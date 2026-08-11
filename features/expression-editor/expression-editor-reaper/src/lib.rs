@@ -552,8 +552,21 @@ pub fn EditorPanel() -> Element {
     use_effect(move || {
         let mut guard = session().lock().unwrap();
         if let Some(s) = guard.as_mut() {
-            if *s.editor() != *editor.read() {
-                *s.editor_mut() = editor.read().clone();
+            let panel = editor.read();
+            let mirror = s.editor_mut();
+            if mirror.doc != panel.doc {
+                // A real edit: mirror everything, it is what the
+                // auto-write sends to the take.
+                *mirror = panel.clone();
+            } else {
+                // View-only change (a pan frame, a marquee): copy the
+                // light state so a remount restores it, without cloning
+                // a many-thousand-note document per frame.
+                mirror.camera = panel.camera;
+                mirror.viewport = panel.viewport;
+                if mirror.selection != panel.selection {
+                    mirror.selection = panel.selection.clone();
+                }
             }
         }
     });

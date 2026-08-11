@@ -61,6 +61,36 @@ fn current_modifiers() -> keyboard_types::Modifiers {
     mods
 }
 
+thread_local! {
+    /// Latest unforwarded pointer position per panel window.
+    ///
+    /// X11 delivers WM_MOUSEMOVE at hundreds per second, and every
+    /// forwarded move runs a full Dioxus dispatch + style/layout pass
+    /// synchronously — which is what made dragging in a dense panel
+    /// (the expression editor's roll) crawl. Moves are coalesced here
+    /// and flushed once per update tick, and immediately before any
+    /// event whose meaning depends on the pointer position (buttons,
+    /// wheel).
+    static PENDING_MOVES: RefCell<HashMap<usize, (f32, f32)>> =
+        RefCell::new(HashMap::new());
+}
+
+/// Flush the coalesced pointer move for `hwnd`, if any.
+fn flush_pending_move(hwnd: raw::HWND) {
+    let pending = PENDING_MOVES.with(|m| m.borrow_mut().remove(&(hwnd as usize)));
+    if let Some((x, y)) = pending {
+        forward_mouse_event(
+            hwnd,
+            blitz_traits::events::UiEvent::PointerMove(mouse_pointer_event(
+                x,
+                y,
+                blitz_traits::events::MouseEventButton::Main,
+                blitz_traits::events::MouseEventButtons::empty(),
+            )),
+        );
+    }
+}
+
 /// The HiDPI scale of the panel living at `hwnd`, 1.0 before init.
 fn panel_scale(hwnd: raw::HWND) -> f32 {
     PANELS.with(|panels| {
@@ -1008,6 +1038,23 @@ pub fn update_panels() {
                 try_init_embedded_view(panel, InitVisibility::Visible);
             }
 
+            // Deliver the coalesced pointer move for this tick — one
+            // dispatch per frame instead of one per X11 motion event.
+            let pending =
+                PENDING_MOVES.with(|m| m.borrow_mut().remove(&(panel.hwnd as usize)));
+            if let Some((x, y)) = pending
+                && let Some(view) = &mut panel.view
+            {
+                view.handle_event(blitz_traits::events::UiEvent::PointerMove(
+                    mouse_pointer_event(
+                        x,
+                        y,
+                        blitz_traits::events::MouseEventButton::Main,
+                        blitz_traits::events::MouseEventButtons::empty(),
+                    ),
+                ));
+            }
+
             let mut rect = raw::RECT {
                 left: 0,
                 top: 0,
@@ -1828,18 +1875,13 @@ fn panel_wndproc_inner(
         // ── Mouse events ────────────────────────────────────────────
         WM_MOUSEMOVE => {
             let (x, y) = client_css_coords(hwnd, lparam);
-            forward_mouse_event(
-                hwnd,
-                blitz_traits::events::UiEvent::PointerMove(mouse_pointer_event(
-                    x,
-                    y,
-                    blitz_traits::events::MouseEventButton::Main,
-                    blitz_traits::events::MouseEventButtons::empty(),
-                )),
-            );
+            // Coalesced: the newest position wins, forwarded once per
+            // update tick (see PENDING_MOVES).
+            PENDING_MOVES.with(|m| m.borrow_mut().insert(hwnd as usize, (x, y)));
             0
         }
         WM_LBUTTONDOWN | WM_MBUTTONDOWN => {
+            flush_pending_move(hwnd);
             let (x, y) = client_css_coords(hwnd, lparam);
             let button = match msg {
                 WM_LBUTTONDOWN => blitz_traits::events::MouseEventButton::Main,
@@ -1894,6 +1936,7 @@ fn panel_wndproc_inner(
         // SWELL/REAPER can synthesise WM_CONTEXTMENU, which the docker uses
         // to open the dock/undock/options menu on tab right-click.
         WM_RBUTTONDOWN => {
+            flush_pending_move(hwnd);
             let (x, y) = client_css_coords(hwnd, lparam);
             forward_mouse_event(
                 hwnd,
@@ -1908,6 +1951,7 @@ fn panel_wndproc_inner(
             unsafe { swell.DefWindowProc(hwnd, msg, wparam, lparam) }
         }
         WM_LBUTTONUP | WM_MBUTTONUP => {
+            flush_pending_move(hwnd);
             let (x, y) = client_css_coords(hwnd, lparam);
             let button = match msg {
                 WM_LBUTTONUP => blitz_traits::events::MouseEventButton::Main,
@@ -1929,6 +1973,7 @@ fn panel_wndproc_inner(
             0
         }
         WM_RBUTTONUP => {
+            flush_pending_move(hwnd);
             let (x, y) = client_css_coords(hwnd, lparam);
             forward_mouse_event(
                 hwnd,
@@ -1943,6 +1988,7 @@ fn panel_wndproc_inner(
             unsafe { swell.DefWindowProc(hwnd, msg, wparam, lparam) }
         }
         WM_MOUSEWHEEL => {
+            flush_pending_move(hwnd);
             let delta = ((wparam >> 16) & 0xFFFF) as i16 as f64 / 120.0;
             // Wheel messages carry SCREEN coordinates (Win32 semantics,
             // which SWELL mirrors) — unlike every other mouse message.
