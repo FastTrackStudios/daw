@@ -923,6 +923,44 @@ pub struct Key {
     pub label: Option<String>,
 }
 
+/// A brace over the rows of one split piece, so `L` and `R` read as two
+/// hands of a `T1` rather than two unrelated lanes.
+pub struct KeyGroup {
+    pub label: String,
+    /// Top edge and height of the whole span.
+    pub y: f64,
+    pub h: f64,
+}
+
+/// Group braces for whatever is on screen.
+///
+/// Built from the already-computed keys so the brace cannot drift from
+/// the rows it spans — including when a span is half scrolled off.
+pub fn key_groups(ed: &Editor, keys: &[Key]) -> Vec<KeyGroup> {
+    let mut out: Vec<KeyGroup> = Vec::new();
+    for k in keys {
+        let Some(label) = ed.row_group(k.row) else {
+            continue;
+        };
+        // Keys arrive in slot order, so a repeat of the same label is
+        // always the continuation of the span above it.
+        match out.last_mut() {
+            Some(g) if g.label == label => {
+                let top = g.y.min(k.y);
+                let bottom = (g.y + g.h).max(k.y + k.h);
+                g.y = top;
+                g.h = bottom - top;
+            }
+            _ => out.push(KeyGroup {
+                label,
+                y: k.y,
+                h: k.h,
+            }),
+        }
+    }
+    out
+}
+
 pub fn keyboard(ed: &Editor) -> Vec<Key> {
     let (lo, hi) = ed.camera.slot_span(ed.viewport);
     let h = ed.camera.vertical.px_per_row;
