@@ -4305,6 +4305,11 @@ pub struct MeterProps {
     /// but under the button stack.
     #[props(default = true)]
     pub scale: bool,
+    /// The colour the unlit bars sit on. `None` is the mixer's dark
+    /// trough; the track panel passes its own background so the meter is
+    /// invisible at rest, which is what REAPER's is.
+    #[props(default)]
+    pub well: Option<String>,
     /// The scale's marks, top to bottom.
     #[props(default)]
     pub marks: Vec<String>,
@@ -4343,7 +4348,14 @@ pub fn Meter(props: MeterProps) -> Element {
     let gap = 1.0f32;
     let bar_w = ((bars_w - gap * (n - 1.0)) / n).max(1.0);
     let text = t.chrome.hardware_mark.shade(-0.35);
-    let well = t.chrome.hardware.shade(-0.72);
+    // The well the bars sit in. The mixer's is a dark trough — a
+    // deliberate departure, REAPER leaves its bare — but the track panel's
+    // meter is a bare strip against the panel and a trough there is a pair
+    // of black bars where REAPER has nothing at rest.
+    let well = props
+        .well
+        .clone()
+        .unwrap_or_else(|| t.chrome.hardware.shade(-0.72).css());
 
     rsx! {
         svg {
@@ -4423,7 +4435,7 @@ pub fn Meter(props: MeterProps) -> Element {
                             rect {
                                 x: "{x}", y: "0", width: "{bar_w}", height: "{vh}",
                                 rx: "{bar_w * 0.25}",
-                                fill: "{well.css()}",
+                                fill: "{well}",
                             }
                             rect {
                                 x: "{x}", y: "{vh - lit}", width: "{bar_w}", height: "{lit}",

@@ -136,6 +136,10 @@ pub fn TrackMeter(
     /// Print the dB scale inside the meter, as the mixer does.
     #[props(default = true)]
     scale: bool,
+    /// What the unlit bars sit on. The track panel passes its own
+    /// background, because REAPER's meter there is invisible at rest.
+    #[props(default)]
+    well: Option<String>,
 ) -> Element {
     let meters = use_meters();
     let guid = track.clone();
@@ -147,6 +151,7 @@ pub fn TrackMeter(
             levels: vec![l.peak_left, l.peak_right],
             cell: (width as f32, height as f32),
             scale: scale,
+            well: well,
             marks: if scale { MARKS.iter().map(|m| m.to_string()).collect() } else { Vec::new() },
             width: Some(width),
             height: Some(height),

@@ -47,6 +47,18 @@ if [ -f "$OUT/.reaper1x.png" ] || magick "$REF" -resize 33.3333% +repage "$OUT/.
   echo "wrote $OUT/strip-diff.png"
 fi
 
+# The track panel, against a row of REAPER's own. Fuzzed, deliberately:
+# at zero tolerance a one-unit rounding in the tint counts every pixel of
+# every tinted field as a difference, and the diff comes back a solid
+# block that says nothing.
+if [ -f "$OUT/tcp-ref.png" ]; then
+  magick "$OUT/tcp-ref.png" -crop 343x70+0+107 +repage "$OUT/.tcp-ref.png"
+  echo -n "── track row, differing pixels: "
+  magick compare -metric AE -fuzz 4% "$OUT/.tcp-ref.png" "$OUT/track-row.png" \
+    -compose src "$OUT/track-row-diff.png" 2>&1 | tail -1
+  echo "wrote $OUT/track-row-diff.png"
+fi
+
 cap() {
   magick "$1" -filter point -resize x600 -bordercolor "$2" -border 3 \
     -background "#141414" -gravity center -extent 240x612 "$OUT/.x.png"

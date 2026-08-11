@@ -173,20 +173,34 @@ fn paint_the_fx_label_half() {
     println!("wrote {}", path.display());
 }
 
+/// The track-panel reference was shot separately and its Kick is a
+/// different colour from the mixer reference's: #9D3C55 on screen, so
+/// #E0567A before the panel tint. The fixture carries the reference's
+/// colour or every pixel of the comparison is a colour difference.
+fn tcp_kick() -> Track {
+    Track {
+        color: Some(0xe0_56_7a),
+        // The reference's tracks are on input 1; without it the combo
+        // reads "No input" and the comparison is about the fixture.
+        record_input: daw_proto::track::RecordInput::Audio { channel: 0 },
+        ..kick()
+    }
+}
+
 /// The TCP row, painted for the same loop.
 #[test]
 fn paint_the_track_row() {
     fn app() -> Element {
         let mut store = use_hook(TrackStore::new);
         use_hook(|| {
-            store.seed([kick()]);
+            store.seed([tcp_kick()]);
             provide_context(store);
         });
         rsx! {
             div {
                 style: "position:absolute; left:0; top:0; background:#1e1e1e; \
-                        width:340px; height:71px;",
-                daw_ui::components::tcp::TrackRow { track: kick(), index: 0 }
+                        width:343px; height:71px;",
+                daw_ui::components::tcp::TrackRow { track: tcp_kick(), index: 0 }
             }
         }
     }
@@ -195,9 +209,9 @@ fn paint_the_track_row() {
     std::fs::create_dir_all(&out).unwrap();
     let path = out.join("track-row.png");
     dioxus_test::render(app)
-        .with_window_size(340 + BODY_MARGIN * 2, 71 + BODY_MARGIN * 2)
+        .with_window_size(343 + BODY_MARGIN * 2, 71 + BODY_MARGIN * 2)
         .build()
         .render_png(&path);
-    crop_to_strip_sized(&path, 340, 71);
+    crop_to_strip_sized(&path, 343, 71);
     println!("wrote {}", path.display());
 }

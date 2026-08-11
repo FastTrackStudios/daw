@@ -92,7 +92,9 @@ const BODY_GREY: &str = "#262626";
 /// Both rows of fields are 17 tall, at these tops.
 const ROW_ONE: f32 = 6.0;
 const ROW_TWO: f32 = 34.0;
-const FIELD_H: f32 = 17.0;
+/// 20, measured — the sheet's 17 left a three-row gap under every field
+/// in the second row.
+const FIELD_H: f32 = 20.0;
 
 /// One track's row in the panel.
 ///
@@ -177,6 +179,14 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
                 art::TrackFolder { colour: combo.clone() }
             }
 
+            // The row's right edge, which REAPER closes with a dark column
+            // at 341 — the boundary between the panel and the arrange
+            // view, and the last thing missing from the row's silhouette.
+            div {
+                style: "position:absolute; left:{ROW_W - 2.0}px; top:0; \
+                        width:1px; height:{ROW_H}px; background:{rule};",
+            }
+
             // The track number, between them.
             div {
                 class: "absolute font-mono",
@@ -241,7 +251,8 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
             }
 
             // ── Row two: envelope, the FX slot, the input combo ──
-            div { style: "position:absolute; left:26px; top:32px;",
+            // 29, measured: the envelope's block runs 29..48 of the row.
+            div { style: "position:absolute; left:29px; top:{ROW_TWO}px;",
                 EnvelopeButton {}
             }
             div {
@@ -252,10 +263,15 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
                 "FX"
             }
             div {
-                style: "position:absolute; left:94px; top:{ROW_TWO}px; \
-                        width:186px; height:{FIELD_H}px; background:{combo};",
+                // 91 and 195: REAPER's slot and combo touch — scanned
+                // across the band there is no tint between them, where we
+                // left a four-column gap — and the combo runs to 285.
+                style: "position:absolute; left:91px; top:{ROW_TWO}px; \
+                        width:195px; height:{FIELD_H}px; background:{combo};",
                 div {
-                    style: "padding:0 6px; line-height:{FIELD_H}px; font-size:11px; \
+                    // Centred, as REAPER sets it — left-aligned it read as
+                    // a text field rather than the combo it is.
+                    style: "line-height:{FIELD_H}px; font-size:11px; text-align:center; \
                             color:{combo_ink}; white-space:nowrap; overflow:hidden; \
                             font-family:Fira Sans, DejaVu Sans, sans-serif;",
                     "{input_label(track)}"
@@ -263,7 +279,7 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
                 // The combo's caret. A triangle rather than a glyph, so it
                 // does not depend on a font having one.
                 svg {
-                    style: "position:absolute; left:172px; top:6px;",
+                    style: "position:absolute; left:181px; top:8px;",
                     width: "7", height: "4", view_box: "0 0 7 4",
                     xmlns: "http://www.w3.org/2000/svg",
                     path { d: "M 0 0 h 7 l -3.5 4 z", fill: "{caret}" }
@@ -294,6 +310,10 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
                     width: TCP_METER_W,
                     height: (ROW_H - 4.0) as u32,
                     scale: false,
+                    // The section's own colour: REAPER's meter here shows
+                    // nothing at rest, and a trough put two black bars in a
+                    // strip that is meant to read as empty.
+                    well: gutter.clone(),
                 }
             }
         }
