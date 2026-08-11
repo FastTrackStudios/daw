@@ -26,7 +26,8 @@ use crate::rows::DrumMap;
 /// Which side of the main hit the grace note falls on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum FlamSide {
-    /// Grace note before the beat — the ordinary flam, and the default.
+    /// Grace note before the beat — the ordinary flam, and the first
+    /// step of the cycle.
     #[default]
     Before,
     /// Grace note after: a drag, or a deliberate reverse flam.
@@ -34,20 +35,34 @@ pub enum FlamSide {
 }
 
 impl FlamSide {
-    /// What pressing the key again does.
-    pub fn toggled(self) -> Self {
-        match self {
-            FlamSide::Before => FlamSide::After,
-            FlamSide::After => FlamSide::Before,
-        }
-    }
-
     pub fn label(self) -> &'static str {
         match self {
             FlamSide::Before => "Flam before",
             FlamSide::After => "Flam after",
         }
     }
+}
+
+/// What one press of the key does to a hit.
+///
+/// The cycle is **none → before → after → none**, and it belongs to the
+/// note rather than to a global mode. That matters: a global
+/// before/after flag makes the same keypress mean different things
+/// depending on what you did last to some *other* note, so you cannot
+/// look at a hit and know what pressing the key will do. Reading the
+/// state off the note itself means you always can.
+///
+/// The third press removing the flam is what makes it a cycle rather
+/// than a trap — otherwise undoing a flam you did not want means
+/// reaching for undo or hunting the grace note down by hand.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FlamStep {
+    /// No grace note yet: add one before.
+    Add(FlamSide),
+    /// Grace note exists on the wrong side: move it across.
+    Move { grace: NoteId, delta: f64 },
+    /// Grace note is after the hit: the cycle closes and it goes.
+    Remove(NoteId),
 }
 
 /// Measured from real playing: see the module docs.
@@ -67,9 +82,67 @@ pub enum FlamError {
     /// The row is a single-handed piece — a hi-hat has no other hand to
     /// flam with.
     NotTwoHanded,
-    /// The other hand already has a hit there, so this would stack two
-    /// notes on one row.
-    AlreadyFlammed,
+}
+
+/// The grace note attached to a hit, and which side it is on.
+///
+/// Found by looking, not remembered: a flam is just a note on the other
+/// hand's row near the hit, so anything that made one — this key, a
+/// paste, an import, a hand-drawn note — reads the same way.
+pub fn existing_grace(
+    doc: &ExpressionDoc,
+    map: &DrumMap,
+    id: NoteId,
+    offset: f64,
+) -> Option<(NoteId, FlamSide)> {
+    let note = doc.note(id)?;
+    let other = map.other_hand_row(note.row.max(0) as usize)? as i32;
+    // Generous window: a grace note dragged a little by hand is still
+    // that hit's flam, and treating it as a stranger would silently add
+    // a second one.
+    let window = offset * 1.75;
+    doc.notes
+        .iter()
+        .filter(|n| n.row == other && n.id != id)
+        .find(|n| (n.start - note.start).abs() <= window)
+        .map(|n| {
+            let side = if n.start < note.start {
+                FlamSide::Before
+            } else {
+                FlamSide::After
+            };
+            (n.id, side)
+        })
+}
+
+/// What the next press should do to this hit.
+pub fn next_step(
+    doc: &ExpressionDoc,
+    map: &DrumMap,
+    id: NoteId,
+    offset_ms: f64,
+    bpm: f64,
+) -> Result<FlamStep, FlamError> {
+    let note = doc.note(id).ok_or(FlamError::NoNote)?;
+    map.other_hand_row(note.row.max(0) as usize)
+        .ok_or(FlamError::NotTwoHanded)?;
+    let offset = offset_ticks(doc, offset_ms, bpm);
+
+    Ok(match existing_grace(doc, map, id, offset) {
+        None => FlamStep::Add(FlamSide::Before),
+        Some((grace, FlamSide::Before)) => FlamStep::Move {
+            grace,
+            // Across the hit and out the other side.
+            delta: offset * 2.0,
+        },
+        Some((grace, FlamSide::After)) => FlamStep::Remove(grace),
+    })
+}
+
+/// Ticks for a wall-clock offset in this document.
+fn offset_ticks(doc: &ExpressionDoc, offset_ms: f64, bpm: f64) -> f64 {
+    let units_per_second = doc.time_base.units_per_second(bpm).max(1e-9);
+    (offset_ms.abs() / 1000.0) * units_per_second
 }
 
 /// Build the edit that turns a hit into a flam.
@@ -82,41 +155,38 @@ pub fn flam(
     doc: &ExpressionDoc,
     map: &DrumMap,
     id: NoteId,
-    side: FlamSide,
     offset_ms: f64,
     bpm: f64,
 ) -> Result<Edit, FlamError> {
+    let step = next_step(doc, map, id, offset_ms, bpm)?;
     let note = doc.note(id).ok_or(FlamError::NoNote)?;
-    let row = note.row.max(0) as usize;
-    let other = map.other_hand_row(row).ok_or(FlamError::NotTwoHanded)?;
+    let other = map
+        .other_hand_row(note.row.max(0) as usize)
+        .ok_or(FlamError::NotTwoHanded)? as i32;
+    let offset = offset_ticks(doc, offset_ms, bpm);
 
-    let units_per_second = doc.time_base.units_per_second(bpm).max(1e-9);
-    let offset = (offset_ms.abs() / 1000.0) * units_per_second;
-    let start = match side {
-        FlamSide::Before => note.start - offset,
-        FlamSide::After => note.start + offset,
-    };
-
-    // Refuse rather than stack: two notes on one row at one tick is not
-    // a flam, it is a bug you find later by ear.
-    let occupied = doc
-        .notes
-        .iter()
-        .any(|n| n.row == other as i32 && (n.start - start).abs() < offset * 0.5);
-    if occupied {
-        return Err(FlamError::AlreadyFlammed);
-    }
-
-    let mut grace = Note::new(
-        NoteId(next_id(doc)),
-        start,
-        start + (note.end - note.start),
-        other as i32,
-    );
-    grace.velocity = (note.velocity * GRACE_VELOCITY).clamp(0.0, 1.0);
-    grace.channel = note.channel;
-
-    Ok(Edit::AddNote(Box::new(grace)))
+    Ok(match step {
+        FlamStep::Add(side) => {
+            let start = match side {
+                FlamSide::Before => note.start - offset,
+                FlamSide::After => note.start + offset,
+            };
+            let mut grace = Note::new(
+                NoteId(next_id(doc)),
+                start,
+                start + (note.end - note.start),
+                other,
+            );
+            grace.velocity = (note.velocity * GRACE_VELOCITY).clamp(0.0, 1.0);
+            grace.channel = note.channel;
+            Edit::AddNote(Box::new(grace))
+        }
+        FlamStep::Move { grace, delta } => Edit::MoveTime {
+            notes: vec![grace],
+            delta,
+        },
+        FlamStep::Remove(grace) => Edit::DeleteNotes(vec![grace]),
+    })
 }
 
 /// The next free note id in a document.

@@ -1,7 +1,7 @@
 //! Flams and two-handed drum rows.
 
 use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
-use expression_editor_core::flam::{DEFAULT_FLAM_MS, FlamError, FlamSide, flam};
+use expression_editor_core::flam::{DEFAULT_FLAM_MS, FlamError, FlamSide, FlamStep, flam, next_step};
 use expression_editor_core::rows::{DrumMap, Hand, RowSpace};
 use expression_editor_core::{Editor, Mode, Viewport};
 
@@ -97,7 +97,7 @@ fn a_flam_puts_the_grace_note_on_the_other_hand() {
     let m = map();
     let snare = row_of(&m, "S");
     let doc = doc_with_hit(snare);
-    let edit = flam(&doc, &m, NoteId(1), FlamSide::Before, DEFAULT_FLAM_MS, BPM).unwrap();
+    let edit = flam(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, BPM).unwrap();
 
     let expression_editor_core::Edit::AddNote(grace) = edit else {
         panic!("expected an added note");
@@ -109,16 +109,27 @@ fn a_flam_puts_the_grace_note_on_the_other_hand() {
 fn flam_before_lands_early_and_flam_after_lands_late() {
     let m = map();
     let doc = doc_with_hit(row_of(&m, "S"));
-    let at = |side| {
-        let expression_editor_core::Edit::AddNote(g) =
-            flam(&doc, &m, NoteId(1), side, DEFAULT_FLAM_MS, BPM).unwrap()
-        else {
-            unreachable!()
-        };
-        g.start
+    // First press: before.
+    let expression_editor_core::Edit::AddNote(g) =
+        flam(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, BPM).unwrap()
+    else {
+        unreachable!()
     };
-    assert!(at(FlamSide::Before) < PPQ);
-    assert!(at(FlamSide::After) > PPQ);
+    assert!(g.start < PPQ, "the first press goes before the hit");
+
+    // With that grace note present, the next press moves it across.
+    let mut with_grace = doc.clone();
+    let before_start = g.start;
+    with_grace.push(*g);
+    let expression_editor_core::Edit::MoveTime { delta, .. } =
+        flam(&with_grace, &m, NoteId(1), DEFAULT_FLAM_MS, BPM).unwrap()
+    else {
+        panic!("expected the grace note to move");
+    };
+    assert!(
+        before_start + delta > PPQ,
+        "moving it should land it after the hit"
+    );
 }
 
 #[test]
@@ -128,7 +139,7 @@ fn the_offset_is_the_measured_one() {
     let m = map();
     let doc = doc_with_hit(row_of(&m, "S"));
     let expression_editor_core::Edit::AddNote(g) =
-        flam(&doc, &m, NoteId(1), FlamSide::Before, DEFAULT_FLAM_MS, BPM).unwrap()
+        flam(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, BPM).unwrap()
     else {
         unreachable!()
     };
@@ -147,7 +158,7 @@ fn the_offset_is_wall_clock_not_musical() {
     let doc = doc_with_hit(row_of(&m, "S"));
     let ticks_at = |bpm| {
         let expression_editor_core::Edit::AddNote(g) =
-            flam(&doc, &m, NoteId(1), FlamSide::Before, DEFAULT_FLAM_MS, bpm).unwrap()
+            flam(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, bpm).unwrap()
         else {
             unreachable!()
         };
@@ -166,7 +177,7 @@ fn the_grace_note_is_quieter() {
     let m = map();
     let doc = doc_with_hit(row_of(&m, "S"));
     let expression_editor_core::Edit::AddNote(g) =
-        flam(&doc, &m, NoteId(1), FlamSide::Before, DEFAULT_FLAM_MS, BPM).unwrap()
+        flam(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, BPM).unwrap()
     else {
         unreachable!()
     };
@@ -178,29 +189,81 @@ fn a_single_handed_piece_cannot_flam() {
     let m = map();
     let doc = doc_with_hit(row_of(&m, "H-Clsd Tip"));
     assert_eq!(
-        flam(&doc, &m, NoteId(1), FlamSide::Before, DEFAULT_FLAM_MS, BPM),
-        Err(FlamError::NotTwoHanded)
+        flam(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, BPM).err(),
+        Some(FlamError::NotTwoHanded)
     );
 }
 
 #[test]
-fn flamming_twice_is_refused_rather_than_stacked() {
-    // Two notes on one row at one tick is not a flam, it is a bug you
-    // find later by ear.
+fn the_cycle_is_none_then_before_then_after_then_none() {
+    // The third press removing the flam is what makes it a cycle rather
+    // than a trap: changing your mind should not mean reaching for undo.
     let m = map();
-    let snare = row_of(&m, "S");
-    let mut doc = doc_with_hit(snare);
+    let mut doc = doc_with_hit(row_of(&m, "S"));
+
+    // 1: nothing there yet.
+    assert_eq!(
+        next_step(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, BPM),
+        Ok(FlamStep::Add(FlamSide::Before))
+    );
     let expression_editor_core::Edit::AddNote(g) =
-        flam(&doc, &m, NoteId(1), FlamSide::Before, DEFAULT_FLAM_MS, BPM).unwrap()
+        flam(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, BPM).unwrap()
     else {
         unreachable!()
     };
+    let grace_id = g.id;
     doc.push(*g);
 
+    // 2: it is before, so move it across.
+    match next_step(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, BPM).unwrap() {
+        FlamStep::Move { grace, delta } => {
+            assert_eq!(grace, grace_id);
+            if let Some(n) = doc.note_mut(grace_id) {
+                let len = n.end - n.start;
+                n.start += delta;
+                n.end = n.start + len;
+            }
+        }
+        other => panic!("expected a move, got {other:?}"),
+    }
+    assert!(doc.note(grace_id).unwrap().start > PPQ, "now after the hit");
+
+    // 3: it is after, so the cycle closes.
     assert_eq!(
-        flam(&doc, &m, NoteId(1), FlamSide::Before, DEFAULT_FLAM_MS, BPM),
-        Err(FlamError::AlreadyFlammed)
+        next_step(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, BPM),
+        Ok(FlamStep::Remove(grace_id))
     );
+
+    // 4: and having removed it, we are back at the start.
+    doc.notes.retain(|n| n.id != grace_id);
+    assert_eq!(
+        next_step(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, BPM),
+        Ok(FlamStep::Add(FlamSide::Before)),
+        "the cycle came round"
+    );
+}
+
+#[test]
+fn a_grace_note_nudged_by_hand_is_still_that_hits_flam() {
+    // Otherwise the next press adds a second one, silently, and the
+    // part has two grace notes where the player wanted one.
+    let m = map();
+    let mut doc = doc_with_hit(row_of(&m, "S"));
+    let expression_editor_core::Edit::AddNote(g) =
+        flam(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, BPM).unwrap()
+    else {
+        unreachable!()
+    };
+    let id = g.id;
+    let mut g = *g;
+    g.start -= 12.0; // dragged a little earlier
+    g.end -= 12.0;
+    doc.push(g);
+
+    match next_step(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, BPM).unwrap() {
+        FlamStep::Move { grace, .. } => assert_eq!(grace, id),
+        other => panic!("expected it to be recognised, got {other:?}"),
+    }
 }
 
 // ── The key ──────────────────────────────────────────────────────────
@@ -216,22 +279,49 @@ fn drum_editor() -> Editor {
 }
 
 #[test]
-fn pressing_the_key_flams_and_pressing_it_again_flips_the_side() {
-    // One key, because you press it, look, and press again if you
-    // wanted the grace note on the other side.
+fn pressing_the_key_walks_the_hit_through_the_cycle() {
+    // Press, look, press again — and a third press if you did not want
+    // it after all.
     let mut ed = drum_editor();
-    assert_eq!(ed.flam_side, FlamSide::Before);
+    let hit = NoteId(1);
 
     assert_eq!(ed.flam_selection(), 1);
-    assert_eq!(ed.flam_side, FlamSide::After, "the next one flips");
-    let first = ed.doc.notes.iter().find(|n| n.id != NoteId(1)).unwrap().start;
-    assert!(first < PPQ, "the first went before");
+    let grace = ed.doc.notes.iter().find(|n| n.id != hit).unwrap();
+    assert!(grace.start < PPQ, "first press: before the hit");
 
-    ed.selection.set_single(NoteId(1));
+    ed.selection.set_single(hit);
     assert_eq!(ed.flam_selection(), 1);
-    assert_eq!(ed.flam_side, FlamSide::Before, "and flips back");
-    let late = ed.doc.notes.iter().any(|n| n.start > PPQ);
-    assert!(late, "the second went after");
+    let grace = ed.doc.notes.iter().find(|n| n.id != hit).unwrap();
+    assert!(grace.start > PPQ, "second press: after it");
+
+    ed.selection.set_single(hit);
+    assert_eq!(ed.flam_selection(), 1);
+    assert_eq!(
+        ed.doc.notes.len(),
+        1,
+        "third press: the flam is gone and only the hit remains"
+    );
+
+    ed.selection.set_single(hit);
+    assert_eq!(ed.flam_selection(), 1);
+    let grace = ed.doc.notes.iter().find(|n| n.id != hit).unwrap();
+    assert!(grace.start < PPQ, "and round again");
+}
+
+#[test]
+fn the_next_step_is_readable_before_the_key_is_pressed() {
+    // So a UI can say what the key will do rather than the user finding
+    // out by pressing it.
+    let mut ed = drum_editor();
+    assert_eq!(
+        ed.flam_step(NoteId(1)),
+        Some(FlamStep::Add(FlamSide::Before))
+    );
+    ed.flam_selection();
+    assert!(matches!(
+        ed.flam_step(NoteId(1)),
+        Some(FlamStep::Move { .. })
+    ));
 }
 
 #[test]

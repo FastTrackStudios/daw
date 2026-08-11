@@ -140,8 +140,6 @@ pub struct Editor {
     /// piece splits only when a part needs the sticking, so the roll
     /// does not carry twice the rows for material that never asks.
     pub split_pieces: Vec<usize>,
-    /// Which way the next flam goes. Pressing the key again flips it.
-    pub flam_side: flam::FlamSide,
     /// Context × modifier → action. Editable, so a host can ship a
     /// REAPER-matching profile or its own.
     pub mouse: MouseMap,
@@ -234,7 +232,6 @@ impl Editor {
             strip_lane: StripLane::Velocity,
             color_by_string: true,
             split_pieces: Vec::new(),
-            flam_side: flam::FlamSide::default(),
             mouse: MouseMap::default(),
             tuning: Tuning::default(),
             grid: Grid::default(),
@@ -403,13 +400,17 @@ impl Editor {
         }
     }
 
-    /// Flam the selected drum hits, and flip which way the next one
-    /// goes.
+    /// Step the selected drum hits through the flam cycle.
     ///
-    /// One key does both, which is the point: you press it, look at the
-    /// result, and press it again if you wanted the grace note on the
-    /// other side. A separate before/after control would be two things
-    /// to find for a decision you make by ear in a second.
+    /// **none → before → after → none.** One key, and the state lives on
+    /// the note rather than in a mode: you can look at a hit and know
+    /// what the next press will do, which a global before/after flag
+    /// cannot give you — there, the same key means different things
+    /// depending on what you last did to some other note.
+    ///
+    /// The third press removing the flam is what makes it a cycle rather
+    /// than a trap. Without it, changing your mind means reaching for
+    /// undo or hunting the grace note down by hand.
     ///
     /// Silent about pieces that cannot flam — a hi-hat in the selection
     /// is skipped rather than refusing the whole gesture.
@@ -417,19 +418,11 @@ impl Editor {
         let RowSpace::Drums(map) = self.row_space.clone() else {
             return 0;
         };
-        let side = self.flam_side;
         let ids: Vec<doc::NoteId> = self.selection.notes.clone();
 
         let mut made = 0;
         for id in ids {
-            match flam::flam(
-                &self.doc,
-                &map,
-                id,
-                side,
-                flam::DEFAULT_FLAM_MS,
-                self.bpm,
-            ) {
+            match flam::flam(&self.doc, &map, id, flam::DEFAULT_FLAM_MS, self.bpm) {
                 Ok(edit) => {
                     self.apply(&edit);
                     made += 1;
@@ -444,8 +437,16 @@ impl Editor {
             // cannot see or select.
             self.show_hands_for_selection(&map);
         }
-        self.flam_side = side.toggled();
         made
+    }
+
+    /// What the next press of the flam key will do to a hit, for a UI
+    /// that wants to say so before you press it.
+    pub fn flam_step(&self, id: doc::NoteId) -> Option<flam::FlamStep> {
+        let RowSpace::Drums(map) = &self.row_space else {
+            return None;
+        };
+        flam::next_step(&self.doc, map, id, flam::DEFAULT_FLAM_MS, self.bpm).ok()
     }
 
     /// Open both hands for every two-handed piece in the selection.
