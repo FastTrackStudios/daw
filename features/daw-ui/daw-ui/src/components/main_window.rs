@@ -15,7 +15,10 @@
 
 use std::collections::HashMap;
 
-use crate::components::arrangement_view::{ArrangePreview, EnvelopePreview, ItemPreview};
+use crate::components::arrangement_view::{
+    ArrangePreview, ArrangeRowKind, EnvelopeLaneView, EnvelopePreview, ItemPreview, plan_rows,
+};
+use crate::components::tcp::EnvcpRow;
 use crate::components::media_browser::{MediaBrowserPanel, MediaEntry};
 use crate::components::mixer::ChannelStripPreview;
 use crate::controls::FxSlotStack;
@@ -57,6 +60,10 @@ pub fn MainWindowPreview(
     /// Visible envelopes by track guid — see `ArrangePreview`.
     #[props(default)]
     envelopes: HashMap<String, Vec<EnvelopePreview>>,
+    /// Envelopes in their own lanes, by track guid — the TCP column grows
+    /// an envcp row per lane, on the shared plan.
+    #[props(default)]
+    env_lanes: HashMap<String, Vec<EnvelopeLaneView>>,
     /// FX chains by track guid. Any non-empty chain grows the FX band
     /// above the mixer strips.
     #[props(default)]
@@ -120,11 +127,32 @@ pub fn MainWindowPreview(
                             // The ruler's height in empty panel, so row one
                             // starts where lane one does.
                             div { style: "height:{RULER_H + 1.0}px;" }
-                            for (i, track) in tracks.iter().enumerate() {
-                                TrackRow {
-                                    key: "{track.guid}",
-                                    track: track.clone(),
-                                    index: i as u32,
+                            // Both sides walk plan_rows, so an envcp row
+                            // is exactly as tall as the lane it controls.
+                            for (kind, _, h) in
+                                plan_rows(&tracks, &env_lanes, daw_theme_art::geometry::tcp::ROW_H)
+                            {
+                                match kind {
+                                    ArrangeRowKind::Track(i) => rsx! {
+                                        TrackRow {
+                                            key: "{tracks[i].guid}",
+                                            track: tracks[i].clone(),
+                                            index: i as u32,
+                                        }
+                                    },
+                                    ArrangeRowKind::EnvelopeLane { track, lane } => {
+                                        let view = &env_lanes[&tracks[track].guid][lane];
+                                        let fx_param = view.envelope.name.contains('/');
+                                        rsx! {
+                                            EnvcpRow {
+                                                key: "e{track}-{lane}",
+                                                name: view.envelope.name.clone(),
+                                                height: h,
+                                                fx_param,
+                                                armed: true,
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -133,6 +161,7 @@ pub fn MainWindowPreview(
                             items,
                             previews,
                             envelopes,
+                            env_lanes,
                             width: arrange_w,
                             height: middle_h,
                             bpm,

@@ -90,6 +90,76 @@ impl EnvelopePreview {
     }
 }
 
+/// An envelope shown in its **own lane** under the track, rather than
+/// overlaid — REAPER's per-envelope lanes, vertically resizable, where FX
+/// parameter automation lives.
+#[derive(Clone, PartialEq, Debug)]
+pub struct EnvelopeLaneView {
+    pub envelope: EnvelopePreview,
+    /// The lane's height. REAPER's floor is `envcp_min_height 27` (from
+    /// `rtconfig.txt`); resizing changes this number and everything else
+    /// follows.
+    pub height: f32,
+    /// Automation items sitting on this lane.
+    pub automation_items: Vec<AutomationItemView>,
+}
+
+/// One automation item: a windowed piece of envelope with its own header,
+/// movable and poolable like a media item.
+#[derive(Clone, PartialEq, Debug)]
+pub struct AutomationItemView {
+    pub name: String,
+    /// Seconds on the timeline.
+    pub start: f32,
+    /// Seconds.
+    pub length: f32,
+    /// A pooled instance edits its siblings too — marked in the header.
+    pub pooled: bool,
+    /// `(seconds from the item's start, value 0..1)`.
+    pub points: Vec<(f32, f32)>,
+}
+
+/// A row in the arrange's vertical layout — a track's lane or one of its
+/// envelope lanes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ArrangeRowKind {
+    Track(usize),
+    /// `lane` indexes into the track's `EnvelopeLaneView` list.
+    EnvelopeLane { track: usize, lane: usize },
+}
+
+/// The arrange's vertical plan: every row with its top and height, tracks
+/// interleaved with their envelope lanes.
+///
+/// **This is the alignment contract between the arrange and the TCP
+/// column**, extended from "same pitch" to "same plan": both sides walk
+/// this list, so an envelope lane's envcp row is exactly as tall as the
+/// lane it controls, the way REAPER ties `envcp` height to the lane.
+pub fn plan_rows(
+    tracks: &[Track],
+    lanes: &HashMap<String, Vec<EnvelopeLaneView>>,
+    row_h: f32,
+) -> Vec<(ArrangeRowKind, f32, f32)> {
+    let mut out = Vec::new();
+    let mut top = 0.0f32;
+    for (i, track) in tracks.iter().enumerate() {
+        out.push((ArrangeRowKind::Track(i), top, row_h));
+        top += row_h + 1.0;
+        if let Some(track_lanes) = lanes.get(&track.guid) {
+            for (l, lane) in track_lanes.iter().enumerate() {
+                let h = lane.height.max(ENVELOPE_LANE_MIN_H);
+                out.push((ArrangeRowKind::EnvelopeLane { track: i, lane: l }, top, h));
+                top += h + 1.0;
+            }
+        }
+    }
+    out
+}
+
+/// `envcp_min_height` from the theme — the floor a lane cannot resize
+/// below.
+pub const ENVELOPE_LANE_MIN_H: f32 = 27.0;
+
 /// The ruler's band, above the lanes.
 const RULER_H: f32 = 26.0;
 
@@ -114,9 +184,15 @@ pub fn ArrangePreview(
     #[props(default)]
     previews: HashMap<String, ItemPreview>,
     /// Visible envelopes, by track guid, drawn over the lane the way
-    /// REAPER overlays them (separate envelope lanes come later).
+    /// REAPER overlays them.
     #[props(default)]
     envelopes: HashMap<String, Vec<EnvelopePreview>>,
+    /// Envelopes in their **own lanes** under the track, by track guid —
+    /// where FX parameter automation and automation items live. Heights
+    /// come with the data; [`plan_rows`] turns them into the vertical
+    /// plan both this panel and the TCP column walk.
+    #[props(default)]
+    env_lanes: HashMap<String, Vec<EnvelopeLaneView>>,
     width: f32,
     height: f32,
     /// Zoom, as pixels per second of timeline.
@@ -154,6 +230,15 @@ pub fn ArrangePreview(
     let draw_beats = beat_px >= 12.0;
 
     let lanes_h = height - RULER_H;
+
+    // The vertical plan: tracks interleaved with their envelope lanes.
+    let plan = plan_rows(&tracks, &env_lanes, row_h);
+    let track_top = |i: usize| -> f32 {
+        plan.iter()
+            .find(|(k, _, _)| *k == ArrangeRowKind::Track(i))
+            .map(|(_, top, _)| *top)
+            .unwrap_or(i as f32 * (row_h + 1.0))
+    };
 
     rsx! {
         div {
@@ -210,7 +295,7 @@ pub fn ArrangePreview(
                 // faint enough to organise without shouting.
                 for (i, track) in tracks.iter().enumerate() {
                     {
-                        let top = i as f32 * (row_h + 1.0);
+                        let top = track_top(i);
                         let tint = track
                             .color
                             .map(|c| format!(
@@ -240,7 +325,7 @@ pub fn ArrangePreview(
                                     key: "{item.guid}",
                                     item: item.clone(),
                                     track_colour: tracks[i].color,
-                                    top: i as f32 * (row_h + 1.0),
+                                    top: track_top(i),
                                     height: row_h,
                                     pixels_per_second,
                                     preview: previews.get(&item.guid).cloned(),
@@ -264,7 +349,7 @@ pub fn ArrangePreview(
                                     EnvelopeLane {
                                         key: "{guid}/{e}",
                                         envelope: env.clone(),
-                                        top: i as f32 * (row_h + 1.0),
+                                        top: track_top(i),
                                         height: row_h,
                                         width,
                                         pixels_per_second,
@@ -272,6 +357,43 @@ pub fn ArrangePreview(
                                 }
                             },
                             None => rsx! {},
+                        }
+                    }
+                }
+
+                // The envelope lanes themselves: a darker ground than the
+                // track lanes, the envelope across it, automation items
+                // as blocks on top.
+                for (kind, top, h) in plan.iter() {
+                    if let ArrangeRowKind::EnvelopeLane { track, lane } = kind {
+                        {
+                            let view = &env_lanes[&tracks[*track].guid][*lane];
+                            rsx! {
+                                div {
+                                    key: "el{track}-{lane}",
+                                    style: "position:absolute; left:0; top:{top}px; \
+                                            width:{width}px; height:{h}px; \
+                                            background:rgba(0,0,0,0.18); \
+                                            border-bottom:1px solid {lane_rule};",
+                                }
+                                EnvelopeLane {
+                                    envelope: view.envelope.clone(),
+                                    top: *top,
+                                    height: *h,
+                                    width,
+                                    pixels_per_second,
+                                }
+                                for (a, ai) in view.automation_items.iter().enumerate() {
+                                    AutomationItemBlock {
+                                        key: "ai{track}-{lane}-{a}",
+                                        item: ai.clone(),
+                                        top: *top,
+                                        height: *h,
+                                        pixels_per_second,
+                                        colour: view.envelope.colour(&daw_theme::Theme::default()),
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -541,6 +663,73 @@ fn EnvelopeLane(
     }
 }
 
+/// One automation item on an envelope lane.
+///
+/// REAPER's shape: a translucent block in the envelope's own colour with
+/// a thin header carrying the name (and the pool mark — a pooled
+/// instance edits its siblings, so it must be tellable), the envelope
+/// segment drawn inside the body. The lane's underlying envelope shows
+/// through around it, which is what makes an AI read as a *window onto*
+/// automation rather than a second kind of media item.
+#[component]
+fn AutomationItemBlock(
+    item: AutomationItemView,
+    top: f32,
+    height: f32,
+    pixels_per_second: f32,
+    colour: daw_theme::Color,
+) -> Element {
+    let left = item.start * pixels_per_second;
+    let w = (item.length * pixels_per_second).max(8.0);
+    let header_h = 10.0f32;
+    let body_h = (height - header_h - 3.0).max(4.0);
+    let ink = colour.css();
+    let header_bg = colour.shade(-0.55).css();
+    let name = if item.pooled {
+        format!("∞ {}", item.name)
+    } else {
+        item.name.clone()
+    };
+
+    // The segment, in the body's pixel space.
+    let mut d = String::new();
+    for (i, (time, value)) in item.points.iter().enumerate() {
+        let x = (time * pixels_per_second).min(w);
+        let y = (1.0 - value.clamp(0.0, 1.0)) * (body_h - 4.0) + 2.0;
+        d.push_str(if i == 0 { "M" } else { "L" });
+        d.push_str(&format!(" {x:.2} {y:.2} "));
+    }
+
+    rsx! {
+        div {
+            style: "position:absolute; left:{left}px; top:{top + 1.0}px; \
+                    width:{w}px; height:{height - 3.0}px; \
+                    border:1px solid {ink}; border-radius:2px; \
+                    background:rgba(0,0,0,0.25); overflow:hidden;",
+            div {
+                style: "height:{header_h}px; background:{header_bg}; \
+                        font-size:7px; line-height:{header_h}px; padding:0 3px; \
+                        color:{ink}; white-space:nowrap; overflow:hidden; \
+                        font-family:Fira Sans, DejaVu Sans, sans-serif;",
+                "{name}"
+            }
+            svg {
+                style: "display:block;",
+                width: "{w}", height: "{body_h}",
+                view_box: "0 0 {w} {body_h}",
+                xmlns: "http://www.w3.org/2000/svg",
+                path {
+                    d: "{d}",
+                    fill: "none",
+                    stroke: "{ink}",
+                    stroke_width: "1.1",
+                    stroke_opacity: "0.95",
+                }
+            }
+        }
+    }
+}
+
 /// The live arrangement view: [`ArrangePreview`] fed from the DAW.
 ///
 /// Tracks arrive on the track stream through the shared store, like every
@@ -713,5 +902,43 @@ pub(crate) async fn fetch_preview(
             (!notes.is_empty()).then(|| ItemPreview::Notes(notes))
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track(guid: &str) -> Track {
+        Track { guid: guid.into(), ..Default::default() }
+    }
+
+    /// The vertical plan interleaves lanes under their tracks, respects
+    /// the envcp floor, and accounts every divider — the numbers both the
+    /// arrange and the TCP column lay out by.
+    #[test]
+    fn the_plan_interleaves_and_holds_the_floor() {
+        let tracks = vec![track("a"), track("b")];
+        let lane = |h: f32| EnvelopeLaneView {
+            envelope: EnvelopePreview { name: "Volume".into(), points: vec![] },
+            height: h,
+            automation_items: Vec::new(),
+        };
+        let lanes = HashMap::from([
+            // One healthy lane and one below the floor.
+            ("a".to_string(), vec![lane(40.0), lane(10.0)]),
+        ]);
+
+        let plan = plan_rows(&tracks, &lanes, 70.0);
+        assert_eq!(plan.len(), 4);
+        assert_eq!(plan[0], (ArrangeRowKind::Track(0), 0.0, 70.0));
+        assert_eq!(plan[1], (ArrangeRowKind::EnvelopeLane { track: 0, lane: 0 }, 71.0, 40.0));
+        // The 10-tall lane is held at the envcp floor.
+        assert_eq!(
+            plan[2],
+            (ArrangeRowKind::EnvelopeLane { track: 0, lane: 1 }, 112.0, ENVELOPE_LANE_MIN_H)
+        );
+        // And track b starts below it, divider counted.
+        assert_eq!(plan[3], (ArrangeRowKind::Track(1), 140.0, 70.0));
     }
 }

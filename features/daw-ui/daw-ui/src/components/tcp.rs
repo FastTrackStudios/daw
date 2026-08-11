@@ -300,6 +300,113 @@ pub fn TrackRow(
     }
 }
 
+/// The envelope control panel row — the TCP-side half of an envelope
+/// lane.
+///
+/// Layout is WALTER's `calcEnvFlow`, read out of `rtconfig.txt` rather
+/// than invented: elements flow left to right at `element_h` 20 —
+/// **arm (20) → bypass (15) → label (min 30) → fader → hide (36)** — and
+/// an FX-parameter envelope (`envcp_type==4`) adds the **parammod and
+/// learn plates (30 each)**. The value readout takes the right 60. The
+/// panel indents 24 (`main_sec + [24 0 -30]`), the row floor is
+/// `envcp_min_height 27`, and every part is the envelope panel's own
+/// vector art from #117.
+#[component]
+pub fn EnvcpRow(
+    name: String,
+    /// The lane's height — the same number the arrange lane draws at,
+    /// through `plan_rows`.
+    height: f32,
+    #[props(default)] armed: bool,
+    #[props(default)] bypassed: bool,
+    /// An FX-parameter envelope grows the mod/learn plates.
+    #[props(default)]
+    fx_param: bool,
+    /// Fader position 0..1.
+    #[props(default = 0.7)]
+    value: f32,
+    /// The readout's text.
+    #[props(default)]
+    readout: String,
+) -> Element {
+    let t = daw_theme::Theme::default();
+    // The envelope panel's own dark ground — a step below the track rows
+    // it hangs from.
+    let bg = t.chrome.hardware_edge.shade(0.05).css();
+    let label_ink = t.chrome.hardware_mark.shade(0.35).css();
+    let value_ink = t.chrome.accent.css();
+    let rule = t.chrome.hardware_edge.shade(-0.3).css();
+    // `element_h` at scale 1; the flow compresses below squash height.
+    let el_h = 20.0f32;
+    let pad_y = ((height - el_h) / 2.0).max(1.0);
+    let fader_w = 56.0f32;
+    let cap_at = 4.0 + (fader_w - 22.0) * value.clamp(0.0, 1.0);
+
+    rsx! {
+        div {
+            style: "position:relative; width:{ROW_W}px; height:{height + 1.0}px; \
+                    background:{bg}; border-bottom:1px solid {rule}; \
+                    overflow:hidden;",
+            div {
+                style: "position:absolute; left:24px; top:{pad_y}px; \
+                        display:flex; align-items:center; height:{el_h}px; \
+                        width:{ROW_W - 24.0 - 6.0}px;",
+                div { style: "flex:0 0 auto; line-height:0;",
+                    art::EnvcpArmButton { armed, cell: (20.0, 20.0) }
+                }
+                div { style: "flex:0 0 auto; line-height:0;",
+                    art::EnvcpBypassButton { bypassed, cell: (15.0, 20.0) }
+                }
+                div {
+                    style: "flex:1 1 auto; min-width:30px; padding:0 4px; \
+                            font-size:9px; color:{label_ink}; white-space:nowrap; \
+                            overflow:hidden; text-overflow:ellipsis; \
+                            font-family:Fira Sans, DejaVu Sans, sans-serif;",
+                    "{name}"
+                }
+                // The horizontal fader: the slab, and the cap slid to the
+                // value.
+                div {
+                    style: "flex:0 0 auto; position:relative; width:{fader_w}px; \
+                            height:{el_h}px;",
+                    div { style: "position:absolute; left:0; top:6px; line-height:0;",
+                        art::EnvcpPanel {
+                            part: art::EnvcpPart::FaderTrack,
+                            cell: (fader_w, 8.0),
+                        }
+                    }
+                    div { style: "position:absolute; left:{cap_at}px; top:0; line-height:0;",
+                        art::EnvcpPanel {
+                            part: art::EnvcpPart::FaderCap,
+                            cell: (22.0, 20.0),
+                        }
+                    }
+                }
+                if fx_param {
+                    div { style: "flex:0 0 auto; line-height:0; margin-left:4px;",
+                        art::EnvcpPlate { glyph: art::EnvcpGlyph::ParamMod }
+                    }
+                    div { style: "flex:0 0 auto; line-height:0;",
+                        art::EnvcpPlate { glyph: art::EnvcpGlyph::Learn }
+                    }
+                }
+                div { style: "flex:0 0 auto; line-height:0; margin-left:4px;",
+                    art::EnvcpOptionsButton { cell: (36.0, 20.0) }
+                }
+                if !readout.is_empty() {
+                    div {
+                        style: "flex:0 0 auto; width:52px; text-align:right; \
+                                font-size:8px; color:{value_ink}; \
+                                font-variant-numeric:tabular-nums; \
+                                font-family:DejaVu Sans Mono, monospace;",
+                        "{readout}"
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The volume knob, on the name field's right end.
 ///
 /// The art is `vector_controls::VolumeKnob`; this is the wrapper that binds

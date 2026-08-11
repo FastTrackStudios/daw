@@ -10,7 +10,9 @@ use std::collections::HashMap;
 
 use daw_proto::{Fx, Item, Track};
 use daw_ui::controls::{EmbeddedFx, use_embedded_fx_guis};
-use daw_ui::components::arrangement_view::{EnvelopePreview, ItemPreview, NotePreview};
+use daw_ui::components::arrangement_view::{
+    AutomationItemView, EnvelopeLaneView, EnvelopePreview, ItemPreview, NotePreview,
+};
 use daw_ui::components::main_window::MainWindowPreview;
 use daw_ui::components::media_browser::{MediaEntry, MediaKind};
 use daw_ui::controls::TrackStore;
@@ -18,7 +20,7 @@ use dioxus::prelude::*;
 
 const BODY_MARGIN: u32 = 8;
 const W: f32 = 1024.0;
-const H: f32 = 768.0;
+const H: f32 = 940.0;
 
 fn tracks() -> Vec<Track> {
     let t = |guid: &str, name: &str, colour: u32, index: u32| Track {
@@ -155,22 +157,63 @@ fn media() -> Vec<MediaEntry> {
     ]
 }
 
-/// A volume ride on the Bass (dipping through Bass B) and a pan sweep on
-/// OH — the two envelope colours, both holds visible at the edges.
+/// A pan sweep overlaid on OH — the overlay style.
 fn envelopes() -> HashMap<String, Vec<EnvelopePreview>> {
+    HashMap::from([(
+        "oh".to_string(),
+        vec![EnvelopePreview {
+            name: "Pan".into(),
+            points: vec![(0.0, 0.5), (4.0, 0.15), (8.0, 0.85), (12.0, 0.5)],
+        }],
+    )])
+}
+
+/// The envelope lanes: a volume ride under Bass, and an FX-parameter
+/// lane under Keys ("FTS EQ / Gain") carrying two automation items — one
+/// pooled — with the lane's own envelope visible around them.
+fn env_lanes() -> HashMap<String, Vec<EnvelopeLaneView>> {
     HashMap::from([
         (
             "bass".to_string(),
-            vec![EnvelopePreview {
-                name: "Volume".into(),
-                points: vec![(1.0, 0.8), (7.0, 0.8), (9.0, 0.35), (12.0, 0.35), (14.0, 0.75)],
+            vec![EnvelopeLaneView {
+                envelope: EnvelopePreview {
+                    name: "Volume".into(),
+                    points: vec![
+                        (1.0, 0.8),
+                        (7.0, 0.8),
+                        (9.0, 0.35),
+                        (12.0, 0.35),
+                        (14.0, 0.75),
+                    ],
+                },
+                height: 34.0,
+                automation_items: Vec::new(),
             }],
         ),
         (
-            "oh".to_string(),
-            vec![EnvelopePreview {
-                name: "Pan".into(),
-                points: vec![(0.0, 0.5), (4.0, 0.15), (8.0, 0.85), (12.0, 0.5)],
+            "keys".to_string(),
+            vec![EnvelopeLaneView {
+                envelope: EnvelopePreview {
+                    name: "FTS EQ / Gain".into(),
+                    points: vec![(0.0, 0.5)],
+                },
+                height: 44.0,
+                automation_items: vec![
+                    AutomationItemView {
+                        name: "Rise".into(),
+                        start: 8.0,
+                        length: 4.0,
+                        pooled: false,
+                        points: vec![(0.0, 0.2), (2.0, 0.4), (3.0, 0.8), (4.0, 0.9)],
+                    },
+                    AutomationItemView {
+                        name: "Rise".into(),
+                        start: 13.0,
+                        length: 4.0,
+                        pooled: true,
+                        points: vec![(0.0, 0.2), (2.0, 0.4), (3.0, 0.8), (4.0, 0.9)],
+                    },
+                ],
             }],
         ),
     ])
@@ -270,10 +313,13 @@ fn paint_the_main_window() {
             div {
                 style: "position:absolute; left:0; top:0;",
                 MainWindowPreview {
+                    width: W,
+                    height: H,
                     tracks: tracks(),
                     items: items(),
                     previews: previews(),
                     envelopes: envelopes(),
+                    env_lanes: env_lanes(),
                     fx: fx(),
                     fx_expanded: Some(("keys".to_string(), "fx-eq".to_string())),
                     media: media(),
