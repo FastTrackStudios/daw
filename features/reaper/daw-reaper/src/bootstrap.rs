@@ -263,5 +263,17 @@ pub async fn build_extension_daw_with(handler: architect::LayerRouter) -> eyre::
     // Leak LocalCaller to keep the server-side tokio task alive for the
     // process lifetime. The extension owns the process — this is intentional.
     let _ = Box::leak(Box::new(local));
+
+    // Install it as the process-wide `Daw` as well as returning it.
+    //
+    // A Dioxus panel in this same process reaches the DAW through
+    // `Daw::try_get()` — it is a component, with no way to be handed an
+    // instance the extension happens to be holding. Without this the panel
+    // mounts, renders, and sits on "Waiting for DAW connection…" forever
+    // while a perfectly good `Daw` exists a few frames away.
+    //
+    // Already-initialised is not an error: a host that called `Daw::init`
+    // itself keeps its own, and this returns the instance either way.
+    let _ = Daw::init(caller.clone());
     Ok(Daw::new(caller))
 }

@@ -194,6 +194,9 @@ width: n.0,
         render_svg(
             v::EnvelopeButton,
             v::EnvelopeProps {
+                // The exporter draws the theme's own images, which are the
+                // track panel's — scrim and all.
+                scrim: true,
                 mode,
                 cell: (20.0, 20.0),
 width: n.0,

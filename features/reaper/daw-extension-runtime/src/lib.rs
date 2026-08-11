@@ -16,7 +16,6 @@ use reaper_high::{MainTaskMiddleware, MainThreadTask, Reaper as HighReaper, Task
 use reaper_low::PluginContext;
 use reaper_medium::ReaperSession;
 use tracing::{debug, info, warn};
-use vox::Rx;
 
 static GLOBAL: OnceLock<Global> = OnceLock::new();
 
@@ -112,6 +111,18 @@ impl ExtensionRuntime {
             .map_err(|e| eyre!("{e}"))
     }
 
+    /// A handle to this extension's tokio runtime.
+    ///
+    /// Needed to *enter* the runtime around code that spawns or sleeps
+    /// without being a spawned task itself — a Dioxus panel, whose futures
+    /// are polled by dioxus's own scheduler on the main thread. Both
+    /// `tokio::task::spawn` and `tokio::time` abort the process when no
+    /// runtime is in context, and the subscription machinery under a live
+    /// panel does both.
+    pub fn handle(&self) -> tokio::runtime::Handle {
+        self.tokio_runtime.handle().clone()
+    }
+
     /// Run an async task on this extension's runtime.
     pub fn spawn<F>(&self, future: F)
     where
@@ -147,7 +158,16 @@ pub struct ActionDef {
 /// Result of registering actions with REAPER.
 pub struct ActionRegistration {
     /// Receiver for action trigger events.
-    pub rx: Rx<daw_proto::ActionEvent>,
+    /// Triggered actions, in the order REAPER fired them.
+    ///
+    /// A plain in-process channel, not a `vox::Rx`. This used to be one —
+    /// left over from when the subscription crossed an RPC boundary — and a
+    /// bare `vox::channel()` cannot work here: a vox channel streams values
+    /// *within a call*, and `Tx::send` parks until the framework binds the
+    /// pair as part of one. With no call to bind them the send never
+    /// completed, so the receiver was silent and every action appeared to do
+    /// nothing. An extension is in-process; its channel should be too.
+    pub rx: tokio::sync::mpsc::UnboundedReceiver<daw_proto::ActionEvent>,
     /// Number of actions successfully registered and confirmed in the action list.
     pub registered: usize,
     /// Number of actions that failed to register or were not found in the action list.
@@ -185,13 +205,17 @@ pub async fn register_actions(daw: &Daw, actions: &[ActionDef]) -> Result<Action
     // callback broadcasts the command name. This forwards that broadcast
     // as the `ActionEvent` the stream promises. In-process only, which is
     // what an extension is.
-    let (tx, rx) = vox::channel::<daw_proto::ActionEvent>();
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<daw_proto::ActionEvent>();
     let mut triggers = daw_reaper::subscribe_action_broadcasts();
     architect::platform::spawn(async move {
         loop {
             match triggers.recv().await {
                 Ok(command_name) => {
-                    if tx.send(daw_proto::ActionEvent::Triggered { command_name }).await.is_err() {
+                    // Unbounded, so a trigger fired before the consumer
+                    // starts reading is queued rather than dropped —
+                    // REAPER can run an action the moment it is registered,
+                    // and a startup script does exactly that.
+                    if tx.send(daw_proto::ActionEvent::Triggered { command_name }).is_err() {
                         break;
                     }
                 }

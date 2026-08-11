@@ -583,7 +583,25 @@ pub enum FxPart {
     Label,
     /// The lit end — the bypass toggle.
     Toggle,
+    /// Both halves in one element.
+    ///
+    /// The split into two images is REAPER's: it blits `mcp_fx` and
+    /// `mcp_fxbyp` side by side, so the exporter needs each half on its
+    /// own. A live GUI has no such constraint, and composing the halves as
+    /// two positioned `<svg>`s put the toggle's rounded end through the
+    /// `FX` under Blitz. One element cannot be mis-composed.
+    Whole,
 }
+
+/// Where the record-arm housing stops flaring and goes vertical.
+///
+/// Its base corners run 45° out from `0.592` of the cell to here; below it
+/// the sides are upright — a plain rectangle. That rectangle is meant to be
+/// invisible: REAPER seats it in the dark under the coloured band so only
+/// the flare emerges into the colour, which is what makes the housing read
+/// as growing out of the background rather than sitting on it. A panel
+/// placing the button needs this number to know how far to sink it.
+pub const HOUSING_SHOULDER: f32 = 0.717;
 
 /// The measured geometry of one family's FX control.
 struct Pill {
@@ -690,13 +708,63 @@ pub struct FxControlProps {
 pub fn FxControl(props: FxControlProps) -> Element {
     let t = Theme::default();
     let k = ink(None, props.at, true, 0.35);
-    let p = props.family.pill();
+    let mut p = props.family.pill();
+
+    // Widened by *redrawing*, never by scaling.
+    //
+    // `mcp.fx` is a 43-wide box and the art behind it is 28; `mcp.fxbyp` is
+    // 29 against 18. Asked for those widths with `preserveAspectRatio:
+    // none` the whole drawing stretched — 1.54 across and nothing down —
+    // which elongated the rounded ends into notches and blew the `FX` up to
+    // half again its size. REAPER gets there by nine-slicing: the ends hold
+    // their size and only the flat run grows.
+    //
+    // This is vector art, so it does the same thing the honest way: the
+    // slack goes into the pill's own geometry before anything is drawn. The
+    // corner radius, the letters and the lamp keep their natural size and
+    // the `<svg>` ends up 1:1 with its viewBox.
+    let widen = match (props.pane, props.width) {
+        (None, Some(want)) => {
+            let natural = match props.part {
+                FxPart::Label => p.split,
+                FxPart::Toggle => p.w - p.split,
+                FxPart::Whole => p.w,
+            };
+            (want as f32 - natural).max(0.0)
+        }
+        // A caller drawing bands states each band's width itself, and the
+        // exporter rasterises at the source size — neither wants slack.
+        _ => 0.0,
+    };
+    // The letters do not move with the widening. REAPER grows the flat run
+    // *after* them — its `FX` sits about ten pixels into a 43-wide box, the
+    // same place it sits in the 28-wide art — so re-centring the glyph in
+    // the widened half pushed it to the middle of the pill, which is the
+    // difference that still read as "wrong scaling" once the stretch was
+    // gone.
+    let glyph_split = p.split;
+    match props.part {
+        FxPart::Label => {
+            p.split += widen;
+            p.w += widen;
+        }
+        FxPart::Toggle => p.w += widen,
+        // The label half takes the slack, exactly as it does when the two
+        // are drawn separately, so a whole pill and a composed one are the
+        // same drawing.
+        FxPart::Whole => {
+            p.split += widen;
+            p.w += widen;
+        }
+    }
+
     // The half this image is. The pill is drawn once, at its own
     // proportions, and each image is a window onto it — that is what keeps
     // the two halves from disagreeing about height or material.
     let (part_x, part_w) = match props.part {
         FxPart::Label => (0.0, p.split),
         FxPart::Toggle => (p.split, p.w - p.split),
+        FxPart::Whole => (0.0, p.w),
     };
     // A band *within* that half, when the caller is stretching one. Offset
     // into the half rather than into the pill, so a caller can pass the
@@ -844,7 +912,13 @@ pub fn FxControl(props: FxControlProps) -> Element {
     // at the same offset in both families — which *is* centred in the
     // 16-wide half and a pixel left of centre in the 18-wide one, so
     // centring it put the mixer's a pixel too far right.
-    let (tx, ty) = (p.split + p.h * 0.364, body_y + body_h * 0.5);
+    // 0.364 of the height from the split, which is the middle of the
+    // toggle's natural 18 — so a widened toggle carries the lamp along with
+    // half the slack rather than leaving it against the seam.
+    let (tx, ty) = (
+        p.split + p.h * 0.364 + if props.part == FxPart::Toggle { widen * 0.5 } else { 0.0 },
+        body_y + body_h * 0.5,
+    );
     // Measured: a 4px pill and an 8x8 plus with 2px arms, in both
     // families — so neither scales with the cell width.
     let (pw, ph) = (p.h * 0.182, body_h * 0.5);
@@ -857,6 +931,13 @@ pub fn FxControl(props: FxControlProps) -> Element {
             preserve_aspect_ratio: "none",
             width: "{props.width.unwrap_or(win_w as u32)}",
             height: "{props.height.unwrap_or(p.h as u32)}",
+            // And again in CSS. An `<svg>` is a replaced element and Blitz
+            // sizes it from its box before it looks at the attributes, so
+            // with an auto-width box the two halves divided the pill
+            // between them: the label came out a stub showing only its
+            // rounded end and the toggle stretched across the rest.
+            style: "display:block; width:{props.width.unwrap_or(win_w as u32)}px; \
+                    height:{props.height.unwrap_or(p.h as u32)}px;",
             // The window is the only thing that differs between the two
             // images: same drawing, different slice of it.
             view_box: "{win_x} 0 {win_w} {p.h}",
@@ -921,7 +1002,7 @@ pub fn FxControl(props: FxControlProps) -> Element {
                 // carry. Measured against the F's stem, a plain centre
                 // lands the pair two columns left of where the art puts
                 // them in both families.
-                x: "{p.split * 0.5 + 1.5}", y: "{body_y + body_h * 0.5}",
+                x: "{glyph_split * 0.5 + 1.5}", y: "{body_y + body_h * 0.5}",
                 text_anchor: "middle", dominant_baseline: "central",
                 font_family: "Fira Sans, DejaVu Sans, sans-serif",
                 // 0.51, not 0.44. The peak colour is right either way —
@@ -1203,8 +1284,8 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                 }
                 path {
                     d: "M {cx - vw * 0.3194} {vh * 0.592}
-                        L {cx - vw * 0.4028} {vh * 0.717} V {vh}
-                        H {cx + vw * 0.4028} V {vh * 0.717}
+                        L {cx - vw * 0.4028} {vh * HOUSING_SHOULDER} V {vh}
+                        H {cx + vw * 0.4028} V {vh * HOUSING_SHOULDER}
                         L {cx + vw * 0.3194} {vh * 0.592} Z",
                     fill: "{hole_fill.css()}",
                 }
@@ -2033,10 +2114,13 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
 #[component]
 pub fn VolumeFaderTrack(props: FaderCapProps) -> Element {
     let (vw, vh) = (23.0f32, 55.0f32);
-    // The rail is drawn at its source coordinates, always. Which *part* of
-    // it a given `<svg>` shows is the viewBox's business, not the shape's —
-    // that is what makes a band a window onto one drawing rather than a
-    // second drawing of its own.
+    // Each band draws *its own slice* of the groove, in its own
+    // coordinates. It used to draw the whole groove and let a viewBox
+    // window it — which is the tidier idea and does not survive Blitz:
+    // there a viewBox's min-y offset is ignored and nothing is clipped to
+    // it, so all three bands painted the full 27-row groove and a tall
+    // fader came out as three disconnected dashes. The intersection is
+    // arithmetic every renderer agrees about.
     //
     // y14..y41, which is where the groove is *traced*, and deliberately not
     // the 16..39 the magenta guides mark. Those are two different facts: the
@@ -2054,6 +2138,12 @@ pub fn VolumeFaderTrack(props: FaderCapProps) -> Element {
     // itself without being told twice.
     let w = props.width.unwrap_or(vw as u32);
     let scale = w as f32 / vw;
+    // Where the groove lands inside this band: the overlap of the traced
+    // rows with the pane, expressed from the pane's own top.
+    let (groove_y, groove_h) = {
+        let (top, bottom) = (rail_y.max(py), (rail_y + rail_h).min(py + ph));
+        (top - py, (bottom - top).max(0.0))
+    };
     // A growing pane hands its height to the layout engine; a fixed one
     // states it. `preserveAspectRatio: none` because the rail is meant to
     // lengthen — letterboxing the stretch band is exactly the wrong answer.
@@ -2062,23 +2152,36 @@ pub fn VolumeFaderTrack(props: FaderCapProps) -> Element {
     } else {
         format!("flex:0 0 auto; height:{}px", ph * scale)
     };
+    // An `<svg>` is a replaced element, so its `height` *attribute* beats
+    // `flex:1` — a growing band that states the source band's height stays
+    // that tall however long the strip is, which is what kept the rail
+    // stuck at 27 rows beside a full-height meter. A caller that states a
+    // height still gets it; the exporter always does.
+    let height = match (pane.grow, props.height) {
+        (_, Some(h)) => h.to_string(),
+        (true, None) => "100%".to_string(),
+        (false, None) => format!("{}", (ph * scale).round() as u32),
+    };
     rsx! {
         svg {
             width: "{w}",
-            height: "{props.height.unwrap_or((ph * scale).round() as u32)}",
-            view_box: "{px} {py} {pw} {ph}",
+            height: "{height}",
+            view_box: "0 0 {pw} {ph}",
             preserve_aspect_ratio: "none",
             style: "{sizing}; display:block",
             xmlns: "http://www.w3.org/2000/svg",
             // Slightly wider than a pixel and centred on x11.5, which is
             // what gives the source its soft shoulders at 60 either side
             // of a 215 core rather than one hard column.
-            rect {
-                x: "{vw * 10.8 / 23.0}",
-                y: "{rail_y}",
-                width: "{vw * 1.4 / 23.0}",
-                height: "{rail_h}",
-                fill: "#000000", fill_opacity: "0.85",
+            // The groove, clipped to this band and moved to its origin.
+            if groove_h > 0.0 {
+                rect {
+                    x: "{vw * 10.8 / 23.0 - px}",
+                    y: "{groove_y}",
+                    width: "{vw * 1.4 / 23.0}",
+                    height: "{groove_h}",
+                    fill: "#000000", fill_opacity: "0.85",
+                }
             }
         }
     }
@@ -2131,6 +2234,10 @@ impl EnvelopeMode {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct EnvelopeProps {
+    /// Draw the plate behind the mark. The track panel's controls sit on a
+    /// scrim; the mixer's sit on the strip.
+    #[props(default = true)]
+    pub scrim: bool,
     #[props(default)]
     pub mode: EnvelopeMode,
     #[props(default = (20.0, 20.0))]
@@ -2170,7 +2277,17 @@ pub fn EnvelopeButton(props: EnvelopeProps) -> Element {
     // The plate is the track panel's usual scrim — flat black at a low
     // opacity — not a wash of the mode colour. Tinting it made every lit
     // mode glow, and turned the alpha-weighted mean from #08 into #3e.
-    let plate = if lit { 0.35 } else { 0.25 };
+    //
+    // The mixer does not want it at all. A scrim reads as a plate over a
+    // track panel's colour; over the mixer strip's own #262626 it is just
+    // a darker box sitting on the grey, which is what made the button look
+    // like a hole in the column. Same split the FX pill makes between the
+    // two families, for the same reason.
+    let plate = if props.scrim {
+        if lit { 0.35 } else { 0.25 }
+    } else {
+        0.0
+    };
     let glyph = if lit { 1.0 } else { 0.73 };
     // Down half a pixel when there is no letter to make room for.
     let dy = if lit { 0.0 } else { 0.6 };
@@ -4203,6 +4320,11 @@ pub fn EnvcpBypassButton(props: EnvcpBypassProps) -> Element {
 pub struct MeterProps {
     /// One value per bar, 0 at silence and 1 at the top of the scale.
     pub levels: Vec<f32>,
+    /// Decaying peak-hold, one value per bar in the same units as
+    /// `levels`. The feed computes these publisher-side; a bar with no
+    /// entry — or a hold at silence — draws no mark.
+    #[props(default)]
+    pub holds: Vec<f32>,
     /// Cell size. `mcp.meter` is `[4 4 22 -4]` of the stretch section and
     /// two wider again in wide mode, so 24 by whatever is left.
     pub cell: (f32, f32),
@@ -4214,6 +4336,15 @@ pub struct MeterProps {
     /// but under the button stack.
     #[props(default = true)]
     pub scale: bool,
+    /// The colour the unlit bars sit on. `None` is the mixer's dark
+    /// trough; the track panel passes its own background so the meter is
+    /// invisible at rest, which is what REAPER's is.
+    #[props(default)]
+    pub well: Option<String>,
+    /// Distinguishes this meter's ids from the next one's. SVG ids are
+    /// document-global and a mixer is a row of these.
+    #[props(default)]
+    pub tag: String,
     /// The scale's marks, top to bottom.
     #[props(default)]
     pub marks: Vec<String>,
@@ -4242,13 +4373,29 @@ pub fn Meter(props: MeterProps) -> Element {
     // rest, which is why REAPER's meters are as thin as they are: "-18-"
     // at nine pixels is most of a 24-wide `mcp.meter`. At two-thirds the
     // marks ran off their own left edge and rendered as "18-".
-    let bars_x = if props.scale { vw * 0.80 } else { 0.0 };
-    let bars_w = vw - bars_x;
+    // 0.85, measured: in a 26-wide block at x=4, REAPER's scale runs 7..24
+    // and its fader cap starts at 30 — so the bars get the five columns
+    // between them and the scale gets everything to their left. At 0.80 the
+    // whole scale sat three columns left of REAPER's.
+    // The bars are the *whole* block, scale included. REAPER's meter is one
+    // wide rectangle with the numbers printed inside it — the green fills
+    // the lot and the marks sit on top — not a pair of hairlines beside a
+    // column of type, which is what reserving most of the width for the
+    // scale produced.
+    let bars_x = 0.0f32;
+    let bars_w = vw;
     let n = props.levels.len().max(1) as f32;
     let gap = 1.0f32;
     let bar_w = ((bars_w - gap * (n - 1.0)) / n).max(1.0);
     let text = t.chrome.hardware_mark.shade(-0.35);
-    let well = t.chrome.hardware.shade(-0.72);
+    // The well the bars sit in. The mixer's is a dark trough — a
+    // deliberate departure, REAPER leaves its bare — but the track panel's
+    // meter is a bare strip against the panel and a trough there is a pair
+    // of black bars where REAPER has nothing at rest.
+    let well = props
+        .well
+        .clone()
+        .unwrap_or_else(|| t.chrome.hardware.shade(-0.72).css());
 
     rsx! {
         svg {
@@ -4266,35 +4413,98 @@ pub fn Meter(props: MeterProps) -> Element {
                     stop { offset: "1", stop_color: "{t.signal.meter_danger.css()}" }
                 }
             }
-            if props.scale {
-                for (i, mark) in props.marks.iter().enumerate() {
-                    text {
-                        key: "m{i}",
-                        x: "{bars_x - 2.0}",
-                        y: "{vh * (i as f32 + 0.5) / props.marks.len().max(1) as f32}",
-                        text_anchor: "end", dominant_baseline: "central",
-                        font_family: "Fira Sans, DejaVu Sans, sans-serif",
-                        font_size: "{(vw * 0.36).min(8.6)}",
-                        fill: "{text.css()}",
-                        "{mark}"
-                    }
-                }
-            }
             for (i, level) in props.levels.iter().enumerate() {
                 {
                     let x = bars_x + i as f32 * (bar_w + gap);
                     let lit = vh * level.clamp(0.0, 1.0);
+                    let hold = props.holds.get(i).copied().unwrap_or(0.0).clamp(0.0, 1.0);
                     rsx! {
                         g { key: "b{i}",
                             rect {
                                 x: "{x}", y: "0", width: "{bar_w}", height: "{vh}",
                                 rx: "{bar_w * 0.25}",
-                                fill: "{well.css()}",
+                                fill: "{well}",
                             }
                             rect {
                                 x: "{x}", y: "{vh - lit}", width: "{bar_w}", height: "{lit}",
                                 rx: "{bar_w * 0.25}",
                                 fill: "url(#mtr)",
+                            }
+                            // The peak-hold mark — one row, held where the
+                            // peak was while the bar falls away under it.
+                            if hold > 0.0 {
+                                rect {
+                                    x: "{x}", y: "{(vh - vh * hold).min(vh - 1.0)}",
+                                    width: "{bar_w}", height: "1",
+                                    fill: "#ffffff", fill_opacity: "0.7",
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if props.scale {
+                {
+                    // Printed *over* the bars: the meter is one block with
+                    // its numbers inside it.
+                    //
+                    // The first mark is the peak *readout*, not a scale
+                    // mark. REAPER prints it at the top of the meter and
+                    // spaces the dB marks evenly through what is left —
+                    // measured, its marks step 21.75 in a 118-row meter
+                    // whose readout sits at 10. Spacing all six evenly
+                    // instead put every middle mark eight rows low.
+                    // Two separate anchors, because they are two separate
+                    // things: the readout sits at 0.055 of the meter (6.5
+                    // rows of REAPER's 119) and the marks below it start at
+                    // 0.0914, which is where its 21.75 step lands them.
+                    let head = vh * 0.055;
+                    let top = vh * 0.0914;
+                    let rest = (props.marks.len().max(2) - 1) as f32;
+                    // 0.43 and 11.2, measured: REAPER's "-18-" is 17
+                    // columns wide and eight rows tall, ours was 13 by six.
+                    // The marks are the biggest thing in the meter's block
+                    // and reading them at a glance is the whole point of a
+                    // scale, so the type is REAPER's size rather than a
+                    // size that merely fits.
+                    let size = (vw * 0.43).min(11.2);
+                    // Anchored on the bars, with no gap of its own: the
+                    // glyphs' own right side bearing is the gap, and the
+                    // two columns this used to reserve were two columns
+                    // REAPER spends on the scale.
+                    // The block's right edge, less a column. The marks were
+                    // anchored on `bars_x`, which was the bars' left edge
+                    // back when the scale had its own column beside them —
+                    // now that the bars *are* the block, that is 0 and the
+                    // whole scale hung off the left of the meter.
+                    let x = vw - 1.0;
+                    // White at 0.55 — REAPER's unlit scale colour, `[255
+                    // 255 255 140]`. It prints black over the lit part too
+                    // (`[0 0 0 170]`); that wants two clipped passes, and
+                    // the clip cut the glyphs rather than the bars in this
+                    // renderer. One legible pass beats two broken ones.
+                    let ink = "#ffffff";
+                    rsx! {
+                        for (i, mark) in props.marks.iter().enumerate() {
+                            {
+                                let y = if i == 0 {
+                                    head
+                                } else {
+                                    top + (i as f32 - 0.5) * (vh - top) / rest
+                                };
+                                rsx! {
+                                    text {
+                                        key: "m{i}",
+                                        x: "{x}", y: "{y}",
+                                        text_anchor: "end",
+                                        dominant_baseline: "central",
+                                        font_family: "Fira Sans, DejaVu Sans, sans-serif",
+                                        font_size: "{size}",
+                                        fill: "{ink}",
+                                        fill_opacity: "0.55",
+                                        "{mark}"
+                                    }
+                                }
                             }
                         }
                     }
@@ -4914,5 +5124,423 @@ mod tests {
             },
         );
         assert_ne!(svg, plain, "the accent made no difference");
+    }
+}
+
+#[cfg(test)]
+mod rail_band_tests {
+    use super::*;
+    use crate::slice::Pane;
+
+    fn render(pane: Pane, height: Option<u32>) -> String {
+        let mut dom = dioxus::prelude::VirtualDom::new_with_props(
+            VolumeFaderTrack,
+            FaderCapProps { accent: None, pane: Some(pane), width: Some(23), height },
+        );
+        dom.rebuild_in_place();
+        dioxus_ssr::render(&dom)
+    }
+
+    /// A growing band takes the layout's height, not the source band's.
+    ///
+    /// An `<svg>` is a replaced element: a `height` attribute beats the
+    /// `flex:1` beside it, so a rail that stated 27 stayed 27 rows tall in
+    /// a 300-row strip.
+    #[test]
+    fn a_growing_band_does_not_state_a_pixel_height() {
+        let html = render(Pane { view: (0.0, 14.0, 23.0, 27.0), grow: true }, None);
+        assert!(html.contains("height=\"100%\""), "the growing band pinned a height:\n{html}");
+    }
+
+    /// A fixed band still states one, and a caller that asks for a height
+    /// still gets it — the exporter always asks.
+    #[test]
+    fn a_fixed_band_and_an_asked_for_height_are_unchanged() {
+        let fixed = render(Pane { view: (0.0, 0.0, 23.0, 16.0), grow: false }, None);
+        assert!(fixed.contains("height=\"16\""), "the fixed band lost its height:\n{fixed}");
+
+        let asked = render(Pane { view: (0.0, 14.0, 23.0, 27.0), grow: true }, Some(55));
+        assert!(asked.contains("height=\"55\""), "an asked-for height was ignored:\n{asked}");
+    }
+}
+
+// ── track panel: the volume knob ────────────────────────────────────────
+
+#[derive(Props, Clone, PartialEq)]
+pub struct VolumeKnobProps {
+    /// Where the value sits on its travel, 0 at the bottom of the sweep and
+    /// 1 at the top. The *taper's* position, not the gain — see
+    /// `daw_ui::controls::fader_position`.
+    #[props(default)]
+    pub value: f32,
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// Where the value ring starts, clockwise from twelve o'clock, and how far
+/// it runs.
+///
+/// A 320° track with a 40° gap at the bottom — measured off REAPER's,
+/// whose ring closes much further round than the 300° first drawn here.
+/// Public because the test that checks unity lands where the fader puts it
+/// has to ask the same two numbers.
+pub const VOLUME_KNOB_START: f32 = -160.0;
+pub const VOLUME_KNOB_SWEEP: f32 = 320.0;
+
+/// REAPER's track-panel volume knob: a dark body inside a value ring.
+///
+/// It is drawn rather than traced. REAPER's own is `tcp_vol_knob_stack`, a
+/// 939-row sprite holding every position of the ring — there is no single
+/// image to measure, and a strip of 40-odd frames is exactly the thing this
+/// crate exists to stop shipping.
+///
+/// The geometry is read off a screenshot instead: a 21-wide knob whose ring
+/// is open at the bottom, running from seven o'clock clockwise through
+/// twelve to five — a 300° track with a 60° gap. Unity lands a little past
+/// two o'clock, which is the same 0.708 of travel the fader puts it at, and
+/// is the check that the sweep is right.
+#[component]
+pub fn VolumeKnob(props: VolumeKnobProps) -> Element {
+    let t = Theme::default();
+    // 24, the height of the field it straddles. REAPER's knob fills that
+    // band exactly — a knob two rows shorter than the box it sits on reads
+    // as sunk into it rather than seated on its edge.
+    let (vw, vh) = (24.0f32, 24.0f32);
+    let (cx, cy) = (vw * 0.5, vh * 0.5);
+    // Measured off REAPER pixel by pixel across the knob's centre row and
+    // down its centre column: a 22-wide cell, the ring's outer edge at 11
+    // from centre with a 4-wide stroke, and a body of 7.5. Drawn thinner —
+    // a 2.9 stroke on a 5.8 body — the ring read as a hairline and the
+    // knob as a smaller control than the one beside it.
+    // The ring is inset by a dark rim — REAPER's knob starts with one
+    // near-black column at 158 and only then the blue. Without it the ring
+    // runs to the cell's edge and the knob reads a size larger than the
+    // one beside it even when the two measure the same.
+    // Absolute, not fractions of the cell. REAPER's knob is 22 across
+    // inside a 24-tall field, so the cell is the field's height and the
+    // drawing keeps its own measurements: an 11 rim, a 7.5 body and a 3.5
+    // ring between them. Scaled to the cell instead, the ring came out
+    // heavy and the body small — the knob read as a thick washer rather
+    // than a cap with a track round it.
+    let rim = 11.0f32;
+    let r = 9.0f32;
+    let stroke = 3.5f32;
+    let body = 7.5f32;
+
+    /// A point on the ring, by angle clockwise from twelve o'clock.
+    fn on(cx: f32, cy: f32, r: f32, deg: f32) -> (f32, f32) {
+        let a = deg.to_radians();
+        (cx + r * a.sin(), cy - r * a.cos())
+    }
+
+    let (start, sweep) = (VOLUME_KNOB_START, VOLUME_KNOB_SWEEP);
+    let arc = |from: f32, to: f32| {
+        let (x0, y0) = on(cx, cy, r, from);
+        let (x1, y1) = on(cx, cy, r, to);
+        let large = if (to - from).abs() > 180.0 { 1 } else { 0 };
+        format!("M {x0} {y0} A {r} {r} 0 {large} 1 {x1} {y1}")
+    };
+
+    let value = props.value.clamp(0.0, 1.0);
+    let lit_to = start + sweep * value;
+    let ink = ink(None, props.at, true, 0.35);
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            style: "display:block; width:{props.width.unwrap_or(vw as u32)}px; \
+                    height:{props.height.unwrap_or(vh as u32)}px;",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+
+            defs {
+                // The same drop the pan knob casts, so the two controls
+                // sit on the row the same way. REAPER's knob is not flat
+                // against the field: it throws a soft shadow below it and
+                // is ringed in near-black, which is most of what makes it
+                // read as a knob rather than a printed circle.
+                radialGradient { id: "voldrop",
+                    stop { offset: "0.90", stop_color: "#000000", stop_opacity: "0.15" }
+                    stop { offset: "1", stop_color: "#000000", stop_opacity: "0" }
+                }
+            }
+            ellipse {
+                cx: "{cx}", cy: "{cy + vh * 0.055}",
+                rx: "{rim * 1.07}", ry: "{rim * 1.23}",
+                fill: "url(#voldrop)",
+            }
+            // The black outline, and the rim the ring is inset into.
+            circle { cx: "{cx}", cy: "{cy}", r: "{rim}", fill: "#0d0d0d" }
+            defs {
+                // The ring is not one flat blue. Sampled round REAPER's,
+                // it runs #5EC3FF where the value starts at the lower left
+                // and #4B7994 by the time it reaches the top — lit from
+                // below, like the rest of this theme's hardware.
+                linearGradient { id: "volring", x1: "0", y1: "1", x2: "0", y2: "0",
+                    stop { offset: "0", stop_color: "#5ec3ff" }
+                    stop { offset: "1", stop_color: "#4b7994" }
+                }
+                // And the body is not flat either: #303030 at the top to
+                // #2D2D2D at the bottom. Three units, which sounds like
+                // nothing and is the difference between a moulded cap and
+                // a filled circle.
+                linearGradient { id: "volbody", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "#303030" }
+                    stop { offset: "1", stop_color: "#2d2d2d" }
+                }
+            }
+            // The unlit track, all the way round.
+            path {
+                d: "{arc(start, start + sweep)}",
+                fill: "none",
+                // #3E4A51, measured off the unlit side of REAPER's ring —
+                // a slate that stays legible against the body. Derived from
+                // the accent it was too dark to see, so the knob looked
+                // like a lit arc floating on nothing.
+                stroke: "#3e4a51",
+                stroke_width: "{stroke}",
+                stroke_linecap: "butt",
+            }
+            // The body, inside it.
+            circle { cx: "{cx}", cy: "{cy}", r: "{body}", fill: "url(#volbody)" }
+            circle {
+                cx: "{cx}", cy: "{cy}", r: "{body}",
+                fill: "none",
+                stroke: "{ink.border.css()}",
+                stroke_width: "0.8",
+            }
+            // The value, over the track. Drawn last so its cap sits on top
+            // of the unlit stroke rather than under it.
+            if value > 0.0 {
+                path {
+                    d: "{arc(start, lit_to)}",
+                    fill: "none",
+                    stroke: "url(#volring)",
+                    stroke_width: "{stroke}",
+                    stroke_linecap: "butt",
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod volume_knob_tests {
+    use super::*;
+
+    fn render(value: f32) -> String {
+        let mut dom = dioxus::prelude::VirtualDom::new_with_props(
+            VolumeKnob,
+            VolumeKnobProps { value, width: Some(21), height: Some(21), at: Interaction::Normal },
+        );
+        dom.rebuild_in_place();
+        dioxus_ssr::render(&dom)
+    }
+
+    /// The ring is a track plus a value arc, and at rest there is no value
+    /// arc at all — a knob at silence must not show a lit sliver.
+    #[test]
+    fn the_ring_lights_only_as_far_as_the_value() {
+        let silent = render(0.0);
+        assert_eq!(silent.matches("<path").count(), 1, "a lit arc at zero:\n{silent}");
+
+        let unity = render(0.708);
+        assert_eq!(unity.matches("<path").count(), 2, "no value arc:\n{unity}");
+    }
+
+    /// Unity lands a little past two o'clock, which is what says the 300°
+    /// sweep and the fader's taper agree about where 0 dB is.
+    ///
+    /// Read back out of the drawing rather than compared with a literal:
+    /// the cell's size is taken from the rendered `viewBox`, so resizing
+    /// the knob cannot turn this into a failing test about nothing.
+    #[test]
+    fn unity_lands_past_two_oclock() {
+        let html = render(0.708);
+
+        // The cell, from the drawing itself.
+        let vb = html.split("viewBox=\"0 0 ").nth(1).expect("a viewBox");
+        let vw: f32 = vb.split_whitespace().next().unwrap().parse().unwrap();
+        let c = vw * 0.5;
+
+        // The value arc is the last path; its `A` ends at the value's angle.
+        let last = html.rsplit("<path").next().expect("a value arc");
+        let end = last.split(" A ").nth(1).expect("an arc").split('"').next().unwrap();
+        let n: Vec<f32> = end.split_whitespace().filter_map(|w| w.parse().ok()).collect();
+        let (x, y) = (n[n.len() - 2], n[n.len() - 1]);
+
+        // Clockwise from twelve, which is how the component measures.
+        let deg = (x - c).atan2(c - y).to_degrees();
+        let wanted = VOLUME_KNOB_START + VOLUME_KNOB_SWEEP * 0.708;
+        assert!(
+            (deg - wanted).abs() < 1.0,
+            "unity is at {deg:.1}°, not {wanted:.1}° — the sweep and the taper disagree"
+        );
+        assert!((60.0..70.0).contains(&deg), "that is not past two o'clock");
+    }
+}
+
+// ── track panel: the left column's glyphs ───────────────────────────────
+
+#[derive(Props, Clone, PartialEq)]
+pub struct GlyphProps {
+    /// The ink. REAPER draws both of these in the row's own colour
+    /// darkened — measured #762D40 against a #9D3C55 tint, the same 0.75
+    /// the input combo is — so they read as pressed into the panel rather
+    /// than printed on it.
+    pub colour: String,
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+}
+
+/// The pin at the top of a track panel's left column.
+///
+/// A five-pointed star, which is what REAPER draws for "pinned" — measured
+/// at seven columns across, at the top of the column the track number runs
+/// down.
+#[component]
+pub fn TrackPin(props: GlyphProps) -> Element {
+    let (vw, vh) = (9.0f32, 9.0f32);
+    let (cx, cy) = (vw * 0.5, vh * 0.52);
+    let r = vw * 0.5;
+    // Five points, alternating outer and inner radius.
+    let mut d = String::new();
+    for i in 0..10 {
+        let rr = if i % 2 == 0 { r } else { r * 0.42 };
+        let a = (-90.0 + i as f32 * 36.0).to_radians();
+        let (x, y) = (cx + rr * a.cos(), cy + rr * a.sin());
+        d.push_str(&format!("{} {x:.2} {y:.2} ", if i == 0 { "M" } else { "L" }));
+    }
+    d.push('Z');
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            style: "display:block;",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            path { d: "{d}", fill: "{props.colour}" }
+        }
+    }
+}
+
+/// The folder mark at the bottom of that column.
+///
+/// A tab and a body, nine columns across — REAPER's folder-state glyph,
+/// drawn rather than traced because it is nine pixels of two rectangles
+/// and a sprite for it would be silly.
+#[component]
+pub fn TrackFolder(props: GlyphProps) -> Element {
+    let (vw, vh) = (9.0f32, 7.0f32);
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            style: "display:block;",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            // The tab, then the body under it.
+            path {
+                d: "M 0 1 H 3.6 L 4.6 2.2 H 9 V 7 H 0 Z",
+                fill: "{props.colour}",
+            }
+        }
+    }
+}
+
+/// The fixed-lanes button — `custom_fixed_lanes_*`, this theme's own
+/// addition rather than one of REAPER's.
+///
+/// **Two stacked dots**, not a stack of bars. Traced off the image: a
+/// 20x24 cell with dots of radius 2.5 centred on x9.5 at y9 and y17,
+/// #818181 with the lower one at 0.40 alpha when off, and both a solid
+/// #CBA336 when the track is in fixed-lane mode.
+///
+/// Drawn as bars first, it was indistinguishable from the routing button
+/// two rows above it — which is a worse failure than being ugly, because
+/// the two do entirely different things and the panel had them looking
+/// the same.
+#[derive(Props, Clone, PartialEq)]
+pub struct FixedLanesProps {
+    /// Whether the track is in fixed-lane mode.
+    #[props(default)]
+    pub on: bool,
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+#[component]
+pub fn FixedLanesButton(props: FixedLanesProps) -> Element {
+    let (vw, vh) = (20.0f32, 24.0f32);
+    let (cx, r) = (vw * 0.475, 2.5f32);
+    let t = Theme::default();
+    // Hover and press lift the marks, as everything else here does.
+    let lift = match props.at {
+        Interaction::Normal => 0.0,
+        Interaction::Hover => 0.12,
+        Interaction::Pressed => -0.10,
+    };
+    let (upper, lower, lower_alpha) = if props.on {
+        let lit = t.signal.solo.shade(lift).css();
+        (lit.clone(), lit, 1.0f32)
+    } else {
+        let ink = Color::rgb(0x81, 0x81, 0x81).shade(lift).css();
+        (ink.clone(), ink, 0.40)
+    };
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            style: "display:block;",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            circle { cx: "{cx}", cy: "9", r: "{r}", fill: "{upper}" }
+            circle { cx: "{cx}", cy: "17", r: "{r}", fill: "{lower}", fill_opacity: "{lower_alpha}" }
+        }
+    }
+}
+
+#[cfg(test)]
+mod fixed_lanes_tests {
+    use super::*;
+
+    fn render(on: bool) -> String {
+        let mut dom = dioxus::prelude::VirtualDom::new_with_props(
+            FixedLanesButton,
+            FixedLanesProps { on, width: Some(20), height: Some(24), at: Interaction::Normal },
+        );
+        dom.rebuild_in_place();
+        dioxus_ssr::render(&dom)
+    }
+
+    /// Two dots, and nothing that could be mistaken for the routing
+    /// button's lanes — which is what it was drawn as first, two rows
+    /// below the routing button itself.
+    #[test]
+    fn it_is_two_dots_and_not_a_stack_of_bars() {
+        let off = render(false);
+        assert_eq!(off.matches("<circle").count(), 2, "not two dots:\n{off}");
+        assert_eq!(off.matches("<rect").count(), 0, "it has bars:\n{off}");
+    }
+
+    /// Lit, both dots take the theme's mark colour at full strength; unlit,
+    /// the lower one is a shadow of the upper.
+    #[test]
+    fn the_lower_dot_is_faint_until_the_mode_is_on() {
+        assert!(render(false).contains(r#"fill-opacity="0.4""#), "the dots read as equals");
+        assert!(render(true).contains(r#"fill-opacity="1""#), "the lit dots are not solid");
     }
 }
