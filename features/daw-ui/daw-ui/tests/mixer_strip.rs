@@ -209,7 +209,11 @@ fn pan_re_anchors_rather_than_disappearing() {
 fn the_fader_becomes_a_knob_when_its_area_runs_out() {
     use daw_ui::controls::{Collapse, REAPER_THRESHOLDS as T};
 
-    let rail = |h: &str| h.contains("viewBox=\"0 16 23 23\"");
+    // The cap's ribbed grip, which only the fader draws. Spotting the
+    // fader by one of its bands' viewBoxes tied this test to a coordinate
+    // system, and it broke the day the bands started drawing their own
+    // slice instead of windowing one drawing.
+    let rail = |h: &str| h.contains("capgrip");
     let area = |h: f32| {
         let c = Collapse::at(h);
         daw_theme_art::collapse::fader_area(c.stretch, c.show_io, c.show_envelope, c.show_phase)

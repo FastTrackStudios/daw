@@ -462,7 +462,17 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                 div { style: "position:absolute; left:9px; top:2px;",
                     PanKnob { track: track.guid.clone() }
                     if shape.show_pan_labels {
-                        div { class: "text-[8px] text-zinc-400 leading-none text-center", "pan" }
+                        // Inline, like everything else that decides layout
+                        // here: a Tailwind-only `text-[8px]` falls back to
+                        // the UA's 16px in any window that renders before
+                        // the sheet, and a 16px "pan" is half the band.
+                        div {
+                            class: "text-[8px] text-zinc-400 leading-none text-center",
+                            style: "font-size:8px; line-height:8px; text-align:center; \
+                                    color:#a1a1aa; \
+                                    font-family:Fira Sans, DejaVu Sans, sans-serif;",
+                            "pan"
+                        }
                     }
                 }
                 // Hung *through* the band's floor, not sat on it.
@@ -509,7 +519,9 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                 if shape.show_volume_label {
                     div {
                         class: "absolute font-mono text-[9px] text-zinc-400",
-                        style: "left:4px; top:-11px;",
+                        style: "position:absolute; left:4px; top:-11px; \
+                                font-size:9px; line-height:9px; color:#a1a1aa; \
+                                font-family:DejaVu Sans Mono, monospace;",
                         "{db_label}"
                     }
                 }
@@ -525,7 +537,9 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                     match shape.volume {
                         // Below the swap threshold a fader has no travel
                         // worth having, so it stops being a fader.
-                        VolumeWidget::Fader => rsx! { VolumeFader { track: track.guid.clone() } },
+                        VolumeWidget::Fader => rsx! {
+                            VolumeFader { track: track.guid.clone(), height: meter_h as f32 }
+                        },
                         VolumeWidget::Knob => rsx! {
                             PanKnob { track: track.guid.clone(), large: true }
                         },

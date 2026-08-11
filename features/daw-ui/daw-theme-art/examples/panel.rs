@@ -157,6 +157,7 @@ fn meter(x: f32, y: f32, w: f32, h: f32, levels: Vec<f32>, marks: &[&str]) -> St
         &render_svg(
             v::Meter,
             v::MeterProps {
+                well: None,
                 levels,
                 cell: (w, h),
                 scale: !marks.is_empty(),

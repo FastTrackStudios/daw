@@ -2114,10 +2114,13 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
 #[component]
 pub fn VolumeFaderTrack(props: FaderCapProps) -> Element {
     let (vw, vh) = (23.0f32, 55.0f32);
-    // The rail is drawn at its source coordinates, always. Which *part* of
-    // it a given `<svg>` shows is the viewBox's business, not the shape's —
-    // that is what makes a band a window onto one drawing rather than a
-    // second drawing of its own.
+    // Each band draws *its own slice* of the groove, in its own
+    // coordinates. It used to draw the whole groove and let a viewBox
+    // window it — which is the tidier idea and does not survive Blitz:
+    // there a viewBox's min-y offset is ignored and nothing is clipped to
+    // it, so all three bands painted the full 27-row groove and a tall
+    // fader came out as three disconnected dashes. The intersection is
+    // arithmetic every renderer agrees about.
     //
     // y14..y41, which is where the groove is *traced*, and deliberately not
     // the 16..39 the magenta guides mark. Those are two different facts: the
@@ -2135,6 +2138,12 @@ pub fn VolumeFaderTrack(props: FaderCapProps) -> Element {
     // itself without being told twice.
     let w = props.width.unwrap_or(vw as u32);
     let scale = w as f32 / vw;
+    // Where the groove lands inside this band: the overlap of the traced
+    // rows with the pane, expressed from the pane's own top.
+    let (groove_y, groove_h) = {
+        let (top, bottom) = (rail_y.max(py), (rail_y + rail_h).min(py + ph));
+        (top - py, (bottom - top).max(0.0))
+    };
     // A growing pane hands its height to the layout engine; a fixed one
     // states it. `preserveAspectRatio: none` because the rail is meant to
     // lengthen — letterboxing the stretch band is exactly the wrong answer.
@@ -2157,19 +2166,22 @@ pub fn VolumeFaderTrack(props: FaderCapProps) -> Element {
         svg {
             width: "{w}",
             height: "{height}",
-            view_box: "{px} {py} {pw} {ph}",
+            view_box: "0 0 {pw} {ph}",
             preserve_aspect_ratio: "none",
             style: "{sizing}; display:block",
             xmlns: "http://www.w3.org/2000/svg",
             // Slightly wider than a pixel and centred on x11.5, which is
             // what gives the source its soft shoulders at 60 either side
             // of a 215 core rather than one hard column.
-            rect {
-                x: "{vw * 10.8 / 23.0}",
-                y: "{rail_y}",
-                width: "{vw * 1.4 / 23.0}",
-                height: "{rail_h}",
-                fill: "#000000", fill_opacity: "0.85",
+            // The groove, clipped to this band and moved to its origin.
+            if groove_h > 0.0 {
+                rect {
+                    x: "{vw * 10.8 / 23.0 - px}",
+                    y: "{groove_y}",
+                    width: "{vw * 1.4 / 23.0}",
+                    height: "{groove_h}",
+                    fill: "#000000", fill_opacity: "0.85",
+                }
             }
         }
     }

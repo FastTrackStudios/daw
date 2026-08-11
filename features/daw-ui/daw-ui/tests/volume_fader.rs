@@ -51,11 +51,28 @@ fn the_rail_is_a_stack_of_bands_and_only_the_middle_grows() {
 
     // Three rail bands plus the cap.
     assert_eq!(html.matches("<svg").count(), 4, "not one svg per band:\n{html}");
-    // The caps window the top and bottom of the source box and state their
-    // height; the run windows the middle and takes what is left.
-    assert!(html.contains(r#"viewBox="0 0 23 16""#), "no top cap:\n{html}");
-    assert!(html.contains(r#"viewBox="0 16 23 23""#), "no stretch band:\n{html}");
-    assert!(html.contains(r#"viewBox="0 39 23 16""#), "no bottom cap:\n{html}");
+    // Each band draws its own slice of the groove in its own coordinates,
+    // rather than windowing one drawing through a viewBox offset: Blitz
+    // ignores a viewBox's min-y and clips nothing to it, so windowing made
+    // all three bands paint the whole groove and a tall fader came out as
+    // three disconnected dashes.
+    assert_eq!(
+        html.matches(r#"viewBox="0 0 23 16""#).count(),
+        2,
+        "the caps are not drawn at their own origin:\n{html}"
+    );
+    assert!(html.contains(r#"viewBox="0 0 23 23""#), "no stretch band:\n{html}");
+
+    // And the slices reassemble the traced groove: 2 rows in the top cap,
+    // 23 in the run, 2 in the bottom — the 27 rows `mcp_volbg` traces.
+    let rows: u32 = html
+        .match_indices(r#"width="1.4" height=""#)
+        .filter_map(|(i, m)| {
+            let rest = &html[i + m.len()..];
+            rest.split('"').next()?.parse::<u32>().ok()
+        })
+        .sum();
+    assert_eq!(rows, 27, "the groove's slices do not add up:\n{html}");
     assert!(html.contains("flex:1"), "nothing takes the slack:\n{html}");
     // A stretched band must not letterbox — the rail is meant to lengthen.
     assert!(

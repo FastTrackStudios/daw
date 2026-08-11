@@ -39,6 +39,16 @@ pub fn VolumeFader(
     /// The height comes from the parent box.
     #[props(default = 1.0)]
     scale: f32,
+    /// The rail's height in px, when the caller knows it.
+    ///
+    /// The stretch band is `flex:1` with `height:100%`, and Blitz resolves
+    /// that percentage against an auto height — so the band's *box* grew
+    /// and the `<svg>` inside it stayed 23 rows tall, leaving the groove a
+    /// short dash in the middle of a tall fader. Given the number, the
+    /// bands are arithmetic instead: the caps keep their size and the run
+    /// takes what is left.
+    #[props(default)]
+    height: Option<f32>,
 ) -> Element {
     let store = use_track_store();
     let mut drafts = store.drafts();
@@ -120,7 +130,7 @@ pub fn VolumeFader(
             // The rail, decomposed. One `<svg>` per band: the caps state
             // their height in pixels, the run takes what is left.
             for (i, pane) in rail.stack().into_iter().enumerate() {
-                RailBand { key: "{i}", pane, width: w }
+                RailBand { key: "{i}", pane, width: w, height: band_px(pane, &rail, height, scale) }
             }
 
             // The cap, riding on top.
@@ -138,10 +148,30 @@ pub fn VolumeFader(
 /// A component rather than an inline call so each band is its own scope and
 /// Dioxus diffs them independently — and so the `key` above means something.
 #[component]
-fn RailBand(pane: Pane, width: u32) -> Element {
+fn RailBand(pane: Pane, width: u32, height: Option<u32>) -> Element {
     rsx! {
-        art::VolumeFaderTrack { pane: Some(pane), width: Some(width) }
+        art::VolumeFaderTrack { pane: Some(pane), width: Some(width), height }
     }
+}
+
+/// A band's height in pixels, when the fader knows its own.
+///
+/// The fixed caps keep their source height; the growing run takes the
+/// remainder. `None` when the caller did not say — the band then falls
+/// back to the flex layout, which is right in a browser and short in
+/// Blitz.
+fn band_px(pane: Pane, rail: &slice::NamedArt, total: Option<f32>, scale: f32) -> Option<u32> {
+    let total = total?;
+    if !pane.grow {
+        return Some((pane.view.3 * scale).round() as u32);
+    }
+    let fixed: f32 = rail
+        .stack()
+        .into_iter()
+        .filter(|p| !p.grow)
+        .map(|p| p.view.3 * scale)
+        .sum();
+    Some((total - fixed).max(1.0).round() as u32)
 }
 
 /// REAPER's fader taper, in both directions.
