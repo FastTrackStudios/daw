@@ -589,7 +589,14 @@ impl RowSpace {
         match self {
             RowSpace::Pitch => (0, 127),
             RowSpace::Drums(m) => (0, m.lanes.len().saturating_sub(1) as i32),
-            RowSpace::Strings(t) => (0, t.strings().saturating_sub(1) as i32),
+            // A string roll is a *pitch* roll: rows are MIDI pitches
+            // and the string is an annotation on the note. Bounded by
+            // the neck rather than by 0..127, because a note above the
+            // top fret is not playable on this instrument.
+            RowSpace::Strings(t) => (
+                t.open(0),
+                t.open(t.strings().saturating_sub(1)) + t.frets as i32,
+            ),
             RowSpace::Bands(b) => (0, b.count().saturating_sub(1) as i32),
         }
     }
@@ -605,12 +612,10 @@ impl RowSpace {
             // knows which pieces are open and calls `display_name`
             // directly.
             RowSpace::Drums(m) => m.display_name(row.max(0) as usize, false),
-            RowSpace::Strings(t) => {
-                let open = t.open(row.max(0) as usize);
-                // Pitch class only: "E", "A" — the string's name, not
-                // its octave, which is how players refer to them.
-                tuning::pitch_class_name(open).to_string()
-            }
+            // Rows are pitches here too, so they are named as pitches.
+            // Which string a note is on is the note's business, not the
+            // row's — one pitch is reachable on several strings.
+            RowSpace::Strings(_) => tuning::note_name(row),
             RowSpace::Bands(b) => b.name(row.max(0) as usize).to_string(),
         }
     }
@@ -621,7 +626,7 @@ impl RowSpace {
         match self {
             RowSpace::Pitch => row.rem_euclid(12) == 0,
             RowSpace::Drums(_) => false,
-            RowSpace::Strings(_) => true,
+            RowSpace::Strings(_) => row.rem_euclid(12) == 0,
             // Every band boundary is a real division of the material.
             RowSpace::Bands(_) => true,
         }
@@ -642,8 +647,9 @@ impl RowSpace {
     /// somewhere else".
     pub fn semitones_per_row(&self) -> f64 {
         match self {
-            RowSpace::Pitch => 1.0,
-            RowSpace::Strings(_) => 2.0,
+            // A string roll is a pitch roll, so a row is a semitone
+            // here exactly as it is in pitch space.
+            RowSpace::Pitch | RowSpace::Strings(_) => 1.0,
             // Neither space has a pitch axis to scale against; the
             // curves drawn over them are decoration, not a reading.
             RowSpace::Drums(_) | RowSpace::Bands(_) => 1.0,
@@ -653,7 +659,9 @@ impl RowSpace {
     /// Black-key shading only means anything in pitch space.
     pub fn is_accidental(&self, row: i32) -> bool {
         match self {
-            RowSpace::Pitch => matches!(row.rem_euclid(12), 1 | 3 | 6 | 8 | 10),
+            RowSpace::Pitch | RowSpace::Strings(_) => {
+                matches!(row.rem_euclid(12), 1 | 3 | 6 | 8 | 10)
+            }
             _ => false,
         }
     }
@@ -663,7 +671,7 @@ impl RowSpace {
         match self {
             RowSpace::Pitch => note.row,
             RowSpace::Drums(m) => m.pitch_of_row(note.row.max(0) as usize).unwrap_or(note.row),
-            RowSpace::Strings(t) => t.pitch(note.row.max(0) as usize, note.fret.unwrap_or(0)),
+            RowSpace::Strings(_) => note.row,
             // A slice has no pitch. Callers that need one for playback
             // get silence rather than a number that would sound.
             RowSpace::Bands(_) => 0,
@@ -675,7 +683,7 @@ impl RowSpace {
         match self {
             RowSpace::Pitch => Some(pitch.clamp(0, 127)),
             RowSpace::Drums(m) => m.row_of_pitch(pitch).map(|r| r as i32),
-            RowSpace::Strings(t) => t.best_position(pitch, 5).map(|(s, _)| s as i32),
+            RowSpace::Strings(_) => Some(pitch),
             // Nothing imports *into* band space by pitch: a band comes
             // from a measured centroid, and a MIDI note has none.
             RowSpace::Bands(_) => None,
@@ -693,8 +701,14 @@ impl RowSpace {
         match self {
             RowSpace::Pitch => Some(tuning::note_name(note.row)),
             RowSpace::Drums(_) => None,
-            // The fret number is the whole point of a tab view.
-            RowSpace::Strings(_) => Some(note.fret.unwrap_or(0).to_string()),
+            // The fret number is the whole point of a tab view — and it
+            // is computed, because the note stores the string and the
+            // row is the pitch.
+            RowSpace::Strings(t) => Some(
+                fret_of(note, t)
+                    .map(|f| f.to_string())
+                    .unwrap_or_else(|| "?".into()),
+            ),
             // The band is already the row, and a hit is too narrow to
             // print in anyway.
             RowSpace::Bands(_) => None,
@@ -743,7 +757,10 @@ impl RowSpace {
     pub fn row_color(&self, row: i32) -> Option<&'static str> {
         match self {
             RowSpace::Pitch => None,
-            RowSpace::Strings(_) => Some(STRING_COLORS[row.max(0) as usize % STRING_COLORS.len()]),
+            // A row is a pitch, and a pitch is reachable on several
+            // strings — so the colour belongs to the *note*, via
+            // [`string_color`], not to the row it sits on.
+            RowSpace::Strings(_) => None,
             RowSpace::Drums(m) => {
                 let name = m.lanes.get(row.max(0) as usize)?.name.as_str();
                 Some(drum_color(name))
@@ -771,6 +788,26 @@ pub enum NoteShape {
     /// edge sits exactly on the attack, where a diamond's widest point
     /// is its middle and the onset has to be inferred.
     Triangle,
+}
+
+/// The colour of a note fingered on `string`.
+///
+/// This is what makes a pitch roll readable as a guitar part: the row
+/// says which note, the colour says where it was played, and the two
+/// together are what a fret number is computed from.
+pub fn string_color(string: u8) -> &'static str {
+    STRING_COLORS[string as usize % STRING_COLORS.len()]
+}
+
+/// The fret a note is played at: its pitch, less the string's open
+/// pitch.
+///
+/// `None` when the note carries no string — a plain MIDI note on a
+/// guitar track is a real thing, and it has no fret until someone says
+/// which string it is on.
+pub fn fret_of(note: &Note, tuning: &StringTuning) -> Option<i32> {
+    let string = note.string?;
+    Some(note.row - tuning.open(string as usize))
 }
 
 /// String colours, low to high. Warm at the bottom, cool at the top,

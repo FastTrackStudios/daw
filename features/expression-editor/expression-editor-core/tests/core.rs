@@ -1429,8 +1429,9 @@ fn moving_a_note_to_another_string_keeps_its_sounding_pitch() {
     let tuning = StringTuning::guitar_standard();
     let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
     doc.row_space = RowSpace::Strings(tuning.clone());
-    let mut n = Note::new(NoteId(1), 0.0, PPQ, 5); // high E string
-    n.fret = Some(5); // A4
+    // 5th fret of the high E string = A4 (69). The row is the pitch.
+    let mut n = Note::new(NoteId(1), 0.0, PPQ, tuning.open(5) + 5);
+    n.string = Some(5);
     doc.push(n);
     let before = doc.row_space.pitch_of(doc.note(NoteId(1)).unwrap());
 
@@ -1443,26 +1444,26 @@ fn moving_a_note_to_another_string_keeps_its_sounding_pitch() {
     );
 
     let n = doc.note(NoteId(1)).unwrap();
-    assert_eq!(n.row, 4);
     assert_eq!(
         doc.row_space.pitch_of(n),
         before,
         "changing string re-fingers, it does not transpose"
     );
-    assert_eq!(n.fret, Some(10));
+    assert_eq!(n.string, Some(4), "it is on the B string now");
+    assert_eq!(
+        expression_editor_core::rows::fret_of(n, &tuning),
+        Some(10),
+        "A4 on the B string is the tenth fret"
+    );
 }
 
 #[test]
 fn an_unreachable_string_refuses_the_move() {
     let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
     doc.row_space = RowSpace::Strings(StringTuning::guitar_standard());
-    let mut n = Note::new(NoteId(1), 0.0, PPQ, 5);
-    n.fret = Some(0); // E4 — below the low E string's open pitch? no, above
-    doc.push(n);
-    // E4 = 64 cannot be played on the high E string at a negative fret,
-    // and moving a low note up a string can go out of range.
-    let mut n2 = Note::new(NoteId(2), 0.0, PPQ, 0);
-    n2.fret = Some(0); // E2 = 40
+    // E2 = 40, open on the low E string.
+    let mut n2 = Note::new(NoteId(2), 0.0, PPQ, 40);
+    n2.string = Some(0);
     doc.push(n2);
     assert!(
         !Edit::SetString {
@@ -1477,10 +1478,14 @@ fn an_unreachable_string_refuses_the_move() {
 #[test]
 fn a_string_roll_labels_notes_with_their_fret() {
     let space = RowSpace::Strings(StringTuning::guitar_standard());
-    let mut n = Note::new(NoteId(1), 0.0, 100.0, 2);
-    n.fret = Some(7);
+    let tuning = StringTuning::guitar_standard();
+    // Seventh fret of the D string.
+    let mut n = Note::new(NoteId(1), 0.0, 100.0, tuning.open(2) + 7);
+    n.string = Some(2);
     assert_eq!(space.note_label(&n), Some("7".to_string()));
-    assert_eq!(space.row_label(2), "D", "third string is D");
+    // Rows are pitches now, so they are named as pitches — a row does
+    // not belong to a string, because several strings reach it.
+    assert_eq!(space.row_label(tuning.open(2)), "D3");
 }
 
 #[test]
@@ -2251,9 +2256,14 @@ fn a_string_roll_reports_sounding_pitches_not_string_numbers() {
     let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
     doc.row_space = RowSpace::Strings(tuning.clone());
     // An open C major shape on the top three strings: G B E.
-    for (i, (string, fret)) in [(3usize, 0u8), (4, 1), (5, 0)].iter().enumerate() {
-        let mut n = Note::new(NoteId(i as u64 + 1), 0.0, PPQ, *string as i32);
-        n.fret = Some(*fret);
+    for (i, (string, fret)) in [(3usize, 0i32), (4, 1), (5, 0)].iter().enumerate() {
+        let mut n = Note::new(
+            NoteId(i as u64 + 1),
+            0.0,
+            PPQ,
+            tuning.open(*string) + fret,
+        );
+        n.string = Some(*string as u8);
         doc.push(n);
     }
     let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
@@ -2504,10 +2514,16 @@ fn row_colour_follows_what_the_row_means() {
     // because that is the thing being tracked.
     assert!(RowSpace::Pitch.row_color(60).is_none());
 
+    // A string roll's rows are pitches, and a pitch is reachable on
+    // several strings — so the row has no colour and the *note* carries
+    // it, which is what shows a phrase crossing the neck.
     let strings = RowSpace::Strings(StringTuning::guitar_standard());
-    let low = strings.row_color(0).unwrap();
-    let high = strings.row_color(5).unwrap();
-    assert_ne!(low, high, "strings must be told apart by colour");
+    assert!(strings.row_color(64).is_none());
+    assert_ne!(
+        expression_editor_core::rows::string_color(0),
+        expression_editor_core::rows::string_color(5),
+        "strings must be told apart by colour"
+    );
 
     let kit = RowSpace::Drums(DrumMap::general_midi());
     let map = DrumMap::general_midi();
@@ -3009,9 +3025,13 @@ fn the_menu_offers_what_the_mode_can_actually_carry() {
 fn commands_needing_a_panel_report_that_they_did_not_run() {
     let mut ed = menu_editor();
     ed.set_mode(Mode::Vocals);
-    // The core cannot invent a syllable, so it must say so rather than
-    // return true and leave the UI thinking a lyric was set.
-    assert!(!ed.run_command(&Command::EditLyric(NoteId(1)), Some(NoteId(1))));
+    // `EditLyric` now *opens the field* rather than inventing a
+    // syllable, so it runs — and still writes nothing, which is the
+    // property this test was really protecting.
+    assert!(ed.run_command(&Command::EditLyric(NoteId(1)), Some(NoteId(1))));
+    assert_eq!(ed.editing_lyric, Some(NoteId(1)));
+    assert_eq!(ed.doc.note(NoteId(1)).and_then(|n| n.text.clone()), None);
+    // Properties still has no panel to open.
     assert!(!ed.run_command(&Command::Properties, Some(NoteId(1))));
 }
 
@@ -4201,5 +4221,123 @@ fn the_left_point_owns_the_segment() {
     assert!(
         (c.sample(5.0, 0.0) - 0.5).abs() < 1e-9,
         "the trailing point's shape is not read"
+    );
+}
+
+// ── the three operations that had no way in ──────────────────────────
+
+#[test]
+fn a_lyric_can_be_typed_and_cleared() {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 4.0);
+    doc.push(Note::new(NoteId(1), 0.0, PPQ, 60));
+    let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
+
+    assert!(ed.set_lyric(NoteId(1), "ho"));
+    assert_eq!(ed.doc.note(NoteId(1)).unwrap().text.as_deref(), Some("ho"));
+
+    // Blank clears rather than storing an empty syllable — deleting is
+    // the same gesture as typing.
+    assert!(ed.set_lyric(NoteId(1), "   "));
+    assert_eq!(ed.doc.note(NoteId(1)).unwrap().text, None);
+}
+
+#[test]
+fn opening_the_lyric_field_does_not_write_anything() {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 4.0);
+    doc.push(Note::new(NoteId(1), 0.0, PPQ, 60));
+    let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
+
+    assert!(ed.run_command(&expression_editor_core::menu::Command::EditLyric(NoteId(1)), None));
+    assert_eq!(ed.editing_lyric, Some(NoteId(1)));
+    assert_eq!(ed.doc.note(NoteId(1)).unwrap().text, None);
+
+    ed.cancel_lyric();
+    assert_eq!(ed.editing_lyric, None);
+}
+
+#[test]
+fn setting_a_fret_transposes_and_keeps_the_string() {
+    let tuning = StringTuning::guitar_standard();
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 4.0);
+    doc.row_space = RowSpace::Strings(tuning.clone());
+    let mut n = Note::new(NoteId(1), 0.0, PPQ, tuning.open(2) + 5);
+    n.string = Some(2);
+    doc.push(n);
+
+    let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
+    ed.selection.set_single(NoteId(1));
+    assert!(ed.set_fret_of_selection(7));
+
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    assert_eq!(n.string, Some(2), "the hand stayed on the same string");
+    assert_eq!(n.row, tuning.open(2) + 7, "and the note sounds higher");
+}
+
+#[test]
+fn moving_a_band_split_resorts_slices_without_reanalysing() {
+    use expression_editor_core::rows::SliceBands;
+
+    let bands = SliceBands::default();
+    let mut doc = ExpressionDoc::new(TimeBase::Frames { frame_rate: 100.0 }, 0.0, 100.0);
+    doc.row_space = RowSpace::Bands(bands.clone());
+    // One slice just under the first split, so a small move of that
+    // split is enough to reband it.
+    let split = bands.splits[0];
+    let mut n = Note::new(NoteId(1), 0.0, 4.0, bands.band_of(split * 0.9) as i32);
+    n.centroid_hz = Some(split * 0.9);
+    let before = n.row;
+    doc.push(n);
+
+    let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
+    assert!(ed.move_band_split(0, split * 0.5));
+
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    assert_ne!(n.row, before, "the slice moved to the band above");
+    assert_eq!(
+        n.centroid_hz,
+        Some(split * 0.9),
+        "rebanding is a re-sort: the measured centroid is untouched"
+    );
+}
+
+#[test]
+fn a_slice_with_no_centroid_stays_put_when_bands_move() {
+    use expression_editor_core::rows::SliceBands;
+
+    let bands = SliceBands::default();
+    let mut doc = ExpressionDoc::new(TimeBase::Frames { frame_rate: 100.0 }, 0.0, 100.0);
+    doc.row_space = RowSpace::Bands(bands.clone());
+    // A hand-drawn slice has no measured centroid; it must not collapse
+    // onto band zero the moment somebody drags a split.
+    doc.push(Note::new(NoteId(1), 0.0, 4.0, 2));
+
+    let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
+    assert!(ed.move_band_split(0, bands.splits[0] * 0.5));
+    assert_eq!(ed.doc.note(NoteId(1)).unwrap().row, 2);
+}
+
+#[test]
+fn undo_brings_the_row_space_view_back_with_the_document() {
+    // `SetBands` changes the row space itself. Undo restored the
+    // document and left the editor's view on the new splits, so the
+    // roll drew one thing while every later edit resorted against
+    // another.
+    use expression_editor_core::rows::SliceBands;
+
+    let bands = SliceBands::default();
+    let mut doc = ExpressionDoc::new(TimeBase::Frames { frame_rate: 100.0 }, 0.0, 100.0);
+    doc.row_space = RowSpace::Bands(bands.clone());
+    let mut n = Note::new(NoteId(1), 0.0, 4.0, 0);
+    n.centroid_hz = Some(bands.splits[0] * 0.9);
+    doc.push(n);
+
+    let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
+    ed.row_space = RowSpace::Bands(bands.clone());
+    assert!(ed.move_band_split(0, bands.splits[0] * 0.5));
+    assert!(ed.undo());
+
+    assert_eq!(
+        ed.row_space, ed.doc.row_space,
+        "the view kept the undone splits"
     );
 }

@@ -491,9 +491,26 @@ pub struct Note {
     /// Joined to the following note on the same string. Riffer's rule:
     /// the legato is marked on the *first* note of the pair.
     pub legato: bool,
-    /// Guitar/bass: fret. The string is the note's `row` in a
-    /// [`crate::rows::RowSpace::Strings`] roll.
-    pub fret: Option<u8>,
+    /// Unpitched audio: the slice's energy-weighted mean frequency.
+    ///
+    /// Kept on the note so band splits can be moved without re-running
+    /// the analysis — which is the whole point of `reband` being cheap
+    /// and lossless. Before this the centroids lived only inside the
+    /// analyser's own struct, so nothing the editor held could reband
+    /// and the operation was unreachable.
+    pub centroid_hz: Option<f64>,
+    /// Guitar/bass: which string the note is fingered on.
+    ///
+    /// The row is the **sounding MIDI pitch**, exactly as in every other
+    /// mode — a guitar roll is a full pitch roll, not six lanes. The
+    /// string is an annotation on top of it: it colours the note and it
+    /// is what makes the fret computable, because a pitch alone does
+    /// not say where on the neck it was played.
+    ///
+    /// The fret is therefore *derived*, never stored — `row -
+    /// tuning.open(string)`. Storing both invites the two to disagree,
+    /// and a note whose fret and pitch disagree is unplayable.
+    pub string: Option<u8>,
     pub pitch: Curve,
     pub pressure: Curve,
     pub timbre: Curve,
@@ -533,7 +550,8 @@ impl Note {
             articulation: None,
             grace_of: None,
             legato: false,
-            fret: None,
+            centroid_hz: None,
+            string: None,
             pitch: Curve::new(),
             pressure: Curve::new(),
             timbre: Curve::new(),

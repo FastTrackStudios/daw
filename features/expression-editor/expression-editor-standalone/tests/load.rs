@@ -270,3 +270,59 @@ fn a_missing_project_reports_the_path() {
     .expect_err("the file is not there");
     assert!(matches!(err, LoadError::Read(..)), "got {err:?}");
 }
+
+// ── Guitar Pro: scenario 4's material, openable in the app ───────────
+
+#[test]
+fn a_guitar_pro_extension_is_recognised() {
+    for name in ["solo.gp", "solo.gpx", "solo.gp5", "SOLO.GP"] {
+        assert!(
+            matches!(Source::parse(name), Ok(Source::GuitarPro(_))),
+            "{name} should load as a transcription"
+        );
+    }
+}
+
+#[test]
+fn a_transcription_opens_as_a_guitar_roll() {
+    // The fixture the importer's own suite uses, so this cannot drift
+    // from what the parser is tested against.
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../expression-editor-guitarpro/tests/fixtures");
+    let Some(file) = std::fs::read_dir(&fixture).ok().and_then(|d| {
+        d.flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.extension().is_some_and(|x| {
+                    let x = x.to_string_lossy().to_ascii_lowercase();
+                    x.starts_with("gp")
+                })
+            })
+            .min()
+    }) else {
+        eprintln!("SKIP: no .gp fixture in {}", fixture.display());
+        return;
+    };
+
+    let source = Source::parse(&file.to_string_lossy()).expect("recognised");
+    let runner = Runner::open(
+        &source,
+        &Target::default(),
+        Viewport::new(1100.0, 700.0),
+        None,
+    )
+    .expect("open the transcription");
+
+    let editor = runner.loaded.editor();
+    assert_eq!(editor.mode, Mode::Guitar, "a .gp opens in guitar mode");
+    assert!(!editor.doc.notes.is_empty(), "no notes reached the roll");
+    // The file's own tuning, not the mode preset's — a drop-D or a
+    // seven-string must not be forced onto standard six.
+    assert!(
+        matches!(editor.doc.row_space, expression_editor_core::RowSpace::Strings(_)),
+        "a transcription must open on a string row space"
+    );
+    // Rows are pitches, so every note must land on the neck.
+    let (lo, hi) = editor.doc.row_space.bounds();
+    assert!(editor.doc.notes.iter().all(|n| n.row >= lo && n.row <= hi));
+}

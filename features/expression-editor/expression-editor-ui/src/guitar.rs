@@ -92,10 +92,16 @@ pub fn is_string_roll(ed: &Editor) -> bool {
     matches!(ed.row_space, RowSpace::Strings(_))
 }
 
-fn string_color(ed: &Editor, row: i32) -> &'static str {
-    ed.row_space
-        .row_color(row)
-        .unwrap_or(theme::PITCH_TRACK)
+/// The colour of a note, by the string it is fingered on.
+///
+/// A row is a pitch and several strings reach it, so the colour comes
+/// from the note rather than its row — `row_color` returns `None` for a
+/// string roll for exactly that reason.
+fn string_color(ed: &Editor, note: &expression_editor_core::Note) -> &'static str {
+    match note.string {
+        Some(s) if ed.color_by_string => expression_editor_core::rows::string_color(s),
+        _ => theme::PITCH_TRACK,
+    }
 }
 
 /// Sample a note's pitch curve as `(t, semitones)` pairs.
@@ -147,7 +153,7 @@ pub fn flow_paths(ed: &Editor) -> Vec<FlowPath> {
             }
             FlowPath {
                 points: s,
-                color: string_color(ed, n.row),
+                color: string_color(ed, n),
                 peak,
                 peak_label: peak_label(peak),
                 peak_at,
@@ -181,23 +187,28 @@ pub struct Join {
 /// Joins between consecutive notes on the same string.
 ///
 /// This is where the row model bites. A slide from fret 5 to fret 7 is
-/// two semitones of continuous pitch motion, but both notes sit on the
-/// *same row*, so the connector is dead horizontal and shows none of
-/// it. The only way to draw the motion is to let the origin note's own
-/// bend curve carry it and then snap back — which is what the OnRow
-/// picture shows, and it reads as a bend, not a slide.
+/// two semitones of continuous pitch motion. When the string was the
+/// row this connector was dead horizontal and showed none of it, and
+/// the only way to draw the motion was to let the origin note's own
+/// bend curve carry it and snap back — which read as a bend, not a
+/// slide. Now that a row is a pitch the two notes sit at different
+/// heights and the connector slopes, which is what a slide looks like.
 pub fn joins(ed: &Editor) -> Vec<Join> {
     use expression_editor_core::Articulation;
     if !is_string_roll(ed) {
         return Vec::new();
     }
     let spr = ed.row_space.semitones_per_row();
-    let mut by_string: std::collections::BTreeMap<i32, Vec<&Note>> = Default::default();
+    let mut by_string: std::collections::BTreeMap<u8, Vec<&Note>> = Default::default();
     for n in &ed.doc.notes {
-        by_string.entry(n.row).or_default().push(n);
+        // By string, not by row. The row is the sounding pitch now, so
+        // a slide from the 5th to the 7th fret is two rows and would
+        // never pair.
+        let Some(string) = n.string else { continue };
+        by_string.entry(string).or_default().push(n);
     }
     let mut out = Vec::new();
-    for (row, mut notes) in by_string {
+    for (_string, mut notes) in by_string {
         notes.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap());
         for pair in notes.windows(2) {
             let (a, b) = (pair[0], pair[1]);
@@ -216,9 +227,9 @@ pub fn joins(ed: &Editor) -> Vec<Join> {
             // last bend value, the target's first.
             let ya = ed
                 .camera
-                .y(row as f64 + 0.5 + a.pitch.sample(a.end, 0.0) / spr, ed.viewport);
+                .y(a.row as f64 + 0.5 + a.pitch.sample(a.end, 0.0) / spr, ed.viewport);
             let yb = ed.camera.y(
-                row as f64 + 0.5 + b.pitch.sample(b.start, 0.0) / spr,
+                b.row as f64 + 0.5 + b.pitch.sample(b.start, 0.0) / spr,
                 ed.viewport,
             );
             let mid = ((x0 + x1) * 0.5, (ya + yb) * 0.5);
@@ -237,7 +248,7 @@ pub fn joins(ed: &Editor) -> Vec<Join> {
                 kind,
                 d,
                 label_at: (mid.0, mid.1 - 6.0),
-                color: string_color(ed, row),
+                color: string_color(ed, a),
             });
         }
     }
@@ -312,7 +323,7 @@ pub fn bend_lane(ed: &Editor) -> Option<BendLaneView> {
             }
             FlowPath {
                 points: s,
-                color: string_color(ed, n.row),
+                color: string_color(ed, n),
                 peak,
                 peak_label: peak_label(peak),
                 peak_at,

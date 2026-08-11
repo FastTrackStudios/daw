@@ -215,11 +215,10 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
 /// colour has to go through the tuning or every note on one string
 /// would share a colour — which is the thing the toggle exists to turn
 /// off.
-fn pitch_of(space: &RowSpace, n: &Note) -> i32 {
-    match space {
-        RowSpace::Strings(t) => t.open(n.row.max(0) as usize),
-        _ => n.row,
-    }
+fn pitch_of(_space: &RowSpace, n: &Note) -> i32 {
+    // Every row space now measures pitch on its row axis, strings
+    // included — the string is on the note, not the row.
+    n.row
 }
 
 /// The row range a lane shows: its own content, padded.
@@ -272,14 +271,16 @@ fn lane_note(
     // the purpose of showing the track at all.
     let w = (x1 - x0).max(1.5);
 
-    // On a string roll the row *is* the string, so colouring by it
-    // shows the shape of a part at a glance. Turned off, pitch-class
-    // colour reads harmony instead — the more useful signal when you
-    // are looking at what the notes *are* rather than where they sit.
-    let by_row = if matches!(space, RowSpace::Strings(_)) && !ed.color_by_string {
-        None
-    } else {
-        space.row_color(n.row)
+    // On a string roll the row is the pitch, so the string has to
+    // colour the *note* — that is what tells you a phrase moved across
+    // the neck rather than up it. Turned off, pitch-class colour reads
+    // harmony instead.
+    let by_row = match (space, n.string) {
+        (RowSpace::Strings(_), Some(s)) if ed.color_by_string => {
+            Some(expression_editor_core::rows::string_color(s))
+        }
+        (RowSpace::Strings(_), _) => None,
+        _ => space.row_color(n.row),
     };
     let base = by_row
         .map(str::to_string)
@@ -333,8 +334,10 @@ fn guides(
     y_of: impl Fn(f64) -> f64,
 ) -> (Vec<f64>, Vec<(f64, String)>) {
     // Pitch space has 128 rows and a keyboard of its own; drawing a line
-    // per semitone inside a 60 px lane is a grey block.
-    if matches!(space, RowSpace::Pitch) {
+    // per semitone inside a 60 px lane is a grey block. A string roll
+    // is a pitch roll now, so it is in the same position — the string
+    // shows as note colour, not as a row it owns.
+    if matches!(space, RowSpace::Pitch | RowSpace::Strings(_)) {
         return (Vec::new(), Vec::new());
     }
     let (bound_lo, bound_hi) = space.bounds();

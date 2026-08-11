@@ -84,8 +84,6 @@ pub fn Slider(
     let mut mounted: Signal<Option<std::rc::Rc<MountedData>>> = use_signal(|| None);
 
     let measure = move || async move {
-        // Folded into one Option rather than a let-chain: this crate is
-        // edition 2021, pinned to match the nice-plug plugin stack.
         let r = match mounted() {
             Some(el) => el.get_client_rect().await.ok(),
             None => None,
@@ -162,8 +160,6 @@ pub fn RangeSlider(
     let mut mounted: Signal<Option<std::rc::Rc<MountedData>>> = use_signal(|| None);
 
     let measure = move || async move {
-        // Folded into one Option rather than a let-chain: this crate is
-        // edition 2021, pinned to match the nice-plug plugin stack.
         let r = match mounted() {
             Some(el) => el.get_client_rect().await.ok(),
             None => None,
@@ -266,8 +262,6 @@ pub fn BarEditor(
     };
 
     let measure = move || async move {
-        // Folded into one Option rather than a let-chain: this crate is
-        // edition 2021, pinned to match the nice-plug plugin stack.
         let r = match mounted() {
             Some(el) => el.get_client_rect().await.ok(),
             None => None,

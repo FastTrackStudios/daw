@@ -3,7 +3,7 @@ name = "expression-editor-ui"
 version.workspace = true
 authors.workspace = true
 license.workspace = true
-edition = "2021"          # matches the nice-plug plugin stack (eq-ui, comp-ui)
+edition.workspace = true
 description = "Expression editor GUI — the Melodyne/MPE canvas, toolbar, and inspector as a portable Dioxus surface"
 
 [features]

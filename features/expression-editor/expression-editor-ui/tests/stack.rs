@@ -59,8 +59,15 @@ fn band() -> Editor {
     ed.tracks
         .push(Track::in_mode("Ref MIDI", ppq_doc(&hits, 62), Mode::Midi));
 
+    // Rows are sounding pitches; the fixture's notes have to sit on the
+    // neck or they are off the row space entirely.
+    let tuning = StringTuning::guitar_standard();
     let mut guitar = frames_doc(100.0, &hits, 2);
-    guitar.row_space = RowSpace::Strings(StringTuning::guitar_standard());
+    for (i, n) in guitar.notes.iter_mut().enumerate() {
+        n.string = Some((i % tuning.strings()) as u8);
+        n.row = tuning.open(i % tuning.strings()) + 5;
+    }
+    guitar.row_space = RowSpace::Strings(tuning);
     ed.tracks
         .push(Track::in_mode("Guitar", guitar, Mode::Guitar));
 
@@ -193,9 +200,11 @@ fn named_row_spaces_get_dividers_and_pitch_does_not() {
         let l = lanes.iter().find(|l| l.name == name).unwrap();
         (l.dividers.len(), l.labels.len())
     };
-    // Three bands, six strings — each row is a named thing worth a line.
+    // Three bands — each row is a named thing worth a line. The guitar
+    // is a pitch roll now, so it gets the same treatment as pitch: no
+    // line per semitone.
     assert_eq!(of("Kit"), (3, 3));
-    assert_eq!(of("Guitar"), (6, 6));
+    assert_eq!(of("Guitar"), (0, 0));
     // 128 semitones inside a 150 px lane is a grey block, and pitch has
     // a keyboard of its own to read.
     assert_eq!(of("Lead Vox"), (0, 0));
@@ -291,14 +300,24 @@ fn guitar_notes_colour_by_string_by_default_and_by_pitch_when_off() {
     // Two notes on *different* strings. By string they differ; by pitch
     // class they are both open strings a fourth apart, so they differ
     // there too — what matters is that the two modes disagree.
-    doc.push(Note::new(NoteId(1), 0.0, 480.0, 0));
-    doc.push(Note::new(NoteId(2), 960.0, 1440.0, 1));
+    // The same sounding pitch, fingered two ways: the fifth fret of
+    // the low E and the open A. By string they differ; by pitch class
+    // they cannot, which is the sharpest form of the distinction.
+    let mut a = Note::new(NoteId(1), 0.0, 480.0, tuning.open(0) + 5);
+    a.string = Some(0);
+    let mut b = Note::new(NoteId(2), 960.0, 1440.0, tuning.open(1));
+    b.string = Some(1);
+    doc.push(a);
+    doc.push(b);
 
     let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
     ed.set_mode(expression_editor_core::Mode::Guitar);
     ed.reset_view();
 
-    assert!(ed.color_by_string, "on by default — the row is the string");
+    assert!(
+        ed.color_by_string,
+        "on by default — it is what shows the fingering"
+    );
 
     let by_string = expression_editor_ui::stack::lanes(&ed, 1.0, 20.0);
     ed.color_by_string = false;

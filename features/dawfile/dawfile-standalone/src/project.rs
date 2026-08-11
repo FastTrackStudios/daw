@@ -50,6 +50,11 @@ pub struct DawProject {
     /// This is what decides between the two export paths — see
     /// [`DawProject::to_rpp`].
     modified: bool,
+    /// The CRDT history, when this project has any (#173).
+    ///
+    /// `None` until the first save, and after a hand edit invalidates
+    /// the stored log.
+    history: Option<loro::LoroDoc>,
 }
 
 impl DawProject {
@@ -59,6 +64,7 @@ impl DawProject {
             document,
             objects,
             modified: false,
+            history: None,
         }
     }
 
@@ -179,8 +185,21 @@ impl DawProject {
             objects: referenced,
         });
 
+        // The staleness hash covers the manifest *without* its own
+        // oplog ref. A manifest cannot contain a hash of itself — that
+        // is a fixpoint with no solution — and the ref is the only part
+        // of the text a save writes that a hand edit never touches.
+        let history = self.history.clone().unwrap_or_default();
+        history.commit();
+        let bytes = crate::oplog::export(&history)?;
+        let object = self.objects.put(bytes);
+
+        self.install_oplog(object)?;
+        let text = self.to_text()?;
+        self.history = Some(history);
+
         self.objects.write_dir(&dir.join(OBJECTS_DIR))?;
-        std::fs::write(manifest_path(dir, &self.document.name), self.to_text()?)?;
+        std::fs::write(manifest_path(dir, &self.document.name), text)?;
         self.modified = false;
         Ok(())
     }
@@ -245,9 +264,39 @@ impl DawProject {
                 }
             }
         }
+        // Compaction rewrites the manifest, so the stored hash no
+        // longer describes it. Left alone, the next load sees a
+        // mismatch and silently drops history — indistinguishable from
+        // the hand-edit case, and nothing like what the caller asked
+        // for.
+        if let Some(oplog) = self.document.oplog.clone() {
+            self.install_oplog(oplog.object)?;
+        }
         std::fs::write(manifest_path(dir, &self.document.name), self.to_text()?)?;
         self.modified = false;
         Ok(removed)
+    }
+
+    /// Point the manifest at `object` and re-hash it.
+    ///
+    /// The hash covers the manifest with its own oplog ref removed: a
+    /// manifest holding a hash of itself is a fixpoint with no
+    /// solution, and the ref is the one part of the text a hand edit
+    /// never touches.
+    ///
+    /// The object is also added to the newest save entry, so a retained
+    /// save still reaches the history it was written with rather than
+    /// having it collected the next time somebody compacts.
+    fn install_oplog(&mut self, object: crate::id::ObjectId) -> DawResult<()> {
+        self.document.oplog = None;
+        if let Some(entry) = self.document.saves.last_mut()
+            && !entry.objects.contains(&object)
+        {
+            entry.objects.push(object.clone());
+        }
+        let text_hash = crate::oplog::hash_text(&self.to_text()?);
+        self.document.oplog = Some(crate::oplog::OplogRef { object, text_hash });
+        Ok(())
     }
 
     /// Open a project directory.
@@ -269,7 +318,35 @@ impl DawProject {
             }
         }
 
-        Ok(Self::new(document, objects))
+        // History is restored only when the manifest is byte-for-byte
+        // the text the log was built from. A hand edit discards it, and
+        // that is a normal outcome rather than an error (#173).
+        let bytes = document
+            .oplog
+            .as_ref()
+            .and_then(|r| objects.get(&r.object).ok())
+            .map(|b| b.to_vec());
+        // Hash the same thing `save` hashed: the manifest with its
+        // oplog ref removed.
+        let history = {
+            let mut without = document.clone();
+            without.oplog = None;
+            let bare = styx::to_text(&without).unwrap_or_else(|_| text.clone());
+            crate::oplog::load_if_current(document.oplog.as_ref(), bytes.as_deref(), &bare)
+        };
+
+        let mut project = Self::new(document, objects);
+        project.history = history;
+        Ok(project)
+    }
+
+    /// The project's CRDT history, when it has any.
+    ///
+    /// `None` means history starts fresh on the next save — either this
+    /// project has never been saved, or its manifest was hand-edited
+    /// since the log was built.
+    pub fn history(&self) -> Option<&loro::LoroDoc> {
+        self.history.as_ref()
     }
 }
 

@@ -142,12 +142,16 @@ pub fn to_document(notes: &[GpNote], tuning: StringTuning) -> Imported {
             NoteId(i as u64 + 1),
             gp.start,
             gp.start + gp.length,
-            // The row is the *string*, because that is what the vertical
-            // axis means here — the fret is a label inside the note.
-            // #161's prototype found this is why a bend and a slide of
-            // the same interval are visually different problems.
-            gp.string as i32,
+            // The row is the sounding pitch. A guitar roll is a full
+            // MIDI roll — the string is an annotation that colours the
+            // note and makes its fret computable, not the axis.
+            row_of(&tuning, gp.string, gp.fret),
         );
+        note.string = Some(gp.string as u8);
+        // The channel too, and not as a duplicate of the string: MPE
+        // export attributes per-note bend by channel, and a part whose
+        // notes all sit on channel 0 has every bend overwriting every
+        // other one on any chord.
         note.channel = Some(gp.string as u8);
         note.articulation = gp.articulation;
 

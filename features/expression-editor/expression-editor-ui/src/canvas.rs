@@ -27,6 +27,24 @@ pub struct Row {
     pub starts_group: bool,
 }
 
+/// What colour a note body is.
+///
+/// On a string roll the row is a pitch and several strings reach it, so
+/// the colour has to come from the note — `row_color` returns `None`
+/// there for exactly that reason, and going straight to it is what made
+/// the "By string" toggle do nothing on the main canvas.
+fn note_color(ed: &Editor, n: &expression_editor_core::Note) -> &'static str {
+    match (&ed.row_space, n.string) {
+        (expression_editor_core::RowSpace::Strings(_), Some(s)) if ed.color_by_string => {
+            expression_editor_core::rows::string_color(s)
+        }
+        _ => ed
+            .row_space
+            .row_color(n.row)
+            .unwrap_or_else(|| theme::pitch_class_color(n.row)),
+    }
+}
+
 /// Background rows across the visible pitch span.
 pub fn rows(ed: &Editor) -> Vec<Row> {
     let (lo, hi) = ed.camera.slot_span(ed.viewport);
@@ -303,9 +321,7 @@ pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
             let fill = if blob_shape.is_some() {
                 theme::tune_color(blob_cents(ed, n))
             } else {
-                ed.row_space
-                    .row_color(n.row)
-                    .unwrap_or_else(|| theme::pitch_class_color(n.row))
+                note_color(ed, n)
             };
             NoteRect {
                 id: n.id,
@@ -1117,10 +1133,7 @@ pub fn stems(ed: &Editor, h: f64) -> Vec<Stem> {
                 // Same rule as the note body: where the row itself
                 // carries meaning, the strip has to agree with the roll
                 // or two colours name the same note.
-                color: ed
-                    .row_space
-                    .row_color(n.row)
-                    .unwrap_or_else(|| theme::pitch_class_color(n.row)),
+                color: note_color(ed, n),
                 selected: ed.selection.contains(n.id),
                 muted: n.muted,
             }

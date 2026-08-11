@@ -36,6 +36,9 @@ impl Percussion {
     pub fn reband(&mut self, bands: SliceBands) {
         for (note, onset) in self.doc.notes.iter_mut().zip(&self.onsets) {
             note.row = bands.band_of(onset.centroid_hz) as i32;
+            // Carried on the note so the editor can reband later
+            // without holding this struct — see `Edit::SetBands`.
+            note.centroid_hz = Some(onset.centroid_hz);
         }
         self.doc.row_space = RowSpace::Bands(bands.clone());
         self.bands = bands;
@@ -86,6 +89,9 @@ pub fn analyze_percussive(samples: &[f64], sample_rate: f64, cfg: PercussiveConf
         // equally hard.
         note.velocity = hit.peak.clamp(0.0, 1.0);
         note.weight = note.velocity;
+        // What band this slice belongs in is a function of its
+        // centroid, so the centroid travels with the slice.
+        note.centroid_hz = Some(hit.centroid_hz);
         notes.push(note);
     }
 
