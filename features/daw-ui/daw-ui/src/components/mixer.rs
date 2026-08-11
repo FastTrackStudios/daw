@@ -245,8 +245,9 @@ impl PartialEq for ChannelStripProps {
 #[component]
 fn ChannelStrip(props: ChannelStripProps) -> Element {
     // The store first, the prop as the seed — see `use_live_track`.
-    let track = use_live_track(&props.track);
-    let track = &track;
+    let live = use_live_track(&props.track);
+    let live = live.read();
+    let track = live.as_ref().unwrap_or(&props.track);
 
     let vol_db = if track.volume > 0.0 {
         20.0 * track.volume.log10()

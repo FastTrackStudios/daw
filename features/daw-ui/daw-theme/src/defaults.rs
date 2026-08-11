@@ -345,6 +345,11 @@ mod tests {
             ("LANE_PITCH", LANE_PITCH),
             ("LANE_PRESSURE", LANE_PRESSURE),
             ("LANE_TIMBRE", LANE_TIMBRE),
+            ("STRIP_BODY", STRIP_BODY),
+            ("VOLUME_RING_LIT", VOLUME_RING_LIT),
+            ("VOLUME_RING_LIT_TOP", VOLUME_RING_LIT_TOP),
+            ("VOLUME_RING_UNLIT", VOLUME_RING_UNLIT),
+            ("FIXED_LANES_DOT", FIXED_LANES_DOT),
         ];
         for (i, p) in PITCH_CLASSES.iter().enumerate() {
             v.push((Box::leak(format!("PITCH_CLASSES[{i}]").into_boxed_str()), p));

@@ -122,6 +122,29 @@ pub mod mcp {
     /// Stated: `mcp.io`'s `[-1 23 23 30]`.
     pub const IO_FROM_SOLO: f32 = 23.0;
 
+    // The rest of each quad — heights, widths, the dx steps. Facts too,
+    // and named here so the themer guard asserts values that have a home
+    // to fix when the theme moves (a literal that exists only inside the
+    // guard is a check nobody can act on).
+    /// Stated: the fourth element of recmon/mute/solo's quads — the
+    /// buttons are 20 tall.
+    pub const BUTTON_H: f32 = 20.0;
+    /// Stated: `mcp.recmon`'s dx off the arm, `[7 20 21 20]`.
+    pub const RECMON_DX: f32 = 7.0;
+    /// Stated: `mcp.io`'s own box from `[-1 23 23 30]` — one column left,
+    /// 23 wide, 30 tall.
+    pub const IO_DX: f32 = -1.0;
+    pub const IO_W: f32 = 23.0;
+    pub const IO_H: f32 = 30.0;
+    /// Stated: `mcp.env`'s `[1 -30 21 30]`.
+    pub const ENV_DX: f32 = 1.0;
+    pub const ENV_W: f32 = 21.0;
+    /// Stated: `mcp.phase`'s `[3 -18 16 18]`.
+    pub const PHASE_DX: f32 = 3.0;
+    /// Stated: `mcp.recinput`'s `[6 0 75 16]`.
+    pub const RECINPUT_X: f32 = 6.0;
+    pub const RECINPUT_W: f32 = 75.0;
+
     /// Stated: `set mcp.env … + [0 stretch_sec{3}] + [mcp.io stretch_sec]
     /// * scale … [1 -30 21 30]` — env hangs 30 above the stretch section's
     /// floor, which is why the column spreads as a strip grows instead of

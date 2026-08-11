@@ -904,7 +904,10 @@ pub fn FxControl(props: FxControlProps) -> Element {
     // a hovered pill next to a resting one, or a track-panel pill in the
     // same document as a mixer's, must not share defs.
     let face_id = vary("fxface", &[&plate_top, &plate_bot]);
-    let clip_id = vary("fxpill", &[&format!("{}x{}x{}", p.w, p.h, widen)]);
+    // `split` as well as the box: widen moves it for Label and Whole but
+    // not Toggle, so two parts can share (w, h, widen) with different
+    // outlines.
+    let clip_id = vary("fxpill", &[&format!("{}x{}x{}x{}", p.w, p.h, widen, p.split)]);
     let (fill, alpha) = if p.scrim {
         ("#000000".to_string(), 0.35)
     } else {
@@ -2630,8 +2633,13 @@ pub fn FolderCompactButton(props: FolderCompactProps) -> Element {
     } else {
         [("0", "#e9e9e9", 0.149), ("0.55", "#4a4a4a", 0.043), ("1", "#0a0a0a", 0.008)]
     };
-    // Two washes, so a hovered button beside a resting one is two ids.
-    let wash_id = vary("fcompwash", &[wash[0].1]);
+    // Two washes, so a hovered button beside a resting one is two ids —
+    // keyed on every stop, not just the first, per vary()'s contract.
+    let wash_key: String = wash
+        .iter()
+        .map(|(at, hex, a)| format!("{at}{hex}{a}"))
+        .collect();
+    let wash_id = vary("fcompwash", &[&wash_key]);
 
     // Traced: down-triangle, ramp, right-triangle, all in the same box.
     let glyph = match props.state {
@@ -5559,15 +5567,7 @@ pub fn TrackFolder(props: GlyphProps) -> Element {
 #[cfg(test)]
 mod glyph_tests {
     use super::*;
-
-    fn render<P: dioxus::dioxus_core::Properties + Clone + 'static>(
-        component: fn(P) -> Element,
-        props: P,
-    ) -> String {
-        let mut dom = dioxus::prelude::VirtualDom::new_with_props(component, props);
-        dom.rebuild_in_place();
-        dioxus_ssr::render(&dom)
-    }
+    use crate::render::render_svg as render;
 
     fn glyph(colour: &str) -> GlyphProps {
         GlyphProps { colour: colour.into(), width: None, height: None }

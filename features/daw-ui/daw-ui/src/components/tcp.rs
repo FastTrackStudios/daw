@@ -65,8 +65,9 @@ pub fn TrackRow(
 ) -> Element {
     // The store first, the prop as the seed — see `use_live_track`.
     let row_h = height;
-    let track = use_live_track(&track);
-    let track = &track;
+    let live = use_live_track(&track);
+    let live = live.read();
+    let track = live.as_ref().unwrap_or(&track);
 
     let theme = daw_theme::Theme::default();
     let tint = track

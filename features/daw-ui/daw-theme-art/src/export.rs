@@ -319,6 +319,11 @@ width: n.0,
     // top to bottom; the value beside each shade is what it is today.
     {
         let g = |v: f32| theme.chrome.hardware.shade(v);
+        // The strip-body grey is the token, not a re-derivation: the
+        // panels paint STRIP_BODY, and the exported art must move with it
+        // (#240). `hardware.shade(-0.40)` happens to equal it today.
+        let strip_body = Color::hex(daw_theme::defaults::STRIP_BODY)
+            .expect("token is valid hex (tested)");
         let flat = |c: daw_theme::Color, a: f32| (c, c, a);
         let strip = |pills: Vec<v::ListPill>, rows, pill, edge, inset| {
             render_svg(
@@ -353,9 +358,9 @@ width: n.0,
             // Bypassed and offline are the same drawing.
             "mcp_fxlist_byp" | "mcp_fxlist_off" => Some(strip(
                 vec![
-                    flat(g(-0.40), 1.0), // #262626
+                    flat(strip_body, 1.0),
                     flat(g(-0.19), 1.0), // #333333
-                    flat(g(-0.40), 1.0),
+                    flat(strip_body, 1.0),
                 ],
                 (2.0, 17.0),
                 15.0,
@@ -375,7 +380,7 @@ width: n.0,
             )),
             "mcp_sendlist_norm" => Some(strip(
                 vec![
-                    flat(g(-0.40), 1.0), // #262626
+                    flat(strip_body, 1.0),
                     flat(g(-0.32), 1.0), // #2b2b2b
                     flat(g(-0.48), 1.0), // #212121
                 ],
@@ -390,9 +395,9 @@ width: n.0,
             // came out twice as saturated as the art.
             "mcp_sendlist_mute" => Some(strip(
                 vec![
-                    flat(theme.signal.mute.mix(g(-0.40), 0.66), 1.0), // #54363c
-                    flat(theme.signal.mute.mix(g(-0.40), 0.60), 1.0), // #5f3d44
-                    flat(theme.signal.mute.mix(g(-0.40), 0.66), 1.0),
+                    flat(theme.signal.mute.mix(strip_body, 0.66), 1.0), // #54363c
+                    flat(theme.signal.mute.mix(strip_body, 0.60), 1.0), // #5f3d44
+                    flat(theme.signal.mute.mix(strip_body, 0.66), 1.0),
                 ],
                 (2.0, 16.0),
                 14.0,
@@ -432,6 +437,9 @@ width: n.0,
     // shade is what retints and the value is what it has to match today.
     {
         let g = |v: f32| theme.chrome.hardware.shade(v);
+        // The same token the panels paint — see the note in the list block.
+        let strip_body = Color::hex(daw_theme::defaults::STRIP_BODY)
+            .expect("token is valid hex (tested)");
         let full = |bands: Vec<v::Band>, stripes: Vec<v::Stripe>, inset| {
             render_svg(
                 v::PanelPlate,
@@ -453,7 +461,7 @@ width: n.0,
         // #515151, and it has to round to 81 rather than 80 — at 0.09 the
         // shade landed a level low on every selected background at once.
         let lit = g(0.094);
-        let deep = g(-0.40); // #262626
+        let deep = strip_body;
         let hit = match name {
             "mcp_mainbg" => Some(plate(vec![(0.0, 6.0, sunk, 1.0)], 0.0)),
             // A rule down column 1 — the mark that says *selected*, and

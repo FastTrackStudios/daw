@@ -75,24 +75,36 @@ pub fn generated_lines() -> Vec<Threshold> {
 pub fn section_heights_agree(text: &str) -> Vec<String> {
     let bands = daw_theme_art::collapse::REAPER_BANDS;
     let mut wrong = Vec::new();
-    // Matched word-wise, not by prefix: the file aligns its columns with
-    // tabs, so `starts_with("set fx_sec ")` finds nothing and reports drift
-    // on a file that is perfectly correct.
     for (name, number, what) in [
         ("fx_sec", bands.fx, "fx section"),
         ("in_sec", bands.input_full, "input section"),
         ("bot_sec_h", bands.bottom, "bottom section"),
     ] {
-        let Some(line) = text.lines().find(|l| is_set_of(l, name)) else {
-            wrong.push(format!("{what}: `set {name}` is not in the layout file"));
-            continue;
-        };
         let wanted = format_value(number);
-        if !line.split_whitespace().any(|w| w.trim_end_matches("@h") == wanted) {
-            wrong.push(format!("{what}: the theme does not state {wanted} — `{}`", line.trim()));
+        match first_set_states(text, name, &wanted) {
+            None => wrong.push(format!("{what}: `set {name}` is not in the layout file")),
+            Some((line, false)) => wrong.push(format!(
+                "{what}: the theme does not state {wanted} — `{}`",
+                line.trim()
+            )),
+            Some((_, true)) => {}
         }
     }
     wrong
+}
+
+/// Does the *first* `set name` line state `wanted` as a bare word?
+///
+/// Word-wise, not by prefix: the file aligns its columns with tabs, so
+/// `starts_with("set fx_sec ")` finds nothing and reports drift on a file
+/// that is perfectly correct. `@h`-suffixed words count — heights are
+/// written `33@h`. The first definition on purpose: later `set` lines are
+/// scale variants, and scanning all of them would accept a value that
+/// belongs to a different mode (narrowMode's 54 beside wide's 86).
+fn first_set_states<'t>(text: &'t str, name: &str, wanted: &str) -> Option<(&'t str, bool)> {
+    let line = text.lines().find(|l| is_set_of(l, name))?;
+    let states = line.split_whitespace().any(|w| w.trim_end_matches("@h") == wanted);
+    Some((line, states))
 }
 
 /// Do the theme's stated offsets still match the geometry constants?
@@ -122,39 +134,45 @@ pub fn offsets_agree(text: &str) -> Vec<String> {
         )
     };
 
-    // Each entry: the WALTER name, the literal the geometry constant was
-    // read from, and what it positions.
+    // Each entry: the WALTER name, the literal the geometry constants
+    // were read from, and what it positions. Every number in a quad is a
+    // named constant — a literal that existed only inside this guard was
+    // a check nobody could act on when it fired.
     let stated = [
         ("mcp.recarm", quad(0.0, 0.0, g::ARM_CELL_W, g::ARM_CELL_H), "the record arm's cell"),
         (
             "mcp.recmon",
-            quad(7.0, g::RECMON_FROM_ARM, g::BUTTON_W, 20.0),
+            quad(g::RECMON_DX, g::RECMON_FROM_ARM, g::BUTTON_W, g::BUTTON_H),
             "recmon's step off the arm",
         ),
         (
             "mcp.mute",
-            quad(0.0, g::MUTE_FROM_RECMON, g::BUTTON_W, 20.0),
+            quad(0.0, g::MUTE_FROM_RECMON, g::BUTTON_W, g::BUTTON_H),
             "mute's step off recmon",
         ),
         (
             "mcp.solo",
-            quad(0.0, g::SOLO_FROM_MUTE, g::BUTTON_W, 20.0),
+            quad(0.0, g::SOLO_FROM_MUTE, g::BUTTON_W, g::BUTTON_H),
             "solo's step off mute",
         ),
-        ("mcp.io", quad(-1.0, g::IO_FROM_SOLO, 23.0, 30.0), "io's step off solo"),
+        (
+            "mcp.io",
+            quad(g::IO_DX, g::IO_FROM_SOLO, g::IO_W, g::IO_H),
+            "io's step off solo",
+        ),
         (
             "mcp.env",
-            quad(1.0, -g::ENV_FROM_FLOOR, 21.0, g::ENV_FROM_FLOOR),
+            quad(g::ENV_DX, -g::ENV_FROM_FLOOR, g::ENV_W, g::ENV_FROM_FLOOR),
             "envelope's hang above the stretch floor",
         ),
         (
             "mcp.phase",
-            quad(3.0, -g::PHASE_FROM_ENV, g::PHASE_W, g::PHASE_FROM_ENV),
+            quad(g::PHASE_DX, -g::PHASE_FROM_ENV, g::PHASE_W, g::PHASE_FROM_ENV),
             "phase's step off envelope",
         ),
         (
             "mcp.recinput",
-            quad(6.0, 0.0, 75.0, g::INPUT_FIELD_H),
+            quad(g::RECINPUT_X, 0.0, g::RECINPUT_W, g::INPUT_FIELD_H),
             "the record-input field",
         ),
     ];
@@ -172,14 +190,17 @@ pub fn offsets_agree(text: &str) -> Vec<String> {
     }
 
     // The strip's width is a bare value in the same kind of expression, so
-    // it gets the section-heights treatment: word-wise, `@`-suffix aside.
+    // it gets exactly the section-heights treatment — the same predicate,
+    // first definition only, so narrowMode's 54 on a later line cannot
+    // stand in for wide's 86.
     let wanted = format_value(g::STRIP_W);
-    let stated_somewhere = text
-        .lines()
-        .filter(|l| is_set_of(l, "mcp_w"))
-        .any(|l| l.split_whitespace().any(|w| w.trim_end_matches("@h") == wanted));
-    if !stated_somewhere {
-        wrong.push(format!("strip width: no `set mcp_w` line states {wanted}"));
+    match first_set_states(text, "mcp_w", &wanted) {
+        None => wrong.push("strip width: `set mcp_w` is not in the layout file".to_string()),
+        Some((line, false)) => wrong.push(format!(
+            "strip width: the theme does not state {wanted} — `{}`",
+            line.trim()
+        )),
+        Some((_, true)) => {}
     }
 
     wrong
