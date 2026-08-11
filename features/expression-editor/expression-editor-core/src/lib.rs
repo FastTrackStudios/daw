@@ -32,6 +32,7 @@ pub mod clipboard;
 pub mod doc;
 pub mod draft;
 pub mod edit;
+pub mod flam;
 pub mod handles;
 pub mod menu;
 pub mod mode;
@@ -125,6 +126,20 @@ pub struct Editor {
     pub lane_strip_h: f64,
     /// Which dimension the strip shows.
     pub strip_lane: StripLane,
+    /// Colour guitar notes by string rather than by pitch class.
+    ///
+    /// On by default: on a string roll the row *is* the string, so
+    /// colouring by it makes the shape of a part legible at a glance —
+    /// which run is on the B, where it crosses to the G. Turn it off to
+    /// read harmony instead, where pitch-class colour is the more useful
+    /// signal.
+    pub color_by_string: bool,
+    /// Which drum pieces are shown as two rows instead of one.
+    ///
+    /// Row indices into the drum map. Empty is the ordinary case: a
+    /// piece splits only when a part needs the sticking, so the roll
+    /// does not carry twice the rows for material that never asks.
+    pub split_pieces: Vec<usize>,
     /// Context × modifier → action. Editable, so a host can ship a
     /// REAPER-matching profile or its own.
     pub mouse: MouseMap,
@@ -194,7 +209,7 @@ pub struct Editor {
 impl Editor {
     pub fn new(doc: ExpressionDoc, viewport: Viewport) -> Self {
         let content = content_of(&doc);
-        let camera = camera::reset_view(content, viewport, CUSHION, PAD);
+        let camera = camera::reset_view(content, viewport, CUSHION, PAD, camera::RowFold::default());
         let tracks = Workspace::single("Track 1", doc.clone());
         let mut editor = Self {
             doc,
@@ -215,6 +230,8 @@ impl Editor {
             cc_edit: None,
             lane_strip_h: 96.0,
             strip_lane: StripLane::Velocity,
+            color_by_string: true,
+            split_pieces: Vec::new(),
             mouse: MouseMap::default(),
             tuning: Tuning::default(),
             grid: Grid::default(),
@@ -381,6 +398,197 @@ impl Editor {
                 *slot = camera::VerticalCamera::fitted(lo, hi, height);
             }
         }
+    }
+
+    /// Step the selected drum hits through the flam cycle.
+    ///
+    /// **none → before → after → none.** One key, and the state lives on
+    /// the note rather than in a mode: you can look at a hit and know
+    /// what the next press will do, which a global before/after flag
+    /// cannot give you — there, the same key means different things
+    /// depending on what you last did to some other note.
+    ///
+    /// The third press removing the flam is what makes it a cycle rather
+    /// than a trap. Without it, changing your mind means reaching for
+    /// undo or hunting the grace note down by hand.
+    ///
+    /// Silent about pieces that cannot flam — a hi-hat in the selection
+    /// is skipped rather than refusing the whole gesture.
+    pub fn flam_selection(&mut self) -> usize {
+        let RowSpace::Drums(map) = self.row_space.clone() else {
+            return 0;
+        };
+        let ids: Vec<doc::NoteId> = self.selection.notes.clone();
+
+        let mut made = 0;
+        for id in ids {
+            match flam::flam(&self.doc, &map, id, flam::DEFAULT_FLAM_MS, self.bpm) {
+                Ok(edit) => {
+                    self.apply(&edit);
+                    made += 1;
+                }
+                Err(_) => continue,
+            }
+        }
+
+        if made > 0 {
+            // Splitting the affected pieces is what makes the flam
+            // *visible*: a grace note on a hidden row is a note you
+            // cannot see or select.
+            self.show_hands_for_selection(&map);
+        }
+        made
+    }
+
+    /// What the next press of the flam key will do to a hit, for a UI
+    /// that wants to say so before you press it.
+    pub fn flam_step(&self, id: doc::NoteId) -> Option<flam::FlamStep> {
+        let RowSpace::Drums(map) = &self.row_space else {
+            return None;
+        };
+        flam::next_step(&self.doc, map, id, flam::DEFAULT_FLAM_MS, self.bpm).ok()
+    }
+
+    /// Open both hands for every two-handed piece in the selection.
+    fn show_hands_for_selection(&mut self, map: &rows::DrumMap) {
+        let rows: Vec<usize> = self
+            .selection
+            .notes
+            .iter()
+            .filter_map(|id| self.doc.note(*id))
+            .map(|n| n.row.max(0) as usize)
+            .collect();
+        for row in rows {
+            if let Some(other) = map.other_hand_row(row) {
+                for r in [row, other] {
+                    if !self.split_pieces.contains(&r) {
+                        self.split_pieces.push(r);
+                    }
+                }
+            }
+        }
+        self.split_pieces.sort_unstable();
+        self.split_pieces.dedup();
+    }
+
+    /// Move the selected hits to a hand.
+    ///
+    /// The sticking control: a part that says which hand plays what —
+    /// notated drum music, or a groove you want to be playable — needs
+    /// this to be one action rather than dragging notes between rows and
+    /// hoping you picked the right one.
+    ///
+    /// Opens the piece, because a note that moved to a row you cannot
+    /// see has vanished as far as the user is concerned.
+    ///
+    /// Returns how many moved. Hits on one-handed pieces are skipped
+    /// rather than refusing the whole gesture.
+    pub fn set_hand_of_selection(&mut self, hand: rows::Hand) -> usize {
+        let RowSpace::Drums(map) = self.row_space.clone() else {
+            return 0;
+        };
+        let ids: Vec<doc::NoteId> = self.selection.notes.clone();
+        let mut moved = 0;
+
+        for id in ids {
+            let Some(note) = self.doc.note(id) else {
+                continue;
+            };
+            let row = note.row.max(0) as usize;
+            let Some(target) = map.row_for_hand(row, hand) else {
+                continue;
+            };
+            if target == row {
+                continue;
+            }
+            // Transpose rather than a bare row assignment: on a drum
+            // roll a row *is* the pitch, and this is the edit that
+            // carries a note's owned expression with it.
+            self.apply(&Edit::Transpose {
+                notes: vec![id],
+                semitones: target as i32 - row as i32,
+            });
+            moved += 1;
+        }
+
+        if moved > 0 {
+            self.show_hands_for_selection(&map);
+        }
+        moved
+    }
+
+    /// The header for a drum row, knowing which pieces are open.
+    ///
+    /// A collapsed piece shows its own name — `T1` — and an open one
+    /// shows the hand, `L` or `R`, under it.
+    pub fn row_header(&self, row: i32) -> String {
+        match &self.row_space {
+            RowSpace::Drums(m) => {
+                let r = row.max(0) as usize;
+                m.display_name(r, self.split_pieces.contains(&r))
+            }
+            other => other.row_label(row),
+        }
+    }
+
+    /// The piece name for a split row, so a renderer can bracket the
+    /// two hands together.
+    pub fn row_group(&self, row: i32) -> Option<String> {
+        let RowSpace::Drums(m) = &self.row_space else {
+            return None;
+        };
+        let r = row.max(0) as usize;
+        if !self.split_pieces.contains(&r) {
+            return None;
+        }
+        m.group_name(r).map(str::to_string)
+    }
+
+    /// Which hand a hit is played with, when its piece has two.
+    pub fn hand_of_note(&self, id: doc::NoteId) -> Option<rows::Hand> {
+        let RowSpace::Drums(map) = &self.row_space else {
+            return None;
+        };
+        let row = self.doc.note(id)?.row.max(0) as usize;
+        map.hand_of(row)
+    }
+
+    /// Show or collapse a two-handed piece.
+    pub fn toggle_piece_split(&mut self, row: usize) {
+        let RowSpace::Drums(map) = self.row_space.clone() else {
+            return;
+        };
+        let Some(other) = map.other_hand_row(row) else {
+            return;
+        };
+        if self.split_pieces.contains(&row) {
+            self.split_pieces.retain(|r| *r != row && *r != other);
+        } else {
+            self.split_pieces.push(row);
+            self.split_pieces.push(other);
+            self.split_pieces.sort_unstable();
+            self.split_pieces.dedup();
+        }
+        self.refresh_fold();
+    }
+
+    /// Recompute which rows the roll folds away.
+    ///
+    /// A two-handed piece that is not split shows only its right hand,
+    /// so the left is folded onto it — one lane called `T1` rather than
+    /// two called `T1 L` and `T1 R`.
+    pub fn refresh_fold(&mut self) {
+        let hidden = match &self.row_space {
+            RowSpace::Drums(map) => {
+                let visible = map.visible_rows(&self.split_pieces);
+                (0..map.lanes.len())
+                    .filter(|r| !visible.contains(r))
+                    .map(|r| r as i32)
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
+        self.camera.fold = crate::camera::RowFold::new(hidden);
     }
 
     /// Give the active track the host's identity.
@@ -771,7 +979,7 @@ impl Editor {
 
     /// The Reset View camera for the current content.
     pub fn reset_camera(&self) -> Camera {
-        camera::reset_view(self.content(), self.viewport, CUSHION, PAD)
+        camera::reset_view(self.content(), self.viewport, CUSHION, PAD, self.camera.fold)
     }
 
     /// `V` — snap directly to Reset View, no interpolation, no magnets.
@@ -1109,6 +1317,11 @@ impl Editor {
             self.row_space = mode.default_row_space();
             self.doc.row_space = self.row_space.clone();
         }
+        // A new row space means a new fold; drums fold, nothing else
+        // does, and switching between them must not leave the old one
+        // applied to the new rows.
+        self.split_pieces.clear();
+        self.refresh_fold();
         self.mouse = mode.default_mouse();
         self.overlays = mode.default_overlays();
         self.strip_lane = mode.default_strip();

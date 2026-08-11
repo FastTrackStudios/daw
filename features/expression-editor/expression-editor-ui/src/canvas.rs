@@ -19,28 +19,43 @@ pub struct Row {
     pub h: f64,
     pub fill: &'static str,
     pub is_c: bool,
+    /// This row opens a new part of the kit — draw a divider above it.
+    ///
+    /// One line per group rather than per row: thirty-nine evenly-ruled
+    /// lanes give the eye nothing to steer by, which is the whole
+    /// problem banding solves.
+    pub starts_group: bool,
 }
 
 /// Background rows across the visible pitch span.
 pub fn rows(ed: &Editor) -> Vec<Row> {
-    let (lo, hi) = ed.camera.pitch_span(ed.viewport);
+    let (lo, hi) = ed.camera.slot_span(ed.viewport);
     let h = ed.camera.vertical.px_per_row;
     // Clamped to the row space's own bounds, not to 0..127. A six-string
     // roll has six rows and painting a hundred and twenty-two phantom
     // ones above and below them says there is somewhere else to put a
     // note, which there is not.
-    let (rlo, rhi) = ed.row_space.bounds();
+    //
+    // Iteration is in *slots*, so a folded piece is drawn once.
+    let (rlo, rhi) = ed.camera.fold.slot_bounds(ed.row_space.bounds());
     ((lo.floor() as i32).max(rlo)..=(hi.ceil() as i32).min(rhi))
+        .map(|slot| ed.camera.fold.row(slot as f64) as i32)
         .map(|row| Row {
             row,
             y: ed.camera.y(row as f64 + 0.5, ed.viewport),
             h,
-            fill: if theme::is_black_key(row) {
-                theme::ROW_BLACK
-            } else {
-                theme::ROW_WHITE
-            },
+            // A drum roll bands by family; everything else keeps the
+            // keyboard's black/white, which is the thing a pitch roll
+            // is already navigated by.
+            fill: ed.row_space.row_background(row).unwrap_or_else(|| {
+                if theme::is_black_key(row) {
+                    theme::ROW_BLACK
+                } else {
+                    theme::ROW_WHITE
+                }
+            }),
             is_c: row.rem_euclid(12) == 0,
+            starts_group: ed.row_space.starts_group(row),
         })
         .collect()
 }
@@ -908,22 +923,61 @@ pub struct Key {
     pub label: Option<String>,
 }
 
+/// A brace over the rows of one split piece, so `L` and `R` read as two
+/// hands of a `T1` rather than two unrelated lanes.
+pub struct KeyGroup {
+    pub label: String,
+    /// Top edge and height of the whole span.
+    pub y: f64,
+    pub h: f64,
+}
+
+/// Group braces for whatever is on screen.
+///
+/// Built from the already-computed keys so the brace cannot drift from
+/// the rows it spans — including when a span is half scrolled off.
+pub fn key_groups(ed: &Editor, keys: &[Key]) -> Vec<KeyGroup> {
+    let mut out: Vec<KeyGroup> = Vec::new();
+    for k in keys {
+        let Some(label) = ed.row_group(k.row) else {
+            continue;
+        };
+        // Keys arrive in slot order, so a repeat of the same label is
+        // always the continuation of the span above it.
+        match out.last_mut() {
+            Some(g) if g.label == label => {
+                let top = g.y.min(k.y);
+                let bottom = (g.y + g.h).max(k.y + k.h);
+                g.y = top;
+                g.h = bottom - top;
+            }
+            _ => out.push(KeyGroup {
+                label,
+                y: k.y,
+                h: k.h,
+            }),
+        }
+    }
+    out
+}
+
 pub fn keyboard(ed: &Editor) -> Vec<Key> {
-    let (lo, hi) = ed.camera.pitch_span(ed.viewport);
+    let (lo, hi) = ed.camera.slot_span(ed.viewport);
     let h = ed.camera.vertical.px_per_row;
-    let (rlo, rhi) = ed.row_space.bounds();
+    let (rlo, rhi) = ed.camera.fold.slot_bounds(ed.row_space.bounds());
     // Named rows always carry their label — a drum lane called nothing
     // is unusable, where an unlabelled piano key can still be counted.
     let named = !matches!(ed.row_space, expression_editor_core::RowSpace::Pitch);
     let label_rows = h >= 8.0;
     ((lo.floor() as i32).max(rlo)..=(hi.ceil() as i32).min(rhi))
+        .map(|slot| ed.camera.fold.row(slot as f64) as i32)
         .map(|row| Key {
             row,
             y: ed.camera.y(row as f64 + 0.5, ed.viewport),
             h,
             black: ed.row_space.is_accidental(row),
             label: (label_rows && (named || row.rem_euclid(12) == 0 || h >= 18.0))
-                .then(|| ed.row_space.row_label(row)),
+                .then(|| ed.row_header(row)),
         })
         .collect()
 }

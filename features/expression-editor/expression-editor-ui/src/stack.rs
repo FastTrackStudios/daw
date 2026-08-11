@@ -42,6 +42,10 @@ pub struct LaneView {
     pub active: bool,
     /// The track other tracks are aligned against, if any.
     pub reference: bool,
+    /// Drum row index when this lane is one hand of a two-handed piece.
+    pub two_handed_row: Option<usize>,
+    /// Whether that piece is currently showing both hands.
+    pub split: bool,
     pub notes: Vec<LaneNote>,
     /// Row dividers inside the lane, for spaces where a row is a named
     /// thing (strings, bands, drum lanes). Empty for pitch, which has
@@ -60,6 +64,15 @@ pub struct LaneNote {
     pub fill: String,
     /// Slices and drum hits draw as triangles; everything else as bars.
     pub triangle: bool,
+    /// This note ornaments another — draw it small and slashed, the way
+    /// a grace note is engraved.
+    pub grace: bool,
+    /// This hit *has* a grace note, so it is a flam.
+    ///
+    /// Carried separately from `grace` because the principal is drawn
+    /// full size and only badged; conflating them would shrink the note
+    /// you actually played.
+    pub flam: bool,
 }
 
 /// Vertical padding inside a lane, in pixels, top and bottom.
@@ -166,6 +179,20 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
     let (lo, hi) = cam.span(h);
     let (dividers, labels) = guides(&doc.row_space, lo, hi, y_of);
 
+    // A drum lane's header offers a hand split only when the piece has
+    // two hands to offer.
+    let (two_handed_row, split) = match &doc.row_space {
+        RowSpace::Drums(m) => {
+            let row = doc.notes.first().map(|n| n.row.max(0) as usize).unwrap_or(0);
+            if m.is_two_handed(row) {
+                (Some(row), ed.split_pieces.contains(&row))
+            } else {
+                (None, false)
+            }
+        }
+        _ => (None, false),
+    };
+
     Some(LaneView {
         track: track_index,
         name: track.name.clone(),
@@ -177,7 +204,22 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
         notes,
         dividers,
         labels,
+        two_handed_row,
+        split,
     })
+}
+
+/// The sounding pitch of a note, for colour that means harmony.
+///
+/// On a string roll the row is a string, not a pitch, so pitch-class
+/// colour has to go through the tuning or every note on one string
+/// would share a colour — which is the thing the toggle exists to turn
+/// off.
+fn pitch_of(space: &RowSpace, n: &Note) -> i32 {
+    match space {
+        RowSpace::Strings(t) => t.open(n.row.max(0) as usize),
+        _ => n.row,
+    }
 }
 
 /// The row range a lane shows: its own content, padded.
@@ -230,10 +272,18 @@ fn lane_note(
     // the purpose of showing the track at all.
     let w = (x1 - x0).max(1.5);
 
-    let base = space
-        .row_color(n.row)
+    // On a string roll the row *is* the string, so colouring by it
+    // shows the shape of a part at a glance. Turned off, pitch-class
+    // colour reads harmony instead — the more useful signal when you
+    // are looking at what the notes *are* rather than where they sit.
+    let by_row = if matches!(space, RowSpace::Strings(_)) && !ed.color_by_string {
+        None
+    } else {
+        space.row_color(n.row)
+    };
+    let base = by_row
         .map(str::to_string)
-        .unwrap_or_else(|| theme::pitch_class_color(n.row).to_string());
+        .unwrap_or_else(|| theme::pitch_class_color(pitch_of(space, n)).to_string());
     let fill = if active {
         base
     } else {
@@ -248,6 +298,8 @@ fn lane_note(
         y: y_of(n.row as f64 + 1.0),
         h: (row_h * 0.9).max(1.0),
         fill,
+        grace: n.grace_of.is_some(),
+        flam: doc.is_flam(n.id),
         triangle: matches!(
             space.note_shape(),
             expression_editor_core::rows::NoteShape::Triangle
@@ -425,17 +477,51 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
                                 }
                             }
                             for n in lane.notes.iter() {
-                                if n.triangle {
-                                    polygon {
-                                        points: "{n.x:.1},{n.y:.1} {n.x + n.w:.1},{n.y + n.h / 2.0:.1} {n.x:.1},{n.y + n.h:.1}",
-                                        fill: "{n.fill}",
-                                    }
-                                } else {
-                                    rect {
-                                        x: "{n.x:.1}", y: "{n.y:.1}",
-                                        width: "{n.w:.1}", height: "{n.h:.1}",
-                                        rx: 1,
-                                        fill: "{n.fill}",
+                                // A grace note draws at two-thirds
+                                // height, the way engraving shrinks one
+                                // — so a flam reads as one gesture with
+                                // a light hit rather than two equal
+                                // ones.
+                                {
+                                    let gh = if n.grace { n.h * 0.62 } else { n.h };
+                                    let gy = n.y + (n.h - gh) / 2.0;
+                                    rsx! {
+                                        if n.triangle {
+                                            polygon {
+                                                points: "{n.x:.1},{gy:.1} {n.x + n.w:.1},{gy + gh / 2.0:.1} {n.x:.1},{gy + gh:.1}",
+                                                fill: "{n.fill}",
+                                                opacity: if n.grace { "0.75" } else { "1" },
+                                            }
+                                        } else {
+                                            rect {
+                                                x: "{n.x:.1}", y: "{gy:.1}",
+                                                width: "{n.w:.1}", height: "{gh:.1}",
+                                                rx: 1,
+                                                fill: "{n.fill}",
+                                                opacity: if n.grace { "0.75" } else { "1" },
+                                            }
+                                        }
+                                        // The engraver's slash through
+                                        // the grace note's stem.
+                                        if n.grace {
+                                            line {
+                                                x1: "{n.x - 1.0:.1}", y1: "{gy + gh + 2.0:.1}",
+                                                x2: "{n.x + 5.0:.1}", y2: "{gy - 2.0:.1}",
+                                                stroke: "{n.fill}", stroke_width: 1,
+                                            }
+                                        }
+                                        // The principal is badged, not
+                                        // shrunk: it is the note you
+                                        // played.
+                                        if n.flam {
+                                            text {
+                                                x: "{n.x + n.w + 2.0:.1}",
+                                                y: "{n.y + n.h * 0.5:.1}",
+                                                font_size: "7",
+                                                fill: theme::TEXT_DIM,
+                                                "fl"
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -447,6 +533,22 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
                             font_size: "9",
                             fill: if lane.active { theme::TEXT } else { theme::TEXT_DIM },
                             "{lane.name}"
+                        }
+                        // Two-handed pieces carry a hand affordance in
+                        // the header. Only they do: a hi-hat showing a
+                        // split control that does nothing is worse than
+                        // no control.
+                        if let Some(row) = lane.two_handed_row {
+                            text {
+                                x: "{canvas::GUTTER_W - 12.0:.1}",
+                                y: "{lane.y + 11.0:.1}",
+                                font_size: "8",
+                                fill: theme::TEXT_DIM,
+                                onclick: move |_| {
+                                    editor.write().toggle_piece_split(row);
+                                },
+                                if lane.split { "L|R" } else { "L+R" }
+                            }
                         }
                     }
                 }

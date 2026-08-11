@@ -272,6 +272,7 @@ fn Canvas(
     let guides = canvas::tuning_guides(&ed);
     let zone_guides = canvas::zone_guides(&ed);
     let keys = canvas::keyboard(&ed);
+    let key_groups = canvas::key_groups(&ed, &keys);
     let ticks = canvas::ruler(&ed);
     let marker_flags = canvas::markers(&ed);
     let playhead = ed.playhead.map(|t| ed.camera.x(t));
@@ -418,6 +419,16 @@ fn Canvas(
                     e.prevent_default();
                     return;
                 }
+                // Drum-mode keys, before the general ones: `f` means
+                // flam here and nothing elsewhere.
+                if key == "f" && !m.ctrl && editor.read().mode == expression_editor_core::Mode::Drums {
+                    let made = editor.write().flam_selection();
+                    if made > 0 {
+                        e.prevent_default();
+                        return;
+                    }
+                }
+
                 if multi.read().armed {
                     match key.as_str() {
                         "m" => {
@@ -653,6 +664,19 @@ fn Canvas(
                         width: "{vp.w:.0}",
                         height: "{r.h:.2}",
                         fill: r.fill,
+                    }
+                }
+                // One divider per family, so a kit reads as groups
+                // rather than thirty-nine identical lanes.
+                for r in rows.iter().filter(|r| r.starts_group) {
+                    line {
+                        key: "grp{r.row}",
+                        x1: "0",
+                        y1: "{r.y:.1}",
+                        x2: "{vp.w:.0}",
+                        y2: "{r.y:.1}",
+                        stroke: theme::OCTAVE_LINE,
+                        stroke_width: "1",
                     }
                 }
                 for r in rows.iter().filter(|r| r.is_c) {
@@ -1430,6 +1454,41 @@ fn Canvas(
                                 font_size: "9",
                                 "{label}"
                             }
+                        }
+                    }
+                    // The piece name, braced over its hands. Drawn after
+                    // the hand labels so the brace sits on top of the
+                    // key fills rather than under them.
+                    for g in key_groups.iter() {
+                        path {
+                            key: "gb{g.label}",
+                            d: "M 26 {g.y + 1.5:.1} L 22 {g.y + 1.5:.1} L 22 {g.y + g.h - 1.5:.1} L 26 {g.y + g.h - 1.5:.1}",
+                            fill: "none",
+                            stroke: theme::TEXT_DIM,
+                            stroke_width: "1",
+                        }
+                        // The label is centred on the span, which is
+                        // exactly where the seam between the two keys
+                        // falls — so it gets its own chip to sit on.
+                        rect {
+                            key: "gc{g.label}",
+                            x: "1",
+                            y: "{g.y + g.h * 0.5 - 6.0:.1}",
+                            width: "20",
+                            height: "12",
+                            fill: theme::KEY_WHITE,
+                        }
+                        // Horizontal, not rotated: Blitz does not apply
+                        // an SVG transform to text, so a rotated label
+                        // renders as nothing at all.
+                        text {
+                            key: "gl{g.label}",
+                            x: "4",
+                            y: "{g.y + g.h * 0.5 + 3.0:.1}",
+                            text_anchor: "start",
+                            fill: theme::KEY_LABEL,
+                            font_size: "9",
+                            "{g.label}"
                         }
                     }
                     line {

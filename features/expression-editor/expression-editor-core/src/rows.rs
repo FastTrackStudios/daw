@@ -113,6 +113,138 @@ pub struct DrumLane {
     pub name: String,
     /// Lanes sharing a group choke each other (hi-hat open/closed).
     pub group: Option<u8>,
+    /// Which hand plays this row, when the kit distinguishes them.
+    ///
+    /// `None` is the ordinary case and the default: for most parts it
+    /// does not matter which hand hit the snare, and a roll that always
+    /// asked would be twice as tall for no reason. A piece becomes
+    /// two-handed only when something needs it — a flam, or notation
+    /// that specifies sticking.
+    pub hand: Option<Hand>,
+    /// The **piece** this row belongs to — `T1`, `S`, `K`.
+    ///
+    /// The piece is what the player thinks of as a drum; the hands are
+    /// how it splits. So a collapsed row is labelled with this, and a
+    /// split one is labelled `L` or `R` *under* it, rather than the roll
+    /// showing two rows called `T1 L` and `T1` and leaving you to work
+    /// out that they are the same drum.
+    pub piece: Option<String>,
+    /// The pitch of the same piece played by the other hand.
+    ///
+    /// This is what makes a split reversible and a flam possible: the
+    /// row knows its counterpart rather than a gesture having to guess
+    /// at one.
+    pub other_hand: Option<i32>,
+}
+
+/// The part of the kit a lane belongs to.
+///
+/// Grouping is what makes a real kit navigable: the FTS map is 39 rows,
+/// and a wall of evenly-striped lanes gives the eye nothing to steer by.
+/// Banding by family means you find the toms by *shape* rather than by
+/// reading every label.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DrumFamily {
+    Kick,
+    Snare,
+    Tom,
+    HiHat,
+    Cymbal,
+    /// Ride is its own band rather than a cymbal, because it is played
+    /// like a hat — a continuous part — not struck like a crash.
+    Ride,
+    Other,
+}
+
+impl DrumFamily {
+    /// Background tint for the row band.
+    ///
+    /// Deliberately near-black: this sits *under* the notes, and a band
+    /// strong enough to notice on its own would compete with the
+    /// material it exists to organise. The hue is the signal; the value
+    /// stays almost flat.
+    pub fn band(self) -> &'static str {
+        match self {
+            DrumFamily::Kick => "#1e1416",
+            DrumFamily::Snare => "#1e1a13",
+            DrumFamily::Tom => "#161c14",
+            DrumFamily::HiHat => "#131b1e",
+            DrumFamily::Cymbal => "#1c1520",
+            DrumFamily::Ride => "#14181f",
+            DrumFamily::Other => "#16161a",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            DrumFamily::Kick => "Kick",
+            DrumFamily::Snare => "Snare",
+            DrumFamily::Tom => "Toms",
+            DrumFamily::HiHat => "Hi-hat",
+            DrumFamily::Cymbal => "Cymbals",
+            DrumFamily::Ride => "Ride",
+            DrumFamily::Other => "Other",
+        }
+    }
+}
+
+/// Which family a lane name belongs to.
+///
+/// Reads the FTS abbreviations first and exactly — `K`, `S`, `T1`, `H-`,
+/// `C-`, `R-` — then falls back to the words a General MIDI map uses.
+/// Matching a single letter by substring would put half the kit in the
+/// wrong band.
+pub fn drum_family(name: &str) -> DrumFamily {
+    let n = name.to_ascii_lowercase();
+    let head = n.split(|c: char| c == ' ' || c == '-').next().unwrap_or("");
+    match head {
+        "k" | "kl" => return DrumFamily::Kick,
+        "s" | "sr" => return DrumFamily::Snare,
+        "t1" | "t2" | "t3" | "t4" => return DrumFamily::Tom,
+        "h" => return DrumFamily::HiHat,
+        "r" => return DrumFamily::Ride,
+        "c" => return DrumFamily::Cymbal,
+        _ => {}
+    }
+    if n.contains("kick") {
+        DrumFamily::Kick
+    } else if n.contains("snare") || n.contains("stick") || n.contains("clap") {
+        DrumFamily::Snare
+    } else if n.contains("tom") {
+        DrumFamily::Tom
+    } else if n.contains("hh") || n.contains("hat") {
+        DrumFamily::HiHat
+    } else if n.contains("ride") {
+        DrumFamily::Ride
+    } else if n.contains("crash") || n.contains("china") || n.contains("splash") {
+        DrumFamily::Cymbal
+    } else {
+        DrumFamily::Other
+    }
+}
+
+/// Which hand plays a drum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum Hand {
+    Left,
+    Right,
+}
+
+impl Hand {
+    pub fn other(self) -> Hand {
+        match self {
+            Hand::Left => Hand::Right,
+            Hand::Right => Hand::Left,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Hand::Left => "L",
+            Hand::Right => "R",
+        }
+    }
 }
 
 /// An ordered set of drum lanes — the rows of a drum editor.
@@ -126,6 +258,191 @@ pub struct DrumMap {
 impl DrumMap {
     /// General MIDI, trimmed to the kit pieces people actually
     /// sequence. A full 47-dimension GM map is unusable as a roll.
+    /// The FTS kit, as `midi-note-maps/FTS Drum Map.txt` defines it.
+    ///
+    /// Kick, snare and all four toms are **two-handed pieces**: each has
+    /// a left and a right note. Everything else is a single row, because
+    /// nothing about a hi-hat or a crash depends on which stick got
+    /// there.
+    ///
+    /// The two-handed pieces are collapsed by default —
+    /// [`DrumMap::split_piece`] opens one when a part needs it. A roll
+    /// that showed both hands for every drum would be twice as tall for
+    /// no reason on most material.
+    pub fn fts() -> Self {
+        // (pitch, name, group, hand, other-hand pitch, piece)
+        let lanes: Vec<(i32, &str, Option<u8>, Option<Hand>, Option<i32>, Option<&str>)> = vec![
+            // Kick is a pair for the same reason the toms are: a double
+            // pedal is two feet, and a part that specifies which is
+            // notated the same way sticking is.
+            (23, "K L", None, Some(Hand::Left), Some(24), Some("K")),
+            (24, "K R", None, Some(Hand::Right), Some(23), Some("K")),
+            (25, "S-Cross", None, None, None, None),
+            // The snare is deliberately **not** paired. The map has
+            // `S`, `SR`, `S-Buzz`, `S-Cross` and no `S L` — `SR` is the
+            // *rim*, not the right hand. Pairing them would put a
+            // rimshot on the other stick every time you asked for
+            // sticking. Add an `S L` to the map and give it
+            // `Some(Hand::Left)` here to turn the snare two-handed.
+            (26, "S", None, None, None, None),
+            (27, "S-Buzz", None, None, None, None),
+            (28, "S Rim", None, None, None, None),
+            (29, "T1 L", None, Some(Hand::Left), Some(30), Some("T1")),
+            (30, "T1 R", None, Some(Hand::Right), Some(29), Some("T1")),
+            (31, "T2 L", None, Some(Hand::Left), Some(32), Some("T2")),
+            (32, "T2 R", None, Some(Hand::Right), Some(31), Some("T2")),
+            (33, "T3 L", None, Some(Hand::Left), Some(34), Some("T3")),
+            (34, "T3 R", None, Some(Hand::Right), Some(33), Some("T3")),
+            (35, "T4 L", None, Some(Hand::Left), Some(36), Some("T4")),
+            (36, "T4 R", None, Some(Hand::Right), Some(35), Some("T4")),
+            (37, "H-Tight Tip", Some(1), None, None, None),
+            (38, "H-Tight Edg", Some(1), None, None, None),
+            (39, "H-Clsd Tip", Some(1), None, None, None),
+            (40, "H-Clsd Edg", Some(1), None, None, None),
+            (41, "H-Open1", Some(1), None, None, None),
+            (42, "H-Open2", Some(1), None, None, None),
+            (43, "H-Open3", Some(1), None, None, None),
+            (44, "H-Chick", Some(1), None, None, None),
+            (45, "H-Ching", Some(1), None, None, None),
+            (48, "C-L", Some(2), None, None, None),
+            (49, "C-L Choke", Some(2), None, None, None),
+            (50, "C-C", Some(3), None, None, None),
+            (51, "C-C Choke", Some(3), None, None, None),
+            (52, "C-R", Some(4), None, None, None),
+            (53, "C-R Choke", Some(4), None, None, None),
+            (54, "H-Bell", Some(1), None, None, None),
+            (56, "R-Bow Lo", Some(5), None, None, None),
+            (57, "R-Bell", Some(5), None, None, None),
+            (58, "R-Crash", Some(5), None, None, None),
+            (59, "R-Choke", Some(5), None, None, None),
+            (62, "China", Some(6), None, None, None),
+            (63, "China Choke", Some(6), None, None, None),
+            (64, "Splash", Some(7), None, None, None),
+            (65, "Splash Choke", Some(7), None, None, None),
+            (71, "Stack", None, None, None, None),
+        ];
+        Self {
+            name: "FTS",
+            lanes: lanes
+                .into_iter()
+                .map(|(pitch, name, group, hand, other_hand, piece)| DrumLane {
+                    pitch,
+                    name: name.to_string(),
+                    group,
+                    hand,
+                    other_hand,
+                    piece: piece.map(str::to_string),
+                })
+                .collect(),
+        }
+    }
+
+    /// Whether a row is one hand of a two-handed piece.
+    pub fn is_two_handed(&self, row: usize) -> bool {
+        self.lanes.get(row).is_some_and(|l| l.other_hand.is_some())
+    }
+
+    /// The row holding the other hand of `row`'s piece.
+    pub fn other_hand_row(&self, row: usize) -> Option<usize> {
+        let other = self.lanes.get(row)?.other_hand?;
+        self.lanes.iter().position(|l| l.pitch == other)
+    }
+
+    /// The family a row belongs to.
+    pub fn family_of(&self, row: usize) -> Option<DrumFamily> {
+        self.lanes.get(row).map(|l| drum_family(&l.name))
+    }
+
+    /// Whether `row` is the first of its family, reading upward.
+    ///
+    /// What a renderer needs to draw one divider per group instead of
+    /// one per row — the line that makes a band read as a band.
+    pub fn starts_family(&self, row: usize) -> bool {
+        let Some(here) = self.family_of(row) else {
+            return false;
+        };
+        match row.checked_sub(1).and_then(|r| self.family_of(r)) {
+            Some(below) => below != here,
+            None => true,
+        }
+    }
+
+    /// What to write in the row header.
+    ///
+    /// Collapsed, a two-handed piece shows the **piece** — `T1` — because
+    /// that is the drum. Split, each row shows its hand — `L`, `R` —
+    /// with the piece carried by [`DrumMap::group_name`] so a renderer
+    /// can bracket the pair. Showing `T1 L` and `T1` side by side was
+    /// the thing that made you work out they were one drum.
+    pub fn display_name(&self, row: usize, split: bool) -> String {
+        let Some(lane) = self.lanes.get(row) else {
+            return String::new();
+        };
+        match (&lane.piece, split) {
+            (Some(piece), false) => piece.clone(),
+            (Some(_), true) => self
+                .hand_of(row)
+                .map(|h| h.label().to_string())
+                .unwrap_or_else(|| lane.name.clone()),
+            (None, _) => lane.name.clone(),
+        }
+    }
+
+    /// The piece a row belongs to, for a renderer that brackets the two
+    /// hands together.
+    pub fn group_name(&self, row: usize) -> Option<&str> {
+        self.lanes.get(row)?.piece.as_deref()
+    }
+
+    /// The row for a piece played by a given hand.
+    pub fn row_for_hand(&self, row: usize, hand: Hand) -> Option<usize> {
+        if self.hand_of(row) == Some(hand) {
+            return Some(row);
+        }
+        self.other_hand_row(row)
+            .filter(|&o| self.hand_of(o) == Some(hand))
+    }
+
+    /// Which hand `row` is played with, for a two-handed piece.
+    ///
+    /// Both halves of a pair carry their hand explicitly. An earlier
+    /// version inferred "unmarked means right", which quietly made both
+    /// halves of the snare pair report Right — the bug that revealed the
+    /// snare was not a pair at all.
+    pub fn hand_of(&self, row: usize) -> Option<Hand> {
+        let lane = self.lanes.get(row)?;
+        lane.other_hand?;
+        lane.hand
+    }
+
+    /// Rows currently shown: every single-handed piece, plus both halves
+    /// of any piece in `split`.
+    ///
+    /// A two-handed piece the caller has not split contributes only its
+    /// unmarked row, so the roll stays the height it was.
+    pub fn visible_rows(&self, split: &[usize]) -> Vec<usize> {
+        (0..self.lanes.len())
+            .filter(|&i| {
+                let Some(lane) = self.lanes.get(i) else {
+                    return false;
+                };
+                match lane.other_hand {
+                    None => true,
+                    Some(_) => {
+                        // Split: both halves show. Collapsed: the right
+                        // hand stands for the piece, because that is the
+                        // hand most parts lead with — and *some* row has
+                        // to be the one you draw on when sticking does
+                        // not matter.
+                        split.contains(&i)
+                            || self.other_hand_row(i).is_some_and(|o| split.contains(&o))
+                            || lane.hand == Some(Hand::Right)
+                    }
+                }
+            })
+            .collect()
+    }
+
     pub fn general_midi() -> Self {
         let lanes = [
             (35, "Kick 2", None),
@@ -160,6 +477,9 @@ impl DrumMap {
                     pitch,
                     name: name.to_string(),
                     group,
+                    hand: None,
+                    other_hand: None,
+                    piece: None,
                 })
                 .collect(),
         }
@@ -270,11 +590,10 @@ impl RowSpace {
     pub fn row_label(&self, row: i32) -> String {
         match self {
             RowSpace::Pitch => tuning::note_name(row),
-            RowSpace::Drums(m) => m
-                .lanes
-                .get(row.max(0) as usize)
-                .map(|l| l.name.clone())
-                .unwrap_or_default(),
+            // Collapsed by default here; the editor's own labelling
+            // knows which pieces are open and calls `display_name`
+            // directly.
+            RowSpace::Drums(m) => m.display_name(row.max(0) as usize, false),
             RowSpace::Strings(t) => {
                 let open = t.open(row.max(0) as usize);
                 // Pitch class only: "E", "A" — the string's name, not
@@ -390,6 +709,26 @@ impl RowSpace {
     /// tracking, and pitch-class colour would scatter one string's part
     /// across six hues. Drums colour by kit section for the same
     /// reason. Pitch space returns `None` and keeps pitch-class colour.
+    /// Background tint for a row band.
+    ///
+    /// Only drum rolls have one: a piano roll already has black and
+    /// white keys to steer by, and a string roll has six rows. A kit has
+    /// thirty-nine and needs the grouping.
+    pub fn row_background(&self, row: i32) -> Option<&'static str> {
+        match self {
+            RowSpace::Drums(m) => m.family_of(row.max(0) as usize).map(|f| f.band()),
+            _ => None,
+        }
+    }
+
+    /// Whether a row opens a new family — where a divider goes.
+    pub fn starts_group(&self, row: i32) -> bool {
+        match self {
+            RowSpace::Drums(m) => m.starts_family(row.max(0) as usize),
+            _ => false,
+        }
+    }
+
     pub fn row_color(&self, row: i32) -> Option<&'static str> {
         match self {
             RowSpace::Pitch => None,
@@ -434,6 +773,23 @@ pub const STRING_COLORS: [&str; 8] = [
 /// Kit-section colour, so a groove reads at a glance.
 fn drum_color(name: &str) -> &'static str {
     let n = name.to_ascii_lowercase();
+
+    // The FTS map abbreviates: `K`, `S`, `T1`..`T4`, `H-`, `C-`, `R-`.
+    // Matched first and exactly, because a substring test on one letter
+    // would colour half the kit by accident — and without this every
+    // FTS row falls through to the same purple, which is how the whole
+    // kit came out one colour the first time it was drawn.
+    let head = n.split(|c: char| c == ' ' || c == '-').next().unwrap_or("");
+    match head {
+        "k" | "kl" => return "#ef4444",
+        "s" | "sr" => return "#f59e0b",
+        "t1" | "t2" | "t3" | "t4" => return "#a3e635",
+        "h" => return "#22d3ee",
+        "r" => return "#60a5fa",
+        "c" => return "#f472b6",
+        _ => {}
+    }
+
     if n.contains("kick") {
         "#ef4444"
     } else if n.contains("snare") || n.contains("stick") || n.contains("clap") {
