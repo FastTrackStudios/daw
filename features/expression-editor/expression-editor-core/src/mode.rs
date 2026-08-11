@@ -251,6 +251,12 @@ impl Mode {
     }
 
     pub fn default_mouse(&self) -> MouseMap {
+        crate::mouse::host_overlay(self.default_mouse_preset())
+    }
+
+    /// The raw preset, before the host overlay. Split out so tests can
+    /// assert on the presets without a registered overlay interfering.
+    pub fn default_mouse_preset(&self) -> MouseMap {
         match self {
             Mode::Drums => MouseMap::drums(),
             Mode::Guitar => MouseMap::riffer(),

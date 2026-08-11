@@ -478,10 +478,20 @@ fn Canvas(
                 // The roll is the surface every gesture lands on, so it
                 // carries an id a test can aim a pointer at (#167).
                 "data-testid": "roll",
-                style: "display: block; width: 100%; height: 100%; \
+                // Sized in px to exactly the viewBox, never stretched
+                // (`100%` + `preserveAspectRatio: none` scaled the
+                // coordinate space whenever the element's size drifted
+                // from `vp` — and element_coordinates are element px, so
+                // every gesture landed offset by the stretch factor).
+                // With a 1:1 mapping the mouse is exact even while `vp`
+                // is stale; a stale `vp` only costs clipped or
+                // letterboxed rendering until the host resizes the
+                // editor, and the parent's overflow:hidden absorbs that.
+                style: "display: block; \
+                        width: {vp.w + canvas::GUTTER_W:.0}px; \
+                        height: {vp.h + canvas::RULER_H:.0}px; \
                         touch-action: none; user-select: none; cursor: crosshair;",
                 view_box: "0 0 {vp.w + canvas::GUTTER_W:.0} {vp.h + canvas::RULER_H:.0}",
-                preserve_aspect_ratio: "none",
                 // Measured by `onresize`, not by a spawned
                 // `get_client_rect().await`.
                 //

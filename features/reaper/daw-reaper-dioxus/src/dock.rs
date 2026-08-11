@@ -24,6 +24,43 @@ use std::ptr;
 
 use crate::embedded::EmbeddedView;
 
+/// The keyboard modifiers held right now, polled from SWELL.
+///
+/// SWELL's mouse and key messages reach our wndproc without usable
+/// modifier state, and a modifier pressed while another window had
+/// focus never produces a WM_KEYDOWN here at all — so the only honest
+/// source is a poll at event time. Without this every event carried
+/// `Modifiers::empty()` and no Ctrl/Shift/Alt mouse gesture (e.g. the
+/// expression editor's Ctrl-drag draw-notes modifier) could ever fire
+/// inside a panel.
+fn current_modifiers() -> keyboard_types::Modifiers {
+    use keyboard_types::Modifiers;
+    const VK_SHIFT: c_int = 0x10;
+    const VK_CONTROL: c_int = 0x11;
+    const VK_MENU: c_int = 0x12;
+    const VK_LWIN: c_int = 0x5B;
+
+    if !is_initialized() {
+        return Modifiers::empty();
+    }
+    let swell = swell();
+    let down = |vk: c_int| (swell.GetAsyncKeyState(vk) as u16 & 0x8000) != 0;
+    let mut mods = Modifiers::empty();
+    if down(VK_SHIFT) {
+        mods |= Modifiers::SHIFT;
+    }
+    if down(VK_CONTROL) {
+        mods |= Modifiers::CONTROL;
+    }
+    if down(VK_MENU) {
+        mods |= Modifiers::ALT;
+    }
+    if down(VK_LWIN) {
+        mods |= Modifiers::META;
+    }
+    mods
+}
+
 /// Build a `BlitzPointerEvent` for a mouse pointer at window-local (x, y).
 /// All coord fields are filled with the same value because we don't track
 /// page/screen offsets inside REAPER's docker windows.
@@ -50,7 +87,7 @@ fn mouse_pointer_event(
         // offsets inside REAPER docker windows.
         element: blitz_traits::events::Point { x, y },
         active_pointers: Default::default(),
-        mods: keyboard_types::Modifiers::empty(),
+        mods: current_modifiers(),
         details: blitz_traits::events::PointerDetails::default(),
     }
 }
@@ -1832,7 +1869,7 @@ fn panel_wndproc_inner(
                         client_y: y,
                     },
                     buttons: blitz_traits::events::MouseEventButtons::empty(),
-                    mods: keyboard_types::Modifiers::empty(),
+                    mods: current_modifiers(),
                     element: blitz_traits::events::Point { x, y },
                 }),
             );
@@ -1845,7 +1882,7 @@ fn panel_wndproc_inner(
             let event = blitz_traits::events::BlitzKeyEvent {
                 key,
                 code,
-                modifiers: keyboard_types::Modifiers::empty(),
+                modifiers: current_modifiers(),
                 location: keyboard_types::Location::Standard,
                 is_auto_repeating: false,
                 is_composing: false,
