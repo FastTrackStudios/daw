@@ -10,6 +10,11 @@
 //! - ArrangementView — timeline placeholder with track lanes
 //! - FxParameterBrowser — live FX parameter browser with bidirectional control
 //! - FxBrowserDockPanel — dock-ready wrapper for the FX browser
+//!
+//! **Before writing a component, read `features/daw-ui/BLITZ.md`** — the
+//! rendering contract for the Blitz renderer REAPER embeds. Every rule in
+//! it was a multi-hour bug first. The measured screenshots the layout is
+//! converged against live in `features/daw-ui/reference/`.
 
 // ── DAW-wired panels (poll a live `daw_control::Daw`) ──
 pub mod components;
