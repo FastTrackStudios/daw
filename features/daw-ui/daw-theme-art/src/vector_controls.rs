@@ -5502,23 +5502,20 @@ pub struct GlyphProps {
 
 /// The pin at the top of a track panel's left column.
 ///
-/// A five-pointed star, which is what REAPER draws for "pinned" — measured
-/// at seven columns across, at the top of the column the track number runs
-/// down.
+/// A **pushpin at an angle**, traced off `custom_track_pin_off.png` —
+/// not the five-pointed star it was first drawn as from its name. The
+/// glyph in the art's 19-wide cell occupies x4..14.5, y3..13.5 and is
+/// four parts: a handle leaning in from the top, a flat brim running
+/// across, the round head under it, and a needle running out to the
+/// bottom-right corner. Coordinates below are the traced cell's, shifted
+/// by (-4,-3) into an 11x11 box.
 #[component]
 pub fn TrackPin(props: GlyphProps) -> Element {
-    let (vw, vh) = (9.0f32, 9.0f32);
-    let (cx, cy) = (vw * 0.5, vh * 0.52);
-    let r = vw * 0.5;
-    // Five points, alternating outer and inner radius.
-    let mut d = String::new();
-    for i in 0..10 {
-        let rr = if i % 2 == 0 { r } else { r * 0.42 };
-        let a = (-90.0 + i as f32 * 36.0).to_radians();
-        let (x, y) = (cx + rr * a.cos(), cy + rr * a.sin());
-        d.push_str(&format!("{} {x:.2} {y:.2} ", if i == 0 { "M" } else { "L" }));
-    }
-    d.push('Z');
+    let (vw, vh) = (11.0f32, 11.0f32);
+    // Handle, brim, needle — the head is the circle below.
+    let d = "M 4.1 0 L 5.2 0.2 L 4.6 2.8 L 2.9 2.4 Z \
+             M 0.3 3.3 L 9.8 2.8 L 9.8 5.2 L 0.3 5.7 Z \
+             M 6.6 7.6 L 7.6 7.0 L 10.6 10.2 L 9.5 10.7 Z";
 
     rsx! {
         svg {
@@ -5528,15 +5525,18 @@ pub fn TrackPin(props: GlyphProps) -> Element {
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
             path { d: "{d}", fill: "{props.colour}" }
+            circle { cx: "5.4", cy: "5.6", r: "3.0", fill: "{props.colour}" }
         }
     }
 }
 
 /// The folder mark at the bottom of that column.
 ///
-/// A tab and a body, nine columns across — REAPER's folder-state glyph,
-/// drawn rather than traced because it is nine pixels of two rectangles
-/// and a sprite for it would be silly.
+/// A tab and a body, traced off `track_folder_off.png`'s first mark: the
+/// tab is 4x2 with a **square** right edge — the slanted edge this was
+/// first drawn with is not in the art — over a 9x5 body, all one flat
+/// ink. (The strip's other two marks are plus signs, per the
+/// three-marks-in-one-image convention folder strips use.)
 #[component]
 pub fn TrackFolder(props: GlyphProps) -> Element {
     let (vw, vh) = (9.0f32, 7.0f32);
@@ -5547,11 +5547,54 @@ pub fn TrackFolder(props: GlyphProps) -> Element {
             style: "display:block;",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
-            // The tab, then the body under it.
+            // The tab, then the body under it — one outline, no diagonal.
             path {
-                d: "M 0 1 H 3.6 L 4.6 2.2 H 9 V 7 H 0 Z",
+                d: "M 0 0 H 4 V 2 H 9 V 7 H 0 Z",
                 fill: "{props.colour}",
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod glyph_tests {
+    use super::*;
+
+    fn render<P: dioxus::dioxus_core::Properties + Clone + 'static>(
+        component: fn(P) -> Element,
+        props: P,
+    ) -> String {
+        let mut dom = dioxus::prelude::VirtualDom::new_with_props(component, props);
+        dom.rebuild_in_place();
+        dioxus_ssr::render(&dom)
+    }
+
+    fn glyph(colour: &str) -> GlyphProps {
+        GlyphProps { colour: colour.into(), width: None, height: None }
+    }
+
+    /// A pushpin, not a star: a round head, and a needle that reaches the
+    /// glyph's bottom-right corner — the two things the star had neither
+    /// of. The star was ten line segments; the pushpin's path is three
+    /// small quads.
+    #[test]
+    fn the_pin_is_a_pushpin_and_not_a_star() {
+        let svg = render(TrackPin, glyph("#752d3f"));
+        assert_eq!(svg.matches("<circle").count(), 1, "no round head:\n{svg}");
+        let d = svg.split("d=\"").nth(1).unwrap().split('"').next().unwrap();
+        assert_eq!(d.matches('M').count(), 3, "not three parts:\n{d}");
+        assert!(d.contains("10.6 10.2"), "the needle does not reach the corner:\n{d}");
+    }
+
+    /// The folder's tab is square — the art has no slanted edge, so the
+    /// outline is axis-aligned from end to end: a 4x2 tab over a 9x5 body.
+    #[test]
+    fn the_folder_tab_is_square() {
+        let svg = render(TrackFolder, glyph("#752d3f"));
+        let d = svg.split("d=\"").nth(1).unwrap().split('"').next().unwrap();
+        assert!(!d.contains('L'), "the tab has a diagonal again:\n{d}");
+        for step in ["H 4", "V 2", "H 9", "V 7"] {
+            assert!(d.contains(step), "the {step} edge moved:\n{d}");
         }
     }
 }

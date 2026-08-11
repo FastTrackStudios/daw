@@ -135,7 +135,10 @@ pub fn TrackRow(
                 style: "position:absolute; left:{COLUMN_RULE_X}px; top:0; \
                         width:1px; height:{row_h}px; background:{combo};",
             }
-            div { style: "position:absolute; left:8px; top:6px;",
+            // At (7,5): the pushpin's 11x11 box carries the needle's
+            // corner, so it sits a pixel up and left of where the old
+            // 9x9 star did to keep the head on the same spot.
+            div { style: "position:absolute; left:7px; top:5px;",
                 art::TrackPin { colour: combo.clone() }
             }
             div { style: "position:absolute; left:7px; top:{row_h - 10.0}px;",
