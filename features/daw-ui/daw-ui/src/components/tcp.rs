@@ -64,13 +64,17 @@ const TCP_METER_W: u32 = 19;
 /// 183..207, the routing widget 214..239 and the FX pill 248..283, with
 /// the tint ending at 296.
 const NAME_FIELD_X: f32 = 33.0;
-const NAME_FIELD_W: f32 = 152.0;
+const NAME_FIELD_W: f32 = 136.0;
 const NAME_FIELD_H: f32 = 24.0;
-/// The knob sits *inside* the field, which wraps around it: scanned across
-/// the knob's own centre row the dark runs from the field straight through
-/// the knob and out the other side, where a row above it stops at 161. So
-/// the field is not a 129-wide box with a knob beside it — it is a
-/// 152-wide box whose rounded end encloses the knob.
+/// The field stops *midway through* the knob, and its right edge is square.
+///
+/// The two scanlines that looked like a field wrapping the knob say this
+/// instead: above the knob's centre the dark ends at 161, and across the
+/// centre it runs to 179 — which is the knob's own body, not the field.
+/// A circle straddling a square edge reads exactly like a rounded end from
+/// one row and exactly like a longer box from another. So the field runs
+/// 33..169, ending at the knob's centre, and the knob is a plain circle
+/// sitting half on it and half on the tint.
 const VOLUME_KNOB_X: f32 = 158.0;
 const PAN_KNOB_X: f32 = 205.0;
 const FX_IN_X: f32 = 248.0;
@@ -167,7 +171,8 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
             div {
                 style: "position:absolute; left:{NAME_FIELD_X}px; top:{ROW_ONE}px; \
                         width:{NAME_FIELD_W}px; height:{NAME_FIELD_H}px; \
-                        background:{field}; border-radius:{NAME_FIELD_H / 2.0}px;",
+                        background:{field}; \
+                        border-radius:{NAME_FIELD_H / 2.0}px 0 0 {NAME_FIELD_H / 2.0}px;",
             }
             div { style: "position:absolute; left:{NAME_FIELD_X + 2.0}px; top:7px;",
                 RecordArmButton { track: track.guid.clone(), panel: Panel::Track }
