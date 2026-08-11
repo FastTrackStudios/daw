@@ -1,0 +1,20 @@
+// FTS Expression Editor — the panel's own input context.
+//
+// These bindings fire only while the editor panel has keyboard focus
+// (click anywhere in it to focus; the panel is registered as its own
+// input context by fts-extensions). Routing is exclusive:
+//
+//   bound here    → the action runs, key eaten
+//   anything else → the key goes to the editor itself — its component
+//                   handles tools (d), reset view (v), modulation (b),
+//                   undo/redo (Ctrl+Z / Ctrl+Shift+Z), arrows, escape —
+//                   and NEVER on to REAPER's global shortcuts.
+//
+// Mouse modifiers are separate: the editor overlays your live
+// reaper-mouse.ini MIDI contexts onto its own mouse map at startup.
+
+bindings (
+    // One key in, same key out — matches the arrange-side `e`.
+    {keys e,       action "FTS_EXPRESSION_EDITOR_OPEN", context @Custom"expression-editor", desc "Close the Expression Editor"}
+    {keys "<S-e>", action "FTS_EXPRESSION_EDITOR_OPEN", context @Custom"expression-editor", desc "Close the Expression Editor"}
+)

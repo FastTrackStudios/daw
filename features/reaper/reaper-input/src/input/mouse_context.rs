@@ -397,6 +397,15 @@ pub fn determine_mouse_context(medium_reaper: &MediumReaper, mode: DetectionMode
         return mouse_context;
     }
 
+    // App-defined panels claim their own context — a docked panel
+    // would otherwise read as Main and its wheel events would be eaten
+    // by the arrange-view wheel bindings.
+    if let Some(context) = crate::input::window_detection::panel_context_of(mouse_window_hwnd) {
+        mouse_context.context = context;
+        mouse_context.window = format!("{context:?}").to_lowercase();
+        return mouse_context;
+    }
+
     // Get arrange view info
     let (mouse_pos, _arrange_start, _arrange_end, _arrange_zoom) =
         position_at_arrange_point(mouse_point, medium_reaper);
@@ -639,6 +648,7 @@ pub fn get_context_from_mouse_position(medium_reaper: &MediumReaper) -> (Context
         Context::MidiInlineEditor => "MIDI Inline Editor",
         Context::MediaExplorer => "Media Explorer",
         Context::CrossfadeEditor => "Crossfade Editor",
+        Context::ExpressionEditor => "Expression Editor",
         Context::Global => "Global",
     }
     .to_string();

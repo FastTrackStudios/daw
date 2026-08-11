@@ -151,6 +151,37 @@ pub struct DockablePanelConfig {
     pub default_width: u32,
     pub default_height: u32,
     pub show_on_first_launch: bool,
+    /// Take keyboard focus on any click, not only on text inputs.
+    ///
+    /// For panels that are input surfaces in their own right (the
+    /// expression editor): focus is what routes keys to the panel's own
+    /// input context instead of REAPER's. Off by default because a
+    /// focus-stealing panel with no such context locks REAPER's
+    /// keyboard out — see the guard at the WM_LBUTTONDOWN handler.
+    /// Set after registration via [`set_panel_focus_on_click`].
+    pub focus_on_click: bool,
+}
+
+/// Opt a registered panel into taking keyboard focus on any click.
+pub fn set_panel_focus_on_click(id: PanelId, on: bool) {
+    PANELS.with(|panels| {
+        if let Some(panel) = panels.borrow_mut().get_mut(id) {
+            panel.config.focus_on_click = on;
+        }
+    });
+}
+
+/// Whether `hwnd` is the window of the panel registered under `id`.
+///
+/// For host-side context probes (reaper-input asks "whose window is
+/// this keystroke headed for?").
+pub fn is_panel_hwnd(id: PanelId, hwnd: *mut std::ffi::c_void) -> bool {
+    PANELS.with(|panels| {
+        panels
+            .borrow()
+            .get(id)
+            .is_some_and(|p| std::ptr::eq(p.hwnd as *const std::ffi::c_void, hwnd))
+    })
 }
 
 /// A live dockable panel registered with REAPER's docker system.
@@ -709,6 +740,7 @@ pub fn register_panel_from_service(def: &daw_module::PanelDef) {
         default_width: def.default_size.0 as u32,
         default_height: def.default_size.1 as u32,
         show_on_first_launch: false,
+        focus_on_click: false,
     };
 
     register_panel(config, Vec::new(), reaper, swell);
@@ -1838,13 +1870,18 @@ fn panel_wndproc_inner(
             // get focus back from a normal click. Now non-input clicks
             // leave focus where REAPER had it.
             let needs_focus = PANELS.with(|panels| {
-                panels
-                    .borrow()
-                    .values()
-                    .find(|p| p.hwnd == hwnd)
-                    .and_then(|p| p.view.as_ref())
-                    .map(|v| v.focused_is_text_input())
-                    .unwrap_or(false)
+                let panels = panels.borrow();
+                let Some(p) = panels.values().find(|p| p.hwnd == hwnd) else {
+                    return false;
+                };
+                // Input-surface panels (focus_on_click) take focus on
+                // every click: focus is what routes the keyboard to
+                // their own input context.
+                p.config.focus_on_click
+                    || p.view
+                        .as_ref()
+                        .map(|v| v.focused_is_text_input())
+                        .unwrap_or(false)
             });
             if needs_focus {
                 unsafe {

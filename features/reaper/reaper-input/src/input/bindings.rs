@@ -154,6 +154,9 @@ impl Bindings {
             Context::MidiInlineEditor => &self.midi_inline_editor,
             Context::MediaExplorer => &self.media_explorer,
             Context::CrossfadeEditor => &self.crossfade_editor,
+            // The expression editor resolves its bindings through
+            // `processor::resolve_exact_context`, never this table.
+            Context::ExpressionEditor => &self.global,
             Context::Global => &self.global,
         };
 

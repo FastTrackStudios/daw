@@ -623,12 +623,13 @@ fn Canvas(
                     }
                     let (x, y) = local(&e);
                     let m = mods_of(e.modifiers());
-                    let button = if e.trigger_button()
-                        == Some(MouseButton::Secondary)
-                    {
-                        2
-                    } else {
-                        0
+                    let button = match e.trigger_button() {
+                        Some(MouseButton::Secondary) => 2,
+                        // Middle is a real gesture (hand-scroll pan);
+                        // collapsing it onto left made a middle-drag
+                        // edit notes.
+                        Some(MouseButton::Auxiliary) => 1,
+                        _ => 0,
                     };
                     // A pitch drawing owns the surface while it is up:
                     // a click is an anchor and nothing else.

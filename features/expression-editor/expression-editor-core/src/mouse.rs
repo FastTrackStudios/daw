@@ -421,7 +421,9 @@ impl MouseMap {
                 b(C::PianoRoll, G::DoubleClick, N, A::InsertNote),
                 b(C::PianoRoll, G::DoubleClick, AL, A::InsertNoteNoSnap),
                 b(C::PianoRoll, G::RightClick, N, A::ContextMenu),
-                b(C::PianoRoll, G::MiddleClick, N, A::MovePlayhead),
+                // Hand scroll, REAPER's own MIDI-editor middle-drag.
+                b(C::PianoRoll, G::MiddleClick, N, A::Pan),
+                b(C::PianoRoll, G::MiddleClick, S, A::MovePlayhead),
                 // ── notes ────────────────────────────────────────────
                 b(C::Note, G::Click, N, A::SelectNote),
                 b(C::Note, G::Click, S, A::AddNoteToSelection),
@@ -437,7 +439,10 @@ impl MouseMap {
                 b(C::Note, G::Drag, SC, A::EditNoteVelocityFine),
                 b(C::Note, G::Drag, CA, A::MoveNoteNoSnap),
                 b(C::Note, G::RightClick, N, A::ContextMenu),
-                b(C::Note, G::MiddleClick, N, A::Audition),
+                // Hand scroll works from a note too — grabbing the roll
+                // to pan must not depend on hitting empty canvas.
+                b(C::Note, G::MiddleClick, N, A::Pan),
+                b(C::Note, G::MiddleClick, S, A::Audition),
                 // ── note edges ───────────────────────────────────────
                 b(C::NoteEdge, G::Drag, N, A::MoveNoteEdge),
                 b(C::NoteEdge, G::Drag, CT, A::MoveNoteEdgeNoSnap),

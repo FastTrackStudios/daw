@@ -33,6 +33,11 @@ pub enum Context {
     MediaExplorer,
     /// Crossfade Editor
     CrossfadeEditor,
+    /// The FTS Expression Editor panel (registered by the extension via
+    /// [`crate::input::window_detection::set_panel_context_probe`]).
+    /// Its own input surface: only bindings declared for it fire, and
+    /// unbound keys go to the panel itself, never to REAPER.
+    ExpressionEditor,
     /// Global (applies to both main and midi)
     Global,
 }

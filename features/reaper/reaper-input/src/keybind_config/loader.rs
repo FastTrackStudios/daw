@@ -285,3 +285,42 @@ fn convert_mouse(def: &MouseBindDef) -> MouseModifier {
     }
     mm
 }
+
+#[cfg(test)]
+mod tests {
+    use input_config_proto::{KeybindContext, SectionConfig};
+
+    /// An app-defined context binding parses out of a section file —
+    /// what the expression-editor section relies on. A parse failure
+    /// here would otherwise surface only as a silently skipped section
+    /// at REAPER startup.
+    #[test]
+    fn custom_context_binding_parses() {
+        // Learn the canonical serialization first, then assert the
+        // config file form parses back.
+        let canonical = facet_styx::to_string(&SectionConfig {
+            bindings: Some(vec![input_config_proto::KeybindDef {
+                keys: "e".into(),
+                action: "FTS_EXPRESSION_EDITOR_OPEN".into(),
+                desc: Some("Close".into()),
+                context: Some(KeybindContext::Custom("expression-editor".into())),
+                passthrough: None,
+                mnemonic: None,
+                why: None,
+            }]),
+            ..Default::default()
+        });
+        eprintln!("canonical: {canonical:?}");
+        let styx = r#"bindings (
+            {keys e, action "FTS_EXPRESSION_EDITOR_OPEN", context @Custom"expression-editor", desc "Close"}
+        )"#;
+        let cfg: SectionConfig = facet_styx::from_str(styx).expect("section parses");
+        let bindings = cfg.bindings();
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0].keys, "e");
+        assert_eq!(
+            bindings[0].context,
+            Some(KeybindContext::Custom("expression-editor".into()))
+        );
+    }
+}

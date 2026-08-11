@@ -22,5 +22,6 @@ sections (
     utility.styx
     midi-modes.styx
     midi.styx
+    expression-editor.styx
     mouse.styx
 )
