@@ -412,6 +412,11 @@ fn on_fx_change(_args: ExtSetFxChangeArgs) -> bool {
     // FX added / removed / reordered. Defer to the existing chain-diff
     // poller (it already builds the full Added/Removed/Moved diff).
     crate::poll_and_broadcast_fx();
+    // And to the track poller, which is where a *count* change becomes
+    // `TrackEvent::FxCountChanged`. Without this the mixer's FX button
+    // would be correct only as far as the next periodic tick; REAPER has
+    // just told us the chain changed, so there is no reason to wait.
+    crate::poll_and_broadcast_tracks();
     true
 }
 

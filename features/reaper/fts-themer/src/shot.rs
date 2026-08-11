@@ -77,6 +77,15 @@ pub fn default_tracks() -> Vec<TrackSpec> {
     .collect()
 }
 
+/// What a shot is aimed at.
+#[derive(Clone, Debug)]
+pub enum Capture {
+    /// The first window whose title contains this string.
+    Window(String),
+    /// The whole display, including every floating window.
+    Screen,
+}
+
 /// What to capture.
 #[derive(Clone, Debug)]
 pub struct ShotOptions {
@@ -94,6 +103,26 @@ pub struct ShotOptions {
     pub display: String,
     /// How long to let REAPER settle before capturing.
     pub settle: Duration,
+    /// Extension `.so`/`.dylib`s to install into the profile before launch.
+    ///
+    /// A theme is art REAPER blits; a *panel* is a window an extension
+    /// opens, and photographing one means the extension has to be loaded.
+    /// Copied rather than symlinked: REAPER holds the library open, and a
+    /// symlink into a build directory turns a rebuild into a crash.
+    pub plugins: Vec<PathBuf>,
+    /// Which window to photograph, by title, or the whole screen.
+    ///
+    /// A floating panel is its own X window, so a capture aimed at
+    /// "REAPER" misses it entirely and looks exactly like a panel that
+    /// never opened.
+    pub window: Capture,
+    /// Actions to run once REAPER has started, by named-command id.
+    ///
+    /// Written into the profile as a `__startup.lua`, which REAPER runs on
+    /// its own. The alternative — driving the Actions dialog with xdotool —
+    /// is a keystroke race against a window that may not have focus yet,
+    /// and it fails differently every time.
+    pub startup_actions: Vec<String>,
 }
 
 impl ShotOptions {
@@ -107,6 +136,9 @@ impl ShotOptions {
             geometry: "1920x1200x24".into(),
             display: ":97".into(),
             settle: Duration::from_secs(14),
+            window: Capture::Window("REAPER".into()),
+            plugins: Vec::new(),
+            startup_actions: Vec::new(),
         }
     }
 }
@@ -320,6 +352,8 @@ pub fn capture(opts: &ShotOptions) -> Result<PathBuf> {
 
     let project = dir.join("fts-themer-shot.rpp");
     std::fs::write(&project, project_rpp(&opts.tracks))?;
+    install_plugins(&dir, &opts.plugins)?;
+    write_startup_actions(&dir, &opts.startup_actions)?;
 
     if let Err(missing) = VirtualDisplay::tooling_available() {
         eprintln!("  NOTE: {missing}");
@@ -347,13 +381,19 @@ pub fn capture(opts: &ShotOptions) -> Result<PathBuf> {
     // Falling back on *error* as well as on "not found": a window can match
     // the title search and still refuse to be captured, and a whole-screen
     // shot is far better than no shot.
-    let result = match display.screenshot_window_named("REAPER", &opts.out) {
-        Ok(true) => Ok(()),
-        Ok(false) => display.screenshot(&opts.out),
-        Err(e) => {
-            eprintln!("  NOTE: window capture failed ({e}); falling back to the full screen");
-            display.screenshot(&opts.out)
-        }
+    let result = match &opts.window {
+        Capture::Screen => display.screenshot(&opts.out),
+        Capture::Window(title) => match display.screenshot_window_named(title, &opts.out) {
+            Ok(true) => Ok(()),
+            Ok(false) => {
+                eprintln!("  NOTE: no window titled {title:?}; capturing the screen instead");
+                display.screenshot(&opts.out)
+            }
+            Err(e) => {
+                eprintln!("  NOTE: window capture failed ({e}); falling back to the full screen");
+                display.screenshot(&opts.out)
+            }
+        },
     }
     .map_err(|e| anyhow::anyhow!("capture: {e}"));
 
@@ -362,6 +402,91 @@ pub fn capture(opts: &ShotOptions) -> Result<PathBuf> {
     result?;
 
     Ok(opts.out.clone())
+}
+
+/// Copy extension libraries into the profile's `UserPlugins`.
+fn install_plugins(profile: &Path, plugins: &[PathBuf]) -> Result<()> {
+    if plugins.is_empty() {
+        return Ok(());
+    }
+    let dest = profile.join("UserPlugins");
+    std::fs::create_dir_all(&dest)?;
+    for plugin in plugins {
+        let name = plugin
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow::anyhow!("plugin path has no filename: {}", plugin.display()))?;
+        // Cargo builds a cdylib as `libfoo.so`; REAPER loads extensions by
+        // filename and wants `reaper_foo.so`. Copying the file under its
+        // build name is the failure that looks like a working setup: the
+        // plugin is present, REAPER starts fine, and the actions it would
+        // have registered simply never appear.
+        let installed = name.strip_prefix("lib").unwrap_or(name);
+        if !installed.starts_with("reaper_") {
+            eprintln!(
+                "  NOTE: {installed} does not start with `reaper_` — REAPER \
+                 will ignore it, and its actions will not register."
+            );
+        }
+        std::fs::copy(plugin, dest.join(installed))
+            .with_context(|| format!("install {}", plugin.display()))?;
+        println!("  plugin:  {} -> UserPlugins/{installed}", plugin.display());
+    }
+    Ok(())
+}
+
+/// Write a `__startup.lua` that runs `actions` when REAPER opens.
+///
+/// REAPER runs this script itself at startup, which is why nothing has to
+/// be typed at a dialog. But it runs it *early* — an extension that
+/// registers its actions asynchronously has not finished by then, and the
+/// lookup returns 0 for an action that is about to exist. So the script
+/// retries on `defer` (once per frame) until the action appears or the
+/// budget runs out, and says so on the console either way.
+///
+/// Both spellings are tried: extensions register a bare name and REAPER
+/// exposes it prefixed with `_`, and which one a caller passes is not worth
+/// getting wrong over.
+fn write_startup_actions(profile: &Path, actions: &[String]) -> Result<()> {
+    if actions.is_empty() {
+        return Ok(());
+    }
+    let scripts = profile.join("Scripts");
+    std::fs::create_dir_all(&scripts)?;
+
+    let mut lua = String::from(
+        "local pending = {}\n\
+         local tries = 0\n",
+    );
+    for action in actions {
+        let bare = action.trim_start_matches('_');
+        lua.push_str(&format!("pending[#pending+1] = \"{bare}\"\n"));
+        println!("  action:  {bare}");
+    }
+    lua.push_str(
+        "local function run()\n\
+        \x20 local left = {}\n\
+        \x20 for _, name in ipairs(pending) do\n\
+        \x20   local id = reaper.NamedCommandLookup(\"_\" .. name)\n\
+        \x20   if id == 0 then id = reaper.NamedCommandLookup(name) end\n\
+        \x20   if id ~= 0 then reaper.Main_OnCommand(id, 0)\n\
+        \x20   else left[#left+1] = name end\n\
+        \x20 end\n\
+        \x20 pending = left\n\
+        \x20 if #pending == 0 then return end\n\
+        \x20 tries = tries + 1\n\
+        \x20 if tries > 400 then\n\
+        \x20   for _, name in ipairs(pending) do\n\
+        \x20     reaper.ShowConsoleMsg(\"no such action: \" .. name .. \"\\n\")\n\
+        \x20   end\n\
+        \x20   return\n\
+        \x20 end\n\
+        \x20 reaper.defer(run)\n\
+        end\n\
+        run()\n",
+    );
+    std::fs::write(scripts.join("__startup.lua"), lua)?;
+    Ok(())
 }
 
 /// Resource dirs searched for an existing REAPER licence, in order.
@@ -465,9 +590,24 @@ fn launch_reaper(ini: &Path, project: &Path, display: &str, home: &Path) -> Resu
         .args(["-nosplash", "-ignoreerrors"])
         .arg(project)
         .env("DISPLAY", display)
-        .env("HOME", home)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .env("HOME", home);
+
+    // REAPER's own output, and every extension's with it. Discarded by
+    // default because it is noisy; kept when asked, because "the panel did
+    // not appear" is unanswerable without it — an extension that fails to
+    // load, or a window that fails to create, says so here and nowhere else.
+    match std::env::var("FTS_SHOT_LOG") {
+        Ok(path) if !path.is_empty() => {
+            let log = std::fs::File::create(&path)
+                .with_context(|| format!("open shot log {path}"))?;
+            let dup = log.try_clone()?;
+            cmd.stdout(Stdio::from(log)).stderr(Stdio::from(dup));
+            eprintln!("  log:     {path}");
+        }
+        _ => {
+            cmd.stdout(Stdio::null()).stderr(Stdio::null());
+        }
+    }
 
     cmd.spawn()
         .with_context(|| format!("launch {}", exe.display()))

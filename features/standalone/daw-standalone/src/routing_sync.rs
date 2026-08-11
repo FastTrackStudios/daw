@@ -552,14 +552,30 @@ impl Routing for Standalone {
         enabled: bool,
     ) -> DawResult<()> {
         let pg = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&pg, |p| {
+        let guid = self.with_project_mut(&pg, |p| {
             let g = resolve_track_guid(p, &track).ok_or_else(not_found_track)?;
+            // Mirrored onto the stored `Track` as well as the side map: a
+            // strip reads `Track::parent_send` from the bulk read, and the
+            // two must not disagree.
+            if let Some(t) = p.tracks.iter_mut().find(|t| t.guid == g) {
+                t.parent_send = enabled;
+            }
             p.track_ext
-                .entry(g)
+                .entry(g.clone())
                 .or_insert_with(TrackExt::default)
                 .parent_send_enabled = enabled;
-            Ok::<(), DawError>(())
-        })?
+            Ok::<String, DawError>(g)
+        })??;
+        // The IO indicator on every strip shows this, so it is an event
+        // rather than something a mixer has to ask about again.
+        let event = daw_proto::track::TrackStreamEvent {
+            project_guid: pg,
+            event: daw_proto::track::TrackEvent::ParentSendChanged { guid, enabled },
+        };
+        self.bus_events
+            .publish(daw_proto::event_bus::DawEvent::Track(event.clone()));
+        self.track_events.publish(event);
+        Ok(())
     }
 }
 

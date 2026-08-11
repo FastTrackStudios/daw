@@ -22,6 +22,7 @@ use daw_theme::{Color, Theme};
 use dioxus::prelude::*;
 
 pub use crate::mixer_controls::{FxChain, Interaction, Monitoring, RecordArm, Solo};
+pub use crate::slice::NamedArt;
 
 /// Which way a control is laid out.
 ///
@@ -205,13 +206,11 @@ pub struct LabelButtonProps {
     /// Face colour when engaged. `None` draws the resting state.
     #[props(default)]
     pub lit: Option<Color>,
-    /// The cell this button replaces, in REAPER's pixels.
-    ///
-    /// Not cosmetic: mute and solo are 21x20 but FX is 28x22, and drawing
-    /// both at 21x20 left the FX button to be stretched into its cell by
-    /// whatever rendered it — visibly wide, with an oval `FX` on it.
-    #[props(default = (21.0, 20.0))]
-    pub cell: (f32, f32),
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -234,7 +233,7 @@ pub struct LabelButtonProps {
 #[component]
 pub fn LabelButton(props: LabelButtonProps) -> Element {
     let k = ink(props.lit, props.at, props.sinks, props.hover);
-    let (vw, vh) = props.cell;
+    let (vw, vh) = props.art.source;
     let (body_y, body_h) = (vh * props.body.0, vh * props.body.1);
     let id = format!("lb{}", props.label.replace(' ', ""));
     // The radius was never the problem — the stroke was.
@@ -385,9 +384,11 @@ pub struct ToggleProps {
     pub body: (f32, f32),
     #[props(default)]
     pub on: bool,
-    /// The cell this replaces: `mcp_mute_*` is 21x20, `track_mute_*` 22x24.
-    #[props(default = (21.0, 20.0))]
-    pub cell: (f32, f32),
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -404,7 +405,7 @@ pub fn MuteButton(props: ToggleProps) -> Element {
         LabelButton {
             label: "M",
             lit: props.on.then_some(t.signal.mute).or(props.unlit),
-            cell: props.cell, body: props.body, legend: props.legend,
+            art: props.art, body: props.body, legend: props.legend,
             depth: props.depth, sinks: props.sinks, hover: props.hover,
             shadow: !props.on, scales: true,
             width: props.width, height: props.height, at: props.at,
@@ -444,9 +445,11 @@ pub struct SoloProps {
     pub body: (f32, f32),
     #[props(default)]
     pub state: Solo,
-    /// The cell this replaces: `mcp_mute_*` is 21x20, `track_mute_*` 22x24.
-    #[props(default = (21.0, 20.0))]
-    pub cell: (f32, f32),
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -462,7 +465,12 @@ pub fn SoloButton(props: SoloProps) -> Element {
     // Defeat is a different thing from solo, not more of it, so it gets a
     // different hue rather than a brighter one.
     let lit = match props.state {
-        Solo::Off => None,
+        // `props.unlit`, not `None`. Dropped, this fell back to the plain
+        // hardware grey and the resting face came out sixteen levels dark
+        // in the track panel and eight in the mixer — which is precisely
+        // what the prop's own doc comment says it exists to prevent.
+        // `MuteButton` has always passed it through; solo never did.
+        Solo::Off => props.unlit,
         Solo::On => Some(t.signal.solo),
         // #3898d3 in the source — its own blue, a clear step below the
         // accent used for a lit routing lane rather than the same one.
@@ -471,7 +479,7 @@ pub fn SoloButton(props: SoloProps) -> Element {
     };
     rsx! {
         LabelButton {
-            label: "S", lit, cell: props.cell, body: props.body,
+            label: "S", lit, art: props.art, body: props.body,
             legend: props.legend, depth: props.depth, sinks: props.sinks,
             hover: props.hover,
             width: props.width, height: props.height, at: props.at,
@@ -624,14 +632,6 @@ impl FxFamily {
         }
     }
 
-    /// `(x, width)` of `part` within the pill.
-    fn window(self, part: FxPart) -> (f32, f32) {
-        let p = self.pill();
-        match part {
-            FxPart::Label => (0.0, p.split),
-            FxPart::Toggle => (p.split, p.w - p.split),
-        }
-    }
 }
 
 #[derive(Props, Clone, PartialEq)]
@@ -647,6 +647,21 @@ pub struct FxControlProps {
     /// Which half to emit.
     #[props(default)]
     pub part: FxPart,
+    /// Which band of this half to draw, when the caller is drawing the
+    /// pill as a row of bands rather than whole.
+    ///
+    /// REAPER nine-slices this button: `mcp.fx` is 43 wide and `mcp.fxbyp`
+    /// 29, against art that is 28 and 17, and only the flat run before the
+    /// seam grows — which is why its `FX` reads small in a long pill.
+    /// Scaling the whole thing into those boxes stretches the rounded ends
+    /// into a notch and the letters with them.
+    ///
+    /// The window is relative to the half [`FxControlProps::part`] selects,
+    /// so a caller can hand over [`crate::slice::NamedArt::row`]'s panes
+    /// unchanged. `None` draws the half whole, which is what the exporter
+    /// wants.
+    #[props(default)]
+    pub pane: Option<crate::slice::Pane>,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -676,7 +691,20 @@ pub fn FxControl(props: FxControlProps) -> Element {
     let t = Theme::default();
     let k = ink(None, props.at, true, 0.35);
     let p = props.family.pill();
-    let (win_x, win_w) = props.family.window(props.part);
+    // The half this image is. The pill is drawn once, at its own
+    // proportions, and each image is a window onto it — that is what keeps
+    // the two halves from disagreeing about height or material.
+    let (part_x, part_w) = match props.part {
+        FxPart::Label => (0.0, p.split),
+        FxPart::Toggle => (p.split, p.w - p.split),
+    };
+    // A band *within* that half, when the caller is stretching one. Offset
+    // into the half rather than into the pill, so a caller can pass the
+    // image's own panes without knowing where its half begins.
+    let (win_x, win_w) = match props.pane {
+        Some(pane) => (part_x + pane.view.0, pane.view.2),
+        None => (part_x, part_w),
+    };
 
     let (body_y, body_h) = (p.h * p.body.0, p.h * p.body.1);
     // Exactly one pixel, on the pixel grid.
@@ -710,8 +738,15 @@ pub fn FxControl(props: FxControlProps) -> Element {
     // half a pixel either side — left both halves' edges mid-pixel and
     // the column half covered.
     let (lhs, rhs) = (p.split, p.split + gut);
+    // The two left arcs sweep 0, the two right arcs sweep 1.
+    //
+    // Not a symmetry to tidy up: with the traversal these paths use, both
+    // ends need a different flag to bulge outward, and at sweep 1 the
+    // left corners picked the other centre and curved *into* the pill —
+    // a notch where the source has a rounded end. The source's own left
+    // corner is plainly convex, reaching x2 by row 3 and x1 by row 5.
     let outline = format!(
-        "M {} {y} H {lhs} V {} H {} A {r} {r} 0 0 1 {x} {} V {} A {r} {r} 0 0 1 {} {y} Z \
+        "M {} {y} H {lhs} V {} H {} A {r} {r} 0 0 0 {x} {} V {} A {r} {r} 0 0 0 {} {y} Z \
          M {rhs} {y} H {} A {r} {r} 0 0 1 {} {} V {} A {r} {r} 0 0 1 {} {} H {rhs} Z",
         x + r,
         y + h,
@@ -731,7 +766,7 @@ pub fn FxControl(props: FxControlProps) -> Element {
     // so stroking the closed outline drew a line down each side of the
     // seam, half of it landing in the empty column.
     let frame = format!(
-        "M {lhs} {y} H {} A {r} {r} 0 0 1 {x} {} V {} A {r} {r} 0 0 1 {} {} H {lhs} \
+        "M {lhs} {y} H {} A {r} {r} 0 0 0 {x} {} V {} A {r} {r} 0 0 0 {} {} H {lhs} \
          M {rhs} {y} H {} A {r} {r} 0 0 1 {} {} V {} A {r} {r} 0 0 1 {} {} H {rhs}",
         x + r,
         y + r,
@@ -817,6 +852,9 @@ pub fn FxControl(props: FxControlProps) -> Element {
 
     rsx! {
         svg {
+            // A stretched band must not letterbox: the flat run is meant to
+            // lengthen, which is the whole reason it is its own band.
+            preserve_aspect_ratio: "none",
             width: "{props.width.unwrap_or(win_w as u32)}",
             height: "{props.height.unwrap_or(p.h as u32)}",
             // The window is the only thing that differs between the two
@@ -964,9 +1002,11 @@ pub fn FxControl(props: FxControlProps) -> Element {
 pub struct RecordArmProps {
     #[props(default)]
     pub state: RecordArm,
-    /// The cell this replaces: `mcp_recarm_*` is 36x24, `track_*` 20x20.
-    #[props(default = (36.0, 24.0))]
-    pub cell: (f32, f32),
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
     /// Draw the moulded housing the ring is seated in.
     ///
     /// The mixer has one; the track panel draws a bare ring on the strip.
@@ -996,7 +1036,7 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     );
     let barred = matches!(props.state, RecordArm::NoRecord | RecordArm::AutoNoRecord);
 
-    let (vw, vh) = props.cell;
+    let (vw, vh) = props.art.source;
     let unit = vw.min(vh);
 
     // Traced, in *edge* coordinates rather than pixel indices. In the
@@ -1008,8 +1048,25 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     // The track panel's 20x20 ring is centred and **larger** relative to
     // its cell (radius 8 of 20) because there is no housing competing for
     // the room, so the two fractions differ rather than one being wrong.
-    let (cx, cy, outer, hole) = if props.housing {
-        (vw * 0.486, vh * 0.521, unit * 0.3125, unit * 0.1458)
+    // **The barred ring is not the plain ring with an X over it.** It is
+    // a bigger, thinner band in both families — the mixer's runs 8.46
+    // outside and 4.56 in against 7.45 and 3.67, the track panel's 7.91
+    // and 4.28 against 7.40 and 3.38. Sharing one pair of radii left the
+    // outer edge sixty to eighty levels short all the way round, which
+    // made `track_recarm_norec` the worst image in the set after the
+    // thumbs.
+    // Only the *plain* barred states grow. `AutoNoRecord` keeps the
+    // ordinary radii — measured 7.40 and 3.35 in the track panel, the
+    // same as `off` — so it is the auto disc that governs there, not the
+    // bar. Applying the enlargement to it put that image up from under
+    // ten to fifteen.
+    let wide = barred && !auto;
+    let (cx, cy, outer, hole) = if props.housing && wide {
+        (vw * 0.486, vh * 0.521, unit * 0.3524, unit * 0.1899)
+    } else if props.housing {
+        (vw * 0.486, vh * 0.521, unit * 0.3105, unit * 0.1530)
+    } else if wide {
+        (vw * 0.5, vh * 0.5, unit * 0.3953, unit * 0.2139)
     } else {
         // Read off the coverage rather than guessed at from a threshold.
         // Down the widest row the alpha runs 103, 255 ... 255, 102: the
@@ -1257,7 +1314,15 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                                             x1: "{cx - dx * far}", y1: "{cy - dy * far}",
                                             x2: "{cx + dx * far}", y2: "{cy + dy * far}",
                                             stroke: "#000000",
-                                            stroke_width: "{unit * 0.145}",
+                                            // Scaled off the ring, not the
+                                            // cell. As a fraction of the
+                                            // cell the two families pull
+                                            // in opposite directions —
+                                            // what suits the mixer's 24
+                                            // over-cuts the track panel's
+                                            // 20 — because the notch
+                                            // tracks the band it crosses.
+                                            stroke_width: "{outer * 0.29}",
                                         }
                                     }
                                 }
@@ -1292,9 +1357,11 @@ pub struct RoutingProps {
     pub has_receives: bool,
     #[props(default)]
     pub disabled: bool,
-    /// The cell this replaces: `mcp_io*` is 23x32, `track_io*` 29x22.
-    #[props(default = (23.0, 32.0))]
-    pub cell: (f32, f32),
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
     /// Mixer stacks the lanes; the track panel sets them in a row.
     #[props(default)]
     pub axis: Axis,
@@ -1311,7 +1378,7 @@ pub struct RoutingProps {
 pub fn RoutingButton(props: RoutingProps) -> Element {
     let t = Theme::default();
     let k = ink(None, props.at, true, 0.35);
-    let (vw, vh) = props.cell;
+    let (vw, vh) = props.art.source;
 
     // Three lanes, not two: the original stacks the track's own output,
     // its sends and its receives. Two bars cannot express what the
@@ -1456,9 +1523,11 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
 pub struct MonitoringProps {
     #[props(default)]
     pub state: Monitoring,
-    /// The cell this replaces: `mcp_monitor_*` is 21x20, `track_*` 16x24.
-    #[props(default = (21.0, 20.0))]
-    pub cell: (f32, f32),
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
     /// Mixer radiates downward; the track panel radiates right.
     #[props(default)]
     pub axis: Axis,
@@ -1498,7 +1567,7 @@ pub struct MonitoringProps {
 #[component]
 pub fn InputMonitorIndicator(props: MonitoringProps) -> Element {
     let t = Theme::default();
-    let (vw, vh) = props.cell;
+    let (vw, vh) = props.art.source;
     let mark = t.chrome.hardware_mark;
 
     // Mixer radiates downward from a dot near the top; the track panel
@@ -1616,6 +1685,20 @@ pub struct PanProps {
     pub position: f32,
     #[props(default)]
     pub large: bool,
+    /// Draw the pointer REAPER draws for itself.
+    ///
+    /// The theme's `*_pan_knob_*` bitmaps have no pointer in them at all —
+    /// they are a disc and a cap, and REAPER paints the indicator line
+    /// over the top from the parameter's value. A panel that is not
+    /// REAPER has to draw it, so it is a prop rather than part of the art:
+    /// off, the exported PNGs stay exactly as they are audited; on, the
+    /// knob reads as a knob.
+    ///
+    /// With the pointer on, the cap stays centred and the *pointer*
+    /// carries the value — which is what REAPER does. The cap only slides
+    /// when there is no pointer to do the work.
+    #[props(default)]
+    pub indicator: bool,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -1664,18 +1747,28 @@ pub fn PanningKnob(props: PanProps) -> Element {
     // At rest the cap is dead centre — the knob shows pan by *sliding* it
     // across, not by pointing at a rim, so centre has to read as centre.
     let pos = props.position.clamp(-1.0, 1.0);
-    let dx = pos * (r - cap_r - 1.0);
+    let dx = if props.indicator { 0.0 } else { pos * (r - cap_r - 1.0) };
+    // The pointer sweeps 135° each way from straight up, which is the
+    // throw REAPER gives a pan control. Measured off a rendered knob: two
+    // pixels wide on a 24-pixel body, running from just inside the rim
+    // down to the cap, peaking at `#b3b3b3`.
+    let sweep = pos * 135.0;
+    let point_w = vw * 0.083;
+    let point_top = cy - r + vh * 0.045;
+    let point_bot = cy - cap_r - vh * 0.01;
+    let point = t.chrome.hardware_mark.shade(0.11);
 
     // All neutral. The cap was `text_dim`, a light *blue*-grey — right for
     // a label on a panel, wrong for moulded plastic, where it reads as a
     // lit indicator rather than a part.
     let face = t.chrome.hardware;
     let rim = t.chrome.hardware_edge.shade(-0.45);
-    let cap = if props.position == 0.0 {
-        t.chrome.hardware_mark
-    } else {
-        t.chrome.accent
-    };
+    // Neutral at *every* position, which is what the two lines above
+    // decided and the next three used to contradict: off centre the cap
+    // went accent, so any panned track showed a blue lamp where REAPER
+    // shows the same moulded grey slid across. There is no accent variant
+    // in the art to match — the source draws one cap and moves it.
+    let cap = t.chrome.hardware_mark;
 
     rsx! {
         svg {
@@ -1725,6 +1818,15 @@ pub fn PanningKnob(props: PanProps) -> Element {
                 cx: "{cx + dx}", cy: "{cap_cy + 0.9}", r: "{cap_r + 1.1}",
                 fill: "url(#pancapdrop)",
             }
+            if props.indicator {
+                rect {
+                    x: "{cx - point_w * 0.5}", y: "{point_top}",
+                    width: "{point_w}", height: "{point_bot - point_top}",
+                    rx: "{point_w * 0.5}",
+                    fill: "{point.css()}",
+                    transform: "rotate({sweep} {cx} {cy})",
+                }
+            }
             circle {
                 cx: "{cx + dx}", cy: "{cap_cy}", r: "{cap_r}",
                 fill: "url(#pancap)",
@@ -1740,6 +1842,21 @@ pub struct FaderCapProps {
     /// Track accent, which the cap picks up in REAPER's colour variants.
     #[props(default)]
     pub accent: Option<Color>,
+    /// Which band of the source box to draw, when the caller is drawing
+    /// the art as a stack of bands rather than whole.
+    ///
+    /// `mcp_volbg` is a nine-slice: its rail occupies rows 16..39 of 55
+    /// because that is the stretchy middle, and REAPER lengthens *that*
+    /// band to whatever the strip needs while the caps hold their size.
+    /// Scaled naively to a taller box the whole drawing scales, rail and
+    /// caps alike, which is the mistake the guides exist to prevent.
+    ///
+    /// `None` draws the whole source box — which is what the exporter
+    /// wants, since it rasterises at the source size and the two are the
+    /// same thing there. A panel drawing a 300px fader passes one pane per
+    /// band; see [`crate::slice::NamedArt::stack`].
+    #[props(default)]
+    pub pane: Option<crate::slice::Pane>,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -1916,18 +2033,51 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
 #[component]
 pub fn VolumeFaderTrack(props: FaderCapProps) -> Element {
     let (vw, vh) = (23.0f32, 55.0f32);
+    // The rail is drawn at its source coordinates, always. Which *part* of
+    // it a given `<svg>` shows is the viewBox's business, not the shape's —
+    // that is what makes a band a window onto one drawing rather than a
+    // second drawing of its own.
+    //
+    // y14..y41, which is where the groove is *traced*, and deliberately not
+    // the 16..39 the magenta guides mark. Those are two different facts: the
+    // guides say which rows REAPER may stretch, the trace says where the
+    // black actually is, and the source's groove runs a couple of rows into
+    // the fixed caps at each end. Snapping the drawing to the guide changes
+    // the exported PNG — it was the first thing this rewrite got wrong.
+    let (rail_y, rail_h) = (vh * 14.0 / 55.0, vh * 27.0 / 55.0);
+    let pane = props.pane.unwrap_or(crate::slice::Pane {
+        view: (0.0, 0.0, vw, vh),
+        grow: false,
+    });
+    let (px, py, pw, ph) = pane.view;
+    // The width the caller asked for sets the scale, so a pane can size
+    // itself without being told twice.
+    let w = props.width.unwrap_or(vw as u32);
+    let scale = w as f32 / vw;
+    // A growing pane hands its height to the layout engine; a fixed one
+    // states it. `preserveAspectRatio: none` because the rail is meant to
+    // lengthen — letterboxing the stretch band is exactly the wrong answer.
+    let sizing = if pane.grow {
+        "flex:1; min-height:0; height:100%".to_string()
+    } else {
+        format!("flex:0 0 auto; height:{}px", ph * scale)
+    };
     rsx! {
         svg {
-            width: "{props.width.unwrap_or(23)}",
-            height: "{props.height.unwrap_or(55)}",
-            view_box: "0 0 {vw} {vh}",
+            width: "{w}",
+            height: "{props.height.unwrap_or((ph * scale).round() as u32)}",
+            view_box: "{px} {py} {pw} {ph}",
+            preserve_aspect_ratio: "none",
+            style: "{sizing}; display:block",
             xmlns: "http://www.w3.org/2000/svg",
             // Slightly wider than a pixel and centred on x11.5, which is
             // what gives the source its soft shoulders at 60 either side
             // of a 215 core rather than one hard column.
             rect {
-                x: "{vw * 10.8 / 23.0}", y: "{vh * 14.0 / 55.0}",
-                width: "{vw * 1.4 / 23.0}", height: "{vh * 27.0 / 55.0}",
+                x: "{vw * 10.8 / 23.0}",
+                y: "{rail_y}",
+                width: "{vw * 1.4 / 23.0}",
+                height: "{rail_h}",
                 fill: "#000000", fill_opacity: "0.85",
             }
         }
@@ -2072,8 +2222,11 @@ pub struct PhaseProps {
     /// Inverted — the lit blue state.
     #[props(default)]
     pub inverted: bool,
-    #[props(default = (16.0, 20.0))]
-    pub cell: (f32, f32),
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -2092,7 +2245,7 @@ pub struct PhaseProps {
 #[component]
 pub fn PhaseButton(props: PhaseProps) -> Element {
     let t = Theme::default();
-    let (vw, vh) = props.cell;
+    let (vw, vh) = props.art.source;
 
     let plate = if props.inverted {
         Color::rgb(0x16, 0xa9, 0xfe)
@@ -2294,9 +2447,20 @@ pub fn FolderCompactButton(props: FolderCompactProps) -> Element {
     // Hover lifts the wash as well as the mark — the source's top row
     // goes 38 to 70 — so a version that only brightened the glyph left
     // the whole strip looking a shade flat next to it.
-    let (ink, wash) = match props.at {
-        Interaction::Hover => (0.69f32, 0.28f32),
-        _ => (0.44, 0.15),
+    let ink = match props.at {
+        Interaction::Hover => 0.69f32,
+        _ => 0.44,
+    };
+    // The hover wash is not the resting one turned up. Resting fades to
+    // nothing — `#e9e9e9` at 0.149 down to `#131313` at 0.008, which
+    // composites 35 to 0 — while hover stays bright the whole way and
+    // turns back up at the foot: 67, down to 43, back to 38. Scaled from
+    // one set of stops the hover cell came out a flat 37 levels dark.
+    let hovered = props.at == Interaction::Hover;
+    let wash: [(&str, &str, f32); 3] = if hovered {
+        [("0", "#f4f4f4", 0.275), ("0.40", "#d6d6d6", 0.200), ("1", "#ffffff", 0.149)]
+    } else {
+        [("0", "#e9e9e9", 0.149), ("0.55", "#4a4a4a", 0.043), ("1", "#0a0a0a", 0.008)]
     };
 
     // Traced: down-triangle, ramp, right-triangle, all in the same box.
@@ -2331,20 +2495,21 @@ pub fn FolderCompactButton(props: FolderCompactProps) -> Element {
             xmlns: "http://www.w3.org/2000/svg",
             defs {
                 linearGradient { id: "fcompwash", x1: "0", y1: "0", x2: "0", y2: "1",
-                    // Three stops. The rendered column comes out lumpy —
-                    // 85, 51, 85 down consecutive rows where the source
-                    // decays smoothly — and a clean two-stop white-to-black
-                    // ramp is the obvious fix, but measured it is three
-                    // levels worse across all three images. Left as it is
-                    // until the wash is understood rather than guessed at.
-                    stop { offset: "0", stop_color: "#e9e9e9", stop_opacity: "{wash}" }
-                    stop { offset: "0.55", stop_color: "#4a4a4a", stop_opacity: "{wash * 0.27}" }
-                    stop { offset: "1", stop_color: "#0a0a0a", stop_opacity: "0.008" }
+                    for (i, (at, hex, a)) in wash.iter().enumerate() {
+                        stop {
+                            key: "w{i}", offset: "{at}",
+                            stop_color: "{hex}", stop_opacity: "{a}",
+                        }
+                    }
                 }
             }
             rect { x: "0", y: "0", width: "{vw}", height: "{vh - 3.0}", fill: "url(#fcompwash)" }
-            rect { x: "0", y: "{vh - 2.0}", width: "{vw}", height: "1", fill: "#9a9a9a", fill_opacity: "0.345" }
-            rect { x: "0", y: "{vh - 1.0}", width: "{vw}", height: "1", fill: "#3a3a3a", fill_opacity: "0.094" }
+            // Pure black over pure white, both at low alpha — not the
+            // mid-greys these were. `#9a9a9a` at 0.345 composites 53
+            // levels light against the source's `#000000` at the same
+            // alpha, which is the single largest error in the family.
+            rect { x: "0", y: "{vh - 2.0}", width: "{vw}", height: "1", fill: "#000000", fill_opacity: "0.345" }
+            rect { x: "0", y: "{vh - 1.0}", width: "{vw}", height: "1", fill: "#ffffff", fill_opacity: "0.094" }
             path { d: "{glyph}", fill: "#ffffff", fill_opacity: "{ink}" }
         }
     }
@@ -2619,6 +2784,7 @@ pub fn TransportButton(props: TransportProps) -> Element {
     let t = Theme::default();
     let (vw, vh) = props.cell;
     let repeat = props.glyph == TransportGlyph::Repeat;
+    let h = t.chrome.hardware;
     let lit = props.on.then(|| props.glyph.lit(&t)).flatten();
 
     // The unlit face is nearly flat — 50 down to 47 over twenty rows —
@@ -2645,6 +2811,55 @@ pub fn TransportButton(props: TransportProps) -> Element {
     };
     let (face_top, face_bot) = (offset(face_top, shift), offset(face_bot, shift));
     let border = t.chrome.hardware_edge.shade(0.05);
+    // Record is the last button of the transport cluster, and its lit art
+    // caps the group: square on the left, rounded on the right, with the
+    // corners beyond it transparent. Play, pause and locked play do not
+    // do this — they are in the middle of the row — so it is per glyph
+    // rather than a property of being lit.
+    let end_cap = lit.is_some()
+        && matches!(
+            props.glyph,
+            TransportGlyph::Record | TransportGlyph::RecordItem | TransportGlyph::RecordLoop
+        );
+
+    // One plate layer: square on the left, rounded on the right by `cap`
+    // where this button ends the cluster. A clip-path round the whole
+    // group was the obvious way to do it and resvg dropped the group,
+    // plate and all; building the radius into each shape renders.
+    let cap = if end_cap { 3.5f32 } else { 0.0 };
+    let open_left = lit.is_some()
+        && matches!(
+            props.glyph,
+            TransportGlyph::RecordItem | TransportGlyph::RecordLoop
+        );
+    let plate = |x: f32, y: f32, h: f32| {
+        // Inset on the right by as much as on the left, which the first
+        // version forgot: every layer ran to the full width and each one
+        // overhung the border by a column.
+        let right = vw - x;
+        // Except on the left of the two that carry no border there: the
+        // lit `record_item` and `record_loop` run their face out to
+        // column 0, because the button to their left continues into
+        // them. Drawing the border there put a dark rule down the side —
+        // a hundred levels, every row, about a fifth of the image's error.
+        //
+        // Plain lit `record` is *not* one of them, despite capping the
+        // group on the right exactly as they do. Grouping it with them
+        // by end-cap alone made it worse by two.
+        let x = if open_left { (x - 1.0).max(0.0) } else { x };
+        if cap <= 0.0 {
+            return format!("M {x} {y} H {right} V {} H {x} Z", y + h);
+        }
+        let r = (cap - x).max(0.5);
+        format!(
+            "M {x} {y} H {} A {r} {r} 0 0 1 {right} {} V {} A {r} {r} 0 0 1 {} {} H {x} Z",
+            right - r,
+            y + r,
+            y + h - r,
+            right - r,
+            y + h,
+        )
+    };
 
     // The glyph reads against whatever is behind it.
     let ink = match (props.glyph, props.on) {
@@ -2659,6 +2874,16 @@ pub fn TransportButton(props: TransportProps) -> Element {
         (_, false) => t.chrome.hardware_mark.shade(0.32),
     };
 
+    // A lit ring throws a soft light inside itself: the plate reads
+    // #ff5f5f outside a lit record button and #ff7272 within its ring,
+    // which is white at an eighth over the red. The unlit variants differ
+    // by one level, so it is the lamp and not the moulding.
+    let halo = match (props.glyph, props.on) {
+        (TransportGlyph::Record | TransportGlyph::RecordLoop, true) => Some(3.0f32),
+        (TransportGlyph::RecordItem, true) => Some(6.0),
+        _ => None,
+    };
+
     // Traced boxes, all centred on (18, 13) of a 36x26 cell bar repeat,
     // which is centred on (16, 12) of its 32x24 one.
     // Repeat's glyph sits half a pixel above the centre of its cell —
@@ -2666,8 +2891,22 @@ pub fn TransportButton(props: TransportProps) -> Element {
     // Repeat's glyph is the one that is not centred in its cell: rows
     // 6..17 of 24 and columns 11..22 of 32, so half a pixel up and half
     // a pixel right of where the rest sit.
+    // Repeat's glyph is centred half a pixel right of its cell's middle
+    // and level with it: rows 6..17 of 24 and columns 11..22 of 32.
+    // Precomputed, because an rsx attribute takes an identifier or a
+    // simple expression — a call with arithmetic in its arguments parses
+    // but does not come out the other side.
+    let plate_border = plate(0.0, 1.0, vh - 2.0);
+    let plate_rim = plate(1.0, 2.0, vh - 4.0);
+    let plate_rim_bot = plate(1.0, vh - 3.0, 1.0);
+    // Inset from the rim on *both* axes. It had been inset only
+    // vertically, so the rim's bright left and right columns were painted
+    // straight over by the face — the source keeps a full-height column
+    // of `#7ed5fa` down each side of a lit button and this covered them.
+    let plate_face = plate(2.0, 3.0, vh - 6.0);
+
     let (cx, cy) = if repeat {
-        (vw * 0.5 + 0.5, vh * 0.5 - 0.5)
+        (vw * 0.5 + 0.5, vh * 0.5)
     } else {
         (vw * 0.5, vh * 0.5)
     };
@@ -2695,48 +2934,75 @@ pub fn TransportButton(props: TransportProps) -> Element {
         ),
         // A ring, and the same ring struck through or bracketed.
         TransportGlyph::Record => ring(cx, cy, 6.0, 3.0),
+        // A two-pixel band, not a four: outer 8 and inner 6, with an
+        // 8 by 4 bar through the middle. Read off the lit variant, where
+        // the white separates from the red cleanly — the band came out
+        // twice its width and the bar half its height.
         TransportGlyph::RecordItem => format!(
-            "{} M {} {} h 8 v 2.4 h -8 z",
-            ring(cx, cy, 8.0, 4.4),
+            "{} M {} {} h 8 v 4 h -8 z",
+            ring(cx, cy, 8.0, 6.0),
             cx - 4.0,
-            cy - 1.2
+            cy - 2.0
         ),
+        // The brackets have a top arm only, and it is chamfered rather
+        // than square: a one-pixel stem twelve rows tall with a triangle
+        // at its head running down and inward. Drawn with arms top *and*
+        // bottom — which is what `[o]` looks like, and what the icon reads
+        // as at a glance — it carried a whole flange the source does not.
         TransportGlyph::RecordLoop => format!(
-            "{} M {} {} h 4 v 1.6 h -2.4 v 8.8 h 2.4 v 1.6 h -4 z \
-             M {} {} h 4 v 12 h -4 v -1.6 h 2.4 v -8.8 h -2.4 z",
+            "{} M {} {} h 1.2 v 12 h -1.2 z M {} {} h 3.6 l -3.6 3.6 z \
+             M {} {} h 1.2 v 12 h -1.2 z M {} {} h -3.6 l 3.6 3.6 z",
             ring(cx, cy, 6.0, 3.0),
             cx - 10.0,
             cy - 6.0,
-            cx + 6.0,
+            cx - 10.0,
+            cy - 6.0,
+            cx + 8.8,
+            cy - 6.0,
+            cx + 10.0,
             cy - 6.0
         ),
-        // Two arrowheads; the arcs they cap are stroked separately.
+        // Two arrowheads. The bands they cap are stroked separately.
         //
-        // This is a *vertical* loop — one arrow over the top and one back
-        // under the bottom — not two arrows side by side. Drawn flat it
-        // read as a pair of horizontal arrows, which is a different
-        // symbol entirely.
+        // Traced off the lit variant, where the amber separates cleanly
+        // from the plate in the green channel. Each half is a band of
+        // about 135 degrees — not the half turn a first reading suggests
+        // — and the head sits at one end only: the upper band's is on the
+        // right pointing down, the lower band's on the left pointing up.
+        // Drawn as two symmetric arcs with heads laid over both ends it
+        // closed into a plain ring.
         //
-        // The source is not actually arcs. Read pixel by pixel each half
-        // is a hooked band — a straight run across the top with both ends
-        // turning down — closer to a bracket than to a circle, and its
-        // heads are cut into that band rather than added to it. An arc
-        // with heads laid over the ends gets the symbol right and its
-        // weight about a level light; sitting the heads *on* the ends
-        // instead closed the loop into a plain ring, which is worse. Left
-        // as the closer of the two until the band is traced properly.
+        // The band also widens where it meets its head, which a stroke of
+        // constant width cannot do — so the flare has to come from how far
+        // the head overlaps the band's end. Ten combinations of base width
+        // and reach were measured; this one wins by half a level over its
+        // nearest rival and by a full level over a head large enough to
+        // look right on its own.
         TransportGlyph::Repeat => format!(
             "M {} {} L {} {} L {} {} Z M {} {} L {} {} L {} {} Z",
-            cx + 1.9, cy - 2.9, cx + 6.3, cy - 2.9, cx + 4.1, cy + 1.1,
-            cx - 1.9, cy + 2.9, cx - 6.3, cy + 2.9, cx - 4.1, cy - 1.1
+            cx + 1.80, cy - 0.90, cx + 6.40, cy - 0.90, cx + 4.10, cy - 4.60,
+            cx - 1.80, cy + 0.90, cx - 6.40, cy + 0.90, cx - 4.10, cy + 4.60
         ),
         // A padlock beside the triangle.
+        //
+        // The shackle is a proper arch standing clear above the body, not
+        // a bump on top of it: five columns wide with a one-pixel wall,
+        // rising four rows from the body's shoulder. Drawn as a small arc
+        // tucked into the body it sat three rows too low and read as a
+        // smudge — the one part of this glyph that says "locked".
+        //
+        // Body x8..x14 and y12..y16 of a 36x26 cell; shackle x9..x13 from
+        // y8; triangle x19..x27 over y8..y17.
         TransportGlyph::PlaySync => format!(
-            "M {} {} h 7 v 5.5 h -7 z M {} {} a 2.2 2.2 0 0 1 4.4 0 v 1.6 \
-             h -1.4 v -1.6 a 0.9 0.9 0 0 0 -1.6 0 v 1.6 h -1.4 z \
+            "M {} {} h 7 v 5 h -7 z \
+             M {} {} V {} A 2.5 2.5 0 0 1 {} {} V {} H {} V {} \
+             A 1.5 1.5 0 0 0 {} {} V {} Z \
              M {} {} V {} L {} {} Z",
-            cx - 9.5, cy, cx - 8.2, cy,
-            cx + 1.0, cy - 5.0, cy + 5.0, cx + 8.5, cy
+            cx - 10.0, cy - 1.0,
+            cx - 9.0, cy - 1.0, cy - 2.5, cx - 4.0, cy - 2.5, cy - 1.0,
+            cx - 5.0, cy - 2.5,
+            cx - 8.0, cy - 2.5, cy - 1.0,
+            cx + 1.0, cy - 5.0, cy + 5.0, cx + 9.5, cy
         ),
     };
 
@@ -2747,6 +3013,27 @@ pub fn TransportButton(props: TransportProps) -> Element {
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
             defs {
+                if end_cap {
+                    clipPath { id: "trcap",
+                        path {
+                            d: "M 0 1 H {vw - 3.5} A 3.5 3.5 0 0 1 {vw} 4.5
+                                V {vh - 4.5} A 3.5 3.5 0 0 1 {vw - 3.5} {vh - 1.0}
+                                H 0 Z",
+                        }
+                    }
+                }
+                linearGradient { id: "trcycleedge", x1: "0", y1: "0", x2: "1", y2: "0",
+                    stop { offset: "0", stop_color: "#000000", stop_opacity: "0.15" }
+                    stop { offset: "0.62", stop_color: "#000000", stop_opacity: "0" }
+                }
+                linearGradient { id: "trcycle", x1: "0", y1: "0", x2: "0", y2: "1",
+                    // 34 at the top, up to 40 by a fifth of the way down,
+                    // back to 34 by four fifths and 29 at the foot.
+                    stop { offset: "0", stop_color: "{h.shade(-0.46).css()}" }
+                    stop { offset: "0.22", stop_color: "{h.shade(-0.37).css()}" }
+                    stop { offset: "0.83", stop_color: "{h.shade(-0.46).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(-0.54).css()}" }
+                }
                 linearGradient { id: "trface", x1: "0", y1: "0", x2: "0", y2: "1",
                     stop { offset: "0", stop_color: "{face_top.css()}" }
                     stop { offset: "1", stop_color: "{face_bot.css()}" }
@@ -2763,31 +3050,66 @@ pub fn TransportButton(props: TransportProps) -> Element {
                         stop { offset: "0.78", stop_color: "{b.centre.css()}" }
                         stop { offset: "1", stop_color: "{b.edge.css()}" }
                     }
+                    // The lit face is bevelled *across* as well as down —
+                    // 226 at each side column against 255 three columns
+                    // in, the same fall the vertical stops carry. Drawn
+                    // with the vertical ramp alone the button read as a
+                    // lit strip rather than a lit key.
+                    linearGradient { id: "trlitside", x1: "0", y1: "0", x2: "1", y2: "0",
+                        stop { offset: "0", stop_color: "#000000", stop_opacity: "0.114" }
+                        stop { offset: "{3.0 / vw}", stop_color: "#000000", stop_opacity: "0" }
+                        stop { offset: "{1.0 - 3.0 / vw}", stop_color: "#000000", stop_opacity: "0" }
+                        stop { offset: "1", stop_color: "#000000", stop_opacity: "0.114" }
+                    }
                 }
             }
-            rect {
-                x: "0", y: "1", width: "{vw}", height: "{vh - 2.0}",
-                fill: "{border.css()}",
+            if repeat {
+                // The cycle button is the left end of a pill, not a
+                // button in its own right: it fills its cell edge to edge
+                // with no border, no bevel row and no separator, because
+                // the readout well butts straight up against it and the
+                // two read as one shape. Given the standard transport
+                // plate it came out two rows short at the top and one at
+                // the bottom, sitting in the bar like a tile instead of
+                // running into its neighbour.
+                //
+                // Its three cells are also identical — the plate never
+                // lifts and the glyph never changes — so `at` does not
+                // reach it.
+                // Rounded on the left, square on the right: this is the
+                // *cap* of the pill, and the readout well continues it.
+                // Drawn as a plain rect it had no left edge at all — the
+                // one thing that tells you where the pill begins.
+                path {
+                    d: "M 4.2 0 H {vw} V {vh} H 4.2
+                        A 4.2 4.2 0 0 1 0 {vh - 4.2} V 4.2
+                        A 4.2 4.2 0 0 1 4.2 0 Z",
+                    fill: "url(#trcycle)",
+                }
+                // And an inner shadow down that edge: 34 at x0 against 40
+                // four columns in, which is a black wash at 0.15 fading
+                // out by x3.
+                path {
+                    d: "M 4.2 0 H 6 V {vh} H 4.2
+                        A 4.2 4.2 0 0 1 0 {vh - 4.2} V 4.2
+                        A 4.2 4.2 0 0 1 4.2 0 Z",
+                    fill: "url(#trcycleedge)",
+                }
+            } else {
+                path { d: "{plate_border}", fill: "{border.css()}" }
             }
-            if let Some(b) = &lit {
+            if repeat {
+            } else if let Some(b) = &lit {
                 // A lit plate is a bevel, not a wash. Down its centre the
                 // colour runs #7fd6fb, #369de1, up to #4dbdfb through the
                 // middle, back down to #369de1 and out on #47b8fb: a
                 // bright rim top and bottom with the face inset dark
                 // against it. Painted as one flat field it read as a
                 // sticker rather than a lit button.
-                rect {
-                    x: "1", y: "2", width: "{vw - 2.0}", height: "{vh - 4.0}",
-                    fill: "{b.rim.css()}",
-                }
-                rect {
-                    x: "1", y: "{vh - 3.0}", width: "{vw - 2.0}", height: "1",
-                    fill: "{b.rim_bot.css()}",
-                }
-                rect {
-                    x: "1", y: "3", width: "{vw - 2.0}", height: "{vh - 6.0}",
-                    fill: "url(#trlit)",
-                }
+                path { d: "{plate_rim}", fill: "{b.rim.css()}" }
+                path { d: "{plate_rim_bot}", fill: "{b.rim_bot.css()}" }
+                path { d: "{plate_face}", fill: "url(#trlit)" }
+                path { d: "{plate_face}", fill: "url(#trlitside)" }
             } else {
                 // One lighter row under the top border, which every
                 // ReaperTips control has.
@@ -2802,17 +3124,31 @@ pub fn TransportButton(props: TransportProps) -> Element {
             }
             // The bar's own separator, not the button's edge — it runs the
             // full width where the border is inset by a pixel.
-            rect {
-                x: "0", y: "{vh - 1.0}", width: "{vw}", height: "1",
-                fill: "{t.chrome.hardware.shade(-0.11).css()}",
+            if !repeat {
+                rect {
+                    x: "0", y: "{vh - 1.0}", width: "{vw}", height: "1",
+                    fill: "{t.chrome.hardware.shade(-0.11).css()}",
+                }
             }
             if repeat {
                 path {
-                    d: "M {cx - 4.2} {cy - 0.9} A 4.3 4.3 0 0 1 {cx + 4.2} {cy - 0.9}
-                        M {cx + 4.2} {cy + 0.9} A 4.3 4.3 0 0 1 {cx - 4.2} {cy + 0.9}",
+                    // 195 to 330 degrees over the top, and the same
+                    // turned through half a circle underneath.
+                    d: "M {cx - 4.51} {cy - 1.64} A 4.8 4.8 0 0 1 {cx + 3.93} {cy - 2.75}
+                        M {cx + 4.51} {cy + 1.64} A 4.8 4.8 0 0 1 {cx - 3.93} {cy + 2.75}",
                     fill: "none",
                     stroke: "{ink.css()}",
+                    // 2.2 measured against 2.5, 2.8 and 3.1:
+                    // the source's band looks thicker than it is
+                    // because its ends are squared off, not because
+                    // the stroke is wide.
                     stroke_width: "2.2",
+                }
+            }
+            if let Some(r) = halo {
+                circle {
+                    cx: "{cx}", cy: "{cy}", r: "{r}",
+                    fill: "#ffffff", fill_opacity: "0.12",
                 }
             }
             path { d: "{d}", fill: "{ink.css()}", fill_rule: "evenodd" }
@@ -2844,6 +3180,1300 @@ fn ring(cx: f32, cy: f32, outer: f32, inner: f32) -> String {
     )
 }
 
+// ── transport bar: the panels behind the buttons ────────────────────────
+
+/// Which piece of transport furniture to draw.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum TransportPart {
+    /// The bar itself — a rounded panel the buttons sit on.
+    #[default]
+    Panel,
+    /// The readout's recessed well.
+    Status,
+    /// The same well when the engine is in trouble: a flat red.
+    StatusError,
+    /// The tempo readout's pair of wells.
+    Bpm,
+    /// The play-rate slider's groove.
+    SpeedTrack,
+    /// The play-rate slider's thumb.
+    SpeedThumb,
+    /// The ring around the play-rate knob.
+    KnobRing,
+    /// The timebase toggle showing beats — a barrel.
+    TimebaseBeat,
+    /// The timebase toggle showing time — a clock.
+    TimebaseTime,
+    /// Three of REAPER's images are wholly transparent. Drawing nothing
+    /// is the faithful answer, and saying so here is better than leaving
+    /// them traced and wondering later why they trace to nothing.
+    Empty,
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct TransportPartProps {
+    #[props(default)]
+    pub part: TransportPart,
+    #[props(default = (200.0, 67.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The transport bar's panels, wells and slider parts.
+///
+/// These are nine-slices: REAPER stretches them, so what matters is the
+/// edges and the first row or two inside them, not the middle. The panel
+/// is the clearest case — a two-row dark band, a two-row bevel, then a
+/// face that falls three levels over sixty rows and would be flat if the
+/// bevel had not been mistaken for its top.
+#[component]
+pub fn TransportPanel(props: TransportPartProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    let h = t.chrome.hardware;
+    let tb_plate = if props.at == Interaction::Hover {
+        h.shade(0.03)
+    } else {
+        h.shade(-0.19)
+    }
+    .css();
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            defs {
+                linearGradient { id: "trpanel", x1: "0", y1: "0", x2: "0", y2: "1",
+                    // The bevel is the first two rows, not the top of the
+                    // face: #4b4b4b for two rows, then #414141 settling to
+                    // #3e3e3e over the remaining sixty.
+                    stop { offset: "0", stop_color: "{h.shade(0.19).css()}" }
+                    stop { offset: "0.045", stop_color: "{h.shade(0.03).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(-0.02).css()}" }
+                }
+                linearGradient { id: "trwell", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{h.shade(-0.44).css()}" }
+                    stop { offset: "0.12", stop_color: "{h.shade(-0.37).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(-0.40).css()}" }
+                }
+                linearGradient { id: "trknobband", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{h.shade(0.58).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(0.26).css()}" }
+                }
+                linearGradient { id: "trknobwell", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{h.shade(-0.13).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(-0.25).css()}" }
+                }
+                linearGradient { id: "trthumb", x1: "0", y1: "0", x2: "0", y2: "1",
+                    // 167 at the top, dipping to 143 a quarter of the way
+                    // down, then back to 175 — a shallow trough, not the
+                    // bright-dark-bright of a moulded cap. Read as the
+                    // latter it averaged twenty levels light.
+                    // A bevel row at 167, then 136 climbing steadily to
+                    // 175 at the foot. Read as a trough — bright, dark,
+                    // bright — it came out twenty levels light and lit
+                    // from the wrong end.
+                    stop { offset: "0", stop_color: "{h.shade(0.54).css()}" }
+                    stop { offset: "0.09", stop_color: "{h.shade(0.38).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(0.58).css()}" }
+                }
+            }
+            match props.part {
+                TransportPart::Empty => rsx! {},
+                TransportPart::Panel => rsx! {
+                    // Guides live at x0 and y0, so the panel starts at 1.
+                    rect {
+                        x: "1", y: "1", width: "{vw - 2.0}", height: "{vh - 2.0}",
+                        rx: "5",
+                        fill: "{h.shade(-0.27).css()}",
+                    }
+                    rect {
+                        x: "1", y: "3", width: "{vw - 2.0}", height: "{vh - 4.0}",
+                        rx: "4",
+                        fill: "url(#trpanel)",
+                    }
+                },
+                TransportPart::Status => rsx! {
+                    // A well, not a panel: lit down its left and top-inner
+                    // and darker along its right and bottom, which is what
+                    // makes it read as cut into the bar.
+                    rect {
+                        x: "1", y: "1", width: "{vw - 2.0}", height: "{vh - 2.0}",
+                        rx: "1.5",
+                        fill: "{h.shade(-0.48).css()}",
+                    }
+                    rect {
+                        x: "1", y: "1", width: "{vw - 3.0}", height: "{vh - 3.0}",
+                        rx: "1.5",
+                        fill: "url(#trwell)",
+                    }
+                    // The lit column runs rows 5 to 22 and stops: the
+                    // last three rows are the well's dark floor, and
+                    // taking the highlight through them put a bright line
+                    // down the whole seam where the source ends it.
+                    rect {
+                        x: "1", y: "5", width: "1", height: "18",
+                        fill: "{h.shade(0.00).css()}",
+                    }
+                },
+                TransportPart::StatusError => rsx! {
+                    rect {
+                        x: "0", y: "0", width: "{vw}", height: "{vh}",
+                        fill: "{t.signal.mute.shade(-0.36).css()}",
+                    }
+                },
+                TransportPart::Bpm => rsx! {
+                    // Two wells side by side in the right two thirds of
+                    // the cell — x32..x61 and x62..x89 of 92, rows 3..22 —
+                    // with the left one lighter. The left third is empty;
+                    // spreading them across the whole cell put twenty
+                    // columns of well where the source has nothing.
+                    rect {
+                        x: "32", y: "3", width: "30", height: "20",
+                        fill: "{h.shade(0.00).css()}",
+                    }
+                    rect {
+                        x: "33", y: "4", width: "28", height: "18",
+                        fill: "{h.shade(0.03).css()}",
+                    }
+                    rect {
+                        x: "62", y: "3", width: "28", height: "20",
+                        fill: "{h.shade(-0.19).css()}",
+                    }
+                },
+                TransportPart::SpeedTrack => rsx! {
+                    // Two rows of groove in a 21-row cell, the rest guide.
+                    // The same shape as the mixer's fader trough, and the
+                    // same reason: REAPER stretches the middle.
+                    rect {
+                        x: "2", y: "11", width: "1", height: "2",
+                        fill: "{h.shade(-0.32).css()}",
+                    }
+                },
+                TransportPart::SpeedThumb => rsx! {
+                    // x5..x16, y5..y21 of a 22x28 cell — narrower and
+                    // taller than a proportional guess makes it.
+                    // A soft black surround, not a border: the frame
+                    // columns read alpha 51 with 16 outside them, so it
+                    // is a shadow at a fifth strength over two pixels.
+                    // Drawn solid it was the heaviest thing in the cell.
+                    rect {
+                        x: "4", y: "4", width: "14", height: "18", rx: "2",
+                        fill: "#000000", fill_opacity: "0.07",
+                    }
+                    rect {
+                        x: "5", y: "5", width: "12", height: "16", rx: "1.5",
+                        fill: "#000000", fill_opacity: "0.20",
+                    }
+                    rect {
+                        x: "6", y: "6", width: "10", height: "14", rx: "1",
+                        fill: "url(#trthumb)",
+                    }
+                },
+                TransportPart::TimebaseBeat | TransportPart::TimebaseTime => rsx! {
+                    // No plate at rest; hover and pressed each get one,
+                    // and they are the only thing the three cells differ
+                    // by. Both glyphs are 11 by 11 at #adadad, centred on
+                    // (16, 10) of a 33-wide cell.
+                    if props.at != Interaction::Normal {
+                        rect {
+                            x: "0", y: "1", width: "{vw}", height: "{vh - 2.0}",
+                            rx: "3",
+                            fill: "{tb_plate}",
+                        }
+                    }
+                    if props.part == TransportPart::TimebaseTime {
+                        circle {
+                            cx: "16.5", cy: "10.5", r: "5",
+                            fill: "none",
+                            stroke: "{h.shade(0.58).css()}",
+                            stroke_width: "1.2",
+                        }
+                        path {
+                            d: "M 16.5 7.3 V 10.9 H 19.2",
+                            fill: "none",
+                            stroke: "{h.shade(0.58).css()}",
+                            stroke_width: "1.2",
+                        }
+                    } else {
+                        // A barrel: a filled cap top and bottom with four
+                        // staves between them, which is why rows 10 to 12
+                        // show only four columns of ink.
+                        g { fill: "{h.shade(0.58).css()}",
+                            ellipse { cx: "16.5", cy: "7.6", rx: "5.5", ry: "2.5" }
+                            ellipse { cx: "16.5", cy: "14.3", rx: "5.5", ry: "2.0" }
+                            for (i, x) in [11.5f32, 14.5, 18.5, 21.5].iter().enumerate() {
+                                rect {
+                                    key: "{i}",
+                                    x: "{x - 0.55}", y: "7",
+                                    width: "1.1", height: "7",
+                                }
+                            }
+                        }
+                    }
+                },
+                TransportPart::KnobRing => rsx! {
+                    // Centred half a pixel below the middle of its cell,
+                    // which is what a 34-row cell holding a 27-row ring
+                    // works out to.
+                    // A wide bright band round a dark well, both lit from
+                    // above: the band runs 174 down to 113 over the ring's
+                    // height and the interior 55 down to 47. Drawn as a
+                    // thin flat stroke it was a third of the width and a
+                    // single value.
+                    //
+                    // The band is a filled annulus rather than a stroke
+                    // because resvg flattens a gradient on a stroke to its
+                    // average — the same reason the record ring is one.
+                    circle {
+                        cx: "15.9", cy: "15.4", r: "11.0",
+                        fill: "url(#trknobwell)",
+                    }
+                    path {
+                        d: "{ring(15.9, 15.4, 12.2, 9.9)}",
+                        fill: "url(#trknobband)",
+                        fill_rule: "evenodd",
+                    }
+                },
+            }
+        }
+    }
+}
+
+// ── panel sliders: the horizontal ones ──────────────────────────────────
+
+/// Which part of a track-panel slider to draw.
+///
+/// The mixer's volume fader runs vertically and has its own components.
+/// Everything here runs across: the track panel's volume, and both panels'
+/// pan and width.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SliderPart {
+    /// The track panel's volume groove — a flat plate with a centre tick.
+    #[default]
+    VolumeTrough,
+    /// Its cap, which is the mixer's fader cap turned on its side.
+    VolumeThumb,
+    /// The pan and width groove — a black slot with rounded ends.
+    PanTrough,
+    /// Their cap: small, bright, with a dark line down the middle.
+    PanThumb,
+    /// The mixer's folder mark — a folder on its own, no plus or arrow
+    /// beside it, at half black over the strip.
+    MixerFolder,
+    /// The mixer's "last in folder" mark: a wedge in the bottom-right
+    /// corner, where the track panel puts its on the left.
+    MixerFolderLast,
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SliderProps {
+    #[props(default)]
+    pub part: SliderPart,
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
+    /// Rows to shift the pan cap down. `tcp_widththumb` is the same
+    /// drawing as the other three thumbs one row lower — 164 pixels
+    /// different and every one of them that offset.
+    #[props(default = 0.0)]
+    pub drop: f32,
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// A track-panel slider part.
+///
+/// The troughs are nine-slices REAPER stretches along their length, so what
+/// is drawn here is the ends and one row of the middle — the same rule the
+/// mixer's fader trough follows, and for the same reason: art in the part
+/// that stretches gets stretched.
+#[component]
+pub fn PanelSlider(props: SliderProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.art.source;
+    let h = t.chrome.hardware;
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            defs {
+                // Across, not down: this cap lies on its side, so its
+                // moulding runs left to right with a seam at the middle.
+                linearGradient { id: "slthumb", x1: "0", y1: "0", x2: "1", y2: "0",
+                    stop { offset: "0", stop_color: "{h.shade(0.40).css()}" }
+                    stop { offset: "0.22", stop_color: "{h.shade(0.60).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(0.41).css()}" }
+                }
+                // The pan cap's face and its two edge columns. Both carry
+                // their shoulder rows in the same gradient, as a pair of
+                // stops a fiftieth apart — the top and bottom rows of the
+                // cap are sixty levels down from the face, not a ramp
+                // into it.
+                linearGradient { id: "slpan", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{h.shade(-0.095).css()}" }
+                    stop { offset: "0.124", stop_color: "{h.shade(-0.095).css()}" }
+                    stop { offset: "0.126", stop_color: "{h.shade(0.641).css()}" }
+                    stop { offset: "0.874", stop_color: "{h.shade(0.682).css()}" }
+                    stop { offset: "0.876", stop_color: "{h.shade(-0.079).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(-0.079).css()}" }
+                }
+                linearGradient { id: "slpanedge", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{h.shade(-0.365).css()}" }
+                    stop { offset: "0.124", stop_color: "{h.shade(-0.365).css()}" }
+                    stop { offset: "0.126", stop_color: "{h.shade(0.406).css()}" }
+                    stop { offset: "0.874", stop_color: "{h.shade(0.427).css()}" }
+                    stop { offset: "0.876", stop_color: "{h.shade(-0.365).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(-0.365).css()}" }
+                }
+                radialGradient { id: "slpanhalo",
+                    cx: "6.5", cy: "12.5", r: "8.4",
+                    gradient_units: "userSpaceOnUse",
+                    stop { offset: "0.62", stop_color: "#000000", stop_opacity: "0.30" }
+                    stop { offset: "1", stop_color: "#000000", stop_opacity: "0" }
+                }
+            }
+            match props.part {
+                SliderPart::VolumeTrough => rsx! {
+                    rect {
+                        x: "1", y: "1", width: "{vw - 2.0}", height: "{vh - 2.0}",
+                        fill: "{h.shade(-0.40).css()}",
+                    }
+                    // The centre tick, two pixels of it, in the one row
+                    // REAPER does not stretch.
+                    rect {
+                        x: "6", y: "11", width: "2", height: "1",
+                        fill: "#000000",
+                    }
+                },
+                SliderPart::VolumeThumb => rsx! {
+                    rect {
+                        x: "5", y: "6", width: "17", height: "16", rx: "1",
+                        fill: "{t.chrome.hardware_edge.shade(-0.35).css()}",
+                    }
+                    rect {
+                        x: "6", y: "7", width: "15", height: "14",
+                        fill: "url(#slthumb)",
+                    }
+                    // The seam, one column, a little left of centre.
+                    rect {
+                        x: "13", y: "7", width: "1", height: "14",
+                        fill: "{t.chrome.hardware_edge.shade(-0.35).css()}",
+                    }
+                },
+                SliderPart::PanTrough => rsx! {
+                    // A black slot with rounded ends, inset a pixel all
+                    // round: rows 2..8 of eleven, whatever the length.
+                    rect {
+                        x: "1", y: "2", width: "{vw - 2.0}", height: "7",
+                        rx: "3.5",
+                        fill: "#000000",
+                    }
+                },
+                SliderPart::MixerFolder => rsx! {
+                    // A tab and a body, x5..x13 and y6..y12, at half
+                    // black. The track panel draws the same folder beside
+                    // two other marks; the mixer draws it alone.
+                    g { fill: "#000000", fill_opacity: "0.50",
+                        path { d: "M 5 6 H 9 V 8 H 5 Z" }
+                        rect { x: "5", y: "8", width: "9", height: "5" }
+                    }
+                },
+                SliderPart::MixerFolderLast => rsx! {
+                    // A right-angled wedge filling the bottom-right
+                    // corner, hypotenuse running from (11, 21) up to
+                    // (21, 11).
+                    path {
+                        d: "M 21 10.5 V 21 H 10.5 Z",
+                        fill: "#000000",
+                    }
+                },
+                SliderPart::PanThumb => rsx! {
+                    // A bright cap with a soft shadow round it — not the
+                    // marker-with-a-tapering-tail it had been drawn as.
+                    // The tail was rows 15 to 20 read as opaque geometry;
+                    // they are black at alpha 0.42 falling to 0.05, which
+                    // is a shadow, and rows 5 and 6 are the same thing
+                    // above.
+                    //
+                    // Left as a tail *and* squeezed into a third of its
+                    // width by `states`, this was the worst image in the
+                    // set at 28 mean levels.
+                    g { transform: "translate(0 {props.drop})",
+                        ellipse { cx: "6.5", cy: "12.5", rx: "6.4", ry: "8.4",
+                            fill: "url(#slpanhalo)" }
+                        rect { x: "0", y: "7", width: "13", height: "8",
+                            fill: "#000000", fill_opacity: "0.07" }
+                        rect { x: "1", y: "7", width: "11", height: "8",
+                            fill: "{h.shade(-0.90).css()}", fill_opacity: "0.81" }
+                        rect { x: "2", y: "7", width: "9", height: "8",
+                            fill: "url(#slpanedge)" }
+                        rect { x: "3", y: "7", width: "7", height: "8",
+                            fill: "url(#slpan)" }
+                        // The seam, dead centre, running the cap's full
+                        // height including both shoulder rows.
+                        rect { x: "6", y: "7", width: "1", height: "8",
+                            fill: "{h.shade(-0.683).css()}" }
+                    }
+                },
+            }
+        }
+    }
+}
+
+// ── panel plates: the nine-slices behind everything ─────────────────────
+
+/// One horizontal band of a plate: `(y, height, fill, alpha)`.
+///
+/// Every background in the mixer, track panel and envelope panel is a
+/// stack of these — a few rows of one colour over a few rows of another,
+/// which REAPER stretches vertically and horizontally to fill whatever it
+/// is behind. None of them is a gradient; they are all flat bands, and the
+/// ones that look like gradients are two bands a few levels apart.
+pub type Band = (f32, f32, Color, f32);
+
+/// A vertical mark laid over the bands: `(x, width, y, height, fill)`.
+///
+/// Bands alone cannot say "and there is an accent bar down the right-hand
+/// edge", which is exactly what marks the selected envelope panel — two
+/// columns of `#46b9fe` between two of `#242424`, running the body's
+/// height and stopping short of the separator row. Read as a band-only
+/// plate that stripe simply vanished, and with it the only thing on the
+/// image that says the panel is selected at all.
+pub type Stripe = (f32, f32, f32, f32, Color);
+
+#[derive(Props, Clone, PartialEq)]
+pub struct PlateProps {
+    /// Bands, top to bottom, in cell rows.
+    pub bands: Vec<Band>,
+    /// Vertical marks drawn over the bands. Empty for all but one plate.
+    #[props(default)]
+    pub stripes: Vec<Stripe>,
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
+    /// Columns of margin, left and right. Asymmetric because some of
+    /// these plates are: the mixer's selected icon background leaves one
+    /// column for a rule on the left and one bare column on the right.
+    #[props(default = (0.0, 0.0))]
+    pub inset: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// A panel background.
+///
+/// Drawing these as components rather than shipping the bitmaps is what
+/// lets the panel follow the palette: every colour below is a shade of the
+/// theme's `hardware` grey, and the measured value it came from is written
+/// beside it in the table that feeds this.
+#[component]
+pub fn PanelPlate(props: PlateProps) -> Element {
+    let (vw, vh) = props.art.source;
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            for (i, band) in props.bands.iter().enumerate() {
+                rect {
+                    key: "{i}",
+                    x: "{props.inset.0}", y: "{band.0}",
+                    width: "{vw - props.inset.0 - props.inset.1}", height: "{band.1}",
+                    fill: "{band.2.css()}",
+                    fill_opacity: "{band.3}",
+                }
+            }
+            for (i, s) in props.stripes.iter().enumerate() {
+                rect {
+                    key: "s{i}",
+                    x: "{s.0}", y: "{s.2}", width: "{s.1}", height: "{s.3}",
+                    fill: "{s.4.css()}",
+                }
+            }
+        }
+    }
+}
+
+// ── list rows: the FX and send lists ────────────────────────────────────
+
+/// One pill of a list strip: `(top, bottom, alpha)`.
+///
+/// Flat where top and bottom are equal, which most of them are — only the
+/// FX list's normal state carries a gradient.
+pub type ListPill = (Color, Color, f32);
+
+#[derive(Props, Clone, PartialEq)]
+pub struct ListStripProps {
+    /// The three pills, top to bottom: normal, hover, pressed.
+    pub pills: Vec<ListPill>,
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
+    /// First pill's top row, and the pitch between them.
+    #[props(default = (2.0, 17.0))]
+    pub rows: (f32, f32),
+    /// Pill height.
+    #[props(default = 15.0)]
+    pub pill: f32,
+    /// Columns of margin each side. The FX list insets by one and the
+    /// send list does not, which is the sort of thing that only shows up
+    /// as a whole family scoring 0.95 when it had been scoring 1.0.
+    #[props(default = 1.0)]
+    pub inset: f32,
+    /// A line along each pill's foot — the MIDI hardware send's blue.
+    #[props(default)]
+    pub edge: Option<Color>,
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// A list strip — three states stacked *vertically*.
+///
+/// Which is the thing to know about these: every other sprite in this
+/// theme lays its states out side by side, and the cell detector only
+/// looks for horizontal periods, so it reports one cell of the full width
+/// and is right to. The three pills are one drawing.
+#[component]
+pub fn ListStrip(props: ListStripProps) -> Element {
+    let (vw, vh) = props.art.source;
+    let (top, pitch) = props.rows;
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            defs {
+                for (i, pill) in props.pills.iter().enumerate() {
+                    linearGradient { key: "g{i}", id: "pill{i}",
+                        x1: "0", y1: "0", x2: "0", y2: "1",
+                        stop { offset: "0", stop_color: "{pill.0.css()}" }
+                        stop { offset: "1", stop_color: "{pill.1.css()}" }
+                    }
+                }
+            }
+            for (i, pill) in props.pills.iter().enumerate() {
+                g { key: "{i}",
+                    rect {
+                        x: "{props.inset}", y: "{top + pitch * i as f32}",
+                        width: "{vw - props.inset * 2.0}", height: "{props.pill}",
+                        rx: "5",
+                        fill: "url(#pill{i})",
+                        fill_opacity: "{pill.2}",
+                    }
+                    if let Some(edge) = props.edge {
+                        rect {
+                            x: "{props.inset}",
+                            y: "{top + pitch * i as f32 + props.pill - 1.0}",
+                            width: "{vw - props.inset * 2.0}", height: "1",
+                            rx: "0.5",
+                            fill: "{edge.css()}",
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── envelope panel ──────────────────────────────────────────────────────
+//
+// The envelope panel's buttons share a habit worth stating once: **their
+// pressed cell is their normal cell.** Every one of `arm`, `bypass`,
+// `hide` and the two lit plates is byte-identical in cells 0 and 2, so
+// only hover moves. The unlit `learn` and `parammod` are the exception —
+// pressed there gains a fill their normal state does not have — which is
+// why `at` is read per control rather than through the shared `ink`.
+
+/// The mark on an envelope-panel plate button.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum EnvcpGlyph {
+    /// Parameter learn — a thick ring cut open across the lower left.
+    #[default]
+    Learn,
+    /// Parameter modulation — one period of a wave.
+    ParamMod,
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct EnvcpPlateProps {
+    #[props(default)]
+    pub glyph: EnvcpGlyph,
+    /// Lit: the mark and the tab go accent, and the plate gains a fill.
+    #[props(default)]
+    pub lit: bool,
+    #[props(default = (30.0, 20.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// A plate button on the envelope panel — learn and parameter-modulation.
+///
+/// One drawing with two marks. The plate is a 1px rounded outline with a
+/// tab hanging off the top edge, and the *unlit normal* state is the only
+/// one with no fill at all: it reads as an outline over whatever the
+/// panel behind it is, which is why cell 0 of `envcp_learn` is 362 pixels
+/// of nothing and cell 2 of the same image is 350 pixels of `#2f2f2f`.
+#[component]
+pub fn EnvcpPlate(props: EnvcpPlateProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    let mark = t.chrome.hardware_mark;
+
+    // Measured per cell rather than derived: the two toggle states darken
+    // on press in opposite directions. Unlit goes transparent → #3a3a3a →
+    // #2f2f2f; lit goes #2d2d2d → #373737 → #2d2d2d.
+    let fill = match (props.lit, props.at) {
+        (false, Interaction::Normal) => None,
+        (false, Interaction::Hover) => Some(t.chrome.hardware.shade(-0.086)),
+        (false, Interaction::Pressed) => Some(t.chrome.hardware.shade(-0.254)),
+        (true, Interaction::Hover) => Some(t.chrome.hardware.shade(-0.127)),
+        (true, _) => Some(t.chrome.hardware.shade(-0.286)),
+    };
+    let hovered = props.at == Interaction::Hover;
+    // The outline lifts a few levels under the pointer and nowhere else.
+    let edge = if hovered {
+        t.chrome.hardware_edge.shade(0.032)
+    } else {
+        t.chrome.hardware_edge.shade(0.021)
+    };
+    let (tab, ink) = match (props.lit, hovered) {
+        (true, false) => (t.chrome.accent, t.chrome.accent),
+        (true, true) => (offset(t.chrome.accent, 15.0), offset(t.chrome.accent, 15.0)),
+        (false, false) => (mark.shade(-0.049), mark.shade(-0.068)),
+        (false, true) => (mark.shade(0.161), mark.shade(0.129)),
+    };
+    // Learn is a filled shape, ParamMod a stroked one — flat in both
+    // cases, which is the only reason the stroke is safe here: resvg
+    // averages a gradient on one away.
+    let learn = props.glyph == EnvcpGlyph::Learn;
+    let glyph_fill = if learn { ink.css() } else { "none".to_string() };
+    let glyph_stroke = if learn { 0.0f32 } else { 1.75 };
+    let plate_fill = fill.map(|c| c.css()).unwrap_or_else(|| "none".to_string());
+    let path = match props.glyph {
+        // Not a ring: a solid disc of r 4.90 about (15, 11) with a
+        // diagonal slot knocked out of it, running from near the middle
+        // down to the lower-left rim. Read as a ring first, and drawn
+        // that way it came out a blank blob — a ring's hole and a slot
+        // are the same few dark pixels at this size, and only where they
+        // *stop* tells them apart.
+        //
+        // The slot measures as a round-capped stroke rather than the
+        // arrow it looks like: its width runs 1.9, 3.5, 3.6, 3.3, 1.9
+        // down its length, widest in the middle. An arrowhead would put
+        // the widest part at the tip. So it is drawn as the stadium a
+        // 2.9-wide round-capped line sweeps, spelled out as arcs because
+        // the shape has to be knocked out of the disc by even-odd rather
+        // than painted over it — the plate behind is transparent in the
+        // resting state, so there is no colour to paint the notch in.
+        EnvcpGlyph::Learn => {
+            "M 10.1 11 A 4.9 4.9 0 1 0 19.9 11 A 4.9 4.9 0 1 0 10.1 11 Z \
+             M 13.729 9.745 A 1.45 1.45 0 0 1 16.071 11.455 \
+             L 13.371 15.155 A 1.45 1.45 0 0 1 11.029 13.445 Z"
+        }
+        // One period, ending short of the extremes at both ends: it
+        // leaves (8.1, 12.6) climbing, peaks at (12.0, 7.0), crosses at
+        // (14.7, 11.0), troughs at (17.9, 14.8) and stops at (21.9, 9.4)
+        // still climbing. Read off the three near-vertical strands the
+        // middle rows show, where the curve's centre is legible to a
+        // tenth of a pixel, and the horizontal runs at the peak and
+        // trough. The control points are then solved so each segment's
+        // midpoint lands on the measured extreme rather than eyeballed —
+        // eyeballing put the peak a pixel and a bit left and cost more
+        // than every other error in this glyph combined.
+        EnvcpGlyph::ParamMod => {
+            "M 8.1 12.6 C 10.4 5.4 14 5.4 14.7 11 C 15.4 16.6 20.13 16.07 21.9 9.4"
+        }
+    };
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            rect {
+                x: "0.5", y: "0.5", width: "{vw - 1.0}", height: "{vh - 1.0}",
+                rx: "4.5",
+                fill: "{plate_fill}",
+                stroke: "{edge.css()}", stroke_width: "1",
+            }
+            // The tab: two rows tall, and a pixel narrower at its foot
+            // than at its head. Drawn as the trapezoid it measures as
+            // rather than the arc it probably wants to be — at two pixels
+            // the difference is under a tenth of one.
+            path {
+                d: "M 8 1 H 22 L 20 3 H 10 Z",
+                fill: "{tab.css()}",
+            }
+            path {
+                d: "{path}",
+                fill: "{glyph_fill}",
+                fill_rule: "evenodd",
+                stroke: "{ink.css()}",
+                stroke_width: "{glyph_stroke}",
+                stroke_linecap: "round",
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct EnvcpOptionsProps {
+    #[props(default = (36.0, 20.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The envelope panel's options button — a gear and a drop caret.
+///
+/// Its plate is not the outlined one the other two use: it is a black
+/// scrim at a fifth opacity with a slightly heavier rim, so it darkens
+/// whatever is behind it instead of covering it.
+#[component]
+pub fn EnvcpOptionsButton(props: EnvcpOptionsProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    // The source prints `#b7b7b7` at alpha 0.79 — *instead of* the scrim,
+    // not on top of it. Painted over a fifth of black the same values
+    // composite to `#a5a5a5` at 0.84, which is six levels dark across the
+    // whole mark and was most of this image's error. So the paint is
+    // pre-compensated: lighter and less opaque, chosen to land on the
+    // source's composite rather than to equal its nominal colour.
+    let ink = match props.at {
+        Interaction::Hover => t.chrome.hardware_mark.shade(0.753),
+        _ => t.chrome.hardware_mark.shade(0.366),
+    };
+    // A *six*-tooth gear, which is the whole finding here. Drawn with
+    // eight it painted a tooth at three and nine o'clock — where the
+    // source's widest rows are 4.7 from the middle, a valley — and left
+    // the real teeth at roughly ±68° unpainted. The difference is 144
+    // levels either side and reads, at a glance, as the gear simply being
+    // wrong.
+    //
+    // The rest is measured: teeth reach exactly 6.0 (the mark runs y 4..16
+    // and x 6..18 about (12, 10)), the root sits at 4.7, and the hub is
+    // 2.05 — nearly half the root, much wider than a gear icon usually
+    // draws it.
+    let cx = 12.0f32;
+    let cy = 10.0f32;
+    let teeth: Vec<(f32, f32, f32)> = (0..6)
+        .map(|i| {
+            let a = std::f32::consts::PI / 3.0 * i as f32;
+            (cx + 4.68 * a.sin(), cy - 4.68 * a.cos(), a.to_degrees())
+        })
+        .collect();
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            // The scrim fills the cell edge to edge — it does not sit
+            // inset by half a pixel, which is what a single stroked rect
+            // gives you and what made the whole perimeter a shade light.
+            //
+            // Its rim is barely a rim, and it *fades*: 0.251 at the
+            // outermost row, 0.224 at the next, 0.20 from there in. Alpha
+            // falling inward cannot be stacked layers of black — more
+            // black only ever adds — so it is the base plus two hairlines
+            // carrying the difference.
+            rect {
+                x: "0", y: "0", width: "{vw}", height: "{vh}", rx: "2.8",
+                fill: "#000000", fill_opacity: "0.20",
+            }
+            rect {
+                x: "0.5", y: "0.5", width: "{vw - 1.0}", height: "{vh - 1.0}",
+                rx: "2.4", fill: "none",
+                stroke: "#000000", stroke_opacity: "0.064", stroke_width: "1",
+            }
+            rect {
+                x: "1.5", y: "1.5", width: "{vw - 3.0}", height: "{vh - 3.0}",
+                rx: "1.8", fill: "none",
+                stroke: "#000000", stroke_opacity: "0.030", stroke_width: "1",
+            }
+            g { fill: "{ink.css()}", fill_opacity: "0.74",
+                for (i, (tx, ty, deg)) in teeth.iter().enumerate() {
+                    rect {
+                        key: "t{i}",
+                        x: "{tx - 1.575}", y: "{ty - 1.4}",
+                        width: "3.15", height: "2.8", rx: "0.4",
+                        transform: "rotate({deg} {tx} {ty})",
+                    }
+                }
+                path { d: "{ring(cx, cy, 4.35, 2.05)}", fill_rule: "evenodd" }
+                // The caret, which is a separate mark: it says the button
+                // opens a menu, and it sits clear of the gear's teeth.
+                //
+                // Its rows measure 5.54, 4.34, 3.36, 1.98 and 0.64 wide,
+                // and those are widths at each row's *middle* — taking
+                // the first for the width at y=8 drew the whole triangle
+                // half a row small.
+                path { d: "M 23.42 8 H 29.58 L 26.5 13.02 Z" }
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct EnvcpArmProps {
+    /// Armed — the ring goes accent and the body lifts off black.
+    #[props(default)]
+    pub armed: bool,
+    #[props(default = (20.0, 20.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The envelope arm button — a ring on a disc.
+///
+/// Geometrically the mixer's record button without its housing: body
+/// r 9.90 about the cell's centre, ring 4.90 outside and 2.68 in. Unarmed
+/// it is flat `#1c1c1c` throughout; armed the body picks up a radial
+/// gradient lit from above the top edge, which is the only place in this
+/// family a gradient appears at all.
+#[component]
+pub fn EnvcpArmButton(props: EnvcpArmProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    let (cx, cy) = (vw * 0.5, vh * 0.5);
+    let unit = vw.min(vh);
+    let hovered = props.at == Interaction::Hover;
+
+    let ink = match (props.armed, hovered) {
+        (true, false) => t.chrome.accent,
+        // Not the accent offset or scaled: the source's hover runs red up
+        // 58 levels, green up 21 and blue *down* 3, which is a wash
+        // toward white in one channel only. Carried as measured.
+        (true, true) => Color::rgb(0x80, 0xce, 0xfb),
+        (false, false) => t.chrome.hardware.shade(0.214),
+        (false, true) => t.chrome.hardware.shade(0.406),
+    };
+    let bump = if hovered { 4.0 } else { 0.0 };
+    // Unarmed the body is one flat `#1c1c1c`; armed it takes a radial
+    // gradient lit from above the top edge — `#252525` under the light,
+    // `#1f1f1f` two-thirds out, `#181818` at the rim. That gradient is
+    // the only one in this family, and it is genuinely radial: the
+    // brightness falls with distance from a point near (10, 2), not with
+    // height, which a vertical ramp cannot reproduce at the corners.
+    let flat = offset(t.chrome.hardware_edge.shade(0.0216), bump);
+    let glow = offset(t.chrome.hardware_edge.shade(0.0603), bump);
+    let body = offset(t.chrome.hardware_edge.shade(0.0345), bump);
+    let sink = offset(t.chrome.hardware_edge.shade(0.0043), bump);
+    let body_fill = if props.armed { "url(#envarm)".to_string() } else { flat.css() };
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            defs {
+                radialGradient {
+                    id: "envarm",
+                    cx: "{cx}", cy: "{vh * 0.10}", r: "{unit * 0.85}",
+                    gradient_units: "userSpaceOnUse",
+                    stop { offset: "0", stop_color: "{glow.css()}" }
+                    stop { offset: "0.70", stop_color: "{body.css()}" }
+                    stop { offset: "1", stop_color: "{sink.css()}" }
+                }
+            }
+            circle {
+                cx: "{cx}", cy: "{cy}", r: "{unit * 0.495}",
+                fill: "{body_fill}",
+            }
+            path {
+                d: "{ring(cx, cy, unit * 0.245, unit * 0.134)}",
+                fill_rule: "evenodd",
+                fill: "{ink.css()}",
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct EnvcpBypassProps {
+    /// Bypassed — the whole button turns red.
+    #[props(default)]
+    pub bypassed: bool,
+    #[props(default = (15.0, 20.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The envelope bypass button — a power symbol on a tinted field.
+///
+/// The field is not a shade of the glyph: solved as `base + t·glyph` the
+/// two states want different bases (`#0d0d0d` at t 0.17 for the blue,
+/// `#1c1c1c` at t 0.14 for the red), so they are carried as the two
+/// colours they measure as rather than as one rule bent to fit both.
+#[component]
+pub fn EnvcpBypassButton(props: EnvcpBypassProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    let hovered = props.at == Interaction::Hover;
+
+    let ink = match (props.bypassed, hovered) {
+        (false, false) => Color::rgb(0x68, 0xb7, 0xf8),
+        (false, true) => Color::rgb(0x7c, 0xcc, 0xfc),
+        (true, false) => Color::rgb(0xff, 0x52, 0x60),
+        (true, true) => Color::rgb(0xff, 0x63, 0x73),
+    };
+    let field = match (props.bypassed, hovered) {
+        (false, false) => Color::rgb(0x1b, 0x2a, 0x35),
+        (false, true) => Color::rgb(0x22, 0x34, 0x41),
+        (true, false) => Color::rgb(0x3b, 0x24, 0x26),
+        (true, true) => Color::rgb(0x49, 0x2d, 0x2f),
+    };
+    let _ = &t;
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            rect { x: "0", y: "0", width: "{vw}", height: "{vh}", fill: "{field.css()}" }
+            // The arc opens 50° either side of vertical, which is where
+            // the stem passes through it.
+            path {
+                d: "M 4.658 8.128 A 3.71 3.71 0 1 0 10.342 8.128",
+                fill: "none",
+                stroke: "{ink.css()}", stroke_width: "1.44",
+            }
+            rect { x: "7", y: "5.25", width: "1", height: "4.5", fill: "{ink.css()}" }
+        }
+    }
+}
+
+// ── meters ──────────────────────────────────────────────────────────────
+
+#[derive(Props, Clone, PartialEq)]
+pub struct MeterProps {
+    /// One value per bar, 0 at silence and 1 at the top of the scale.
+    pub levels: Vec<f32>,
+    /// Cell size. `mcp.meter` is `[4 4 22 -4]` of the stretch section and
+    /// two wider again in wide mode, so 24 by whatever is left.
+    pub cell: (f32, f32),
+    /// Print the dB scale down the left of the meter.
+    ///
+    /// It belongs *inside* the meter and not beside it: `mcp.meter` is one
+    /// rect covering both, and REAPER draws the numbers as part of the
+    /// widget. Laid out as a separate column the bars had nowhere to go
+    /// but under the button stack.
+    #[props(default = true)]
+    pub scale: bool,
+    /// The scale's marks, top to bottom.
+    #[props(default)]
+    pub marks: Vec<String>,
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// A level meter — bars, and the scale that belongs to them.
+///
+/// The one control here REAPER draws entirely itself: there is no
+/// `mcp_meter*` bitmap to measure, only `mcp.meter.scale.color.*` and the
+/// VU division in `rtconfig`. So this is the theme's own reading of it
+/// rather than a trace, and the two places it departs from REAPER are
+/// deliberate: the bars sit on a dark well, which REAPER leaves bare, and
+/// the ladder runs green to amber to red rather than one colour lit and
+/// unlit.
+#[component]
+pub fn Meter(props: MeterProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    // The scale takes four-fifths of the block and the bars share the
+    // rest, which is why REAPER's meters are as thin as they are: "-18-"
+    // at nine pixels is most of a 24-wide `mcp.meter`. At two-thirds the
+    // marks ran off their own left edge and rendered as "18-".
+    let bars_x = if props.scale { vw * 0.80 } else { 0.0 };
+    let bars_w = vw - bars_x;
+    let n = props.levels.len().max(1) as f32;
+    let gap = 1.0f32;
+    let bar_w = ((bars_w - gap * (n - 1.0)) / n).max(1.0);
+    let text = t.chrome.hardware_mark.shade(-0.35);
+    let well = t.chrome.hardware.shade(-0.72);
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            defs {
+                // Green until it is loud, amber approaching the top, red
+                // at it — read bottom-up, so the stops are reversed.
+                linearGradient { id: "mtr", x1: "0", y1: "1", x2: "0", y2: "0",
+                    stop { offset: "0", stop_color: "{t.signal.meter_safe.css()}" }
+                    stop { offset: "0.62", stop_color: "{t.signal.meter_safe.css()}" }
+                    stop { offset: "0.82", stop_color: "{t.signal.meter_warn.css()}" }
+                    stop { offset: "1", stop_color: "{t.signal.meter_danger.css()}" }
+                }
+            }
+            if props.scale {
+                for (i, mark) in props.marks.iter().enumerate() {
+                    text {
+                        key: "m{i}",
+                        x: "{bars_x - 2.0}",
+                        y: "{vh * (i as f32 + 0.5) / props.marks.len().max(1) as f32}",
+                        text_anchor: "end", dominant_baseline: "central",
+                        font_family: "Fira Sans, DejaVu Sans, sans-serif",
+                        font_size: "{(vw * 0.36).min(8.6)}",
+                        fill: "{text.css()}",
+                        "{mark}"
+                    }
+                }
+            }
+            for (i, level) in props.levels.iter().enumerate() {
+                {
+                    let x = bars_x + i as f32 * (bar_w + gap);
+                    let lit = vh * level.clamp(0.0, 1.0);
+                    rsx! {
+                        g { key: "b{i}",
+                            rect {
+                                x: "{x}", y: "0", width: "{bar_w}", height: "{vh}",
+                                rx: "{bar_w * 0.25}",
+                                fill: "{well.css()}",
+                            }
+                            rect {
+                                x: "{x}", y: "{vh - lit}", width: "{bar_w}", height: "{lit}",
+                                rx: "{bar_w * 0.25}",
+                                fill: "url(#mtr)",
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A piece of the envelope panel's furniture.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum EnvcpPart {
+    /// The fader's track — a slab with a notch at its middle.
+    #[default]
+    FaderTrack,
+    /// The field behind the arm button: a half-disc, flat on its right.
+    ArmField,
+    /// The envelope knob's body.
+    Knob,
+    /// The fader's cap — the one piece here with a drop shadow.
+    FaderCap,
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct EnvcpPanelProps {
+    #[props(default)]
+    pub part: EnvcpPart,
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The envelope panel's furniture — track, knob, cap and arm field.
+///
+/// Three of these round only their *right* corners and leave the left
+/// square, which is not a style choice: they butt against the panel's
+/// left edge, so REAPER never shows the corner that would be square.
+#[component]
+pub fn EnvcpPanel(props: EnvcpPanelProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    let g = |v: f32| t.chrome.hardware.shade(v);
+    let slab = g(-0.56); // #1c1c1c
+
+    // The cap's body is a cylinder lit from its left of centre: the
+    // colour ramps #222222 up to #797979 at x9, hits an opaque
+    // grey/blue/grey triple at the middle, then falls back to #222222.
+    // Its *alpha* ramps too, 0.745 to 0.816, independently of the
+    // colour — so the stops carry both.
+    let cap: Vec<(f32, &str, f32)> = vec![
+        (0.000, "#222222", 0.745),
+        (0.029, "#222222", 0.745),
+        (0.088, "#3f3f3f", 0.757),
+        (0.147, "#464646", 0.765),
+        (0.206, "#4a4a4a", 0.749),
+        (0.265, "#575757", 0.757),
+        (0.324, "#656565", 0.769),
+        (0.382, "#797979", 0.804),
+        (0.618, "#626262", 0.773),
+        (0.676, "#5c5c5c", 0.757),
+        (0.735, "#5b5b5b", 0.765),
+        (0.794, "#585858", 0.773),
+        (0.853, "#595959", 0.804),
+        (0.912, "#545454", 0.816),
+        (0.971, "#222222", 0.745),
+        (1.000, "#222222", 0.745),
+    ];
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            defs {
+                linearGradient { id: "envcap", x1: "0", y1: "0", x2: "1", y2: "0",
+                    for (i, (at, hex, a)) in cap.iter().enumerate() {
+                        stop {
+                            key: "c{i}", offset: "{at}",
+                            stop_color: "{hex}", stop_opacity: "{a}",
+                        }
+                    }
+                }
+                // The knob's face falls fast for its first three rows and
+                // then slowly: 97 at the top, 81 three rows down, 63 at
+                // the bottom. One straight ramp between the ends misses
+                // the highlight by fifteen levels.
+                linearGradient { id: "envknob", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{g(0.208).css()}" }
+                    stop { offset: "0.11", stop_color: "{g(0.177).css()}" }
+                    stop { offset: "0.26", stop_color: "{g(0.094).css()}" }
+                    stop { offset: "1", stop_color: "{g(-0.032).css()}" }
+                }
+                radialGradient { id: "envshadow",
+                    cx: "11.5", cy: "20.5", r: "9.5",
+                    gradient_units: "userSpaceOnUse",
+                    stop { offset: "0.45", stop_color: "#000000", stop_opacity: "0.30" }
+                    stop { offset: "1", stop_color: "#000000", stop_opacity: "0" }
+                }
+                linearGradient { id: "envcapgloss", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "#ffffff", stop_opacity: "0.13" }
+                    stop { offset: "1", stop_color: "#ffffff", stop_opacity: "0" }
+                }
+            }
+            match props.part {
+                EnvcpPart::FaderTrack => rsx! {
+                    // Square on the left, rounded on the right, with a
+                    // hard black notch at the middle row.
+                    path {
+                        d: "M 1 2 H 15.5 A 2.5 2.5 0 0 1 18 4.5 V 19.5
+                            A 2.5 2.5 0 0 1 15.5 22 H 1 Z",
+                        fill: "{slab.css()}",
+                    }
+                    rect { x: "6", y: "11", width: "7", height: "1", fill: "#000000" }
+                },
+                EnvcpPart::ArmField => rsx! {
+                    // A disc of r 10 about (11, 11) with a square block
+                    // filling out its right half — *not* a semicircle
+                    // whose chord is the right edge. Written that way the
+                    // two endpoints sat on x 21, which puts the circle's
+                    // centre there too and bulges the arc off the canvas.
+                    path {
+                        d: "M 11 1 A 10 10 0 0 0 11 21 H 21 V 1 Z",
+                        fill: "{slab.css()}",
+                    }
+                },
+                EnvcpPart::Knob => rsx! {
+                    // The slab behind the knob is not a rounded rect: its
+                    // right edge is an arc concentric with the knob, 0.9
+                    // outside the rim. It reaches x 23.9 at the middle
+                    // row and x 17.7 at the top, which no corner radius
+                    // does — same rect-plus-disc as the arm field.
+                    rect { x: "1", y: "2", width: "12.5", height: "20",
+                        fill: "{slab.css()}" }
+                    circle { cx: "13.5", cy: "12", r: "10.25", fill: "{slab.css()}" }
+                    circle { cx: "13.5", cy: "12", r: "9.5", fill: "{g(-0.60).css()}" }
+                    circle { cx: "13.5", cy: "12", r: "8.2", fill: "url(#envknob)" }
+                },
+                EnvcpPart::FaderCap => rsx! {
+                    // The shadow goes first and the cap covers all of it
+                    // that is not below the cap — which is how the source
+                    // has it, and cheaper than a blur resvg may not run.
+                    ellipse { cx: "11.5", cy: "20.5", rx: "9.2", ry: "6.8",
+                        fill: "url(#envshadow)" }
+                    rect { x: "2", y: "10", width: "1", height: "12",
+                        fill: "#000000", fill_opacity: "0.125" }
+                    rect { x: "20", y: "10", width: "1", height: "12",
+                        fill: "#000000", fill_opacity: "0.125" }
+                    // Top and bottom row are rims, not body: the source's
+                    // row 5 is a flat `#262626` at 0.66 and its row 21 a
+                    // flat `#222222` at 0.745, both of them a good sixty
+                    // levels below the cylinder they cap.
+                    rect { x: "3", y: "5", width: "17", height: "1", rx: "1",
+                        fill: "#262626", fill_opacity: "0.66" }
+                    rect {
+                        x: "3", y: "6", width: "17", height: "15",
+                        fill: "url(#envcap)",
+                    }
+                    rect { x: "3", y: "21", width: "17", height: "1", rx: "1",
+                        fill: "#222222", fill_opacity: "0.745" }
+                    rect { x: "3", y: "6", width: "17", height: "2.5",
+                        fill: "url(#envcapgloss)" }
+                    rect { x: "10", y: "6", width: "1", height: "15",
+                        fill: "{g(0.10).css()}" }
+                    rect { x: "12", y: "6", width: "1", height: "15",
+                        fill: "{g(0.10).css()}" }
+                    // The one saturated mark on the whole panel.
+                    rect { x: "11", y: "6", width: "1", height: "15",
+                        fill: "#16a9fe" }
+                },
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2873,13 +4503,13 @@ mod tests {
     fn every_control_is_shaped_like_the_cell_it_replaces() {
         let n = (None, None);
         let cases: [(&str, String); 7] = [
-            ("mcp_recarm_on", render_svg(RecordArmButton, RecordArmProps { cell: (36.0, 24.0), housing: true, state: RecordArm::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { unlit: None, hover: 0.35, sinks: true, depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_solo_on", render_svg(SoloButton, SoloProps { unlit: None, hover: 0.35, sinks: true, depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_recarm_on", render_svg(RecordArmButton, RecordArmProps { art: crate::slice::expect_art("mcp_recarm_on"), housing: true, state: RecordArm::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { unlit: None, hover: 0.35, sinks: true, depth: 0.15, legend: None, art: crate::slice::expect_art("mcp_mute_on"), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_solo_on", render_svg(SoloButton, SoloProps { unlit: None, hover: 0.35, sinks: true, depth: 0.11, legend: None, art: crate::slice::expect_art("mcp_solo_on"), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_fx_norm", render_svg(FxButton, FxProps { family: Default::default(), state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { cell: (23.0, 32.0), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { cell: (21.0, 20.0), axis: Default::default(), state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_volthumb", render_svg(VolumeFaderCap, FaderCapProps { accent: None, width: n.0, height: n.1 })),
+            ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { art: crate::slice::expect_art("mcp_io_s_r"), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { art: crate::slice::expect_art("mcp_monitor_on"), axis: Default::default(), state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_volthumb", render_svg(VolumeFaderCap, FaderCapProps { accent: None, pane: None, width: n.0, height: n.1 })),
         ];
 
         for (name, svg) in &cases {
@@ -2916,7 +4546,7 @@ mod tests {
                         depth: 0.15,
                         legend: None,
                         body: (0.0, 1.0),
-                        cell: (21.0, 20.0),
+                        art: crate::slice::expect_art("mcp_mute_on"),
                         on: true,
                         width: w,
                         height: h,
@@ -2931,7 +4561,7 @@ mod tests {
                         depth: 0.11,
                         legend: None,
                         body: (0.0, 1.0),
-                        cell: (21.0, 20.0),
+                        art: crate::slice::expect_art("mcp_solo_on"),
                         state: Solo::Defeat,
                         width: w,
                         height: h,
@@ -2951,7 +4581,7 @@ mod tests {
                 render_svg(
                     RecordArmButton,
                     RecordArmProps {
-                        cell: (36.0, 24.0),
+                        art: crate::slice::expect_art("mcp_recarm_on"),
                         housing: true,
                         state: RecordArm::NoRecord,
                         width: w,
@@ -2962,7 +4592,7 @@ mod tests {
                 render_svg(
                     RoutingButton,
                     RoutingProps {
-                        cell: (23.0, 32.0),
+                        art: crate::slice::expect_art("mcp_io_s_r"),
                         axis: Default::default(),
                         has_sends: true,
                         has_receives: true,
@@ -2975,7 +4605,7 @@ mod tests {
                 render_svg(
                     InputMonitorIndicator,
                     MonitoringProps {
-                        cell: (21.0, 20.0),
+                        art: crate::slice::expect_art("mcp_monitor_on"),
                         axis: Default::default(),
                         state: Monitoring::On,
                         width: w,
@@ -2986,6 +4616,7 @@ mod tests {
                 render_svg(
                     PanningKnob,
                     PanProps {
+                        indicator: false,
                         position: -0.5,
                         large: true,
                         width: w,
@@ -2996,7 +4627,8 @@ mod tests {
                     VolumeFaderCap,
                     FaderCapProps {
                         accent: None,
-                        width: w,
+                        pane: None,
+                                                width: w,
                         height: h,
                     },
                 ),
@@ -3004,7 +4636,8 @@ mod tests {
                     VolumeFaderTrack,
                     FaderCapProps {
                         accent: None,
-                        width: w,
+                        pane: None,
+                                                width: w,
                         height: h,
                     },
                 ),
@@ -3029,7 +4662,7 @@ mod tests {
                 depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
-                cell: (21.0, 20.0),
+                art: crate::slice::expect_art("mcp_mute_on"),
                 on: false,
                 width: Some(21),
                 height: Some(20),
@@ -3044,7 +4677,7 @@ mod tests {
                 depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
-                cell: (21.0, 20.0),
+                art: crate::slice::expect_art("mcp_mute_on"),
                 on: false,
                 width: Some(210),
                 height: Some(200),
@@ -3070,6 +4703,7 @@ mod tests {
         let a = render_svg(
             PanningKnob,
             PanProps {
+                indicator: false,
                 position: -1.0,
                 large: false,
                 width: None,
@@ -3079,6 +4713,7 @@ mod tests {
         let b = render_svg(
             PanningKnob,
             PanProps {
+                indicator: false,
                 position: -0.99,
                 large: false,
                 width: None,
@@ -3088,6 +4723,7 @@ mod tests {
         let c = render_svg(
             PanningKnob,
             PanProps {
+                indicator: false,
                 position: 1.0,
                 large: false,
                 width: None,
@@ -3104,9 +4740,10 @@ mod tests {
             let svg = render_svg(
                 PanningKnob,
                 PanProps {
+                    indicator: false,
                     position: p,
                     large: false,
-                    width: None,
+                width: None,
                     height: None,
                 },
             );
@@ -3126,7 +4763,7 @@ mod tests {
                 depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
-                cell: (21.0, 20.0),
+                art: crate::slice::expect_art("mcp_mute_on"),
                 on: false,
                 width: None,
                 height: None,
@@ -3141,7 +4778,7 @@ mod tests {
                 depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
-                cell: (21.0, 20.0),
+                art: crate::slice::expect_art("mcp_mute_on"),
                 on: false,
                 width: None,
                 height: None,
@@ -3156,7 +4793,7 @@ mod tests {
                 depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
-                cell: (21.0, 20.0),
+                art: crate::slice::expect_art("mcp_mute_on"),
                 on: false,
                 width: None,
                 height: None,
@@ -3178,7 +4815,7 @@ mod tests {
                 depth: 0.11,
                 legend: None,
                 body: (0.0, 1.0),
-                cell: (21.0, 20.0),
+                art: crate::slice::expect_art("mcp_solo_on"),
                 state: Solo::Off,
                 width: None,
                 height: None,
@@ -3193,7 +4830,7 @@ mod tests {
                 depth: 0.11,
                 legend: None,
                 body: (0.0, 1.0),
-                cell: (21.0, 20.0),
+                art: crate::slice::expect_art("mcp_solo_on"),
                 state: Solo::On,
                 width: None,
                 height: None,
@@ -3208,7 +4845,7 @@ mod tests {
                 depth: 0.11,
                 legend: None,
                 body: (0.0, 1.0),
-                cell: (21.0, 20.0),
+                art: crate::slice::expect_art("mcp_solo_on"),
                 state: Solo::Defeat,
                 width: None,
                 height: None,
@@ -3228,7 +4865,8 @@ mod tests {
                 VolumeFaderCap,
                 FaderCapProps {
                     accent: None,
-                    width: None,
+                    pane: None,
+                width: None,
                     height: Some(h),
                 },
             );
@@ -3244,6 +4882,7 @@ mod tests {
             VolumeFaderCap,
             FaderCapProps {
                 accent: Some(green),
+                pane: None,
                 width: None,
                 height: None,
             },
@@ -3269,6 +4908,7 @@ mod tests {
             VolumeFaderCap,
             FaderCapProps {
                 accent: None,
+                pane: None,
                 width: None,
                 height: None,
             },

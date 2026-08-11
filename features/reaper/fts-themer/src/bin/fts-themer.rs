@@ -154,6 +154,35 @@ enum Command {
         /// Seconds to let REAPER settle before capturing.
         #[arg(long, default_value_t = 14)]
         settle: u64,
+        /// Extension library to install before launch (repeatable).
+        ///
+        /// Photographing a *panel* rather than the theme's own chrome means
+        /// the extension that owns the panel has to be loaded.
+        #[arg(long = "plugin")]
+        plugins: Vec<PathBuf>,
+        /// Action to run at startup, by named-command id (repeatable).
+        ///
+        /// e.g. `--action fts-mixer` to open the mixer panel. Written as a
+        /// `__startup.lua` REAPER runs itself.
+        #[arg(long = "action")]
+        actions: Vec<String>,
+        /// Window title to capture. Defaults to REAPER's own window; pass a
+        /// panel's title to photograph a floating panel instead.
+        #[arg(long)]
+        window: Option<String>,
+        /// Capture the whole screen rather than one window.
+        #[arg(long)]
+        full: bool,
+    },
+    /// Write the collapse thresholds into the theme's layout file.
+    ///
+    /// The Dioxus strip and the theme encode the same collapse heights;
+    /// this makes the Rust constant the source of both. Idempotent, and it
+    /// touches nothing but the value on each `set` line.
+    Thresholds {
+        /// Report what would change without writing.
+        #[arg(long)]
+        check: bool,
     },
 }
 
@@ -363,12 +392,52 @@ fn main() -> Result<()> {
             );
         }
 
+        Command::Thresholds { check } => {
+            use fts_themer::thresholds;
+
+            let path = cli.theme.join(format!("{}/rtconfig.txt", theme.name));
+            let text = std::fs::read_to_string(&path)
+                .with_context(|| format!("read {}", path.display()))?;
+
+            let wanted = thresholds::generated_lines();
+            let (patched, changed) = thresholds::splice(&text, &wanted)?;
+            let drifted = thresholds::section_heights_agree(&text);
+
+            for line in &drifted {
+                eprintln!("  DRIFT: {line}");
+            }
+            if check {
+                for t in &wanted {
+                    println!("  {} = {}", t.name, t.value);
+                }
+                if changed > 0 {
+                    anyhow::bail!("{changed} threshold(s) in the layout file are out of date");
+                }
+                if !drifted.is_empty() {
+                    anyhow::bail!(
+                        "{} section height(s) disagree with the Rust constant",
+                        drifted.len()
+                    );
+                }
+                println!("  thresholds are current");
+            } else if changed == 0 {
+                println!("  thresholds already current — nothing written");
+            } else {
+                std::fs::write(&path, patched)
+                    .with_context(|| format!("write {}", path.display()))?;
+                println!("  wrote {changed} threshold(s) to {}", path.display());
+            }
+        }
         Command::Shot {
             out,
             profile,
             geometry,
             display,
             settle,
+            plugins,
+            actions,
+            window,
+            full,
         } => {
             use fts_themer::shot::{self, Profile, ShotOptions};
 
@@ -376,6 +445,15 @@ fn main() -> Result<()> {
             opts.geometry = geometry;
             opts.display = display;
             opts.settle = std::time::Duration::from_secs(settle);
+            opts.plugins = plugins;
+            opts.startup_actions = actions;
+            opts.window = if full {
+                fts_themer::shot::Capture::Screen
+            } else if let Some(title) = window {
+                fts_themer::shot::Capture::Window(title)
+            } else {
+                opts.window
+            };
             if let Some(dir) = profile {
                 opts.profile = Profile::Existing(dir);
             }

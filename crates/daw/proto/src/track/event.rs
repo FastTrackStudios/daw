@@ -52,6 +52,33 @@ pub enum TrackEvent {
         old_index: u32,
         new_index: u32,
     },
+    /// The track stopped or started sending to its parent / master.
+    ///
+    /// The IO indicator on every strip shows this, and it used to be a
+    /// per-track routing call — so a mixer paid N round trips for it and
+    /// then never heard about a change.
+    ParentSendChanged { guid: String, enabled: bool },
+    /// The track's FX chains gained or lost plugins.
+    ///
+    /// `Track::fx_count` and `input_fx_count` were seeded by the bulk read
+    /// and then never updated by anything: a mixer's FX buttons were
+    /// correct when it opened and wrong from the first plugin the user
+    /// added. This is the event that was missing.
+    ///
+    /// Both counts ride together because a backend computing one has
+    /// already computed the other, and a strip showing the input indicator
+    /// separately from the chain needs them consistent — two events could
+    /// leave it briefly showing a track with input FX and no chain when it
+    /// has both.
+    ///
+    /// Deliberately on the *track* stream rather than a new `#[subscribe]`
+    /// on `Effects`: a lit button is track state. What should force a
+    /// chain-level stream is a surface that renders the chain.
+    FxCountChanged {
+        guid: String,
+        fx_count: u32,
+        input_fx_count: u32,
+    },
 }
 
 // SelfRef compatibility: TrackEvent has no lifetime parameters, so Ref<'a> = Self.

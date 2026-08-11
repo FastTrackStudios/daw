@@ -47,6 +47,9 @@ pub const FTS_UI_NATIVE_ACTION_ID: &str = "fts-ui-native";
 pub const FTS_DEMO_NATIVE_PANEL_ID: &str = "FTS_DEMO_NATIVE";
 pub const FTS_DEMO_NATIVE_ACTION_ID: &str = "fts-demo-native";
 
+pub const FTS_MIXER_PANEL_ID: &str = "FTS_MIXER";
+pub const FTS_MIXER_ACTION_ID: &str = "fts-mixer";
+
 #[component]
 pub fn UiTestPanel() -> Element {
     rsx! {
@@ -55,6 +58,37 @@ pub fn UiTestPanel() -> Element {
         document::Style { {BLITZ_FIXES} }
 
         fts_ui::showcase::Showcase {}
+    }
+}
+
+/// The mixer strip, in REAPER.
+///
+/// The vector controls draw the same shapes REAPER's own theme is
+/// rasterised from, so this panel is where the two renderings can be put
+/// side by side and compared — the app's mute button against the theme's
+/// mute button, in one screenshot, with no scaling between them.
+///
+/// No stylesheet is mounted deliberately: every control states its
+/// layout-critical values inline, and this is the panel that proves it.
+/// A strip that only looks right once Tailwind arrives is a strip that
+/// looks wrong in whichever window loads the sheet late.
+#[component]
+pub fn MixerStripPanel() -> Element {
+    rsx! {
+        // Embedded as a static string, never linked by URL and never
+        // through the asset pipeline. Every Blitz window in this tree
+        // builds a dummy network provider with no base URL, so a linked
+        // stylesheet is fetched into a void and silently never arrives —
+        // a total, deterministic failure that looks like a styling bug.
+        //
+        // The strip must render correctly without this, and does: layout
+        // outside the `<svg>` elements is Tailwind, but everything
+        // layout-critical is stated inline. The sheet is polish, not
+        // structure.
+        document::Style { {TAILWIND_CSS} }
+        document::Style { {BLITZ_FIXES} }
+
+        crate::components::mixer::MixerPanel {}
     }
 }
 
@@ -103,8 +137,8 @@ pub fn DemoPanel() -> Element {
     }
 }
 
-/// Native-renderer panel defs: the Showcase + the bare counter.
-pub fn panel_defs() -> [PanelDef; 2] {
+/// Native-renderer panel defs: the Showcase, the bare counter, the mixer.
+pub fn panel_defs() -> [PanelDef; 3] {
     [
         PanelDef {
             id: FTS_UI_NATIVE_PANEL_ID,
@@ -124,13 +158,25 @@ pub fn panel_defs() -> [PanelDef; 2] {
             default_size: (480.0, 320.0),
             toggle_action: Some(FTS_DEMO_NATIVE_ACTION_ID),
         },
+        PanelDef {
+            id: FTS_MIXER_PANEL_ID,
+            title: "FTS Mixer",
+            component: PanelComponent::from_fn_ptr(MixerStripPanel as fn() -> _ as *const ()),
+            default_dock: DockPosition::Floating,
+            renderer: PanelRenderer::Native,
+            // Wide enough for a handful of strips, tall enough that the
+            // fader's stretch band has slack to take — a short panel would
+            // draw the rail at its source height and prove nothing.
+            default_size: (720.0, 640.0),
+            toggle_action: Some(FTS_MIXER_ACTION_ID),
+        },
     ]
 }
 
 /// Action defs that toggle the corresponding panels. Handlers call
 /// straight into the dock module so consumers don't need the `daw`
 /// facade in scope.
-pub fn action_defs() -> [ActionDef; 2] {
+pub fn action_defs() -> [ActionDef; 3] {
     [
         ActionDef::new(FTS_UI_NATIVE_ACTION_ID, "FTS: UI Native", || {
             daw_reaper_dioxus::dock::toggle_panel(FTS_UI_NATIVE_PANEL_ID);
@@ -138,6 +184,16 @@ pub fn action_defs() -> [ActionDef; 2] {
         .in_menu(),
         ActionDef::new(FTS_DEMO_NATIVE_ACTION_ID, "FTS: Demo Native", || {
             daw_reaper_dioxus::dock::toggle_panel(FTS_DEMO_NATIVE_PANEL_ID);
+        })
+        .in_menu(),
+        ActionDef::new(FTS_MIXER_ACTION_ID, "FTS: Mixer", || {
+            // Logged on both sides of the call: everything upstream of here
+            // is a message-passing chain across two threads, and "the panel
+            // did not open" needs to distinguish "the handler never ran"
+            // from "the handler ran and the window did not appear".
+            tracing::info!("mixer panel toggle requested");
+            daw_reaper_dioxus::dock::toggle_panel(FTS_MIXER_PANEL_ID);
+            tracing::info!("mixer panel toggle returned");
         })
         .in_menu(),
     ]

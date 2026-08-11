@@ -287,6 +287,121 @@ pub mod admin {
                 .await
         }
 
+        /// Grant or clear the `admin` role with NO admin session —
+        /// operator tooling authorized by possession of the data root.
+        ///
+        /// This is the bootstrap for admin itself: `require_admin` needs
+        /// an existing admin, so the FIRST one cannot be made through the
+        /// admin flows. Something outside them has to seed it, and
+        /// possession of the auth store is the only authority that
+        /// predates any account.
+        ///
+        /// Note this sets architect-auth's `user.role`, which gates the
+        /// `admin_*` flows. It is NOT the permission gate's role — that
+        /// comes from `architect-permissions`' engine, which currently
+        /// assigns every validated user the same default.
+        pub async fn set_user_role_local_trusted(
+            &self,
+            user_id: uuid::Uuid,
+            role: Option<String>,
+        ) -> Result<auth_proto::AuthUser, AuthFlowError> {
+            self.storage
+                .find_user_by_id(user_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            self.storage.update_user_role(user_id, role).await
+        }
+
+        /// Delete a user with NO admin session — operator tooling whose
+        /// authorization is possession of the data root.
+        ///
+        /// Returns the deleted user so a caller can report what it
+        /// removed; deleting a nonexistent account is an error rather
+        /// than a silent success, because "did that do anything?" is the
+        /// question an operator actually has.
+        pub async fn delete_user_local_trusted(
+            &self,
+            user_id: uuid::Uuid,
+        ) -> Result<auth_proto::AuthUser, AuthFlowError> {
+            let user = self
+                .storage
+                .find_user_by_id(user_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            self.storage.delete_user_by_id(user_id).await?;
+            Ok(user)
+        }
+
+        /// Every user in this org's store, for operator tooling.
+        pub async fn list_users_local_trusted(
+            &self,
+        ) -> Result<Vec<auth_proto::AuthUser>, AuthFlowError> {
+            // 1000 is the same ceiling `org_members_for_token` uses; an
+            // org with more users than that has bigger problems than this
+            // listing.
+            let (users, _total) = self.storage.list_users(0, 1000).await?;
+            Ok(users)
+        }
+
+        /// Set a user's password with NO admin session.
+        ///
+        /// For operator tooling whose authorization is possession of the
+        /// data root rather than a session — the same basis as
+        /// `OrgManagementImpl::new_local_trusted`. It exists because the
+        /// case that needs it most is precisely the one where no session
+        /// can be had: the owner is locked out.
+        ///
+        /// Keeps every check `admin_set_user_password` applies to the new
+        /// password — strength and known-breach rejection — and creates
+        /// the password account when the user has none (an OAuth-only
+        /// account being given a password). What it drops is only the
+        /// admin lookup and the admin audit row, neither of which has a
+        /// meaning without an admin.
+        ///
+        /// Deliberately NOT exposed over vox: a caller that can reach the
+        /// network surface has not proven possession of anything.
+        pub async fn set_user_password_local_trusted(
+            &self,
+            user_id: uuid::Uuid,
+            new_password: &str,
+        ) -> Result<(), AuthFlowError> {
+            let user = self
+                .storage
+                .find_user_by_id(user_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            validate_password_strength(new_password)?;
+            self.reject_breached_password(new_password).await?;
+            let password_hash = hash_password(new_password)
+                .map_err(|err| AuthFlowError::Internal(err.to_string()))?;
+            if self
+                .storage
+                .find_password_account_by_user_id(user_id)
+                .await?
+                .is_some()
+            {
+                self.storage
+                    .update_password_hash(user_id, password_hash)
+                    .await
+            } else {
+                self.storage
+                    .create_account(AuthAccountCreate {
+                        account_id: user.id.to_string(),
+                        provider_id: PASSWORD_PROVIDER_ID.into(),
+                        user_id: user.id,
+                        access_token_ciphertext: None,
+                        refresh_token_ciphertext: None,
+                        id_token_ciphertext: None,
+                        access_token_expires_at: None,
+                        refresh_token_expires_at: None,
+                        scope: None,
+                        password_hash: Some(password_hash),
+                    })
+                    .await
+                    .map(|_| ())
+            }
+        }
+
         // r[impl auth.admin.requires-role]
         // r[impl auth.admin.ban]
         // r[impl auth.admin.ban-expiry]
@@ -1038,7 +1153,7 @@ pub mod username {
     use auth_proto::{AuthFlowError, AuthSessionBundle, AuthUser};
 
     use crate::{
-        ArchitectAuth, AuthStorage, CurrentSession, SignInUsername, UpdateUsername,
+        ArchitectAuth, AuthStorage, CurrentSession, SignInUsername, UpdateProfile, UpdateUsername,
         crypto::verify_password, flows::last_login_method::record_last_login_method,
     };
 
@@ -1104,6 +1219,40 @@ pub mod username {
         // r[impl auth.username.unique]
         // r[impl auth.username.reserved]
         // r[impl auth.username.validation]
+        /// Set the session owner's display name / avatar.
+        ///
+        /// Username, display_username and metadata are read back from
+        /// the session's user and written unchanged: the storage
+        /// primitive takes the whole profile row, so omitting them
+        /// would silently blank an identifier this flow has no
+        /// business touching.
+        pub async fn update_profile(
+            &self,
+            input: UpdateProfile,
+        ) -> Result<AuthUser, AuthFlowError> {
+            let bundle = self
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            // `Some("")` clears; `None` leaves the current value.
+            let merge = |new: Option<String>, current: Option<String>| match new {
+                Some(v) if v.trim().is_empty() => None,
+                Some(v) => Some(v),
+                None => current,
+            };
+            self.storage
+                .update_user_profile(
+                    bundle.user.id,
+                    merge(input.name, bundle.user.name),
+                    bundle.user.username,
+                    bundle.user.display_username,
+                    merge(input.image, bundle.user.image),
+                    bundle.user.metadata_json,
+                )
+                .await
+        }
+
         pub async fn update_username(
             &self,
             input: UpdateUsername,
@@ -1313,10 +1462,11 @@ pub mod email_password {
     use chrono::{Duration, Utc};
 
     use crate::{
-        ArchitectAuth, AuthService, AuthStorage, ChangeEmail, ChangePassword, MigrateUserEmail,
+        ArchitectAuth, AuthService, AuthStorage, ChangeEmail, ChangePassword,
         CompletePasswordReset, CreateEmailPasswordUser, DeleteUser, ListAccounts, ListSessions,
-        RefreshSession, RequestEmailVerification, RequestPasswordReset, RevokeOtherSessions,
-        RevokeSession, SignInEmailPassword, VerificationToken, VerifyEmail,
+        MigrateUserEmail, RefreshSession, RequestEmailVerification, RequestPasswordReset,
+        RevokeOtherSessions, RevokeSession, SignInEmailPassword, UpdateProfile, VerificationToken,
+        VerifyEmail,
         commands::{CurrentSession, SignOut},
         config::CaptchaFlow,
         crypto::{generate_token, hash_password, hash_token, verify_password},
@@ -1862,6 +2012,18 @@ pub mod email_password {
             self.storage.list_email_history(user_id).await
         }
 
+        /// Look an account up by its CURRENT address. Sibling of
+        /// [`find_user_by_previous_email`](Self::find_user_by_previous_email),
+        /// which answers the same question about addresses it has left
+        /// behind.
+        pub async fn find_user_by_email(
+            &self,
+            email: &str,
+        ) -> Result<Option<auth_proto::AuthUser>, AuthFlowError> {
+            let canonical = normalize_email(email)?;
+            self.storage.find_user_by_email(&canonical).await
+        }
+
         /// Which account once held `email` — the reverse lookup that makes
         /// a migrated address still resolvable ("who was old@…?").
         pub async fn find_user_by_previous_email(
@@ -1960,6 +2122,50 @@ pub mod email_password {
     where
         S: AuthStorage,
     {
+        async fn change_email(
+            &self,
+            input: auth_proto::service::ChangeEmailRequest,
+        ) -> Result<auth_proto::AuthUser, AuthFlowError> {
+            ArchitectAuth::change_email(
+                self,
+                ChangeEmail {
+                    session_token: input.session_token,
+                    new_email: input.new_email,
+                },
+            )
+            .await
+        }
+
+        async fn update_profile(
+            &self,
+            input: auth_proto::service::UpdateProfileRequest,
+        ) -> Result<auth_proto::AuthUser, AuthFlowError> {
+            ArchitectAuth::update_profile(
+                self,
+                UpdateProfile {
+                    session_token: input.session_token,
+                    name: input.name,
+                    image: input.image,
+                },
+            )
+            .await
+        }
+
+        async fn change_password(
+            &self,
+            input: auth_proto::service::ChangePasswordRequest,
+        ) -> Result<(), AuthFlowError> {
+            ArchitectAuth::change_password(
+                self,
+                ChangePassword {
+                    session_token: input.session_token,
+                    current_password: input.current_password,
+                    new_password: input.new_password,
+                },
+            )
+            .await
+        }
+
         async fn migrate_user_email(
             &self,
             input: auth_proto::service::MigrateUserEmailRequest,

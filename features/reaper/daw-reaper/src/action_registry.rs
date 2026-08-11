@@ -211,7 +211,12 @@ fn titlecase_underscored(s: &str) -> String {
 /// Uses a broadcast channel so this is non-blocking.
 fn notify_action_triggered(command_name: String) {
     let tx = action_broadcaster();
-    if tx.receiver_count() == 0 {
+    // Logged either way: "REAPER never called us" and "REAPER called us and
+    // nobody was listening" are different bugs that look identical from the
+    // outside — an action that appears to do nothing.
+    let receivers = tx.receiver_count();
+    debug!(%command_name, receivers, "action triggered");
+    if receivers == 0 {
         return;
     }
     let _ = tx.send(command_name);

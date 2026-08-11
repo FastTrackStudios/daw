@@ -230,6 +230,24 @@ pub struct MeterProps {
     /// Level, 0–1.
     #[props(default = 0.0)]
     pub level: f32,
+    /// Distinguishes this meter's gradient from another's on the same
+    /// page.
+    ///
+    /// SVG ids are document-global. Two meters both defining `id="meter"`
+    /// means every `url(#meter)` resolves to whichever came first — and
+    /// since the ramp is `userSpaceOnUse`, keyed to *that* meter's height,
+    /// a second meter of a different height silently borrows the first
+    /// one's zones. A stereo strip is two meters side by side, so this is
+    /// not hypothetical.
+    #[props(default)]
+    pub tag: String,
+    /// Decaying peak-hold, 0–1. `None` draws no hold mark at all.
+    ///
+    /// Optional rather than defaulted to the level, because "no hold" and
+    /// "hold sitting exactly on the level" are different pictures, and
+    /// every drawing that existed before peak-hold did means the first.
+    #[props(default)]
+    pub hold: Option<f32>,
 }
 
 #[component]
@@ -239,6 +257,7 @@ pub fn Meter(props: MeterProps) -> Element {
     let (w, h) = (props.width as f32, props.height as f32);
     let level = props.level.clamp(0.0, 1.0);
     let lit = h * level;
+    let id = format!("meter{}", props.tag);
 
     // The ramp is a gradient rather than three blocks so the transition
     // reads as continuous — a metered signal doesn't step between zones.
@@ -255,7 +274,7 @@ pub fn Meter(props: MeterProps) -> Element {
                 // clipping. The zone a level falls in must depend on the
                 // level, not on the size of the bar drawn for it.
                 linearGradient {
-                    id: "meter",
+                    id: "{id}",
                     gradient_units: "userSpaceOnUse",
                     x1: "0", y1: "{h}", x2: "0", y2: "0",
                     stop { offset: "0",    stop_color: "{s.meter_safe.css()}" }
@@ -270,7 +289,23 @@ pub fn Meter(props: MeterProps) -> Element {
             if lit > 0.0 {
                 rect {
                     x: "0", y: "{h - lit}", width: "{w}", height: "{lit}",
-                    fill: "url(#meter)",
+                    fill: "url(#{id})",
+                }
+            }
+            // The hold mark, in the colour of the zone it is *in* rather
+            // than a fixed white line: a hold sitting in the red has to
+            // read as a peak that clipped, and a white tick above a green
+            // bar reads as a scale mark instead.
+            if let Some(hold) = props.hold {
+                {
+                    let hold = hold.clamp(0.0, 1.0);
+                    let y = (h - h * hold - 1.0).max(0.0);
+                    rsx! {
+                        rect {
+                            x: "0", y: "{y}", width: "{w}", height: "1",
+                            fill: "url(#{id})",
+                        }
+                    }
                 }
             }
         }
@@ -391,6 +426,8 @@ mod tests {
         let svg = render_svg(
             Meter,
             MeterProps {
+                tag: String::new(),
+                hold: None,
                 width: 6,
                 height: 60,
                 level: 0.25,
@@ -407,6 +444,8 @@ mod tests {
         let empty = render_svg(
             Meter,
             MeterProps {
+                tag: String::new(),
+                hold: None,
                 width: 6,
                 height: 60,
                 level: 0.0,
@@ -415,6 +454,8 @@ mod tests {
         let half = render_svg(
             Meter,
             MeterProps {
+                tag: String::new(),
+                hold: None,
                 width: 6,
                 height: 60,
                 level: 0.5,
@@ -423,6 +464,8 @@ mod tests {
         let full = render_svg(
             Meter,
             MeterProps {
+                tag: String::new(),
+                hold: None,
                 width: 6,
                 height: 60,
                 level: 1.0,
@@ -441,6 +484,8 @@ mod tests {
             let svg = render_svg(
                 Meter,
                 MeterProps {
+                    tag: String::new(),
+                    hold: None,
                     width: 6,
                     height: 60,
                     level,

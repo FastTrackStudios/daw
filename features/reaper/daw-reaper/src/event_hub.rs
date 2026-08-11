@@ -241,6 +241,36 @@ impl DawEventHub {
         let _ = self.tracks_tx.send(event);
     }
 
+    /// Put an FX event on the bus.
+    ///
+    /// FX has no per-domain stream service of its own — the in-process
+    /// `broadcast` in `fx_stream` is how extensions consume it — so this
+    /// only feeds the cross-domain bus. Without it the events were built
+    /// correctly and went nowhere, which is what made `EventBus` deliver
+    /// nine of its eleven domains under REAPER while the standalone backend
+    /// delivered all eleven.
+    pub fn publish_fx(&self, event: daw_proto::fx::FxStreamEvent) {
+        self.bus_hub.publish(DawEvent::Fx(event));
+    }
+
+    /// Is anyone listening for FX events on the bus?
+    ///
+    /// The poll sites gate on their own broadcaster's receiver count; this
+    /// is the other half of that question, so a bus subscriber alone is
+    /// enough to keep the poller running.
+    pub fn fx_subscriber_count(&self) -> usize {
+        self.bus_hub.subscriber_count()
+    }
+
+    /// Put a routing event on the bus. Same shape, same reason.
+    pub fn publish_routing(&self, event: daw_proto::RoutingEvent) {
+        self.bus_hub.publish(DawEvent::Routing(event));
+    }
+
+    pub fn routing_subscriber_count(&self) -> usize {
+        self.bus_hub.subscriber_count()
+    }
+
     pub fn tracks_subscriber_count(&self) -> usize {
         self.tracks_tx.receiver_count()
             + self.tracks_hub.subscriber_count()

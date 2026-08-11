@@ -772,7 +772,8 @@ pub mod vox {
     use super::CustomSessionTransport;
     use crate::{
         ArchitectAuth, AuthStorage, CreateEmailPasswordUser, CurrentSession, CustomSessionBundle,
-        MigrateUserEmail, RefreshSession, SignOut, flows::bearer_tokens,
+        ChangeEmail, ChangePassword, MigrateUserEmail, RefreshSession, SignOut, UpdateProfile,
+        flows::bearer_tokens,
     };
     use auth_proto::{
         AuthFlowError, AuthService, AuthSessionBundle, AuthUser, OrgMember, SignInEmailPassword,
@@ -882,6 +883,49 @@ pub mod vox {
                 })
                 .await?;
             self.auth.list_email_history(input.user_id).await
+        }
+
+        async fn update_profile(
+            &self,
+            input: auth_proto::service::UpdateProfileRequest,
+        ) -> Result<AuthUser, AuthFlowError> {
+            self.auth
+                .update_profile(UpdateProfile {
+                    session_token: input.session_token,
+                    name: input.name,
+                    image: input.image,
+                })
+                .await
+        }
+
+        async fn change_email(
+            &self,
+            input: auth_proto::service::ChangeEmailRequest,
+        ) -> Result<AuthUser, AuthFlowError> {
+            // `change_email` validates the session, rejects an address
+            // another account holds, and appends to the history trail.
+            self.auth
+                .change_email(ChangeEmail {
+                    session_token: input.session_token,
+                    new_email: input.new_email,
+                })
+                .await
+        }
+
+        async fn change_password(
+            &self,
+            input: auth_proto::service::ChangePasswordRequest,
+        ) -> Result<(), AuthFlowError> {
+            // No extra checks here: `change_password` already validates
+            // the session, verifies the current password, enforces
+            // strength and rejects breached passwords.
+            self.auth
+                .change_password(ChangePassword {
+                    session_token: input.session_token,
+                    current_password: input.current_password,
+                    new_password: input.new_password,
+                })
+                .await
         }
     }
 

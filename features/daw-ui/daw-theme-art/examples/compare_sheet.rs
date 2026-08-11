@@ -11,7 +11,7 @@
 //! is the entire reason the vector versions exist.
 
 use daw_theme_art::render::render_svg;
-use daw_theme_art::{mixer_controls as traced, vector_controls as vector};
+use daw_theme_art::{mixer_controls as traced, slice, vector_controls as vector};
 
 const CELL: u32 = 76;
 const PAD: u32 = 10;
@@ -104,7 +104,7 @@ fn main() {
                             render_svg(
                                 vector::RecordArmButton,
                                 vector::RecordArmProps {
-                                    cell: (36.0, 24.0),
+                                    art: slice::expect_art("mcp_recarm_on"),
                                     housing: true,
                                     state: *v,
                                     width: None,
@@ -152,7 +152,7 @@ fn main() {
                                     depth: 0.15,
                                     legend: None,
                                     body: (0.0, 1.0),
-                                    cell: (21.0, 20.0),
+                                    art: slice::expect_art("mcp_mute_on"),
                                     on: *on,
                                     width: None,
                                     height: None,
@@ -201,7 +201,7 @@ fn main() {
                                     depth: 0.11,
                                     legend: None,
                                     body: (0.0, 1.0),
-                                    cell: (21.0, 20.0),
+                                    art: slice::expect_art("mcp_solo_on"),
                                     state: *v,
                                     width: None,
                                     height: None,
@@ -304,7 +304,7 @@ fn main() {
                             render_svg(
                                 vector::RoutingButton,
                                 vector::RoutingProps {
-                                    cell: (23.0, 32.0),
+                                    art: slice::expect_art("mcp_io_s_r"),
                                     axis: Default::default(),
                                     has_sends: *s,
                                     has_receives: *r,
@@ -359,7 +359,7 @@ fn main() {
                             render_svg(
                                 vector::InputMonitorIndicator,
                                 vector::MonitoringProps {
-                                    cell: (21.0, 20.0),
+                                    art: slice::expect_art("mcp_monitor_on"),
                                     axis: Default::default(),
                                     state: *v,
                                     width: None,
@@ -400,6 +400,7 @@ fn main() {
                         render_svg(
                             vector::PanningKnob,
                             vector::PanProps {
+                                indicator: false,
                                 position: *p,
                                 large: *large,
                                 width: None,
@@ -432,7 +433,8 @@ fn main() {
                     vector::VolumeFaderCap,
                     vector::FaderCapProps {
                         accent: None,
-                        width: None,
+                        pane: None,
+                                                width: None,
                         height: None,
                     },
                 ),
@@ -450,7 +452,8 @@ fn main() {
                     vector::VolumeFaderTrack,
                     vector::FaderCapProps {
                         accent: None,
-                        width: None,
+                        pane: None,
+                                                width: None,
                         height: None,
                     },
                 ),

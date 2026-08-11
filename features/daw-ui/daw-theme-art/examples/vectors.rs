@@ -45,7 +45,7 @@ fn main() {
                     depth: 0.15,
                     legend: None,
                     body: (0.0, 1.0),
-                    cell: (21.0, 20.0),
+                    art: daw_theme_art::slice::expect_art("mcp_mute_on"),
                     on: false,
                     width: None,
                     height: None,
@@ -64,7 +64,7 @@ fn main() {
                     depth: 0.15,
                     legend: None,
                     body: (0.0, 1.0),
-                    cell: (21.0, 20.0),
+                    art: daw_theme_art::slice::expect_art("mcp_mute_on"),
                     on: true,
                     width: None,
                     height: None,
@@ -83,7 +83,7 @@ fn main() {
                     depth: 0.11,
                     legend: None,
                     body: (0.0, 1.0),
-                    cell: (21.0, 20.0),
+                    art: daw_theme_art::slice::expect_art("mcp_solo_on"),
                     state: Solo::On,
                     width: None,
                     height: None,
@@ -102,7 +102,7 @@ fn main() {
                     depth: 0.11,
                     legend: None,
                     body: (0.0, 1.0),
-                    cell: (21.0, 20.0),
+                    art: daw_theme_art::slice::expect_art("mcp_solo_on"),
                     state: Solo::Defeat,
                     width: None,
                     height: None,
@@ -130,7 +130,7 @@ fn main() {
             &render_svg(
                 RecordArmButton,
                 RecordArmProps {
-                    cell: (36.0, 24.0),
+                    art: daw_theme_art::slice::expect_art("mcp_recarm_on"),
                     housing: true,
                     state: RecordArm::On,
                     width: None,
@@ -145,7 +145,7 @@ fn main() {
             &render_svg(
                 RecordArmButton,
                 RecordArmProps {
-                    cell: (36.0, 24.0),
+                    art: daw_theme_art::slice::expect_art("mcp_recarm_on"),
                     housing: true,
                     state: RecordArm::NoRecord,
                     width: None,
@@ -160,7 +160,7 @@ fn main() {
             &render_svg(
                 RecordArmButton,
                 RecordArmProps {
-                    cell: (36.0, 24.0),
+                    art: daw_theme_art::slice::expect_art("mcp_recarm_on"),
                     housing: true,
                     state: RecordArm::Auto,
                     width: None,
@@ -175,7 +175,7 @@ fn main() {
             &render_svg(
                 RoutingButton,
                 RoutingProps {
-                    cell: (23.0, 32.0),
+                    art: daw_theme_art::slice::expect_art("mcp_io_s_r"),
                     axis: Default::default(),
                     has_sends: true,
                     has_receives: true,
@@ -192,7 +192,7 @@ fn main() {
             &render_svg(
                 InputMonitorIndicator,
                 MonitoringProps {
-                    cell: (21.0, 20.0),
+                    art: daw_theme_art::slice::expect_art("mcp_monitor_on"),
                     axis: Default::default(),
                     state: Monitoring::On,
                     width: None,
@@ -207,6 +207,7 @@ fn main() {
             &render_svg(
                 PanningKnob,
                 PanProps {
+                    indicator: false,
                     position: -0.7,
                     large: false,
                     width: None,
@@ -220,6 +221,7 @@ fn main() {
             &render_svg(
                 PanningKnob,
                 PanProps {
+                    indicator: false,
                     position: 0.0,
                     large: false,
                     width: None,
@@ -234,7 +236,8 @@ fn main() {
                 VolumeFaderCap,
                 FaderCapProps {
                     accent: None,
-                    width: None,
+                    pane: None,
+                                        width: None,
                     height: None,
                 },
             ),

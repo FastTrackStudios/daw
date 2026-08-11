@@ -707,6 +707,10 @@ impl Tracks for Standalone {
         self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
             let track_guid = p.tracks[i].guid.clone();
+            // Mirrored onto the stored `Track` as well as the side map:
+            // a strip reads `Track::record_input` from the bulk read, and
+            // the two must not disagree.
+            p.tracks[i].record_input = input;
             p.track_ext
                 .entry(track_guid)
                 .or_insert_with(TrackExt::default)

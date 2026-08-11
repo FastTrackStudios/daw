@@ -26,7 +26,7 @@ fs = ["dep:image"]
 # Painting a REAPER theme from the canonical FTS theme.
 apply = ["fs", "dep:daw-theme"]
 # Component-drawn artwork: render the Dioxus art components into the theme.
-generate = ["apply", "dep:daw-theme-art", "dep:dioxus"]
+generate = ["apply", "daw-theme-art/render", "dep:dioxus"]
 # Screenshotting a real REAPER on a private X display (Linux/X11).
 shot = ["fs", "dep:daw", "daw/test-harness"]
 
@@ -36,7 +36,10 @@ serde = { workspace = true }
 palette = { workspace = true }
 # The canonical FTS theme — `fts-themer apply` paints REAPER from it.
 daw-theme = { workspace = true, optional = true }
-daw-theme-art = { workspace = true, optional = true, features = ["render"] }
+# The collapse thresholds live here — facts about the theme, shared with
+# the Dioxus strip so the two cannot drift. `render` (resvg/image) is only
+# needed to rasterise, so it rides the `generate` feature.
+daw-theme-art = { workspace = true, default-features = false }
 dioxus = { workspace = true, optional = true, features = ["lib"] }
 image = { workspace = true, optional = true }
 # The shared REAPER test harness (VirtualDisplay: Xvfb + WM + capture).

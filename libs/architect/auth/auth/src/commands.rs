@@ -41,6 +41,17 @@ pub struct UpdateUsername {
     pub display_username: Option<String>,
 }
 
+/// Set the session owner's display name / avatar. `None` leaves a
+/// field untouched; `Some("")` clears it — a distinction federated
+/// callers depend on, since "not mentioned" and "deliberately cleared"
+/// must not become the same write.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UpdateProfile {
+    pub session_token: String,
+    pub name: Option<String>,
+    pub image: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LinkAnonymousEmailPassword {
     pub session_token: String,

@@ -104,6 +104,19 @@ pub struct Track {
     pub automation_mode: crate::primitives::AutomationMode,
     /// Record input monitoring (REAPER `I_RECMON`).
     pub input_monitor: InputMonitoringMode,
+    /// What the track records from (REAPER `I_RECINPUT`).
+    ///
+    /// On the track rather than behind a getter of its own, deliberately:
+    /// a strip needs it, and building a strip has to stay *one* bulk read.
+    /// A per-track getter would make an N-track mixer cost N extra round
+    /// trips to show something every strip displays.
+    pub record_input: RecordInput,
+    /// Does the track send to its parent / master (REAPER `B_MAINSEND`)?
+    ///
+    /// Here for the same reason as `record_input`: it was a separate
+    /// per-track routing call, so a mixer paid N round trips for a flag its
+    /// IO indicator has to show on every strip.
+    pub parent_send: bool,
 
     // === Structure ===
     /// GUID of the parent folder track, if any
@@ -171,6 +184,11 @@ impl Track {
             visible_in_mixer: true,
             fx_count: 0,
             input_fx_count: 0,
+            record_input: RecordInput::None,
+            // Sending, because that is what a new track does — a default of
+            // "cut off from the master" would put a disabled badge on every
+            // strip the moment anything constructed a Track without asking.
+            parent_send: true,
         }
     }
 
@@ -269,7 +287,7 @@ pub enum InputMonitoringMode {
 ///
 /// Simplified representation of REAPER's I_RECINPUT encoding.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, Facet)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Facet)]
 pub enum RecordInput {
     /// No input (-1).
     None,
