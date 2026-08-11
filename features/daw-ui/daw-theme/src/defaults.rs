@@ -140,6 +140,35 @@ pub const PLAYHEAD: &str = "#f8fafc";
 /// A track with no colour assigned.
 pub const NEUTRAL_TRACK: &str = "#828282";
 
+// ── measured off REAPER ──────────────────────────────────────────────────
+//
+// Sampled off REAPER's own render during convergence (#240). These were
+// inlined where they were measured, which made them invisible to a
+// re-palette: everything moved except the most carefully matched parts.
+// The measurement each records lives in its doc comment; change the value
+// here and the panels and the exported art move together.
+
+/// The strip's own grey — `mcp_namebg`, the mixer strip body, the plate
+/// under the track name, and the track panel's name field. Measured off
+/// the strip next to REAPER's: a shade darker than [`SURFACE_RAISED`],
+/// which read as a light bar across the bottom of every strip.
+pub const STRIP_BODY: &str = "#262626";
+/// The volume knob's lit ring where the value starts, at the lower left.
+/// Sampled round REAPER's ring — it is not one flat blue; see
+/// [`VOLUME_RING_LIT_TOP`].
+pub const VOLUME_RING_LIT: &str = "#5ec3ff";
+/// The same ring by the time it reaches the top — lit from below, like
+/// the rest of this theme's hardware.
+pub const VOLUME_RING_LIT_TOP: &str = "#4b7994";
+/// The unlit side of the volume knob's ring — a slate that stays legible
+/// against the body. Derived from the accent it was too dark to see, so
+/// the knob looked like a lit arc floating on nothing.
+pub const VOLUME_RING_UNLIT: &str = "#3e4a51";
+/// The fixed-lanes button's dots when the track is not in fixed-lane
+/// mode, traced off `custom_fixed_lanes_off.png`. The on state is
+/// [`SOLO`]'s amber.
+pub const FIXED_LANES_DOT: &str = "#818181";
+
 // ── editor ───────────────────────────────────────────────────────────────
 
 /// White-key row in the piano roll.

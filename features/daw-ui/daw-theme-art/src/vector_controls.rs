@@ -5278,12 +5278,12 @@ pub fn VolumeKnob(props: VolumeKnobProps) -> Element {
             circle { cx: "{cx}", cy: "{cy}", r: "{rim}", fill: "#0d0d0d" }
             defs {
                 // The ring is not one flat blue. Sampled round REAPER's,
-                // it runs #5EC3FF where the value starts at the lower left
-                // and #4B7994 by the time it reaches the top — lit from
-                // below, like the rest of this theme's hardware.
+                // it runs the lit token where the value starts at the lower
+                // left and the top token by the time it reaches the top —
+                // lit from below, like the rest of this theme's hardware.
                 linearGradient { id: "volring", x1: "0", y1: "1", x2: "0", y2: "0",
-                    stop { offset: "0", stop_color: "#5ec3ff" }
-                    stop { offset: "1", stop_color: "#4b7994" }
+                    stop { offset: "0", stop_color: daw_theme::defaults::VOLUME_RING_LIT }
+                    stop { offset: "1", stop_color: daw_theme::defaults::VOLUME_RING_LIT_TOP }
                 }
                 // And the body is not flat either: #303030 at the top to
                 // #2D2D2D at the bottom. Three units, which sounds like
@@ -5298,11 +5298,11 @@ pub fn VolumeKnob(props: VolumeKnobProps) -> Element {
             path {
                 d: "{arc(start, start + sweep)}",
                 fill: "none",
-                // #3E4A51, measured off the unlit side of REAPER's ring —
-                // a slate that stays legible against the body. Derived from
-                // the accent it was too dark to see, so the knob looked
-                // like a lit arc floating on nothing.
-                stroke: "#3e4a51",
+                // Measured off the unlit side of REAPER's ring — a slate
+                // that stays legible against the body. Derived from the
+                // accent it was too dark to see, so the knob looked like a
+                // lit arc floating on nothing.
+                stroke: daw_theme::defaults::VOLUME_RING_UNLIT,
                 stroke_width: "{stroke}",
                 stroke_linecap: "butt",
             }
@@ -5496,7 +5496,10 @@ pub fn FixedLanesButton(props: FixedLanesProps) -> Element {
         let lit = t.signal.solo.shade(lift).css();
         (lit.clone(), lit, 1.0f32)
     } else {
-        let ink = Color::rgb(0x81, 0x81, 0x81).shade(lift).css();
+        let ink = Color::hex(daw_theme::defaults::FIXED_LANES_DOT)
+            .expect("token is valid hex")
+            .shade(lift)
+            .css();
         (ink.clone(), ink, 0.40)
     };
 

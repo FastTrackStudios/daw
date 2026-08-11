@@ -217,8 +217,9 @@ impl Stacked {
     }
 }
 /// The strip's own grey — `mcp_namebg`'s, and the same one the plate under
-/// the track name uses.
-const BODY_GREY: &str = "#262626";
+/// the track name uses. A measured token, not a local hex, so a re-palette
+/// reaches it (#240).
+use daw_theme::defaults::STRIP_BODY as BODY_GREY;
 
 // ── Channel Strip ───────────────────────────────────────────────────
 

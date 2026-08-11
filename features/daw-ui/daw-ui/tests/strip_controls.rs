@@ -152,7 +152,10 @@ fn the_colour_lands_on_the_index_plate_and_not_the_name_plate() {
         dioxus_ssr::render(&mount(coloured, || rsx! { ChannelStripPreview { track: coloured() } }));
 
     assert!(!name.contains("#ff8800"), "the name plate took the track colour:\n{name}");
-    assert!(name.contains("#262626"), "the name plate is not `mcp_namebg`:\n{name}");
+    assert!(
+        name.contains(daw_theme::defaults::STRIP_BODY),
+        "the name plate is not `mcp_namebg`'s token:\n{name}"
+    );
     // The *tinted* colour, not the raw one: REAPER paints a panel at 70%
     // of the track's colour, measured in one screenshot holding both
     // renders of the same project. #ff8800 shaded 30% toward black.

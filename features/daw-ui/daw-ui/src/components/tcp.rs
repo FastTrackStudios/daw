@@ -43,8 +43,9 @@ use daw_theme_art::geometry::tcp::{
 };
 
 /// The panel's own grey — the same one the mixer strip's body and name
-/// plate use.
-const BODY_GREY: &str = "#262626";
+/// plate use. A measured token, not a local hex, so a re-palette reaches
+/// it (#240).
+use daw_theme::defaults::STRIP_BODY as BODY_GREY;
 
 /// One track's row in the panel.
 ///

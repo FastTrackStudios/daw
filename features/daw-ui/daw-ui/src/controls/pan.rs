@@ -159,10 +159,11 @@ pub fn TrackName(
     //
     // The colour is still read: it decides the ink, because a themer can
     // point the plate at a light surface.
-    // `mcp_namebg` is #262626 — a shade darker than the raised surface the
-    // plate used, which read as a light bar across the bottom of every
-    // strip next to REAPER's.
-    let plate = daw_theme::Color::rgb(0x26, 0x26, 0x26);
+    // `mcp_namebg` — a shade darker than the raised surface the plate
+    // used, which read as a light bar across the bottom of every strip
+    // next to REAPER's. The measured value lives in the token.
+    let plate = daw_theme::Color::hex(daw_theme::defaults::STRIP_BODY)
+        .expect("token is valid hex");
     let _ = colour;
     // Black text on a light colour, white on a dark one — a track painted
     // yellow is unreadable otherwise. Rec. 601 luma, which is what a
