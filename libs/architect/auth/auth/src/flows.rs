@@ -1591,15 +1591,39 @@ pub mod email_password {
         // r[impl auth.email.signin.invalid-generic]
         // r[impl auth.email.signin.banned]
         // r[impl auth.email.signin.verification-required]
-        // r[impl auth.email.signin.success]
-        pub async fn sign_in_email_password(
+        /// Check an email/password pair and return the user it belongs
+        /// to — **without issuing a session**.
+        ///
+        /// This is the whole of [`Self::sign_in_email_password`]'s
+        /// verification (enabled-check, normalization, ban, verification
+        /// requirement, password hash) minus the session it mints,
+        /// factored out for callers that authenticate *per request*
+        /// rather than per login: plain-HTTP surfaces where the client
+        /// re-presents the same credential every time and has nowhere to
+        /// keep a token. HTTP Basic is the case that motivated it (the
+        /// Files WebDAV bridge — Finder re-sends `Authorization: Basic`
+        /// on every `PROPFIND`).
+        ///
+        /// Minting a session per such request grows the session table
+        /// without bound and leaves live credentials nobody will ever
+        /// present again; caching the minted session instead means a
+        /// rotated password keeps working until the cache expires,
+        /// because the *session* is what gets re-checked rather than the
+        /// password. Verifying directly avoids both — every request is
+        /// checked against the current stored hash, and no session
+        /// exists to leak or to sweep (FastTrackStudio PR #287 review).
+        ///
+        /// Emits no audit event and does not touch `last_login_method`:
+        /// this is not a login.
+        pub async fn verify_email_password(
             &self,
-            input: SignInEmailPassword,
-        ) -> Result<AuthSessionBundle, AuthFlowError> {
+            email: &str,
+            password: &str,
+        ) -> Result<auth_proto::AuthUser, AuthFlowError> {
             if !self.config.email_password_enabled {
                 return Err(AuthFlowError::PermissionDenied);
             }
-            let canonical_email = normalize_email(&input.email)?;
+            let canonical_email = normalize_email(email)?;
             let Some(user) = self.storage.find_user_by_email(&canonical_email).await? else {
                 return Err(AuthFlowError::InvalidCredentials);
             };
@@ -1621,11 +1645,22 @@ pub mod email_password {
             let Some(password_hash) = account.password_hash else {
                 return Err(AuthFlowError::InvalidCredentials);
             };
-            let password_ok = verify_password(&input.password, &password_hash)
+            let password_ok = verify_password(password, &password_hash)
                 .map_err(|_| AuthFlowError::InvalidCredentials)?;
             if !password_ok {
                 return Err(AuthFlowError::InvalidCredentials);
             }
+            Ok(user)
+        }
+
+        // r[impl auth.email.signin.success]
+        pub async fn sign_in_email_password(
+            &self,
+            input: SignInEmailPassword,
+        ) -> Result<AuthSessionBundle, AuthFlowError> {
+            let user = self
+                .verify_email_password(&input.email, &input.password)
+                .await?;
 
             let bundle = self
                 .issue_session_with_state(
