@@ -7,11 +7,11 @@ use crate::{DawClients, Error};
 use daw_proto::{
     ProjectContext,
     automation::{
-        AddPointParams, Envelope, EnvelopeLocation, EnvelopePoint, EnvelopeRef, EnvelopeShape,
-        TakeEnvelopeKind,
-        EnvelopeType, SetPointParams, TimeRangeParams,
+        AddAutomationItemParams, AddPointParams, AutomationItem, Envelope, EnvelopeLocation,
+        EnvelopePoint, EnvelopeRef, EnvelopeShape, EnvelopeType, LaneParams,
+        SetAutomationItemParams, SetPointParams, TakeEnvelopeKind, TimeRangeParams,
     },
-    primitives::{AutomationMode, PositionInSeconds},
+    primitives::{AutomationMode, Duration, PositionInSeconds},
     track::TrackRef,
 };
 
@@ -323,6 +323,112 @@ impl EnvelopeHandle {
             .automation
             .set_automation_mode(self.context(), self.location(), mode)
             .await?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // Lane
+    // =========================================================================
+
+    /// Give this envelope a lane of its own, `height` px tall.
+    ///
+    /// The lane is where FX parameter automation becomes readable — a
+    /// parameter curve overlaid on a waveform is not. Heights below the
+    /// theme's `envcp_min_height` are clamped by the host.
+    pub async fn show_in_lane(&self, height: u32) -> Result<()> {
+        self.clients
+            .automation
+            .set_lane(self.context(), self.location(), LaneParams::own(height))
+            .await??;
+        Ok(())
+    }
+
+    /// Fold this envelope back over the track's own lane.
+    pub async fn overlay(&self) -> Result<()> {
+        self.clients
+            .automation
+            .set_lane(self.context(), self.location(), LaneParams::overlaid())
+            .await??;
+        Ok(())
+    }
+
+    // =========================================================================
+    // Automation items
+    // =========================================================================
+
+    /// Every automation item on this envelope.
+    pub async fn automation_items(&self) -> Result<Vec<AutomationItem>> {
+        let items = self
+            .clients
+            .automation
+            .automation_items(self.context(), self.location())
+            .await?;
+        Ok(items)
+    }
+
+    /// The points inside one automation item, in item-relative seconds.
+    pub async fn automation_item_points(&self, index: u32) -> Result<Vec<EnvelopePoint>> {
+        let points = self
+            .clients
+            .automation
+            .automation_item_points(self.context(), self.location(), index)
+            .await?;
+        Ok(points)
+    }
+
+    /// Add an automation item over a range. Returns its index.
+    pub async fn add_automation_item(
+        &self,
+        position: PositionInSeconds,
+        length: Duration,
+    ) -> Result<u32> {
+        let index = self
+            .clients
+            .automation
+            .add_automation_item(
+                self.context(),
+                self.location(),
+                AddAutomationItemParams::new(position, length),
+            )
+            .await??;
+        Ok(index)
+    }
+
+    /// Add another instance of an existing pool — edits propagate
+    /// between instances, which is what pooling is for.
+    pub async fn add_pooled_automation_item(
+        &self,
+        pool_id: i32,
+        position: PositionInSeconds,
+        length: Duration,
+    ) -> Result<u32> {
+        let index = self
+            .clients
+            .automation
+            .add_automation_item(
+                self.context(),
+                self.location(),
+                AddAutomationItemParams::pooled(pool_id, position, length),
+            )
+            .await??;
+        Ok(index)
+    }
+
+    /// Move / resize / re-time one automation item.
+    pub async fn set_automation_item(&self, params: SetAutomationItemParams) -> Result<()> {
+        self.clients
+            .automation
+            .set_automation_item(self.context(), self.location(), params)
+            .await??;
+        Ok(())
+    }
+
+    /// Remove an automation item; the envelope's own points survive.
+    pub async fn delete_automation_item(&self, index: u32) -> Result<()> {
+        self.clients
+            .automation
+            .delete_automation_item(self.context(), self.location(), index)
+            .await??;
         Ok(())
     }
 

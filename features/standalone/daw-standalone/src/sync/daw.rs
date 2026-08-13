@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
 use daw_proto::automation::{
-    Envelope, EnvelopePoint, EnvelopeRef, EnvelopeType, SendEnvelopeKind, TakeEnvelopeKind,
+    AutomationItem, Envelope, EnvelopePoint, EnvelopeRef, EnvelopeType, SendEnvelopeKind,
+    TakeEnvelopeKind,
 };
 use daw_proto::midi::MidiNote;
 use daw_proto::primitives::AutomationMode;
@@ -133,7 +134,18 @@ pub struct EnvelopeData {
     pub visible: bool,
     pub armed: bool,
     pub automation_mode: AutomationMode,
+    /// A lane of its own under the track, rather than overlaid.
+    pub in_own_lane: bool,
+    /// That lane's height in pixels.
+    pub lane_height: u32,
     pub points: Vec<EnvelopePoint>,
+    /// Automation items on this envelope, with their own curves.
+    ///
+    /// The curve lives beside the item because standalone has no pool
+    /// store: two instances of one pool carry equal copies, and the
+    /// setter writes through every instance sharing the id — which is
+    /// pooling's observable behaviour without a second index.
+    pub automation_items: Vec<(AutomationItem, Vec<EnvelopePoint>)>,
 }
 
 impl EnvelopeData {
@@ -142,7 +154,10 @@ impl EnvelopeData {
             visible: false,
             armed: false,
             automation_mode: AutomationMode::TrimRead,
+            in_own_lane: false,
+            lane_height: 0,
             points: Vec::new(),
+            automation_items: Vec::new(),
         }
     }
 
@@ -200,6 +215,9 @@ impl EnvelopeData {
             visible: self.visible,
             armed: self.armed,
             automation_mode: self.automation_mode,
+            in_own_lane: self.in_own_lane,
+            lane_height: self.lane_height,
+            automation_item_count: self.automation_items.len() as u32,
             point_count: self.points.len() as u32,
         }
     }

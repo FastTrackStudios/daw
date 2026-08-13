@@ -10,7 +10,8 @@
 
 use daw_proto::TrackRef;
 use daw_proto::automation::{
-    AddPointParams, Automation, Envelope, EnvelopeLocation, EnvelopePoint, EnvelopeShape,
+    AddAutomationItemParams, AddPointParams, Automation, AutomationItem, Envelope,
+    EnvelopeLocation, EnvelopePoint, EnvelopeShape, LaneParams, SetAutomationItemParams,
     SetPointParams, TimeRangeParams,
 };
 use daw_proto::primitives::{AutomationMode, PositionInSeconds};
@@ -143,6 +144,152 @@ impl Automation for Standalone {
 
     fn set_visible(&self, project: ProjectContext, location: EnvelopeLocation, visible: bool) {
         mutate_envelope(self, project, location, |e| e.visible = visible);
+    }
+
+    fn set_lane(
+        &self,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        lane: LaneParams,
+    ) -> DawResult<()> {
+        // The floor is the theme's `envcp_min_height`; a caller that
+        // asks for less gets the minimum rather than an error, which is
+        // what a drag past the stop should do.
+        let height = if lane.in_own_lane {
+            lane.height.max(ENVCP_MIN_HEIGHT)
+        } else {
+            0
+        };
+        mutate_envelope(self, project, location, |e| {
+            e.in_own_lane = lane.in_own_lane;
+            e.lane_height = height;
+        });
+        Ok(())
+    }
+
+    fn automation_items(
+        &self,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+    ) -> Vec<AutomationItem> {
+        read_envelope(self, &project, &location)
+            .map(|e| e.automation_items.iter().map(|(ai, _)| ai.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    fn automation_item_points(
+        &self,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        index: u32,
+    ) -> Vec<EnvelopePoint> {
+        read_envelope(self, &project, &location)
+            .and_then(|e| e.automation_items.get(index as usize).map(|(_, p)| p.clone()))
+            .unwrap_or_default()
+    }
+
+    fn add_automation_item(
+        &self,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        params: AddAutomationItemParams,
+    ) -> DawResult<u32> {
+        let mut index = 0u32;
+        // A pooled instance copies its pool-mate's curve, so the two
+        // start identical — which is what pooling means before an edit.
+        let mut seeded: Vec<EnvelopePoint> = Vec::new();
+        if params.pool_id >= 0 {
+            if let Some(e) = read_envelope(self, &project, &location) {
+                if let Some((_, points)) = e
+                    .automation_items
+                    .iter()
+                    .find(|(ai, _)| ai.pool_id == params.pool_id)
+                {
+                    seeded = points.clone();
+                }
+            }
+        }
+        mutate_envelope(self, project, location, |e| {
+            index = e.automation_items.len() as u32;
+            let pool_id = if params.pool_id >= 0 {
+                params.pool_id
+            } else {
+                // A fresh pool: one past the highest in use.
+                e.automation_items
+                    .iter()
+                    .map(|(ai, _)| ai.pool_id)
+                    .max()
+                    .unwrap_or(-1)
+                    + 1
+            };
+            e.automation_items.push((
+                AutomationItem {
+                    index,
+                    pool_id,
+                    position: params.position,
+                    length: params.length,
+                    ..Default::default()
+                },
+                seeded,
+            ));
+        });
+        Ok(index)
+    }
+
+    fn set_automation_item(
+        &self,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        params: SetAutomationItemParams,
+    ) -> DawResult<()> {
+        mutate_envelope(self, project, location, |e| {
+            let Some((item, _)) = e.automation_items.get_mut(params.index as usize) else {
+                return;
+            };
+            if let Some(v) = params.position {
+                item.position = v;
+            }
+            if let Some(v) = params.length {
+                item.length = v;
+            }
+            if let Some(v) = params.start_offset {
+                item.start_offset = v;
+            }
+            if let Some(v) = params.play_rate {
+                item.play_rate = v;
+            }
+            if let Some(v) = params.baseline {
+                item.baseline = v;
+            }
+            if let Some(v) = params.amplitude {
+                item.amplitude = v;
+            }
+            if let Some(v) = params.loop_source {
+                item.loop_source = v;
+            }
+            if let Some(v) = params.selected {
+                item.selected = v;
+            }
+        });
+        Ok(())
+    }
+
+    fn delete_automation_item(
+        &self,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        index: u32,
+    ) -> DawResult<()> {
+        mutate_envelope(self, project, location, |e| {
+            if (index as usize) < e.automation_items.len() {
+                e.automation_items.remove(index as usize);
+                // Indices are positions, so everything after shifts.
+                for (i, (item, _)) in e.automation_items.iter_mut().enumerate() {
+                    item.index = i as u32;
+                }
+            }
+        });
+        Ok(())
     }
 
     fn touch_param(&self, project: ProjectContext, location: EnvelopeLocation) -> DawResult<()> {
@@ -388,6 +535,22 @@ impl Automation for Standalone {
             p.global_automation_override = mode;
         });
     }
+}
+
+/// The theme's `envcp_min_height` — a lane cannot be shorter.
+const ENVCP_MIN_HEIGHT: u32 = 27;
+
+/// Read one envelope's state, if the project and location resolve.
+fn read_envelope(
+    daw: &Standalone,
+    project: &ProjectContext,
+    location: &EnvelopeLocation,
+) -> Option<EnvelopeData> {
+    let project_guid = resolve_project(daw, project)?;
+    let (tg, key) = resolve_envelope_id(daw, &project_guid, location)?;
+    daw.with_project(&project_guid, |p| p.envelopes.get(&(tg, key)).cloned())
+        .ok()
+        .flatten()
 }
 
 fn mutate_envelope(

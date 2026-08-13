@@ -1,6 +1,6 @@
 //! Envelope types for automation
 
-use crate::primitives::{AutomationMode, PositionInSeconds};
+use crate::primitives::{AutomationMode, Duration, PositionInSeconds};
 use crate::track::TrackRef;
 use facet::Facet;
 
@@ -120,9 +120,83 @@ pub struct Envelope {
     /// Automation playback/recording mode
     pub automation_mode: AutomationMode,
 
+    // Lane
+    /// Whether the envelope has a **lane of its own** under the track,
+    /// rather than being drawn over the track's own lane.
+    ///
+    /// REAPER's per-envelope choice, and the one that matters for FX
+    /// parameter automation: a parameter envelope is unreadable overlaid
+    /// on a waveform, so it gets a lane. In REAPER's envelope chunk this
+    /// is the second field of `VIS`.
+    pub in_own_lane: bool,
+    /// The lane's height in pixels when it has one, `0` when the host
+    /// has not laid it out yet.
+    ///
+    /// REAPER's `I_TCPH` via `GetEnvelopeInfo_Value`. The floor is the
+    /// theme's `envcp_min_height` (27 in the FTS theme) — a UI drawing
+    /// this lane must clamp, because REAPER reports the *used* height
+    /// and a collapsed lane reports below its own minimum.
+    pub lane_height: u32,
+    /// Number of automation items on this envelope. Fetch them with
+    /// [`Automation::automation_items`][crate::automation::Automation].
+    pub automation_item_count: u32,
+
     // Points
     /// Number of points in the envelope
     pub point_count: u32,
+}
+
+/// A windowed piece of automation on an envelope — REAPER's automation
+/// item, which behaves like a media item: it moves, loops, stretches,
+/// and can be **pooled** so every instance edits one source.
+///
+/// Fields map onto `GetSetAutomationItemInfo`'s descriptors, named for
+/// what they mean rather than for the string.
+#[derive(Clone, Debug, PartialEq, Facet)]
+pub struct AutomationItem {
+    /// Index on the envelope — the handle every setter takes.
+    pub index: u32,
+    /// `P_POOL_ID`. Instances sharing a pool id share their source, so
+    /// editing one edits all — the fact a UI must surface before a user
+    /// edits the wrong copy.
+    pub pool_id: i32,
+    /// `P_POOL_NAME`, the pooled source's display name.
+    pub name: String,
+    /// `D_POS` — position on the timeline.
+    pub position: PositionInSeconds,
+    /// `D_LENGTH`.
+    pub length: Duration,
+    /// `D_STARTOFFS` — offset into the pooled source.
+    pub start_offset: Duration,
+    /// `D_PLAYRATE`.
+    pub play_rate: f64,
+    /// `D_BASELINE` — the value the item's curve is measured from.
+    pub baseline: f64,
+    /// `D_AMPLITUDE` — the curve's scale, and it may be negative
+    /// (inverted), which is why this is not a `0..1`.
+    pub amplitude: f64,
+    /// `D_LOOPSRC` — whether the source repeats to fill the length.
+    pub loop_source: bool,
+    /// `D_UISEL` — selected in the arrange.
+    pub selected: bool,
+}
+
+impl Default for AutomationItem {
+    fn default() -> Self {
+        Self {
+            index: 0,
+            pool_id: -1,
+            name: String::new(),
+            position: PositionInSeconds::ZERO,
+            length: Duration::ZERO,
+            start_offset: Duration::ZERO,
+            play_rate: 1.0,
+            baseline: 0.0,
+            amplitude: 1.0,
+            loop_source: false,
+            selected: false,
+        }
+    }
 }
 
 /// Shape of automation curve between points
@@ -209,6 +283,9 @@ impl Default for Envelope {
             visible: false,
             armed: false,
             automation_mode: AutomationMode::TrimRead,
+            in_own_lane: false,
+            lane_height: 0,
+            automation_item_count: 0,
             point_count: 0,
         }
     }

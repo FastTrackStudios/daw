@@ -289,3 +289,335 @@ pub fn evaluate_envelope(
     };
     Some((value, dvds, ddvds, dddvds))
 }
+
+// ── Automation items ────────────────────────────────────────────────
+//
+// REAPER addresses an automation item by `(envelope, index)` and reads
+// or writes every field through one `GetSetAutomationItemInfo` call with
+// a descriptor string. The `_Ex` point functions take the same index —
+// `-1` means the envelope's own points, `>= 0` means the item's — which
+// is why an item's curve is a different read from the envelope's.
+
+/// Number of automation items on an envelope. `0` if `envelope` is null.
+pub fn count_automation_items(low: &Reaper, envelope: *mut TrackEnvelope) -> u32 {
+    if envelope.is_null() {
+        return 0;
+    }
+    unsafe { low.CountAutomationItems(envelope).max(0) as u32 }
+}
+
+/// Read one numeric field of an automation item.
+///
+/// Descriptors are REAPER's: `D_POS`, `D_LENGTH`, `D_STARTOFFS`,
+/// `D_PLAYRATE`, `D_BASELINE`, `D_AMPLITUDE`, `D_LOOPSRC`, `D_UISEL`,
+/// `P_POOL_ID`.
+pub fn get_automation_item_info(
+    low: &Reaper,
+    envelope: *mut TrackEnvelope,
+    index: u32,
+    desc: &str,
+) -> f64 {
+    if envelope.is_null() {
+        return 0.0;
+    }
+    let Ok(desc) = CString::new(desc) else {
+        return 0.0;
+    };
+    unsafe {
+        low.GetSetAutomationItemInfo(envelope, index as i32, desc.as_ptr(), 0.0, false)
+    }
+}
+
+/// Write one numeric field of an automation item.
+pub fn set_automation_item_info(
+    low: &Reaper,
+    envelope: *mut TrackEnvelope,
+    index: u32,
+    desc: &str,
+    value: f64,
+) {
+    if envelope.is_null() {
+        return;
+    }
+    let Ok(desc) = CString::new(desc) else {
+        return;
+    };
+    unsafe {
+        low.GetSetAutomationItemInfo(envelope, index as i32, desc.as_ptr(), value, true);
+    }
+}
+
+/// The pooled source's name (`P_POOL_NAME`).
+pub fn get_automation_item_name(
+    low: &Reaper,
+    envelope: *mut TrackEnvelope,
+    index: u32,
+) -> Option<String> {
+    if envelope.is_null() {
+        return None;
+    }
+    let desc = CString::new("P_POOL_NAME").ok()?;
+    let mut buf = vec![0i8; 512];
+    let ok = unsafe {
+        low.GetSetAutomationItemInfo_String(
+            envelope,
+            index as i32,
+            desc.as_ptr(),
+            buf.as_mut_ptr(),
+            false,
+        )
+    };
+    if !ok {
+        return None;
+    }
+    let name = unsafe { CStr::from_ptr(buf.as_ptr()) }
+        .to_string_lossy()
+        .into_owned();
+    Some(name)
+}
+
+/// Insert an automation item over a range. `pool_id` of `-1` makes a
+/// fresh pool. Returns the new item's index, or `None` on refusal.
+pub fn insert_automation_item(
+    low: &Reaper,
+    envelope: *mut TrackEnvelope,
+    pool_id: i32,
+    position: f64,
+    length: f64,
+) -> Option<u32> {
+    if envelope.is_null() {
+        return None;
+    }
+    let index = unsafe { low.InsertAutomationItem(envelope, pool_id, position, length) };
+    (index >= 0).then_some(index as u32)
+}
+
+/// Points *inside* an automation item — `GetEnvelopePointEx` with the
+/// item's index, where `-1` would read the envelope's own points.
+pub fn get_automation_item_points(
+    low: &Reaper,
+    envelope: *mut TrackEnvelope,
+    index: u32,
+) -> Vec<PointSample> {
+    if envelope.is_null() {
+        return Vec::new();
+    }
+    let count = unsafe { low.CountEnvelopePointsEx(envelope, index as i32).max(0) } as u32;
+    let mut out = Vec::with_capacity(count as usize);
+    for i in 0..count {
+        let mut time = 0.0f64;
+        let mut value = 0.0f64;
+        let mut shape = 0i32;
+        let mut tension = 0.0f64;
+        let mut selected = false;
+        let ok = unsafe {
+            low.GetEnvelopePointEx(
+                envelope,
+                index as i32,
+                i as i32,
+                &mut time,
+                &mut value,
+                &mut shape,
+                &mut tension,
+                &mut selected,
+            )
+        };
+        if ok {
+            out.push(PointSample { time, value, shape, tension, selected });
+        }
+    }
+    out
+}
+
+/// One field of `GetEnvelopeInfo_Value` — e.g. `I_TCPH` for the lane's
+/// height in pixels, `I_TCPY` for its offset.
+pub fn get_envelope_info_value(low: &Reaper, envelope: *mut TrackEnvelope, desc: &str) -> f64 {
+    if envelope.is_null() {
+        return 0.0;
+    }
+    let Ok(desc) = CString::new(desc) else {
+        return 0.0;
+    };
+    unsafe { low.GetEnvelopeInfo_Value(envelope, desc.as_ptr()) }
+}
+
+/// The envelope's state chunk.
+///
+/// The lane facts live here and nowhere else in the API: `VIS vis lane
+/// unknown` carries visibility and the in-own-lane flag, `LANEHEIGHT h
+/// unknown` the height. `GetEnvelopeInfo_Value`'s `I_TCPH` reports the
+/// *laid-out* height, which is 0 for a hidden lane and cannot be
+/// written — so reads can use either but writes must go through here.
+pub fn get_envelope_state_chunk(low: &Reaper, envelope: *mut TrackEnvelope) -> Option<String> {
+    if envelope.is_null() {
+        return None;
+    }
+    let mut buf = vec![0i8; 64 * 1024];
+    let ok = unsafe {
+        low.GetEnvelopeStateChunk(envelope, buf.as_mut_ptr(), buf.len() as i32, false)
+    };
+    if !ok {
+        return None;
+    }
+    Some(
+        unsafe { CStr::from_ptr(buf.as_ptr()) }
+            .to_string_lossy()
+            .into_owned(),
+    )
+}
+
+/// Write the envelope's state chunk back.
+pub fn set_envelope_state_chunk(low: &Reaper, envelope: *mut TrackEnvelope, chunk: &str) -> bool {
+    if envelope.is_null() {
+        return false;
+    }
+    let Ok(chunk) = CString::new(chunk) else {
+        return false;
+    };
+    unsafe { low.SetEnvelopeStateChunk(envelope, chunk.as_ptr(), false) }
+}
+
+/// The lane facts, parsed out of the state chunk.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LaneState {
+    pub visible: bool,
+    /// `VIS`'s second field: the envelope has a lane of its own.
+    pub in_own_lane: bool,
+    /// `LANEHEIGHT`'s first field, in pixels.
+    pub height: u32,
+}
+
+/// Read `VIS` and `LANEHEIGHT` out of a chunk.
+///
+/// Line-wise rather than by regex: the chunk is line-oriented and both
+/// keys are the first word of their line, so this cannot be confused by
+/// a nested `<PARMENV>` block carrying its own.
+pub fn parse_lane_state(chunk: &str) -> LaneState {
+    let mut state = LaneState::default();
+    // Only the outermost block's keys — a nested block is indented and
+    // belongs to a parameter envelope, not this one.
+    for line in chunk.lines() {
+        let mut words = line.split_whitespace();
+        match words.next() {
+            Some("VIS") => {
+                state.visible = words.next().map(|v| v != "0").unwrap_or(false);
+                state.in_own_lane = words.next().map(|v| v != "0").unwrap_or(false);
+            }
+            Some("LANEHEIGHT") => {
+                state.height = words.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+            }
+            _ => {}
+        }
+    }
+    state
+}
+
+/// Rewrite `VIS` and `LANEHEIGHT` in a chunk, leaving every other line
+/// exactly as it was.
+///
+/// Surgical for the same reason `fts_themer::thresholds` is: the chunk
+/// is REAPER's own serialisation of everything about this envelope, and
+/// a rewrite that regenerates it would drop what this code does not
+/// model.
+pub fn splice_lane_state(chunk: &str, lane: LaneState) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut wrote_height = false;
+    for line in chunk.lines() {
+        let indent: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+        let mut words = line.split_whitespace();
+        match words.next() {
+            Some("VIS") => {
+                // Keep the third field — it is the fader-scaling flag,
+                // and it is not ours to decide.
+                let _ = words.next();
+                let _ = words.next();
+                let rest = words.next().unwrap_or("1");
+                out.push(format!(
+                    "{indent}VIS {} {} {rest}",
+                    if lane.visible { 1 } else { 0 },
+                    if lane.in_own_lane { 1 } else { 0 },
+                ));
+            }
+            Some("LANEHEIGHT") => {
+                let _ = words.next();
+                let rest = words.next().unwrap_or("0");
+                out.push(format!("{indent}LANEHEIGHT {} {rest}", lane.height));
+                wrote_height = true;
+            }
+            _ => out.push(line.to_string()),
+        }
+    }
+    // A chunk that never carried a LANEHEIGHT gains one after VIS.
+    if !wrote_height {
+        if let Some(at) = out.iter().position(|l| l.trim_start().starts_with("VIS ")) {
+            let indent: String = out[at].chars().take_while(|c| c.is_whitespace()).collect();
+            out.insert(at + 1, format!("{indent}LANEHEIGHT {} 0", lane.height));
+        }
+    }
+    let mut text = out.join("\n");
+    if chunk.ends_with('\n') {
+        text.push('\n');
+    }
+    text
+}
+
+#[cfg(test)]
+mod lane_tests {
+    use super::*;
+
+    /// A chunk in REAPER's own shape, with a nested parameter envelope
+    /// carrying its own VIS — the thing a naive parse gets wrong.
+    fn chunk() -> String {
+        [
+            "<PARMENV 2 0 1 1",
+            "  ACT 1 -1",
+            "  VIS 1 0 1",
+            "  LANEHEIGHT 0 0",
+            "  ARM 1",
+            "  DEFSHAPE 0 -1 -1",
+            "  PT 0 0.5 0",
+            ">",
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn the_lane_facts_come_off_the_chunk() {
+        let state = parse_lane_state(&chunk());
+        assert!(state.visible);
+        assert!(!state.in_own_lane);
+        assert_eq!(state.height, 0);
+    }
+
+    /// Splicing changes the two lines it owns and nothing else — the
+    /// points, the arm flag and the shape survive byte for byte.
+    #[test]
+    fn splicing_touches_only_its_own_lines() {
+        let out = splice_lane_state(
+            &chunk(),
+            LaneState { visible: true, in_own_lane: true, height: 44 },
+        );
+        assert!(out.contains("VIS 1 1 1"), "{out}");
+        assert!(out.contains("LANEHEIGHT 44 0"), "{out}");
+        assert!(out.contains("PT 0 0.5 0"), "the points were dropped:\n{out}");
+        assert!(out.contains("ARM 1"), "the arm flag was dropped:\n{out}");
+        assert_eq!(out.lines().count(), chunk().lines().count());
+        // And the read is the inverse of the write.
+        let back = parse_lane_state(&out);
+        assert!(back.in_own_lane);
+        assert_eq!(back.height, 44);
+    }
+
+    /// A chunk with no LANEHEIGHT gains one rather than losing the
+    /// height silently.
+    #[test]
+    fn a_missing_laneheight_is_inserted() {
+        let bare = "<PARMENV 2 0 1 1\n  VIS 1 0 1\n  PT 0 0.5 0\n>";
+        let out = splice_lane_state(
+            bare,
+            LaneState { visible: true, in_own_lane: true, height: 30 },
+        );
+        assert!(out.contains("LANEHEIGHT 30 0"), "{out}");
+        assert!(out.contains("PT 0 0.5 0"));
+    }
+}

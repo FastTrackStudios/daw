@@ -746,6 +746,7 @@ pub fn ArrangementView() -> Element {
     let mut items = use_signal(Vec::<Item>::new);
     let mut previews = use_signal(HashMap::<String, ItemPreview>::new);
     let mut envelopes = use_signal(HashMap::<String, Vec<EnvelopePreview>>::new);
+    let mut env_lanes = use_signal(HashMap::<String, Vec<EnvelopeLaneView>>::new);
     let mut connected = use_signal(|| false);
     let mut size = use_signal(|| Option::<(f32, f32)>::None);
 
@@ -774,37 +775,86 @@ pub fn ArrangementView() -> Element {
             // automation pass in REAPER shows up within a poll. Only the
             // ones REAPER shows: `visible` is the arrange-view flag.
             if let Ok(track_list) = project.tracks().all().await {
-                let mut fetched = HashMap::new();
+                let mut overlaid = HashMap::new();
+                let mut laned: HashMap<String, Vec<EnvelopeLaneView>> = HashMap::new();
                 for track in &track_list {
                     let Ok(Some(handle)) = project.tracks().by_guid(&track.guid).await
                     else {
                         continue;
                     };
                     let Ok(all) = handle.envelopes().all().await else { continue };
+                    let mut over = Vec::new();
                     let mut lanes = Vec::new();
-                    for env in all.iter().filter(|e| e.visible && e.point_count > 0) {
+                    for env in all.iter().filter(|e| e.visible) {
                         let Ok(Some(eh)) =
                             handle.envelopes().by_type(env.envelope_type).await
                         else {
                             continue;
                         };
-                        if let Ok(points) = eh.points().await {
-                            lanes.push(EnvelopePreview {
-                                name: env.name.clone(),
-                                points: points
-                                    .iter()
-                                    .map(|p| {
-                                        (p.time.as_seconds() as f32, p.value as f32)
-                                    })
-                                    .collect(),
+                        let Ok(points) = eh.points().await else { continue };
+                        let preview = EnvelopePreview {
+                            name: env.name.clone(),
+                            points: points
+                                .iter()
+                                .map(|p| (p.time.as_seconds() as f32, p.value as f32))
+                                .collect(),
+                        };
+                        // The envelope's own choice decides where it is
+                        // drawn — over the track, or in a lane of its own
+                        // with its automation items.
+                        if env.in_own_lane {
+                            let mut automation_items = Vec::new();
+                            if env.automation_item_count > 0 {
+                                if let Ok(items) = eh.automation_items().await {
+                                    for ai in &items {
+                                        let pts = eh
+                                            .automation_item_points(ai.index)
+                                            .await
+                                            .unwrap_or_default();
+                                        automation_items.push(AutomationItemView {
+                                            name: ai.name.clone(),
+                                            start: ai.position.as_seconds() as f32,
+                                            length: ai.length.as_seconds() as f32,
+                                            // Every REAPER automation
+                                            // item has a pool; only one
+                                            // shared by siblings needs
+                                            // the warning mark.
+                                            pooled: items
+                                                .iter()
+                                                .filter(|o| o.pool_id == ai.pool_id)
+                                                .count()
+                                                > 1,
+                                            points: pts
+                                                .iter()
+                                                .map(|p| {
+                                                    (
+                                                        p.time.as_seconds() as f32,
+                                                        p.value as f32,
+                                                    )
+                                                })
+                                                .collect(),
+                                        });
+                                    }
+                                }
+                            }
+                            lanes.push(EnvelopeLaneView {
+                                envelope: preview,
+                                height: env.lane_height as f32,
+                                automation_items,
                             });
+                        } else if !preview.points.is_empty() {
+                            over.push(preview);
                         }
                     }
+                    if !over.is_empty() {
+                        overlaid.insert(track.guid.clone(), over);
+                    }
                     if !lanes.is_empty() {
-                        fetched.insert(track.guid.clone(), lanes);
+                        laned.insert(track.guid.clone(), lanes);
                     }
                 }
-                envelopes.set(fetched);
+                envelopes.set(overlaid);
+                env_lanes.set(laned);
             }
             futures_timer::Delay::new(std::time::Duration::from_secs(2)).await;
         }
@@ -849,6 +899,7 @@ pub fn ArrangementView() -> Element {
                 items: item_list,
                 previews: previews.read().clone(),
                 envelopes: envelopes.read().clone(),
+                env_lanes: env_lanes.read().clone(),
                 width: w,
                 height: h,
             }
