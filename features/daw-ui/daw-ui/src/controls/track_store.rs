@@ -46,6 +46,14 @@ pub struct TrackStore {
     order: Signal<Vec<String>>,
 }
 
+impl Default for TrackStore {
+    /// Same scope requirement as [`TrackStore::new`] — it is the same
+    /// constructor. Present so the store reads like any other value type.
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TrackStore {
     /// An empty store. Must be called inside a component scope — it owns a
     /// Signal.

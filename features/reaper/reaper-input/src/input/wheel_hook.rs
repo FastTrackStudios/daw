@@ -38,6 +38,9 @@ fn context_to_keybind_context(context: Context) -> KeybindContext {
         Context::Midi | Context::MidiEventListEditor => KeybindContext::Midi,
         Context::MidiInlineEditor => KeybindContext::MidiInline,
         Context::MediaExplorer => KeybindContext::MediaExplorer,
+        Context::ExpressionEditor => KeybindContext::Custom(
+            crate::input::window_detection::EXPRESSION_EDITOR_TAG.to_string(),
+        ),
         Context::CrossfadeEditor | Context::Global => KeybindContext::Global,
     }
 }

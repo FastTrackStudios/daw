@@ -24,6 +24,115 @@ use std::ptr;
 
 use crate::embedded::EmbeddedView;
 
+/// The keyboard modifiers held right now, polled from SWELL.
+///
+/// SWELL's mouse and key messages reach our wndproc without usable
+/// modifier state, and a modifier pressed while another window had
+/// focus never produces a WM_KEYDOWN here at all — so the only honest
+/// source is a poll at event time. Without this every event carried
+/// `Modifiers::empty()` and no Ctrl/Shift/Alt mouse gesture (e.g. the
+/// expression editor's Ctrl-drag draw-notes modifier) could ever fire
+/// inside a panel.
+fn current_modifiers() -> keyboard_types::Modifiers {
+    use keyboard_types::Modifiers;
+    const VK_SHIFT: c_int = 0x10;
+    const VK_CONTROL: c_int = 0x11;
+    const VK_MENU: c_int = 0x12;
+    const VK_LWIN: c_int = 0x5B;
+
+    if !is_initialized() {
+        return Modifiers::empty();
+    }
+    let swell = swell();
+    let down = |vk: c_int| (swell.GetAsyncKeyState(vk) as u16 & 0x8000) != 0;
+    let mut mods = Modifiers::empty();
+    if down(VK_SHIFT) {
+        mods |= Modifiers::SHIFT;
+    }
+    if down(VK_CONTROL) {
+        mods |= Modifiers::CONTROL;
+    }
+    if down(VK_MENU) {
+        mods |= Modifiers::ALT;
+    }
+    if down(VK_LWIN) {
+        mods |= Modifiers::META;
+    }
+    mods
+}
+
+thread_local! {
+    /// Latest unforwarded pointer position per panel window.
+    ///
+    /// X11 delivers WM_MOUSEMOVE at hundreds per second, and every
+    /// forwarded move runs a full Dioxus dispatch + style/layout pass
+    /// synchronously — which is what made dragging in a dense panel
+    /// (the expression editor's roll) crawl. Moves are coalesced here
+    /// and flushed once per update tick, and immediately before any
+    /// event whose meaning depends on the pointer position (buttons,
+    /// wheel).
+    static PENDING_MOVES: RefCell<HashMap<usize, (f32, f32)>> =
+        RefCell::new(HashMap::new());
+}
+
+/// Flush the coalesced pointer move for `hwnd`, if any.
+fn flush_pending_move(hwnd: raw::HWND) {
+    let pending = PENDING_MOVES.with(|m| m.borrow_mut().remove(&(hwnd as usize)));
+    if let Some((x, y)) = pending {
+        forward_mouse_event(
+            hwnd,
+            blitz_traits::events::UiEvent::PointerMove(mouse_pointer_event(
+                x,
+                y,
+                blitz_traits::events::MouseEventButton::Main,
+                blitz_traits::events::MouseEventButtons::empty(),
+            )),
+        );
+    }
+}
+
+/// The HiDPI scale of the panel living at `hwnd`, 1.0 before init.
+fn panel_scale(hwnd: raw::HWND) -> f32 {
+    PANELS.with(|panels| {
+        panels
+            .borrow()
+            .values()
+            .find(|p| p.hwnd == hwnd)
+            .and_then(|p| p.view.as_ref())
+            .map(|v| v.scale_factor())
+            .unwrap_or(1.0)
+    })
+}
+
+/// Client-area mouse coordinates from `lparam`, converted to the CSS
+/// pixels Blitz lays out in.
+///
+/// Blitz's hit testing compares event coordinates against Taffy's
+/// layout, which is in CSS px — physical px divided by the HiDPI
+/// scale. Forwarding raw client pixels meant that at any scale other
+/// than 1.0 every hit drifted by `(scale - 1) × position`: barely
+/// visible on the header buttons near the origin, badly wrong deep
+/// inside the editor's roll.
+fn client_css_coords(hwnd: raw::HWND, lparam: isize) -> (f32, f32) {
+    let x = (lparam & 0xFFFF) as i16 as f32;
+    let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+    let scale = panel_scale(hwnd);
+    (x / scale, y / scale)
+}
+
+/// Same, for `WM_MOUSEWHEEL`, whose `lparam` is in screen coordinates.
+fn wheel_css_coords(hwnd: raw::HWND, lparam: isize) -> (f32, f32) {
+    let mut pt = raw::POINT {
+        x: (lparam & 0xFFFF) as i16 as i32,
+        y: ((lparam >> 16) & 0xFFFF) as i16 as i32,
+    };
+    unsafe {
+        swell().ScreenToClient(hwnd, &mut pt);
+    }
+    let scale = panel_scale(hwnd);
+    (pt.x as f32 / scale, pt.y as f32 / scale)
+}
+
 /// Build a `BlitzPointerEvent` for a mouse pointer at window-local (x, y).
 /// All coord fields are filled with the same value because we don't track
 /// page/screen offsets inside REAPER's docker windows.
@@ -50,7 +159,7 @@ fn mouse_pointer_event(
         // offsets inside REAPER docker windows.
         element: blitz_traits::events::Point { x, y },
         active_pointers: Default::default(),
-        mods: keyboard_types::Modifiers::empty(),
+        mods: current_modifiers(),
         details: blitz_traits::events::PointerDetails::default(),
     }
 }
@@ -72,6 +181,37 @@ pub struct DockablePanelConfig {
     pub default_width: u32,
     pub default_height: u32,
     pub show_on_first_launch: bool,
+    /// Take keyboard focus on any click, not only on text inputs.
+    ///
+    /// For panels that are input surfaces in their own right (the
+    /// expression editor): focus is what routes keys to the panel's own
+    /// input context instead of REAPER's. Off by default because a
+    /// focus-stealing panel with no such context locks REAPER's
+    /// keyboard out — see the guard at the WM_LBUTTONDOWN handler.
+    /// Set after registration via [`set_panel_focus_on_click`].
+    pub focus_on_click: bool,
+}
+
+/// Opt a registered panel into taking keyboard focus on any click.
+pub fn set_panel_focus_on_click(id: PanelId, on: bool) {
+    PANELS.with(|panels| {
+        if let Some(panel) = panels.borrow_mut().get_mut(id) {
+            panel.config.focus_on_click = on;
+        }
+    });
+}
+
+/// Whether `hwnd` is the window of the panel registered under `id`.
+///
+/// For host-side context probes (reaper-input asks "whose window is
+/// this keystroke headed for?").
+pub fn is_panel_hwnd(id: PanelId, hwnd: *mut std::ffi::c_void) -> bool {
+    PANELS.with(|panels| {
+        panels
+            .borrow()
+            .get(id)
+            .is_some_and(|p| std::ptr::eq(p.hwnd as *const std::ffi::c_void, hwnd))
+    })
 }
 
 /// A live dockable panel registered with REAPER's docker system.
@@ -630,6 +770,7 @@ pub fn register_panel_from_service(def: &daw_module::PanelDef) {
         default_width: def.default_size.0 as u32,
         default_height: def.default_size.1 as u32,
         show_on_first_launch: false,
+        focus_on_click: false,
     };
 
     register_panel(config, Vec::new(), reaper, swell);
@@ -663,6 +804,45 @@ pub fn show_panel(id: PanelId) {
             show_panel_inner(panel);
         } else {
             focus_panel_inner(panel);
+        }
+    });
+}
+
+/// Layout size (CSS px) of the first element carrying `attr="value"`
+/// inside a panel's document. `None` when the panel has no live view or
+/// no such element. See [`EmbeddedView::element_size_by_attr`].
+pub fn panel_element_size(id: PanelId, attr: &str, value: &str) -> Option<(f64, f64)> {
+    #[cfg(debug_assertions)]
+    assert_main_thread();
+    PANELS.with(|panels| {
+        let panels = panels.borrow();
+        panels
+            .get(id)?
+            .view
+            .as_ref()?
+            .element_size_by_attr(attr, value)
+    })
+}
+
+/// Remount a panel's component tree so its root component re-reads
+/// whatever external state it captures at mount.
+///
+/// `show_panel` remounts only on the hidden→visible transition; an
+/// action that loads new state into an *already open* panel needs this
+/// to make the panel pick it up (e.g. the expression editor's
+/// open-on-selected-item action, fired while the editor is docked and
+/// showing a previous item).
+pub fn remount_panel(id: PanelId) {
+    #[cfg(debug_assertions)]
+    assert_main_thread();
+    if !is_initialized() {
+        tracing::warn!(panel = id, "Ignoring remount_panel before dock::init");
+        return;
+    }
+    with_panel_removed(id, |panel| {
+        if let Some(view) = &mut panel.view {
+            view.remount();
+            view.mark_dirty();
         }
     });
 }
@@ -856,6 +1036,23 @@ pub fn update_panels() {
             // Deferred renderer init (max 30 retries ≈ 1 second)
             if panel_needs_init(panel) && panel.init_attempts < 30 {
                 try_init_embedded_view(panel, InitVisibility::Visible);
+            }
+
+            // Deliver the coalesced pointer move for this tick — one
+            // dispatch per frame instead of one per X11 motion event.
+            let pending =
+                PENDING_MOVES.with(|m| m.borrow_mut().remove(&(panel.hwnd as usize)));
+            if let Some((x, y)) = pending
+                && let Some(view) = &mut panel.view
+            {
+                view.handle_event(blitz_traits::events::UiEvent::PointerMove(
+                    mouse_pointer_event(
+                        x,
+                        y,
+                        blitz_traits::events::MouseEventButton::Main,
+                        blitz_traits::events::MouseEventButtons::empty(),
+                    ),
+                ));
             }
 
             let mut rect = raw::RECT {
@@ -1677,22 +1874,15 @@ fn panel_wndproc_inner(
         }
         // ── Mouse events ────────────────────────────────────────────
         WM_MOUSEMOVE => {
-            let x = (lparam & 0xFFFF) as i16 as f32;
-            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
-            forward_mouse_event(
-                hwnd,
-                blitz_traits::events::UiEvent::PointerMove(mouse_pointer_event(
-                    x,
-                    y,
-                    blitz_traits::events::MouseEventButton::Main,
-                    blitz_traits::events::MouseEventButtons::empty(),
-                )),
-            );
+            let (x, y) = client_css_coords(hwnd, lparam);
+            // Coalesced: the newest position wins, forwarded once per
+            // update tick (see PENDING_MOVES).
+            PENDING_MOVES.with(|m| m.borrow_mut().insert(hwnd as usize, (x, y)));
             0
         }
         WM_LBUTTONDOWN | WM_MBUTTONDOWN => {
-            let x = (lparam & 0xFFFF) as i16 as f32;
-            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+            flush_pending_move(hwnd);
+            let (x, y) = client_css_coords(hwnd, lparam);
             let button = match msg {
                 WM_LBUTTONDOWN => blitz_traits::events::MouseEventButton::Main,
                 WM_MBUTTONDOWN => blitz_traits::events::MouseEventButton::Auxiliary,
@@ -1722,13 +1912,18 @@ fn panel_wndproc_inner(
             // get focus back from a normal click. Now non-input clicks
             // leave focus where REAPER had it.
             let needs_focus = PANELS.with(|panels| {
-                panels
-                    .borrow()
-                    .values()
-                    .find(|p| p.hwnd == hwnd)
-                    .and_then(|p| p.view.as_ref())
-                    .map(|v| v.focused_is_text_input())
-                    .unwrap_or(false)
+                let panels = panels.borrow();
+                let Some(p) = panels.values().find(|p| p.hwnd == hwnd) else {
+                    return false;
+                };
+                // Input-surface panels (focus_on_click) take focus on
+                // every click: focus is what routes the keyboard to
+                // their own input context.
+                p.config.focus_on_click
+                    || p.view
+                        .as_ref()
+                        .map(|v| v.focused_is_text_input())
+                        .unwrap_or(false)
             });
             if needs_focus {
                 unsafe {
@@ -1741,8 +1936,8 @@ fn panel_wndproc_inner(
         // SWELL/REAPER can synthesise WM_CONTEXTMENU, which the docker uses
         // to open the dock/undock/options menu on tab right-click.
         WM_RBUTTONDOWN => {
-            let x = (lparam & 0xFFFF) as i16 as f32;
-            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+            flush_pending_move(hwnd);
+            let (x, y) = client_css_coords(hwnd, lparam);
             forward_mouse_event(
                 hwnd,
                 blitz_traits::events::UiEvent::PointerDown(mouse_pointer_event(
@@ -1756,8 +1951,8 @@ fn panel_wndproc_inner(
             unsafe { swell.DefWindowProc(hwnd, msg, wparam, lparam) }
         }
         WM_LBUTTONUP | WM_MBUTTONUP => {
-            let x = (lparam & 0xFFFF) as i16 as f32;
-            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+            flush_pending_move(hwnd);
+            let (x, y) = client_css_coords(hwnd, lparam);
             let button = match msg {
                 WM_LBUTTONUP => blitz_traits::events::MouseEventButton::Main,
                 WM_MBUTTONUP => blitz_traits::events::MouseEventButton::Auxiliary,
@@ -1778,8 +1973,8 @@ fn panel_wndproc_inner(
             0
         }
         WM_RBUTTONUP => {
-            let x = (lparam & 0xFFFF) as i16 as f32;
-            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+            flush_pending_move(hwnd);
+            let (x, y) = client_css_coords(hwnd, lparam);
             forward_mouse_event(
                 hwnd,
                 blitz_traits::events::UiEvent::PointerUp(mouse_pointer_event(
@@ -1793,9 +1988,11 @@ fn panel_wndproc_inner(
             unsafe { swell.DefWindowProc(hwnd, msg, wparam, lparam) }
         }
         WM_MOUSEWHEEL => {
+            flush_pending_move(hwnd);
             let delta = ((wparam >> 16) & 0xFFFF) as i16 as f64 / 120.0;
-            let x = (lparam & 0xFFFF) as i16 as f32;
-            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+            // Wheel messages carry SCREEN coordinates (Win32 semantics,
+            // which SWELL mirrors) — unlike every other mouse message.
+            let (x, y) = wheel_css_coords(hwnd, lparam);
             forward_mouse_event(
                 hwnd,
                 blitz_traits::events::UiEvent::Wheel(blitz_traits::events::BlitzWheelEvent {
@@ -1809,7 +2006,7 @@ fn panel_wndproc_inner(
                         client_y: y,
                     },
                     buttons: blitz_traits::events::MouseEventButtons::empty(),
-                    mods: keyboard_types::Modifiers::empty(),
+                    mods: current_modifiers(),
                     element: blitz_traits::events::Point { x, y },
                 }),
             );
@@ -1822,7 +2019,7 @@ fn panel_wndproc_inner(
             let event = blitz_traits::events::BlitzKeyEvent {
                 key,
                 code,
-                modifiers: keyboard_types::Modifiers::empty(),
+                modifiers: current_modifiers(),
                 location: keyboard_types::Location::Standard,
                 is_auto_repeating: false,
                 is_composing: false,

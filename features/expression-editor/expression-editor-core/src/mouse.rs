@@ -256,6 +256,14 @@ impl ModKey {
         self.0
     }
 
+    /// From REAPER's mouse-modifier index bits (bit0=Shift, bit1=Ctrl,
+    /// bit2=Alt) — the same layout this type uses, kept as an explicit
+    /// constructor so a host loading `reaper-mouse.ini` states the
+    /// correspondence instead of relying on it silently.
+    pub const fn from_bits(bits: u8) -> Self {
+        ModKey(bits & 0b111)
+    }
+
     /// REAPER's `<S-C-A->` notation.
     pub fn notation(self) -> String {
         if self.0 == 0 {
@@ -294,7 +302,33 @@ pub struct MouseMap {
 
 impl Default for MouseMap {
     fn default() -> Self {
-        Self::reaper_like()
+        host_overlay(Self::reaper_like())
+    }
+}
+
+/// Host-supplied refinement of every default map.
+///
+/// The REAPER host registers a loader that overlays the user's own
+/// mouse-modifier map (`reaper-mouse.ini`, the same table REAPER's
+/// preferences edit) onto whatever preset a mode hands out — so a
+/// binding the user set for REAPER's MIDI editor means the same thing
+/// on this roll. Routed through both [`MouseMap::default`] and
+/// [`crate::Mode::default_mouse`], so it survives a mode switch, which
+/// rebuilds the map from the mode preset. Standalone hosts leave it
+/// unset and get the presets untouched.
+static HOST_OVERLAY: std::sync::OnceLock<fn(MouseMap) -> MouseMap> = std::sync::OnceLock::new();
+
+/// Register the host overlay. First caller wins; later calls are
+/// ignored, so a test harness cannot be trampled by a late host.
+pub fn set_host_overlay(f: fn(MouseMap) -> MouseMap) {
+    let _ = HOST_OVERLAY.set(f);
+}
+
+/// Run a preset through the host overlay, if one is registered.
+pub fn host_overlay(map: MouseMap) -> MouseMap {
+    match HOST_OVERLAY.get() {
+        Some(f) => f(map),
+        None => map,
     }
 }
 
@@ -387,7 +421,9 @@ impl MouseMap {
                 b(C::PianoRoll, G::DoubleClick, N, A::InsertNote),
                 b(C::PianoRoll, G::DoubleClick, AL, A::InsertNoteNoSnap),
                 b(C::PianoRoll, G::RightClick, N, A::ContextMenu),
-                b(C::PianoRoll, G::MiddleClick, N, A::MovePlayhead),
+                // Hand scroll, REAPER's own MIDI-editor middle-drag.
+                b(C::PianoRoll, G::MiddleClick, N, A::Pan),
+                b(C::PianoRoll, G::MiddleClick, S, A::MovePlayhead),
                 // ── notes ────────────────────────────────────────────
                 b(C::Note, G::Click, N, A::SelectNote),
                 b(C::Note, G::Click, S, A::AddNoteToSelection),
@@ -403,7 +439,10 @@ impl MouseMap {
                 b(C::Note, G::Drag, SC, A::EditNoteVelocityFine),
                 b(C::Note, G::Drag, CA, A::MoveNoteNoSnap),
                 b(C::Note, G::RightClick, N, A::ContextMenu),
-                b(C::Note, G::MiddleClick, N, A::Audition),
+                // Hand scroll works from a note too — grabbing the roll
+                // to pan must not depend on hitting empty canvas.
+                b(C::Note, G::MiddleClick, N, A::Pan),
+                b(C::Note, G::MiddleClick, S, A::Audition),
                 // ── note edges ───────────────────────────────────────
                 b(C::NoteEdge, G::Drag, N, A::MoveNoteEdge),
                 b(C::NoteEdge, G::Drag, CT, A::MoveNoteEdgeNoSnap),

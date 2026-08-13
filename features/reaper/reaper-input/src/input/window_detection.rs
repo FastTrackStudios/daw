@@ -15,6 +15,39 @@ use reaper_low::raw::{HWND, POINT};
 use reaper_medium::Reaper as MediumReaper;
 use swell_ui::Window;
 
+// region: --- Panel context probe
+
+/// Host-registered probe: does this HWND belong to an app-defined input
+/// context? Returns the context's tag when it does.
+///
+/// The dock's panels are ordinary SWELL children the detection code
+/// here knows nothing about; the extension registers a probe that asks
+/// the dock, so a focused panel can claim its own [`Context`] instead
+/// of falling through to `Main` (which is what let every global REAPER
+/// binding keep firing while typing at the expression editor).
+static PANEL_CONTEXT_PROBE: std::sync::OnceLock<fn(HWND) -> Option<&'static str>> =
+    std::sync::OnceLock::new();
+
+/// The tag [`Context::ExpressionEditor`] is keyed by, in probes and in
+/// keybind config (`context @Custom "expression-editor"`).
+pub const EXPRESSION_EDITOR_TAG: &str = "expression-editor";
+
+/// Register the probe. First caller wins.
+pub fn set_panel_context_probe(f: fn(HWND) -> Option<&'static str>) {
+    let _ = PANEL_CONTEXT_PROBE.set(f);
+}
+
+/// The app-defined context claiming `hwnd`, if any.
+pub(crate) fn panel_context_of(hwnd: HWND) -> Option<Context> {
+    let probe = PANEL_CONTEXT_PROBE.get()?;
+    match probe(hwnd)? {
+        EXPRESSION_EDITOR_TAG => Some(Context::ExpressionEditor),
+        _ => None,
+    }
+}
+
+// endregion: --- Panel context probe
+
 // region: --- Types
 
 /// MIDI editor mode
@@ -211,6 +244,19 @@ pub fn detect_context_from_hwnd(hwnd: HWND, medium_reaper: &MediumReaper) -> Win
         return result;
     }
 
+    // App-defined panels first — a docked panel is a child of the main
+    // window, so every later check would misfile it as `Main`.
+    if let Some(context) = panel_context_of(hwnd) {
+        if let Some(window) = Window::new(hwnd)
+            && let Ok(title) = window.text()
+        {
+            result.window_title = title;
+        }
+        result.context_name = format!("{context:?}");
+        result.context = context;
+        return result;
+    }
+
     // Check if it's a MIDI editor first
     if let Some(midi_info) = is_hwnd_midi_editor(hwnd, medium_reaper) {
         // Get window title
@@ -325,6 +371,16 @@ pub fn detect_context_from_focus(medium_reaper: &MediumReaper) -> WindowContext 
     };
 
     let focused_hwnd = focused_window.raw_hwnd();
+
+    // App-defined panels first, same as the hwnd path.
+    if let Some(context) = panel_context_of(focused_hwnd.as_ptr()) {
+        if let Ok(title) = focused_window.text() {
+            result.window_title = title;
+        }
+        result.context_name = format!("{context:?}");
+        result.context = context;
+        return result;
+    }
 
     // Get window title for logging
     if let Ok(title) = focused_window.text() {

@@ -473,6 +473,12 @@ impl TranslateAccel for InputHandler {
             {
                 return TranslateAccelResult::NotOurWindow;
             }
+            // The expression editor tracks its own key state (momentary
+            // keys like R release on keyup); its releases belong to the
+            // panel, not to this hook.
+            if Self::determine_context_for_msg(&args).0 == Context::ExpressionEditor {
+                return TranslateAccelResult::PassOnToWindow;
+            }
             return TranslateAccelResult::Eat;
         }
 
@@ -567,6 +573,34 @@ impl TranslateAccel for InputHandler {
                 crate::input::which_key_overlay::hide();
             }
             return TranslateAccelResult::Eat;
+        }
+
+        // === The expression editor is its own input surface ===
+        // Only bindings declared for its context fire; everything else
+        // goes to the panel itself (whose component has its own
+        // handlers), and *never* on to REAPER's accelerator tables —
+        // which is what makes typing at the editor safe from global
+        // shortcuts.
+        if context == Context::ExpressionEditor {
+            let bound = crate::input::processor::resolve_exact_context(
+                &keybind_context,
+                &key_str,
+            );
+            return match bound {
+                Some(action_id) => {
+                    let (clean, _) = classify_action(action_id.as_str());
+                    if DEBUG_LOGGING.load(std::sync::atomic::Ordering::Relaxed) {
+                        info!(
+                            mode = %crate::current_mode_label(),
+                            action = %clean, key = %key_str,
+                            "[expression-editor action]"
+                        );
+                    }
+                    Self::execute_action(clean, false);
+                    TranslateAccelResult::Eat
+                }
+                None => TranslateAccelResult::PassOnToWindow,
+            };
         }
 
         // === Process key through InputProcessor ===
@@ -1426,6 +1460,17 @@ impl InputHandler {
             wheel_type, direction, context_name
         ));
 
+        // Wheel over an app panel belongs to the panel: its own wndproc
+        // zooms and pans with it. NotOurWindow lets REAPER route the
+        // wheel to the window under the cursor as usual.
+        let mouse_ctx = crate::input::mouse_context::determine_mouse_context(
+            Reaper::get().medium_reaper(),
+            crate::input::mouse_context::DetectionMode::minimal(),
+        );
+        if mouse_ctx.context == Context::ExpressionEditor {
+            return TranslateAccelResult::NotOurWindow;
+        }
+
         if PASSTHROUGH_MODE.load(std::sync::atomic::Ordering::Relaxed) {
             TranslateAccelResult::NotOurWindow
         } else {
@@ -1526,6 +1571,9 @@ impl InputHandler {
             Context::MidiInlineEditor => KeybindContext::MidiInline,
             Context::MediaExplorer => KeybindContext::MediaExplorer,
             Context::CrossfadeEditor => KeybindContext::Main,
+            Context::ExpressionEditor => KeybindContext::Custom(
+                crate::input::window_detection::EXPRESSION_EDITOR_TAG.to_string(),
+            ),
             Context::Global => KeybindContext::Global,
         }
     }

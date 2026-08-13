@@ -749,6 +749,24 @@ pub fn available_overrides() -> Vec<String> {
 }
 
 /// Resolve a mouse wheel binding through the active preset and overlays.
+/// Resolve a single-chord binding declared for *exactly* `ctx` in the
+/// active preset — no Global-layer fallback.
+///
+/// The routing primitive for app-defined contexts (the expression
+/// editor): a binding fires only when its config named this context,
+/// and everything else is the caller's to pass through to the focused
+/// window. Later bindings win, matching the profile's compose order.
+pub fn resolve_exact_context(ctx: &KeybindContext, key_str: &str) -> Option<String> {
+    let proc = get_processor().read().unwrap();
+    let (preset, _) = proc.available_presets.get(&proc.active_preset_name)?;
+    preset
+        .bindings
+        .iter()
+        .filter(|b| b.context.as_ref() == Some(ctx) && b.keys == key_str)
+        .next_back()
+        .map(|b| b.action.clone())
+}
+
 pub fn resolve_wheel(context: KeybindContext, modifiers: &str, horizontal: bool) -> Option<String> {
     let proc = get_processor().read().unwrap();
     proc.resolve_wheel(context, modifiers, horizontal)

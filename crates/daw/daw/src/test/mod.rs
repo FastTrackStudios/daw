@@ -859,6 +859,20 @@ impl DawTestContext {
         Ok(())
     }
 
+    /// Whether the panel registered under `id` is currently visible.
+    ///
+    /// For tests that need to normalise panel state before acting —
+    /// panel visibility is global to the REAPER instance, so a test
+    /// that follows another inherits whatever the last one left open.
+    pub async fn is_panel_visible(&self, id: &str) -> eyre::Result<bool> {
+        let handle = self
+            .daw
+            .dock_host()
+            .register_dock(id, id, crate::service::dock_host::DockKind::Tabbed)
+            .await?;
+        Ok(self.daw.dock_host().is_visible(handle).await?)
+    }
+
     /// Assert that the panel registered under `id` is currently hidden.
     pub async fn assert_panel_hidden(&self, id: &str) -> eyre::Result<()> {
         let handle = self

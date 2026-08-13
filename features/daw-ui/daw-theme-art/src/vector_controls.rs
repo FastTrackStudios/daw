@@ -4464,7 +4464,7 @@ pub fn Meter(props: MeterProps) -> Element {
     let n = props.levels.len().max(1) as f32;
     let gap = 1.0f32;
     let bar_w = ((bars_w - gap * (n - 1.0)) / n).max(1.0);
-    let text = t.chrome.hardware_mark.shade(-0.35);
+    let _text = t.chrome.hardware_mark.shade(-0.35);
     // The well the bars sit in. The mixer's is a dark trough — a
     // deliberate departure, REAPER leaves its bare — but the track panel's
     // meter is a bare strip against the panel and a trough there is a pair
@@ -5313,7 +5313,7 @@ pub const VOLUME_KNOB_SWEEP: f32 = 320.0;
 /// is the check that the sweep is right.
 #[component]
 pub fn VolumeKnob(props: VolumeKnobProps) -> Element {
-    let t = Theme::default();
+    let _t = Theme::default();
     // 24, the height of the field it straddles. REAPER's knob fills that
     // band exactly — a knob two rows shorter than the box it sits on reads
     // as sunk into it rather than seated on its edge.

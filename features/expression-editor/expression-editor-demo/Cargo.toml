@@ -17,6 +17,11 @@ expression-editor-audio = { workspace = true }
 expression-editor-tools = { workspace = true }
 expression-editor-daw = { workspace = true }
 expression-editor-corpus = { workspace = true }
+# The gen_reaper example: builds the demo as an .rpp REAPER opens.
+dawfile-reaper = { workspace = true }
+daw = { workspace = true }
+hound = "3.5"
+midly = "0.5"
 
 [lints]
 workspace = true

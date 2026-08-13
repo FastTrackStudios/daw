@@ -392,6 +392,43 @@ impl EmbeddedView {
         (self.width, self.height)
     }
 
+    /// The HiDPI scale this view lays out at — the divisor between the
+    /// physical client pixels REAPER reports and the CSS pixels Blitz
+    /// hit-tests in.
+    pub fn scale_factor(&self) -> f32 {
+        self.scale_factor
+    }
+
+    /// Layout size (CSS px) of the first element carrying `attr="value"`.
+    ///
+    /// The substitute for element resize events, which dioxus-native
+    /// does not deliver (`convert_resize_data` is unimplemented): a
+    /// host that needs to know how big one of its component's elements
+    /// came out — the expression editor's roll, sized by flex — polls
+    /// this from its own tick and pushes the answer back into app
+    /// state. Read-only against the laid-out document, so it must be
+    /// called from the UI thread, outside event dispatch.
+    pub fn element_size_by_attr(&self, attr: &str, value: &str) -> Option<(f64, f64)> {
+        let doc = self.doc.inner();
+        let mut stack = vec![doc.root_element().id];
+        while let Some(id) = stack.pop() {
+            let Some(node) = doc.get_node(id) else {
+                continue;
+            };
+            if let Some(el) = node.data.downcast_element()
+                && el
+                    .attrs()
+                    .iter()
+                    .any(|a| a.name.local.as_ref() == attr && a.value == value)
+            {
+                let rect = doc.get_client_bounding_rect(id)?;
+                return Some((rect.width, rect.height));
+            }
+            stack.extend(node.children.iter().copied());
+        }
+        None
+    }
+
     /// Forward a UI event (mouse, keyboard) to the Blitz document.
     pub fn handle_event(&mut self, event: blitz_traits::events::UiEvent) {
         self.doc.handle_ui_event(event);

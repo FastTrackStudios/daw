@@ -46,6 +46,46 @@ pub use interaction::Drag;
 pub use menu_ui::ContextMenu;
 pub use multitool_ui::MultiTool;
 
+/// The empty-roll hint line, derived from the live mouse map: which
+/// modifier+drag on open canvas inserts or paints a note.
+fn draw_hint_of(ed: &Editor) -> String {
+    use expression_editor_core::mouse::{Action, Context, Gesture};
+    let draw = ed.mouse.bindings().iter().find(|b| {
+        b.context == Context::PianoRoll
+            && b.gesture == Gesture::Drag
+            && matches!(
+                b.action,
+                Action::InsertNoteDragToExtend
+                    | Action::InsertNoteDragToExtendNoSnap
+                    | Action::InsertNoteDragToMove
+                    | Action::InsertNote
+                    | Action::InsertNoteNoSnap
+                    | Action::InsertNoteDragToEditVelocity
+                    | Action::PaintNotes
+                    | Action::PaintNotesNoSnap
+                    | Action::PaintRowOfNotes
+            )
+    });
+    match draw {
+        Some(b) => {
+            let bits = b.mods.bits();
+            let mut parts = Vec::new();
+            if bits & 2 != 0 {
+                parts.push("Ctrl");
+            }
+            if bits & 1 != 0 {
+                parts.push("Shift");
+            }
+            if bits & 4 != 0 {
+                parts.push("Alt");
+            }
+            parts.push("drag");
+            format!("{} draws a note", parts.join("+"))
+        }
+        None => "The active tool draws with a drag".to_string(),
+    }
+}
+
 /// The editor: toolbar over canvas.
 ///
 /// The host owns `editor` so it can read the document back out — to a
@@ -313,6 +353,11 @@ fn Canvas(
     let temperament_name = ed.tuning.temperament.name;
     let dimension = ed.dimension;
     let empty = ed.doc.notes.is_empty();
+    // The empty-roll hint names the *actual* draw binding, read from
+    // the live mouse map — which the host may have overlaid with the
+    // user's own REAPER mouse modifiers. A hardcoded "press D" hint
+    // goes stale the moment the map differs.
+    let draw_hint = draw_hint_of(&ed);
     drop(ed);
 
     let marquee = match &*drag.read() {
@@ -336,6 +381,12 @@ fn Canvas(
             // child that could have given it height back.
             style: "position: relative; flex: 1 1 auto; min-height: 360px; \
                     overflow: hidden; outline: none;",
+            // The cell is what a host measures to drive `Editor::resize`
+            // (element resize events don't exist under dioxus-native, so
+            // the REAPER panel polls this element's layout size): the
+            // svg itself is fixed to the viewport and would only ever
+            // report the size it was last given.
+            "data-testid": "canvas-cell",
             tabindex: "0",
             onkeydown: move |e: KeyboardEvent| {
                 let key = e.key().to_string();
@@ -478,10 +529,20 @@ fn Canvas(
                 // The roll is the surface every gesture lands on, so it
                 // carries an id a test can aim a pointer at (#167).
                 "data-testid": "roll",
-                style: "display: block; width: 100%; height: 100%; \
+                // Sized in px to exactly the viewBox, never stretched
+                // (`100%` + `preserveAspectRatio: none` scaled the
+                // coordinate space whenever the element's size drifted
+                // from `vp` — and element_coordinates are element px, so
+                // every gesture landed offset by the stretch factor).
+                // With a 1:1 mapping the mouse is exact even while `vp`
+                // is stale; a stale `vp` only costs clipped or
+                // letterboxed rendering until the host resizes the
+                // editor, and the parent's overflow:hidden absorbs that.
+                style: "display: block; \
+                        width: {vp.w + canvas::GUTTER_W:.0}px; \
+                        height: {vp.h + canvas::RULER_H:.0}px; \
                         touch-action: none; user-select: none; cursor: crosshair;",
                 view_box: "0 0 {vp.w + canvas::GUTTER_W:.0} {vp.h + canvas::RULER_H:.0}",
-                preserve_aspect_ratio: "none",
                 // Measured by `onresize`, not by a spawned
                 // `get_client_rect().await`.
                 //
@@ -562,12 +623,13 @@ fn Canvas(
                     }
                     let (x, y) = local(&e);
                     let m = mods_of(e.modifiers());
-                    let button = if e.trigger_button()
-                        == Some(MouseButton::Secondary)
-                    {
-                        2
-                    } else {
-                        0
+                    let button = match e.trigger_button() {
+                        Some(MouseButton::Secondary) => 2,
+                        // Middle is a real gesture (hand-scroll pan);
+                        // collapsing it onto left made a middle-drag
+                        // edit notes.
+                        Some(MouseButton::Auxiliary) => 1,
+                        _ => 0,
                     };
                     // A pitch drawing owns the surface while it is up:
                     // a click is an anchor and nothing else.
@@ -1512,8 +1574,8 @@ fn Canvas(
                             font-size: 12px; text-align: center; line-height: 1.7;",
                     div {
                         div { style: "color: {theme::TEXT}; font-size: 14px;", "No notes" }
-                        div { "Press D for Note Draw, then click the grid" }
-                        div { "V resets the view \u{b7} B opens modulation" }
+                        div { "{draw_hint}" }
+                        div { "Scroll zooms \u{b7} Alt+scroll pans \u{b7} Ctrl+Alt+scroll scrolls pitch" }
                     }
                 }
             }
