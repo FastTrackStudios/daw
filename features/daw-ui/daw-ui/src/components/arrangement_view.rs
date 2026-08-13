@@ -207,6 +207,11 @@ pub fn ArrangePreview(
     /// up; the caller that draws taller rows passes what it drew.
     #[props(default = daw_theme_art::geometry::tcp::ROW_H)]
     row_h: f32,
+    /// A lane was dragged to a new height: `(track guid, lane index,
+    /// height)`. `None` makes the lanes fixed, which is what a
+    /// screenshot wants.
+    #[props(default)]
+    on_lane_resize: Option<EventHandler<(String, usize, f32)>>,
 ) -> Element {
     let t = daw_theme::Theme::default();
     // The arrange ground is the sunken surface — the one place the theme
@@ -391,6 +396,22 @@ pub fn ArrangePreview(
                                         height: *h,
                                         pixels_per_second,
                                         colour: view.envelope.colour(&daw_theme::Theme::default()),
+                                    }
+                                }
+                                if let Some(resize) = on_lane_resize {
+                                    {
+                                        let guid = tracks[*track].guid.clone();
+                                        let lane = *lane;
+                                        rsx! {
+                                            LaneResizeHandle {
+                                                height: *h,
+                                                width,
+                                                top: *top,
+                                                on_resize: move |h: f32| {
+                                                    resize.call((guid.clone(), lane, h))
+                                                },
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -663,6 +684,68 @@ fn EnvelopeLane(
     }
 }
 
+/// The grab strip at the foot of an envelope lane.
+///
+/// REAPER resizes a lane by dragging its bottom edge, and the lane's
+/// height *is* the envcp row's height (`plan_rows` states that once), so
+/// one drag moves both panels. Relative like every other drag in this
+/// crate — grabbing the edge must not jump the lane to the pointer.
+///
+/// The write goes out through `EnvelopeHandle::show_in_lane`, which
+/// clamps to the theme's floor host-side; the local clamp is so the
+/// preview never draws below the floor mid-drag.
+#[component]
+fn LaneResizeHandle(
+    height: f32,
+    width: f32,
+    top: f32,
+    /// Called with the new height as the pointer moves, and once more on
+    /// release — the caller decides which of those reaches the DAW.
+    on_resize: EventHandler<f32>,
+    /// Called on release with the settled height.
+    #[props(default)]
+    on_commit: Option<EventHandler<f32>>,
+) -> Element {
+    let mut dragging = use_signal(|| false);
+    let mut grab_y = use_signal(|| 0.0f32);
+    let mut grab_h = use_signal(|| 0.0f32);
+
+    let press = move |e: MouseEvent| {
+        dragging.set(true);
+        grab_y.set(e.client_coordinates().y as f32);
+        grab_h.set(height);
+    };
+    let drag = move |e: MouseEvent| {
+        if !dragging() {
+            return;
+        }
+        let dy = e.client_coordinates().y as f32 - grab_y();
+        on_resize.call((grab_h() + dy).max(ENVELOPE_LANE_MIN_H));
+    };
+    let release = move |e: MouseEvent| {
+        if dragging.replace(false) {
+            if let Some(commit) = &on_commit {
+                let dy = e.client_coordinates().y as f32 - grab_y();
+                commit.call((grab_h() + dy).max(ENVELOPE_LANE_MIN_H));
+            }
+        }
+    };
+
+    rsx! {
+        div {
+            // Four rows straddling the lane's foot: thin enough not to
+            // steal clicks from the automation above it, thick enough to
+            // hit without aiming.
+            style: "position:absolute; left:0; top:{top + height - 2.0}px; \
+                    width:{width}px; height:4px; cursor:ns-resize; z-index:3;",
+            onmousedown: press,
+            onmousemove: drag,
+            onmouseup: release,
+            onmouseleave: move |_| { dragging.set(false); },
+        }
+    }
+}
+
 /// One automation item on an envelope lane.
 ///
 /// REAPER's shape: a translucent block in the envelope's own colour with
@@ -902,6 +985,38 @@ pub fn ArrangementView() -> Element {
                 env_lanes: env_lanes.read().clone(),
                 width: w,
                 height: h,
+                // A drag moves the local lane immediately and writes the
+                // settled height through to the DAW — the same
+                // optimistic shape the faders use, because a lane that
+                // waits on a round trip stutters under the pointer.
+                on_lane_resize: move |(guid, lane, height): (String, usize, f32)| {
+                    if let Some(lanes) = env_lanes.write().get_mut(&guid) {
+                        if let Some(view) = lanes.get_mut(lane) {
+                            view.height = height;
+                        }
+                    }
+                    spawn(async move {
+                        let Some(project) = crate::controls::reach::connected_project().await
+                        else {
+                            return;
+                        };
+                        let Ok(Some(track)) = project.tracks().by_guid(&guid).await else {
+                            return;
+                        };
+                        let Ok(all) = track.envelopes().all().await else { return };
+                        // The lane index is a position among the
+                        // envelopes that *have* lanes, which is what the
+                        // view was built from.
+                        let Some(env) = all.iter().filter(|e| e.in_own_lane).nth(lane) else {
+                            return;
+                        };
+                        if let Ok(Some(handle)) =
+                            track.envelopes().by_type(env.envelope_type).await
+                        {
+                            let _ = handle.show_in_lane(height.round() as u32).await;
+                        }
+                    });
+                },
             }
         }
     }
@@ -962,6 +1077,33 @@ mod tests {
 
     fn track(guid: &str) -> Track {
         Track { guid: guid.into(), ..Default::default() }
+    }
+
+    /// A resize drag reports heights clamped to the envcp floor, and
+    /// the plan then lays out at exactly what the drag reported — the
+    /// two clamps agree, so a lane dragged past the stop does not jump
+    /// when the next frame plans it.
+    #[test]
+    fn a_drag_past_the_stop_settles_at_the_floor() {
+        let dragged = |grab_h: f32, dy: f32| (grab_h + dy).max(ENVELOPE_LANE_MIN_H);
+
+        // Dragged well past the bottom stop.
+        let settled = dragged(40.0, -80.0);
+        assert_eq!(settled, ENVELOPE_LANE_MIN_H);
+
+        // And the plan draws it there rather than clamping again to
+        // something else.
+        let tracks = vec![track("a")];
+        let lanes = HashMap::from([(
+            "a".to_string(),
+            vec![EnvelopeLaneView {
+                envelope: EnvelopePreview { name: "Volume".into(), points: vec![] },
+                height: settled,
+                automation_items: Vec::new(),
+            }],
+        )]);
+        let plan = plan_rows(&tracks, &lanes, 70.0);
+        assert_eq!(plan[1].2, ENVELOPE_LANE_MIN_H);
     }
 
     /// The vertical plan interleaves lanes under their tracks, respects

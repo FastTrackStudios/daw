@@ -478,16 +478,42 @@ pub fn set_envelope_state_chunk(low: &Reaper, envelope: *mut TrackEnvelope, chun
 }
 
 /// The lane facts, parsed out of the state chunk.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LaneState {
     pub visible: bool,
     /// `VIS`'s second field: the envelope has a lane of its own.
     pub in_own_lane: bool,
     /// `LANEHEIGHT`'s first field, in pixels.
     pub height: u32,
+    /// `ARM`'s only field: armed for automation recording.
+    pub armed: bool,
+    /// `ACT`'s second field — REAPER's automation mode for this
+    /// envelope, or `-1` meaning "follow the track's".
+    pub automation_mode: i32,
+    /// `ACT`'s first field: whether the envelope is active at all.
+    /// Read and preserved rather than exposed — an inactive envelope
+    /// is a state the facade does not model yet, and a rewrite must
+    /// not silently activate one.
+    pub active: bool,
 }
 
-/// Read `VIS` and `LANEHEIGHT` out of a chunk.
+impl Default for LaneState {
+    /// An envelope with no `ACT` line is active and follows the track's
+    /// automation mode — `false`/`0` would read as "inactive, trim/read"
+    /// and a rewrite would then deactivate it.
+    fn default() -> Self {
+        Self {
+            visible: false,
+            in_own_lane: false,
+            height: 0,
+            armed: false,
+            automation_mode: -1,
+            active: true,
+        }
+    }
+}
+
+/// Read `VIS`, `LANEHEIGHT`, `ARM` and `ACT` out of a chunk.
 ///
 /// Line-wise rather than by regex: the chunk is line-oriented and both
 /// keys are the first word of their line, so this cannot be confused by
@@ -505,6 +531,14 @@ pub fn parse_lane_state(chunk: &str) -> LaneState {
             }
             Some("LANEHEIGHT") => {
                 state.height = words.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+            }
+            Some("ARM") => {
+                state.armed = words.next().map(|v| v != "0").unwrap_or(false);
+            }
+            Some("ACT") => {
+                state.active = words.next().map(|v| v != "0").unwrap_or(true);
+                state.automation_mode =
+                    words.next().and_then(|v| v.parse().ok()).unwrap_or(-1);
             }
             _ => {}
         }
@@ -543,6 +577,16 @@ pub fn splice_lane_state(chunk: &str, lane: LaneState) -> String {
                 let rest = words.next().unwrap_or("0");
                 out.push(format!("{indent}LANEHEIGHT {} {rest}", lane.height));
                 wrote_height = true;
+            }
+            Some("ARM") => {
+                out.push(format!("{indent}ARM {}", if lane.armed { 1 } else { 0 }));
+            }
+            Some("ACT") => {
+                out.push(format!(
+                    "{indent}ACT {} {}",
+                    if lane.active { 1 } else { 0 },
+                    lane.automation_mode
+                ));
             }
             _ => out.push(line.to_string()),
         }
@@ -589,23 +633,64 @@ mod lane_tests {
         assert_eq!(state.height, 0);
     }
 
-    /// Splicing changes the two lines it owns and nothing else — the
-    /// points, the arm flag and the shape survive byte for byte.
+    /// Splicing changes the lines it owns and nothing else — the points
+    /// and the default shape survive byte for byte, and a field the
+    /// caller did not touch comes back out as it went in.
+    ///
+    /// Written as parse-modify-splice, which is how every caller uses
+    /// it: building a `LaneState` from `Default` would silently disarm
+    /// an armed envelope, because this splice owns `ARM` too.
     #[test]
     fn splicing_touches_only_its_own_lines() {
-        let out = splice_lane_state(
-            &chunk(),
-            LaneState { visible: true, in_own_lane: true, height: 44 },
-        );
+        let mut state = parse_lane_state(&chunk());
+        state.in_own_lane = true;
+        state.height = 44;
+        let out = splice_lane_state(&chunk(), state);
+
         assert!(out.contains("VIS 1 1 1"), "{out}");
         assert!(out.contains("LANEHEIGHT 44 0"), "{out}");
         assert!(out.contains("PT 0 0.5 0"), "the points were dropped:\n{out}");
-        assert!(out.contains("ARM 1"), "the arm flag was dropped:\n{out}");
+        assert!(out.contains("DEFSHAPE 0 -1 -1"), "the shape was dropped:\n{out}");
+        // Untouched by this caller, so unchanged in the output.
+        assert!(out.contains("ARM 1"), "an armed envelope was disarmed:\n{out}");
+        assert!(out.contains("ACT 1 -1"), "the active flag moved:\n{out}");
         assert_eq!(out.lines().count(), chunk().lines().count());
+
         // And the read is the inverse of the write.
         let back = parse_lane_state(&out);
         assert!(back.in_own_lane);
         assert_eq!(back.height, 44);
+        assert!(back.armed);
+    }
+
+    /// Arm, automation mode and the active flag round-trip too — the
+    /// four facts that only exist in this chunk.
+    #[test]
+    fn arm_and_mode_round_trip() {
+        let state = parse_lane_state(&chunk());
+        assert!(state.armed, "ARM 1 did not read as armed");
+        assert!(state.active, "ACT's first field did not read as active");
+        assert_eq!(state.automation_mode, -1, "the mode is 'follow the track'");
+
+        let out = splice_lane_state(
+            &chunk(),
+            LaneState { armed: false, automation_mode: 2, active: true, ..state },
+        );
+        assert!(out.contains("ARM 0"), "{out}");
+        assert!(out.contains("ACT 1 2"), "{out}");
+        let back = parse_lane_state(&out);
+        assert!(!back.armed);
+        assert_eq!(back.automation_mode, 2);
+    }
+
+    /// An envelope chunk with no ACT line is active and follows the
+    /// track — reading it as inactive would deactivate it on the next
+    /// rewrite.
+    #[test]
+    fn a_chunk_without_act_stays_active() {
+        let state = parse_lane_state("<PARMENV 2 0 1 1\n  VIS 1 0 1\n>");
+        assert!(state.active);
+        assert_eq!(state.automation_mode, -1);
     }
 
     /// A chunk with no LANEHEIGHT gains one rather than losing the
@@ -615,7 +700,7 @@ mod lane_tests {
         let bare = "<PARMENV 2 0 1 1\n  VIS 1 0 1\n  PT 0 0.5 0\n>";
         let out = splice_lane_state(
             bare,
-            LaneState { visible: true, in_own_lane: true, height: 30 },
+            LaneState { visible: true, in_own_lane: true, height: 30, ..Default::default() },
         );
         assert!(out.contains("LANEHEIGHT 30 0"), "{out}");
         assert!(out.contains("PT 0 0.5 0"));

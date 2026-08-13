@@ -35,6 +35,49 @@ use tracing::debug;
 /// The theme's `envcp_min_height` — the floor a lane cannot go below.
 const ENVCP_MIN_HEIGHT: u32 = 27;
 
+/// Read an envelope's chunk, change its lane state, write it back.
+///
+/// Every one of visibility, arm, automation mode and the lane lives in
+/// the state chunk and nowhere else in REAPER's API, so they all take
+/// this one read-modify-splice-write path — and the splice leaves every
+/// other line (points, shapes, parameter identity) exactly as REAPER
+/// wrote it.
+fn edit_lane_state(
+    project: &ProjectContext,
+    location: &EnvelopeLocation,
+    f: impl FnOnce(&mut env_sw::LaneState),
+) -> DawResult<()> {
+    let env = resolve_envelope(project, location, IfMissing::Decline)
+        .ok_or_else(|| DawError::not_found("envelope", "the location does not resolve"))?;
+    let low = Reaper::get().medium_reaper().low();
+    let chunk = env_sw::get_envelope_state_chunk(low, env)
+        .ok_or_else(|| DawError::operation_failed("read envelope chunk"))?;
+    let mut state = env_sw::parse_lane_state(&chunk);
+    f(&mut state);
+    let patched = env_sw::splice_lane_state(&chunk, state);
+    if !env_sw::set_envelope_state_chunk(low, env, &patched) {
+        return Err(DawError::operation_failed("write envelope chunk"));
+    }
+    Ok(())
+}
+
+/// REAPER's automation-mode numbering, as `ACT`'s second field.
+///
+/// `-1` means "follow the track's mode", which is what Trim/Read is
+/// per-envelope. `Off` is not a mode in this field — REAPER expresses a
+/// bypassed envelope through `ACT`'s *first* field, so it is handled by
+/// the caller (see [`edit_lane_state`]) and maps to Trim/Read here.
+fn automation_mode_raw(mode: AutomationMode) -> i32 {
+    match mode {
+        AutomationMode::TrimRead | AutomationMode::Off => -1,
+        AutomationMode::Read => 1,
+        AutomationMode::Touch => 2,
+        AutomationMode::Write => 3,
+        AutomationMode::Latch => 4,
+        AutomationMode::LatchPreview => 5,
+    }
+}
+
 fn shape_from_raw(raw: i32) -> EnvelopeShape {
     match raw {
         0 => EnvelopeShape::Linear,
@@ -416,12 +459,14 @@ impl Automation for crate::Reaper {
         Some(build_envelope(&track_guid, ty, env))
     }
 
-    fn set_visible(&self, _project: ProjectContext, _location: EnvelopeLocation, _visible: bool) {
-        debug!("Reaper::set_visible — Phase 2, not implemented");
+    fn set_visible(&self, project: ProjectContext, location: EnvelopeLocation, visible: bool) {
+        debug!("Reaper::set_visible");
+        let _ = edit_lane_state(&project, &location, |s| s.visible = visible);
     }
 
-    fn set_armed(&self, _project: ProjectContext, _location: EnvelopeLocation, _armed: bool) {
-        debug!("Reaper::set_armed — Phase 2, not implemented");
+    fn set_armed(&self, project: ProjectContext, location: EnvelopeLocation, armed: bool) {
+        debug!("Reaper::set_armed");
+        let _ = edit_lane_state(&project, &location, |s| s.armed = armed);
     }
 
     fn set_lane(
@@ -430,25 +475,20 @@ impl Automation for crate::Reaper {
         location: EnvelopeLocation,
         lane: LaneParams,
     ) -> DawResult<()> {
-        let env = resolve_envelope(&project, &location, IfMissing::Decline)
-            .ok_or_else(|| DawError::not_found("envelope", "the location does not resolve"))?;
-        let low = Reaper::get().medium_reaper().low();
-        let chunk = env_sw::get_envelope_state_chunk(low, env)
-            .ok_or_else(|| DawError::operation_failed("read envelope chunk"))?;
-        let mut state = env_sw::parse_lane_state(&chunk);
-        state.in_own_lane = lane.in_own_lane;
-        // REAPER clamps its own minimum; passing the theme's floor keeps
-        // a drag past the stop from writing an unusable height.
-        state.height = if lane.in_own_lane {
-            lane.height.max(ENVCP_MIN_HEIGHT)
-        } else {
-            0
-        };
-        let patched = env_sw::splice_lane_state(&chunk, state);
-        if !env_sw::set_envelope_state_chunk(low, env, &patched) {
-            return Err(DawError::operation_failed("write envelope chunk"));
-        }
-        Ok(())
+        edit_lane_state(&project, &location, |s| {
+            s.in_own_lane = lane.in_own_lane;
+            // REAPER clamps its own minimum; passing the theme's floor
+            // keeps a drag past the stop from writing an unusable height.
+            s.height = if lane.in_own_lane {
+                lane.height.max(ENVCP_MIN_HEIGHT)
+            } else {
+                0
+            };
+            // A lane nobody can see is not what "give it a lane" means.
+            if lane.in_own_lane {
+                s.visible = true;
+            }
+        })
     }
 
     fn automation_items(
@@ -582,11 +622,19 @@ impl Automation for crate::Reaper {
 
     fn set_automation_mode(
         &self,
-        _project: ProjectContext,
-        _location: EnvelopeLocation,
-        _mode: AutomationMode,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        mode: AutomationMode,
     ) {
-        debug!("Reaper::set_automation_mode — Phase 2, not implemented");
+        debug!("Reaper::set_automation_mode");
+        let raw = automation_mode_raw(mode);
+        // `Off` is REAPER's inactive envelope, which is `ACT`'s first
+        // field rather than a mode number.
+        let active = mode != AutomationMode::Off;
+        let _ = edit_lane_state(&project, &location, |s| {
+            s.automation_mode = raw;
+            s.active = active;
+        });
     }
 
     fn points(&self, project: ProjectContext, location: EnvelopeLocation) -> Vec<EnvelopePoint> {
