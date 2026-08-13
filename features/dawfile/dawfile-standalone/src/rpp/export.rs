@@ -891,11 +891,19 @@ fn build_envelope(node: &EnvelopeNode) -> RChunk {
     let mut chunk = RChunk::new(vec![RToken::new(chunk_name)]);
     chunk.children.push(node_line(&["EGUID", node.id.as_str()]));
     chunk.children.push(node_line(&["ACT", "1", "-1"]));
+    // `VIS`'s second field is the lane flag, not a constant: exporting
+    // "0" here sent every laned envelope back overlaid on the waveform,
+    // which is a silent loss on round trip.
     chunk.children.push(node_line(&[
         "VIS",
         if node.envelope.visible { "1" } else { "0" },
-        "0",
+        if node.envelope.in_own_lane { "1" } else { "0" },
         "1",
+    ]));
+    chunk.children.push(node_line(&[
+        "LANEHEIGHT",
+        &node.envelope.lane_height.to_string(),
+        "0",
     ]));
     chunk.children.push(node_line(&[
         "ARM",

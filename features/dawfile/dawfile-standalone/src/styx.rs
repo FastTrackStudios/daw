@@ -172,6 +172,12 @@ mod tests {
                 visible: true,
                 armed: false,
                 automation_mode: daw_proto::primitives::AutomationMode::TrimRead,
+                // In a lane of its own, 44 tall — so the round trip is
+                // asserted on an envelope that actually carries lane
+                // facts rather than on defaults.
+                in_own_lane: true,
+                lane_height: 44,
+                automation_item_count: 0,
                 point_count: 0,
             },
             points: vec![daw_proto::automation::EnvelopePoint {
@@ -191,5 +197,9 @@ mod tests {
         assert_eq!(back.tracks[0].envelopes[0].points.len(), 1);
         assert_eq!(back.tracks[0].envelopes[0].points[0].value, 0.5);
         assert_eq!(back.tracks[0].envelopes[0].envelope.point_count, 1);
+        // The lane facts are part of the document, not a runtime detail:
+        // an envelope saved in its own lane must come back in one.
+        assert!(back.tracks[0].envelopes[0].envelope.in_own_lane);
+        assert_eq!(back.tracks[0].envelopes[0].envelope.lane_height, 44);
     }
 }

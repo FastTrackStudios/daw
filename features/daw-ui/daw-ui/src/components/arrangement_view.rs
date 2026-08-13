@@ -1045,7 +1045,7 @@ pub(crate) async fn fetch_preview(
             // draws, small enough to ship for every item in a project.
             let data = take.peaks(512).await.ok()?;
             let amps = waveform_from_peaks(&data);
-            (!amps.is_empty()).then(|| ItemPreview::Waveform(amps))
+            (!amps.is_empty()).then_some(ItemPreview::Waveform(amps))
         }
         daw_proto::SourceType::Midi => {
             let notes = handle.active_take().midi().notes().await.ok()?;
@@ -1065,7 +1065,7 @@ pub(crate) async fn fetch_preview(
                     length: n.length_ppq as f32 * spq,
                 })
                 .collect();
-            (!notes.is_empty()).then(|| ItemPreview::Notes(notes))
+            (!notes.is_empty()).then_some(ItemPreview::Notes(notes))
         }
         _ => None,
     }

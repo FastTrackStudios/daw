@@ -514,6 +514,10 @@ fn new_envelope(
             visible: true,
             armed: false,
             automation_mode: AutomationMode::TrimRead,
+            // A new envelope is overlaid until something asks for a lane.
+            in_own_lane: false,
+            lane_height: 0,
+            automation_item_count: 0,
             point_count: 0,
         },
         points: Vec::new(),

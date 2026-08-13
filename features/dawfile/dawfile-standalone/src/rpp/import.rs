@@ -599,6 +599,12 @@ fn read_envelope(chunk: &RChunk, owner: &EntityId, report: &mut ImportReport) ->
     let mut points = Vec::new();
     let mut visible = true;
     let mut armed = false;
+    // `VIS`'s second field and `LANEHEIGHT`'s first — where REAPER keeps
+    // an envelope's lane. Read here rather than dropped, because a
+    // parameter envelope that comes back overlaid on the waveform is not
+    // the project the user saved.
+    let mut in_own_lane = false;
+    let mut lane_height = 0u32;
     let mut guid = None;
     let mut param_index = None;
 
@@ -609,8 +615,14 @@ fn read_envelope(chunk: &RChunk, owner: &EntityId, report: &mut ImportReport) ->
         };
         match key(node).as_str() {
             "EGUID" => guid = param(node, 1),
-            "VIS" => visible = param_bool(node, 1).unwrap_or(true),
+            "VIS" => {
+                visible = param_bool(node, 1).unwrap_or(true);
+                in_own_lane = param_bool(node, 2).unwrap_or(false);
+            }
             "ARM" => armed = param_bool(node, 1).unwrap_or(false),
+            "LANEHEIGHT" => {
+                lane_height = param_i64(node, 1).unwrap_or(0).max(0) as u32;
+            }
             "PARAMBASE" | "PARMENVNAME" => param_index = param_i64(node, 1).map(|raw| raw as u32),
             "PT" => {
                 if let (Some(time), Some(value)) = (param_f64(node, 1), param_f64(node, 2)) {
@@ -624,7 +636,7 @@ fn read_envelope(chunk: &RChunk, owner: &EntityId, report: &mut ImportReport) ->
                     });
                 }
             }
-            "ACT" | "LANEHEIGHT" | "DEFSHAPE" | "VOLTYPE" => {}
+            "ACT" | "DEFSHAPE" | "VOLTYPE" => {}
             other => report.note("envelope", other),
         }
     }
@@ -649,6 +661,11 @@ fn read_envelope(chunk: &RChunk, owner: &EntityId, report: &mut ImportReport) ->
             visible,
             armed,
             automation_mode: AutomationMode::TrimRead,
+            in_own_lane,
+            lane_height,
+            // Automation items are not modelled by the `.daw` document
+            // yet — the count stays honest at 0 rather than guessing.
+            automation_item_count: 0,
             point_count: points.len() as u32,
         },
         points,
