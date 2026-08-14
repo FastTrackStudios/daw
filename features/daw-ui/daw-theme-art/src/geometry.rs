@@ -145,13 +145,19 @@ pub mod mcp {
     pub const RECINPUT_X: f32 = 6.0;
     pub const RECINPUT_W: f32 = 75.0;
 
-    /// Stated: `set mcp.env … + [0 stretch_sec{3}] + [mcp.io stretch_sec]
-    /// * scale … [1 -30 21 30]` — env hangs 30 above the stretch section's
-    /// floor, which is why the column spreads as a strip grows instead of
-    /// staying a cluster at the top.
+    /// Env hangs 30 above the stretch section's floor, which is why the
+    /// column spreads as a strip grows instead of staying a cluster at
+    /// the top. Stated:
+    ///
+    /// ```text
+    /// set mcp.env … + [0 stretch_sec{3}] + [mcp.io stretch_sec] * scale … [1 -30 21 30]
+    /// ```
     pub const ENV_FROM_FLOOR: f32 = 30.0;
-    /// Stated: `set mcp.phase … + [mcp.env mcp.env] - * scale
-    /// [3 -18 16 18] padding` — phase sits 18 above env, 16 wide.
+    /// Phase sits 18 above env, 16 wide. Stated:
+    ///
+    /// ```text
+    /// set mcp.phase … + [mcp.env mcp.env] - * scale [3 -18 16 18] padding
+    /// ```
     pub const PHASE_FROM_ENV: f32 = 18.0;
     /// Stated: the phase glyph's width, from the same `[3 -18 16 18]`.
     pub const PHASE_W: f32 = 16.0;

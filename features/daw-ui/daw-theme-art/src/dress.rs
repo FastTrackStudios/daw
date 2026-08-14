@@ -157,6 +157,23 @@ pub fn mute_art(panel: Panel, on: bool) -> NamedArt {
     })
 }
 
+
+/// The track colour, as REAPER actually paints it on a panel.
+///
+/// REAPER does not paint the raw track colour: it darkens it. Measured in
+/// one screenshot holding both renders of the same project — REAPER's TCP
+/// painted its Kick row `#9D3C55` where our mixer band painted the track's
+/// own `#E0567A`. All three channels land on 0.700, 0.698 and 0.697 of the
+/// original, which is a flat 30% mix toward black and nothing subtler.
+///
+/// Everything track-coloured goes through here: the mixer's band and index
+/// plate, the track panel's row. Painting the raw colour made every panel
+/// read a stop brighter than REAPER's, and it was the largest single block
+/// of difference left in the strip comparison.
+pub fn panel_tint(colour: daw_theme::Color) -> daw_theme::Color {
+    colour.shade(-0.30)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,20 +219,4 @@ mod tests {
         assert_eq!(mute_art(Panel::Mixer, true).source, (21.0, 20.0));
         assert_eq!(mute_art(Panel::Track, true).source, (21.0, 24.0));
     }
-}
-
-/// The track colour, as REAPER actually paints it on a panel.
-///
-/// REAPER does not paint the raw track colour: it darkens it. Measured in
-/// one screenshot holding both renders of the same project — REAPER's TCP
-/// painted its Kick row `#9D3C55` where our mixer band painted the track's
-/// own `#E0567A`. All three channels land on 0.700, 0.698 and 0.697 of the
-/// original, which is a flat 30% mix toward black and nothing subtler.
-///
-/// Everything track-coloured goes through here: the mixer's band and index
-/// plate, the track panel's row. Painting the raw colour made every panel
-/// read a stop brighter than REAPER's, and it was the largest single block
-/// of difference left in the strip comparison.
-pub fn panel_tint(colour: daw_theme::Color) -> daw_theme::Color {
-    colour.shade(-0.30)
 }

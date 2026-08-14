@@ -232,7 +232,7 @@ fn a_pan_drag_leads_the_engine_and_ignores_its_echo() {
 /// the other's events.
 #[test]
 fn holding_one_value_does_not_suppress_the_other() {
-    let mut dom = mount(base, || rsx! { PanKnob { track: "T1" } });
+    let dom = mount(base, || rsx! { PanKnob { track: "T1" } });
     dom.in_runtime(|| {
         let mut store = store();
         store.drafts().set_pan("T1", 0.5);

@@ -217,7 +217,7 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
         &render_svg(
             v::FxInButton,
             v::FxInProps {
-                loaded: n % 2 == 0,
+                loaded: n.is_multiple_of(2),
                 cell: (29.0, 20.0),
                 width: NONE.0,
                 height: NONE.1,

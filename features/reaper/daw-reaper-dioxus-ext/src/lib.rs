@@ -151,9 +151,11 @@ async fn drive_action_events(
 ) {
     info!("FTS UI action dispatch loop started");
     while let Some(event) = rx.recv().await {
-        let ActionEvent::Triggered { command_name } = event else {
-            continue;
-        };
+        // Plain destructuring, not `let…else`: `ActionEvent` has the one
+        // variant, so a fallback arm is unreachable today. If a second
+        // variant lands this stops compiling, which is the right prompt
+        // to decide what the loop should do with it.
+        let ActionEvent::Triggered { command_name } = event;
         debug!(%command_name, "action received");
         if tx.send(command_name).is_err() {
             info!("FTS UI dispatch channel closed");

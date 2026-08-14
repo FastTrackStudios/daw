@@ -106,7 +106,7 @@ fn instantiating_gives_fresh_ids_and_keeps_the_guid_in_step() {
     let mut source = project();
     source.edit(|d| d.tracks.push(track("Kit", None)));
     let original = source.document().tracks[0].id.clone();
-    let t = DawTemplate::from_tracks(&source, "Kit", &[original.clone()]);
+    let t = DawTemplate::from_tracks(&source, "Kit", std::slice::from_ref(&original));
 
     let mut target = project();
     let remap = t.instantiate(&mut target).unwrap();
