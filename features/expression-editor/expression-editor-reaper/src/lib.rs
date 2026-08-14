@@ -314,7 +314,9 @@ const WRITE_AFTER_STABLE_TICKS: u32 = 8;
 ///   take — an editor that blanked on every arrange-view click would
 ///   be unusable.
 /// - **Auto write-back**: once the document has been stable for
-///   [`WRITE_AFTER_STABLE_TICKS`], it is written to the take. MIDI
+///   `WRITE_AFTER_STABLE_TICKS` (8 polls — the const is private, since
+///   the settling delay is this module's business and not API), it is
+///   written to the take. MIDI
 ///   replaces the take's events; audio timing goes out as stretch
 ///   markers, and a settled pitch edit renders once, not per frame.
 pub fn poll() {

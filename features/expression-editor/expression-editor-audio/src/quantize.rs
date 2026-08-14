@@ -6,7 +6,7 @@
 //!
 //! **The matching itself is not here.** It lives in
 //! [`expression_editor_tools::quantize`], written once over
-//! [`Timed`](expression_editor_tools::Timed), so a drum take and a MIDI
+//! [`expression_editor_tools::Timed`], so a drum take and a MIDI
 //! take are put on the grid by the same code. What is left here is the
 //! part that is genuinely audio: seconds, and the two ways a plan
 //! becomes sound — [`Plan::alignment`] warps, [`Plan::splits`] cuts.

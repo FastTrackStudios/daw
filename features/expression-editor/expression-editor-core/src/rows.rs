@@ -276,10 +276,10 @@ impl DrumMap {
     /// nothing about a hi-hat or a crash depends on which stick got
     /// there.
     ///
-    /// The two-handed pieces are collapsed by default —
-    /// [`DrumMap::split_piece`] opens one when a part needs it. A roll
-    /// that showed both hands for every drum would be twice as tall for
-    /// no reason on most material.
+    /// The two-handed pieces are collapsed by default; passing a piece
+    /// in [`DrumMap::visible_rows`]'s `split` set opens it when a part
+    /// needs both hands. A roll that showed both hands for every drum
+    /// would be twice as tall for no reason on most material.
     pub fn fts() -> Self {
         // (pitch, name, group, hand, other-hand pitch, piece)
         let lanes: Vec<LaneRow> = vec![

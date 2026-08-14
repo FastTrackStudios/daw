@@ -93,7 +93,7 @@ impl std::fmt::Display for ArgsError {
 }
 
 impl Args {
-    /// Parse the process arguments, skipping argv[0].
+    /// Parse the process arguments, skipping `argv[0]`.
     pub fn from_env() -> Result<Self, ArgsError> {
         Self::parse(std::env::args().skip(1))
     }

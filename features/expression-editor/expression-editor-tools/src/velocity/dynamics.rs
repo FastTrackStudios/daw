@@ -57,8 +57,9 @@ impl Default for Pivot {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Dynamics {
     /// -1.0 = every note collapsed onto the pivot, 0.0 = untouched,
-    /// +1.0 = every note thrown [`EXPAND_FACTOR`]× its distance from the
-    /// pivot further out.
+    /// +1.0 = every note thrown twice its distance from the pivot
+    /// further out (`EXPAND_FACTOR`, private — the curve's shape is this
+    /// module's business, not API).
     pub amount: f64,
     pub pivot: Pivot,
 }
