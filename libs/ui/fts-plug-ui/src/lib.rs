@@ -1,7 +1,7 @@
 //! Shared Dioxus editor chrome for the FTS plugin suite.
 //!
 //! `eq-ui`, `comp-ui` and `trigger-ui` each grew their own copy of the same
-//! scaffolding — the nice_plug→[`fts_ui_audio`] param adapter, the ~30 Hz
+//! scaffolding — the nice_plug→[`fts_audio_ui`] param adapter, the ~30 Hz
 //! repaint driver, the header, the labelled control sections. This crate is
 //! that scaffolding, lifted, so a new plugin editor is just its parameter tree
 //! plus its own visualizer.
@@ -59,5 +59,5 @@ pub mod prelude {
     pub use crate::feed::{IoGrMeters, PeakMeter, WAVE_HISTORY_LEN, WaveRing};
     pub use crate::param_adapter::{param_handle, param_handle_with_options};
     pub use crate::skin::{Skin, accents};
-    pub use fts_ui_audio::prelude::*;
+    pub use fts_audio_ui::prelude::*;
 }

@@ -21,7 +21,7 @@
 //! `KnobSpec` describing it, outermost tier first. Then look at it:
 //!
 //! ```sh
-//! cargo test -p fts-ui-audio --features native --test knob_sheet
+//! cargo test -p fts-audio-ui --features native --test knob_sheet
 //! ```
 //!
 //! which paints every style in the kit to one PNG. Nothing else needs

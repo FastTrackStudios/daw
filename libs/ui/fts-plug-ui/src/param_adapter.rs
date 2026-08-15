@@ -1,12 +1,12 @@
 //! Adapter from nice_plug's `ParamPtr` + `ParamContext` to
-//! [`fts_ui_audio::ParamHandle`].
+//! [`fts_audio_ui::ParamHandle`].
 //!
-//! Lives here rather than in `fts-ui-audio` because it depends on nice_plug;
-//! `fts-ui-audio` itself is provider-agnostic. Every plugin editor in the
+//! Lives here rather than in `fts-audio-ui` because it depends on nice_plug;
+//! `fts-audio-ui` itself is provider-agnostic. Every plugin editor in the
 //! suite uses this — it was copied verbatim into `eq-ui`, `comp-ui` and
 //! `trigger-ui` before being lifted.
 
-use fts_ui_audio::ParamHandle;
+use fts_audio_ui::ParamHandle;
 use nice_plug::prelude::ParamPtr;
 use nice_plug_dioxus::prelude::ParamContext;
 

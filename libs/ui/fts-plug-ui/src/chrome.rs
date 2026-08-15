@@ -23,7 +23,7 @@
 
 use audiocore_core::prelude::*;
 use architect_ui::prelude::{ThemeMode, ThemeProvider, ThemeState, default_theme_preset};
-use fts_ui_audio::prelude::*;
+use fts_audio_ui::prelude::*;
 
 use crate::skin::Skin;
 

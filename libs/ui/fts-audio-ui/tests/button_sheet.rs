@@ -6,7 +6,7 @@
 //! rather than wiring it onto a faceplate:
 //!
 //! ```sh
-//! cargo test -p fts-ui-audio --test button_sheet
+//! cargo test -p fts-audio-ui --test button_sheet
 //! ```
 //!
 //! Output lands in `target/gui-shots/buttons/` (override with
@@ -20,8 +20,8 @@ use std::path::PathBuf;
 use dioxus::prelude::*;
 use dioxus_test::{by_testid, render};
 
-use fts_ui_audio::hardware::button::{ButtonStyle, PanelButton};
-use fts_ui_audio::param::ParamHandle;
+use fts_audio_ui::hardware::button::{ButtonStyle, PanelButton};
+use fts_audio_ui::param::ParamHandle;
 
 use std::cell::RefCell;
 use std::collections::HashMap;

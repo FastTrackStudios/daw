@@ -1,5 +1,5 @@
 [package]
-name = "fts-ui-audio"
+name = "fts-audio-ui"
 description = "FastTrack Studio audio widget kit — Dioxus port of iced_audio (knobs, sliders, XY pads, meters)"
 version.workspace = true
 edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately

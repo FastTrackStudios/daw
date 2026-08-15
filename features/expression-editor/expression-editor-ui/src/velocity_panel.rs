@@ -43,8 +43,8 @@ use crate::drag::{BarEditor, RangeSlider, Slider};
 // nice-plug-dioxus), but PanelStyles is not cfg-gated — so this cannot be
 // `architect_ui::THEME_CSS` the way the unconditional consumers do it.
 // Read the vendored copy instead. Canonical source is architect-ui's
-// assets/fts-theme.css; libs/fts-ui/assets/ is a copy kept in step by hand.
-const FTS_THEME: &str = include_str!("../../../../libs/fts-ui/assets/fts-theme.css");
+// assets/fts-theme.css; libs/ui/assets/ is a copy kept in step by hand.
+const FTS_THEME: &str = include_str!("../../../../libs/ui/assets/fts-theme.css");
 
 /// Without `html,body{height:100%}` a full-height root resolves against
 /// `auto` and the panel collapses to its content. Mirrors the reset

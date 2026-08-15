@@ -1,6 +1,6 @@
 //! DAW Transport provider — playback control actions.
 
-use launcher_core::{ActionModifier, ActivationResult, Item, ItemAction, Provider, ProviderConfig};
+use architect_launcher_core::{ActionModifier, ActivationResult, Item, ItemAction, Provider, ProviderConfig};
 
 pub struct DawTransportProvider {
     config: ProviderConfig,

@@ -18,7 +18,7 @@
 //! at it:
 //!
 //! ```sh
-//! cargo test -p fts-ui-audio --test button_sheet
+//! cargo test -p fts-audio-ui --test button_sheet
 //! ```
 //!
 //! which paints every button in the kit, up and down, wired and unwired.

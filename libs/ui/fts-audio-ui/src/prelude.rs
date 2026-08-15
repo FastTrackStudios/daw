@@ -1,4 +1,4 @@
-//! Convenience re-exports — `use fts_ui_audio::prelude::*`.
+//! Convenience re-exports — `use fts_audio_ui::prelude::*`.
 
 pub use crate::axis::{DbAxis, FreqAxis};
 pub use crate::controls::{

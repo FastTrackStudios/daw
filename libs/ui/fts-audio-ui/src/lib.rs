@@ -11,7 +11,7 @@
 //!
 //! # Quick start
 //! ```rust,ignore
-//! use fts_ui_audio::prelude::*;
+//! use fts_audio_ui::prelude::*;
 //! ```
 
 pub mod axis;

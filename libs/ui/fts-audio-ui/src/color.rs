@@ -42,7 +42,7 @@ pub fn css_color_to_hex(value: &str) -> Option<String> {
 /// Lookup helper that returns a hex color for a theme token, falling
 /// back to `default_hex` if the token is missing or unparseable.
 pub fn theme_token_hex<'a>(
-    style: &fts_ui_audio_theme_lookup::Style<'a>,
+    style: &fts_audio_ui_theme_lookup::Style<'a>,
     key: &str,
     default_hex: &str,
 ) -> String {
@@ -123,7 +123,7 @@ fn srgb_encode(c: f32) -> f32 {
 // a hard dep on architect-ui (avoids a cycle). Consumers outside this crate
 // who already have access to architect_ui::ThemeStyle can call
 // `css_color_to_hex` directly.
-mod fts_ui_audio_theme_lookup {
+mod fts_audio_ui_theme_lookup {
     /// Trait-shaped view of any theme style; matches the shape of
     /// architect-ui's `ThemeStyle::get`.
     pub struct Style<'a> {
@@ -137,7 +137,7 @@ mod fts_ui_audio_theme_lookup {
     }
 }
 
-pub use fts_ui_audio_theme_lookup::Style as ThemeStyleView;
+pub use fts_audio_ui_theme_lookup::Style as ThemeStyleView;
 
 #[cfg(test)]
 mod tests {

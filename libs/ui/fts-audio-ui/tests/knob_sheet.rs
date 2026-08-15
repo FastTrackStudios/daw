@@ -7,7 +7,7 @@
 //! for:
 //!
 //! ```sh
-//! cargo test -p fts-ui-audio --test knob_sheet
+//! cargo test -p fts-audio-ui --test knob_sheet
 //! ```
 //!
 //! Output lands in `target/gui-shots/knobs/` (override with `FTS_SHOTS_DIR`).
@@ -20,10 +20,10 @@ use std::path::PathBuf;
 use dioxus::prelude::*;
 use dioxus_test::{by_testid, render};
 
-use fts_ui_audio::drag::DragProvider;
-use fts_ui_audio::hardware::knob::{HardwareKnob, KnobStyle};
-use fts_ui_audio::hardware::knob_svg::{linear_scale_label, scale_ring};
-use fts_ui_audio::param::ParamHandle;
+use fts_audio_ui::drag::DragProvider;
+use fts_audio_ui::hardware::knob::{HardwareKnob, KnobStyle};
+use fts_audio_ui::hardware::knob_svg::{linear_scale_label, scale_ring};
+use fts_audio_ui::param::ParamHandle;
 
 /// Three positions across the sweep, so an index that only looks right at
 /// twelve o'clock gives itself away.

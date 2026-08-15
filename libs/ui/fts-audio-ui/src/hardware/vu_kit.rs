@@ -16,7 +16,7 @@
 //! in [`vu_faces`](crate::hardware::vu_faces). Then look at it:
 //!
 //! ```sh
-//! cargo test -p fts-ui-audio --test vu_sheet
+//! cargo test -p fts-audio-ui --test vu_sheet
 //! ```
 //!
 //! which paints every face in the kit, at rest and swinging, with and without

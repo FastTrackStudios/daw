@@ -1,6 +1,6 @@
 //! A hardware knob — pointer, skirt, and a scale ring printed on the panel.
 //!
-//! Different from [`fts_ui_audio::Knob`] in the way that matters: an FTS knob
+//! Different from [`fts_audio_ui::Knob`] in the way that matters: an FTS knob
 //! draws its value as an arc, because the value is the point. A hardware knob
 //! draws a *pointer*, and the value is read off numbers silkscreened on the
 //! panel around it — which is why the ring here is drawn even where the
@@ -8,7 +8,7 @@
 //! 0–10, 1176 INPUT reads -48…+12) rather than the engine's.
 //!
 //! Geometry lives in [`crate::hardware::knob_svg`]. Dragging goes through the
-//! same [`DragProvider`](fts_ui_audio::drag::DragProvider) as every other FTS
+//! same [`DragProvider`](fts_audio_ui::drag::DragProvider) as every other FTS
 //! control, so a hardware face behaves like the rest of the editor.
 
 use dioxus::prelude::*;

@@ -5,7 +5,7 @@
 //! it, at rest and swinging, in its bezel and out of it:
 //!
 //! ```sh
-//! cargo test -p fts-ui-audio --test vu_sheet
+//! cargo test -p fts-audio-ui --test vu_sheet
 //! ```
 //!
 //! Output lands in `target/gui-shots/vu/` (override with `FTS_SHOTS_DIR`).
@@ -19,8 +19,8 @@ use std::path::PathBuf;
 use dioxus::prelude::*;
 use dioxus_test::{by_testid, render};
 
-use fts_ui_audio::hardware::vu::{BezelStyle, VuFace, VuMeter, VuMode};
-use fts_ui_audio::hardware::vu_svg::VuScale;
+use fts_audio_ui::hardware::vu::{BezelStyle, VuFace, VuMeter, VuMode};
+use fts_audio_ui::hardware::vu_svg::VuScale;
 
 /// Rest, working, and pinned — enough to see the needle sweep and to catch a
 /// scale that crowds the wrong end.
