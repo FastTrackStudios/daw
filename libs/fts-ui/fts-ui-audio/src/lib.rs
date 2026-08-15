@@ -6,7 +6,7 @@
 //! consumers wire to whatever param system they use (nih_plug, vizia, plain
 //! signals, etc).
 //!
-//! Companion to [`fts-ui`](../fts_ui) which provides the general-purpose
+//! Companion to [`architect-ui`](../architect_ui) which provides the general-purpose
 //! shadcn-style design system. Audio plugin UIs typically depend on both.
 //!
 //! # Quick start

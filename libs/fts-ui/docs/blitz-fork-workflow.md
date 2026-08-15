@@ -68,7 +68,7 @@ git push origin main
    # …repeat `git merge --no-ff` for every other still-open fix branch…
    git push --force-with-lease origin fts/integration
    ```
-6. Bump the dep in `fts-ui` so cargo refetches:
+6. Bump the dep in `architect-ui` so cargo refetches:
    ```sh
    cargo update -p dioxus-native
    ```
@@ -97,7 +97,7 @@ git branch -D fix/refcell-borrow-on-set-focus
 git push origin --delete fix/refcell-borrow-on-set-focus
 ```
 
-Then in `fts-ui`:
+Then in `architect-ui`:
 
 ```sh
 cargo update -p dioxus-native
@@ -117,9 +117,9 @@ cargo update -p dioxus-native
   individual `fix/*` branch (rebase it onto the new upstream HEAD) rather
   than fixing conflicts in the merge commit on `fts/integration`.
 - Run the workspace tests in the fork before pushing
-  `fts/integration` so we don't ship a broken integration to fts-ui.
+  `fts/integration` so we don't ship a broken integration to architect-ui.
 
-## Pinning strategy in `fts-ui`
+## Pinning strategy in `architect-ui`
 
 `Cargo.toml` references `branch = "fts/integration"` so cargo refetches
 on `cargo update -p dioxus-native`. If we ever need a hard pin (e.g. for a

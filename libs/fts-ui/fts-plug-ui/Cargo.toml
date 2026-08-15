@@ -10,7 +10,7 @@ description = "Shared Dioxus editor chrome for the FTS plugin suite — param ad
 atomic_float = { workspace = true }
 audiocore-core = { workspace = true }
 dioxus = { workspace = true }
-fts-ui = { workspace = true }
+architect-ui = { workspace = true }
 fts-ui-audio = { workspace = true }
 nice-plug = { workspace = true }
 nice-plug-dioxus = { workspace = true }

@@ -46,7 +46,7 @@ tokio = { version = "1", features = ["time"] }
 # extension can mount them without reimplementing the wiring.
 daw-module = { workspace = true, optional = true }
 daw-reaper-dioxus = { workspace = true, optional = true }
-fts-ui = { workspace = true, optional = true }
+architect-ui = { workspace = true, optional = true }
 
 # REAPER theme importer (`reaper-theme` feature): maps a .ReaperTheme palette
 # + rtconfig params onto our Theme tokens.
@@ -85,12 +85,12 @@ hierarchy = ["web"]
 # Import REAPER themes (palette/params → Theme; see theming::reaper_import).
 reaper-theme = ["dep:daw-theme-reaper"]
 # Ships the `FTS_UI_NATIVE` and `FTS_UI_DESKTOP` panel + action defs that
-# render `fts_ui::showcase::Showcase` through the daw-reaper-dioxus host.
+# render `architect_ui::showcase::Showcase` through the daw-reaper-dioxus host.
 reaper-test-panels = [
     "web",
     "dep:daw-module",
     "dep:daw-reaper-dioxus",
-    "dep:fts-ui",
+    "dep:architect-ui",
 ]
 # The `playground` example: the vector-themeable panels driven by fake
 # sample data (no DAW backend), served in the browser via `dx serve`.

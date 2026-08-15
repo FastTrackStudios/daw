@@ -1,5 +1,5 @@
 //! Minimal color-space helpers — convert the `oklch(...)` strings the
-//! fts-ui theme uses into concrete `#rrggbb` values that blitz will
+//! architect-ui theme uses into concrete `#rrggbb` values that blitz will
 //! accept as SVG `stroke="..."` / `fill="..."` attributes.
 //!
 //! blitz's SVG layer doesn't honor `style="stroke: var(--…)"` on path
@@ -9,7 +9,7 @@
 //! Falls through verbatim when the input is already a `#hex` /
 //! `rgb(...)` / named color.
 
-/// Parse a CSS color value the fts-ui theme system might emit and
+/// Parse a CSS color value the architect-ui theme system might emit and
 /// return it as a `#rrggbb` string. Pass-through for inputs that aren't
 /// `oklch(...)`. Returns `None` if parsing fails.
 ///
@@ -120,12 +120,12 @@ fn srgb_encode(c: f32) -> f32 {
 }
 
 // Re-export ThemeStyle behind a small adapter so the knob doesn't need
-// a hard dep on fts-ui (avoids a cycle). Consumers outside this crate
-// who already have access to fts_ui::ThemeStyle can call
+// a hard dep on architect-ui (avoids a cycle). Consumers outside this crate
+// who already have access to architect_ui::ThemeStyle can call
 // `css_color_to_hex` directly.
 mod fts_ui_audio_theme_lookup {
     /// Trait-shaped view of any theme style; matches the shape of
-    /// fts-ui's `ThemeStyle::get`.
+    /// architect-ui's `ThemeStyle::get`.
     pub struct Style<'a> {
         pub get: &'a dyn Fn(&str) -> Option<&'a str>,
     }
@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn parses_oklch_dark_grey() {
-        // oklch(0.269 0 0) — fts-ui's dark border token.
+        // oklch(0.269 0 0) — architect-ui's dark border token.
         let hex = css_color_to_hex("oklch(0.269 0 0)").unwrap();
         // Should be a near-neutral mid-low grey.
         let r = u8::from_str_radix(&hex[1..3], 16).unwrap();

@@ -146,13 +146,13 @@ pub fn Knob(
     let (tx, ty) = arc_point(cx, cy, r - 6.0, end_angle);
     let (tx2, ty2) = arc_point(cx, cy, r + 1.0, end_angle);
 
-    // Resolve the active fts-ui theme tokens into concrete `#rrggbb`
+    // Resolve the active architect-ui theme tokens into concrete `#rrggbb`
     // strings — blitz doesn't substitute `var(--…)` inside SVG
     // presentation attributes, and `style="stroke:…"` is dropped on
     // path elements, so we have to do the lookup in Rust. Falls back
     // to a sensible dark-mode hex when the theme isn't in scope (e.g.
     // unit tests that don't mount a ThemeProvider).
-    let theme = try_consume_context::<fts_ui::prelude::ThemeContext>();
+    let theme = try_consume_context::<architect_ui::prelude::ThemeContext>();
     let resolve = |key: &str, fallback: &str| -> String {
         theme
             .as_ref()

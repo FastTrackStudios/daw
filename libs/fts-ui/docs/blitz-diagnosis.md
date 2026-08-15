@@ -55,7 +55,7 @@ need it in the matrix.
 
 ## 3. Run the parity harness
 
-`cargo test --release -p fts-ui --features stories --test parity`
+`cargo test --release -p architect-ui --features stories --test parity`
 gives you a deterministic side-by-side composite of Blitz and wry.
 Use it for any visual question. When in doubt, `nix-shell -p
 xorg.xorgserver imagemagick --run "<cmd>"` — the harness needs Xvfb,
@@ -136,7 +136,7 @@ one before opening files:
 | Animation / transform                                | `forks/blitz/packages/blitz-dom/src/stylo_to_kurbo.rs`, `stylo.rs` |
 | Event / focus / keyboard not working                 | `forks/blitz/packages/dioxus-native-dom/src/events.rs` |
 | Snapshot / capture / parity infrastructure           | `forks/blitz/`-adjacent: `fts-story` |
-| Showcase wrappers / demo glue                        | `fts-ui` |
+| Showcase wrappers / demo glue                        | `architect-ui` |
 
 When the bug is in Blitz (most of them are), branch off
 `upstream/main` per [`docs/blitz-fork-workflow.md`](./blitz-fork-workflow.md):
@@ -160,7 +160,7 @@ crossing that boundary. See `fix/svg-currentcolor-from-style`.
 `BaseDocument::resolve(current_time_for_animations: f64)` is what
 advances the Stylo animation clock. Snapshot harnesses that always
 pass `0.0` will render every keyframe at its initial state.
-`fts-story-snapshots` settles at `t = 0` (so animation start times
+`architect-story-snapshots` settles at `t = 0` (so animation start times
 anchor consistently) and then jumps the final resolve to
 `animation_time_secs` (default `0.125 s` = 45° on a 1 s
 `animate-spin`). For wry-side parity, inject CSS that pins the
@@ -181,7 +181,7 @@ factor (which is 75 on a default Xvfb, against the CSS-px
 convention of 96). Blitz's CPU rasteriser uses CSS-px == device-px
 at scale 1.0. Without `-dpi 96` on Xvfb, every parity capture
 disagrees by ~1 px per row and the dssim score never falls below
-~0.08. `fts-story-parity` pins it; if you ever set up a new
+~0.08. `architect-story-parity` pins it; if you ever set up a new
 headless capture path, set this first.
 
 ### Tailwind v4 hover variants and Stylo's media features
@@ -244,12 +244,12 @@ When the visual output isn't enough:
 
 ```sh
 RUST_LOG=blitz_dom=debug,blitz_paint=debug,anyrender_vello_cpu=debug \
-  cargo test --release -p fts-ui --features stories \
+  cargo test --release -p architect-ui --features stories \
   --test parity <story>_parity -- --ignored --nocapture
 ```
 
 For one-off questions, `eprintln!` inside the suspect Blitz code
-path is the fastest signal. Add a `[patch]` to fts-ui's
+path is the fastest signal. Add a `[patch]` to architect-ui's
 `Cargo.toml` so the workspace picks up the local fork checkout
 without a push round-trip:
 
@@ -263,14 +263,14 @@ Always remove this before committing — it makes the repo unbuildable
 on any other machine. The diagnostic-iteration cycle is:
 
 1. Add `eprintln!` in the fork checkout.
-2. `cargo test --release …` from fts-ui (rebuilds your fork crate
+2. `cargo test --release …` from architect-ui (rebuilds your fork crate
    incrementally).
 3. Read the printed values.
 4. Iterate.
 5. Once the fix is identified: commit on a fresh `fix/<slug>`
    branch off `upstream/main`, restack `fts/integration`, push
    both, drop the `[patch]`, `cargo update -p dioxus-native`,
-   verify, commit fts-ui.
+   verify, commit architect-ui.
 
 ## 8. When to stop and what to escalate
 

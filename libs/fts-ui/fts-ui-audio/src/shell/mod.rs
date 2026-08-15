@@ -37,7 +37,7 @@
 //!
 //! Styling is inline rather than Tailwind: this renders under Blitz inside
 //! DAW hosts, where an unresolved utility class means a collapsed layout
-//! rather than an ugly one. Colours come from the fts-ui theme variables the
+//! rather than an ugly one. Colours come from the architect-ui theme variables the
 //! editors already set, with the plugin's accent passed in.
 
 pub mod form;

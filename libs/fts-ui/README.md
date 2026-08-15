@@ -1,4 +1,4 @@
-# fts-ui
+# architect-ui
 
 FastTrack Studio's Dioxus UI library. It provides shadcn-style components for
 Dioxus 0.7 across web, desktop, mobile, and native renderer targets.
@@ -33,7 +33,7 @@ fts-showcase-mobile
 ## Showcase Apps
 
 Each platform showcase lives under `apps/` and renders
-`fts_ui::showcase::Showcase`:
+`architect_ui::showcase::Showcase`:
 
 - `apps/web`
 - `apps/desktop`
@@ -51,7 +51,7 @@ Typical app usage:
 
 ```rust
 use dioxus::prelude::*;
-use fts_ui::prelude::*;
+use architect_ui::prelude::*;
 
 #[component]
 fn App() -> Element {

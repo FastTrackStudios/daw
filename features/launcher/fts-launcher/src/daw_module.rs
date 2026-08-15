@@ -4,7 +4,7 @@ use daw::module::{
     ActionDef, DawModule, DockPosition, ModuleContext, PanelComponent, PanelDef, PanelRenderer,
 };
 use daw::reaper_ui::prelude::*;
-use fts_ui::prelude::{ThemeMode, ThemeProvider, ThemeState, default_theme_preset};
+use architect_ui::prelude::{ThemeMode, ThemeProvider, ThemeState, default_theme_preset};
 use launcher_ui::components::Launcher;
 
 use crate::LauncherEngine;

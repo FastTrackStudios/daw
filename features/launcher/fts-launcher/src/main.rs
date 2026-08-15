@@ -4,7 +4,7 @@
 #[cfg(feature = "standalone")]
 fn main() {
     use dioxus_native::prelude::*;
-    use fts_ui::prelude::{ThemeMode, ThemeProvider, ThemeState, default_theme_preset};
+    use architect_ui::prelude::{ThemeMode, ThemeProvider, ThemeState, default_theme_preset};
     use launcher_ui::components::Launcher;
 
     tracing_subscriber::fmt()
