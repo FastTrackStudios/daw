@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license = "MIT"
 description = "FastTrackStudios launcher for Reaper — audio production workflow launcher"
-repository = "https://codeberg.org/FastTrackStudios/fts-launcher"
+repository = "https://github.com/FastTrackStudios/FastTrackStudio"
 
 [lib]
 name = "fts_launcher"
