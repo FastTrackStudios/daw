@@ -8,7 +8,7 @@ license.workspace = true
 
 [dependencies]
 dioxus = { workspace = true }
-fts-ui = { workspace = true }
+architect-ui = { workspace = true }
 tracing = { workspace = true }
 
 [features]

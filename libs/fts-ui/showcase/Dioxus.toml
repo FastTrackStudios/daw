@@ -1,7 +1,0 @@
-[application]
-name = "fts-ui-showcase"
-default_platform = "desktop"
-features = ["desktop"]
-
-[desktop]
-title = "fts-ui Showcase"

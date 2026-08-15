@@ -15,7 +15,7 @@ pub use editor_app::EditorApp;
 
 use reaper_dioxus::prelude::*;
 
-use fts_ui::prelude::{Kbd, ThemeMode, ThemeProvider, ThemeState, default_theme_preset};
+use architect_ui::prelude::{Kbd, ThemeMode, ThemeProvider, ThemeState, default_theme_preset};
 
 use crate::ui::tailwind::TailwindStyle;
 use data::{ActionSection, KeyBindingInfo, bindings_by_key, collect_current_bindings};
@@ -24,10 +24,10 @@ use layout::{KEY_GAP, KEY_UNIT, KeyBlock, KeyDef, KeyRow, qwerty_layout};
 use crate::input::processor;
 
 // ---------------------------------------------------------------------------
-// Shortcut rendering via the fts-ui Kbd component
+// Shortcut rendering via the architect-ui Kbd component
 // ---------------------------------------------------------------------------
 
-/// Render a key sequence (e.g. `<C-s>`, `g g`, `<S-Tab>`) as a row of fts-ui
+/// Render a key sequence (e.g. `<C-s>`, `g g`, `<S-Tab>`) as a row of architect-ui
 /// [`Kbd`] badges. Multi-step sequences are separated by a thin gap.
 #[component]
 fn ShortcutKbd(seq: String) -> Element {

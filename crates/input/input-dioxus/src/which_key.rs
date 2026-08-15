@@ -8,14 +8,14 @@
 //! plain Dioxus app, a plugin editor, or an embedded native surface. The
 //! consuming app supplies the [`WhichKeyState`] via component context (e.g.
 //! `use_context_provider`, or the `with_context` on a native overlay
-//! builder). Colours/borders come from the `fts_ui` theme + Tailwind classes;
+//! builder). Colours/borders come from the `architect_ui` theme + Tailwind classes;
 //! the size-sensitive properties are inline-styled and multiplied by
 //! [`WhichKeyState::scale`] so the popup scales across devices without a CSS
 //! rebuild. The host is responsible for injecting a Tailwind stylesheet if it
 //! wants the class-based colours (this component only injects the theme).
 
 use dioxus::prelude::*;
-use fts_ui::prelude::*;
+use architect_ui::prelude::*;
 
 // ---------------------------------------------------------------------------
 // Shared state

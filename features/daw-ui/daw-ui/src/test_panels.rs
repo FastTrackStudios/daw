@@ -2,11 +2,11 @@
 //!
 //! Two panel definitions plus matching toggle actions:
 //!
-//! - **`FTS_UI_NATIVE`** — full `fts_ui::showcase::Showcase` rendered through
+//! - **`FTS_UI_NATIVE`** — full `architect_ui::showcase::Showcase` rendered through
 //!   Blitz. The "real" panel showing the design system in REAPER.
 //! - **`FTS_DEMO_NATIVE`** — bare-minimum Dioxus demo (counter + buttons,
 //!   no Tailwind, no theme). The renderer-perf baseline — anything slower
-//!   in `UiTestPanel` is on `fts-ui`, not the renderer.
+//!   in `UiTestPanel` is on `architect-ui`, not the renderer.
 //!
 //! Designed to live in this repo so any REAPER extension that hosts
 //! `daw-reaper-dioxus` can mount the demo by calling `panel_defs()` +
@@ -33,7 +33,7 @@ use daw_module::{ActionDef, DockPosition, PanelComponent, PanelDef, PanelRendere
 use daw_reaper_dioxus::prelude::*;
 
 const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
-const FTS_THEME_CSS: &str = include_str!("../../../../libs/fts-ui/fts-ui/assets/fts-theme.css");
+const FTS_THEME_CSS: &str = architect_ui::THEME_CSS;
 
 const BLITZ_FIXES: &str = r#"
 input, textarea, select, button { cursor: auto !important; }
@@ -57,7 +57,7 @@ pub fn UiTestPanel() -> Element {
         document::Style { {FTS_THEME_CSS} }
         document::Style { {BLITZ_FIXES} }
 
-        fts_ui::showcase::Showcase {}
+        architect_ui::showcase::Showcase {}
     }
 }
 
@@ -92,8 +92,8 @@ pub fn MixerStripPanel() -> Element {
     }
 }
 
-/// Bare-minimum Dioxus demo — counter + buttons, no fts-ui, no
-/// Tailwind. The renderer-perf baseline so we can isolate fts-ui costs
+/// Bare-minimum Dioxus demo — counter + buttons, no architect-ui, no
+/// Tailwind. The renderer-perf baseline so we can isolate architect-ui costs
 /// from Blitz costs when something feels slow.
 #[component]
 pub fn DemoPanel() -> Element {

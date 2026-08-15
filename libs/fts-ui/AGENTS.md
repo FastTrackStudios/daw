@@ -13,9 +13,9 @@ dependencies.
 - Components take owned props (`String`, `Vec<T>`, etc.) and props should be
   `Clone + PartialEq`.
 - Keep component styling compatible with Tailwind class merging through
-  `crate::cn::merge_slice`, `crate::cn::merge`, or `fts_ui::cn!`.
+  `crate::cn::merge_slice`, `crate::cn::merge`, or `architect_ui::cn!`.
 - Prefer `dioxus_primitives` for behavior and accessibility, then wrap the
-  primitive with fts-ui styling.
+  primitive with architect-ui styling.
 - Do not hand-roll accessibility behavior if a Dioxus primitive exists.
 
 ## Repository Shape
@@ -28,7 +28,7 @@ dependencies.
 - `apps/native`: native renderer showcase app.
 - `flake.nix`: development shells and package build.
 
-All `apps/*` packages should render `fts_ui::showcase::Showcase` unless the
+All `apps/*` packages should render `architect_ui::showcase::Showcase` unless the
 task explicitly asks for platform-specific experiments.
 
 ## NixOS / Flake Workflow
@@ -70,7 +70,7 @@ For most component changes, run:
 ```sh
 cargo fmt --check
 cargo check -p fts-ui-showcase-web
-cargo test -p fts-ui
+cargo test -p architect-ui
 cargo clippy --workspace -- -D warnings
 git diff --check
 ```
@@ -119,7 +119,7 @@ edition.workspace = true
 
 [dependencies]
 dioxus = { workspace = true, features = ["web"] }
-fts-ui.workspace = true
+architect-ui.workspace = true
 
 [lints]
 workspace = true
@@ -140,14 +140,14 @@ name = "fts-ui-showcase-<name>"
 default_platform = "web"
 
 [web.app]
-title = "fts-ui Showcase"
+title = "architect-ui Showcase"
 ```
 
 Create `src/main.rs`:
 
 ```rust
 use dioxus::prelude::*;
-use fts_ui::showcase::Showcase;
+use architect_ui::showcase::Showcase;
 
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
 
@@ -173,18 +173,18 @@ Use the same `dioxus-flake` dependency chain as this repo. In the consumer
 flake, follow `dioxus-flake` for `nixpkgs` and inherit the relevant
 `dioxus-flake.devShells.${system}.default` or `.mobile`.
 
-In `Cargo.toml`, depend on fts-ui by path during local development:
+In `Cargo.toml`, depend on architect-ui by path during local development:
 
 ```toml
 [dependencies]
 dioxus = { version = "0.7.6", default-features = false, features = ["web"] }
-fts-ui = { path = "../fts-ui/crates/fts-ui" }
+architect-ui = { path = "../fts-ui/crates/fts-ui" }
 ```
 
 For workspace-based apps in FastTrackStudio, prefer:
 
 ```toml
-fts-ui.workspace = true
+architect-ui.workspace = true
 ```
 
 ## Theme System
@@ -221,7 +221,7 @@ when an app intentionally wants a theme to resize layout.
   small component-scoped `document::Style` rule over relying on missing classes.
 - Keep default components shadcn-like, but respect Dioxus primitives and native
   renderer constraints.
-- `Select` should use the custom fts-ui `Select`, not raw HTML `<select>`,
+- `Select` should use the custom architect-ui `Select`, not raw HTML `<select>`,
   unless the component is intentionally named `NativeSelect`.
 - Raw HTML `<select>` belongs only in low-level/native-select cases.
 

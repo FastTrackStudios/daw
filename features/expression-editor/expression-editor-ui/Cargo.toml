@@ -11,7 +11,7 @@ default = []
 # The Blitz/vello plugin editor. Off → the surface still compiles for
 # wasm remotes and the web build, which is the whole point: the same
 # component renders standalone, in a VST3/CLAP window, and in a browser.
-native = ["dep:nice-plug-dioxus", "dep:fts-ui"]
+native = ["dep:nice-plug-dioxus", "dep:architect-ui"]
 
 [dependencies]
 expression-editor-tools.workspace = true
@@ -20,7 +20,7 @@ level-dsp.workspace = true
 # The canonical FTS palette — every colour below comes from here.
 daw-theme = { workspace = true }
 dioxus = { workspace = true }
-fts-ui = { workspace = true, optional = true }
+architect-ui = { workspace = true, optional = true }
 nice-plug-dioxus = { workspace = true, optional = true }
 
 [dev-dependencies]

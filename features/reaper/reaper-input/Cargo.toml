@@ -36,7 +36,7 @@ reaper-dioxus = { workspace = true }
 # Standalone Blitz window launch for the `keybind-editor` binary —
 # workspace-pinned blitz rev (one blitz tree-wide).
 dioxus-native = { workspace = true }
-fts-ui = { workspace = true }
+architect-ui = { workspace = true }
 daw = { workspace = true }
 vello = { workspace = true }
 reaper-kbd = { workspace = true }
