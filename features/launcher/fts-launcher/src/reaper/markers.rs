@@ -1,6 +1,6 @@
 //! DAW Markers and Regions provider.
 
-use launcher_core::{ActivationResult, Item, ItemAction, Provider, ProviderConfig};
+use architect_launcher_core::{ActivationResult, Item, ItemAction, Provider, ProviderConfig};
 
 pub struct DawMarkersProvider {
     config: ProviderConfig,

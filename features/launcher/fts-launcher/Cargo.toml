@@ -22,13 +22,16 @@ desktop = []
 standalone = ["native", "dep:winit", "dep:tracing-subscriber"]
 
 [dependencies]
-# Core launcher engine and UI. STILL GIT DEPS on dioxus-launcher.git —
-# the launcher-core/launcher-ui/providers crates live in that repo and
-# are not vendored yet (flagged in HANDOFF; note launcher-ui carries its
-# own git architect-ui, a second architect-ui instance beside the in-tree one).
-launcher-core = { git = "https://codeberg.org/FastTrackStudios/dioxus-launcher.git", branch = "main" }
-launcher-ui = { git = "https://codeberg.org/FastTrackStudios/dioxus-launcher.git", branch = "main", default-features = false }
-providers = { git = "https://codeberg.org/FastTrackStudios/dioxus-launcher.git", branch = "main" }
+# Core launcher engine and UI, vendored into the architect repo as
+# architect-launcher-* (was launcher-core / launcher-ui / providers on
+# dioxus-launcher.git). This crate is now just the REAPER DawModule glue.
+#
+# The old git deps were unfixable after the four-repo split: launcher-ui
+# wanted a crate literally named `fts-ui`, and a [patch] cannot rename a
+# crate, so it pulled a stale Codeberg fts-ui with its own dioxus.
+architect-launcher-core = { workspace = true }
+architect-launcher-ui = { workspace = true }
+architect-launcher-providers = { workspace = true }
 architect-ui = { workspace = true }
 
 # Dioxus native renderer (Blitz) — workspace-pinned rev (one blitz tree-wide)

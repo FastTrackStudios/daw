@@ -23,18 +23,18 @@ pub mod reaper;
 
 use std::sync::Arc;
 
-use launcher_core::{FilterState, QueryEngine};
-use providers::{CalcProvider, ExtensionProvider, WorkflowProvider};
+use architect_launcher_core::{FilterState, QueryEngine};
+use architect_launcher_providers::{CalcProvider, ExtensionProvider, WorkflowProvider};
 
 // Re-export everything consumers need
 pub use dioxus_native;
-pub use launcher_core;
-pub use launcher_ui;
+pub use architect_launcher_core;
+pub use architect_launcher_ui;
 
 /// Re-export the UI components under a convenient path.
 pub mod ui {
-    pub use launcher_ui::components::Launcher;
-    pub use launcher_ui::state::LauncherState;
+    pub use architect_launcher_ui::components::Launcher;
+    pub use architect_launcher_ui::state::LauncherState;
 }
 
 /// Action handler type: (command_id, display_name, handler).
@@ -43,7 +43,7 @@ pub type ActionDef = (String, String, Arc<dyn Fn() + Send + Sync>);
 /// The launcher engine — holds the query engine, providers, and configuration.
 pub struct LauncherEngine {
     engine: QueryEngine,
-    _ext_registry: launcher_core::ExtensionRegistry,
+    _ext_registry: architect_launcher_core::ExtensionRegistry,
 }
 
 impl LauncherEngine {
@@ -54,18 +54,18 @@ impl LauncherEngine {
         let bundled_dir = std::path::PathBuf::from(
             std::env::var("FTS_LAUNCHER_PACKS").unwrap_or_else(|_| "packs".into()),
         );
-        loaded_packs.extend(launcher_core::pack::scan_packs(&bundled_dir));
-        let user_dir = launcher_core::pack::default_pack_dir();
-        loaded_packs.extend(launcher_core::pack::scan_packs(&user_dir));
+        loaded_packs.extend(architect_launcher_core::pack::scan_packs(&bundled_dir));
+        let user_dir = architect_launcher_core::pack::default_pack_dir();
+        loaded_packs.extend(architect_launcher_core::pack::scan_packs(&user_dir));
         tracing::info!(packs = loaded_packs.len(), "Loaded workflow packs");
 
         // Load extensions
-        let mut ext_registry = launcher_core::ExtensionRegistry::new();
+        let mut ext_registry = architect_launcher_core::ExtensionRegistry::new();
         let bundled_ext = std::path::PathBuf::from(
             std::env::var("FTS_LAUNCHER_EXTENSIONS").unwrap_or_else(|_| "extensions".into()),
         );
         ext_registry.scan_dir(&bundled_ext);
-        let user_ext = launcher_core::extension::default_extensions_dir();
+        let user_ext = architect_launcher_core::extension::default_extensions_dir();
         ext_registry.scan_dir(&user_ext);
         tracing::info!(
             extensions = ext_registry.extensions().len(),

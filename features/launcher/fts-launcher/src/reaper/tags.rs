@@ -1,6 +1,6 @@
 //! Reaper tag hierarchy — the complete taxonomy for Reaper concepts.
 
-use launcher_core::TagRegistry;
+use architect_launcher_core::TagRegistry;
 
 /// Register all Reaper-specific tags with colors.
 pub fn register_reaper_tags(tags: &mut TagRegistry) {

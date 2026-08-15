@@ -1,6 +1,6 @@
 //! DAW Tracks provider — live track data from the current project.
 
-use launcher_core::{ActionModifier, ActivationResult, Item, ItemAction, Provider, ProviderConfig};
+use architect_launcher_core::{ActionModifier, ActivationResult, Item, ItemAction, Provider, ProviderConfig};
 
 pub struct DawTracksProvider {
     config: ProviderConfig,
