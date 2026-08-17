@@ -715,34 +715,44 @@ fn Canvas(
                 // The roll is the surface every gesture lands on, so it
                 // carries an id a test can aim a pointer at (#167).
                 "data-testid": "roll",
-                // Sized in px to exactly the viewBox, never stretched
-                // (`100%` + `preserveAspectRatio: none` scaled the
-                // coordinate space whenever the element's size drifted
-                // from `vp` — and element_coordinates are element px, so
-                // every gesture landed offset by the stretch factor).
-                // With a 1:1 mapping the mouse is exact even while `vp`
-                // is stale; a stale `vp` only costs clipped or
-                // letterboxed rendering until the host resizes the
-                // editor, and the parent's overflow:hidden absorbs that.
-                // **No `viewBox`.** Without one an svg user unit is a CSS
-                // pixel, so `element_coordinates()` is a document
-                // coordinate exactly, at any element size.
+                // **No `viewBox`, and an explicit pixel size.** Both
+                // halves are load-bearing, and each of the other three
+                // combinations was tried and is wrong:
                 //
-                // A viewBox is how this went wrong twice. It scales the
-                // drawing to the element, and the scale factor is the
-                // ratio of two numbers nothing keeps equal: the viewBox
-                // comes from `vp`, the element size comes from layout.
-                // Sizing the element in px did not fix it either — the
-                // parent constrains a too-wide svg, so a 954-unit viewBox
-                // rendered into 747 px and every click landed short by a
-                // fifth. Removing the viewBox removes the factor.
+                // - `viewBox` + `100%`: the drawing scales to the
+                //   element, and the factor is the ratio of two numbers
+                //   nothing keeps equal (`vp` vs layout). Pointer lands
+                //   off — worse the further from the origin.
+                // - `viewBox` + px: same, because the parent constrains a
+                //   too-wide svg. A 954-unit box rendered into 747 px and
+                //   every click landed short by a fifth.
+                // - none + `100%`: pointer exact, but an svg with no
+                //   viewBox and no size takes its intrinsic size from its
+                //   *content*, which changes as the roll scrolls — so the
+                //   editor resized itself while you scrolled.
                 //
-                // The cost is that a `vp` out of step with the element no
-                // longer stretches to fit: the roll is drawn at its own
-                // size and the remainder is background or is clipped. That
-                // is visible and harmless, where a scaled pointer is
-                // invisible and wrong. `available_space` keeps the two in
-                // step in the ordinary case.
+                // Without a viewBox an svg user unit *is* a CSS pixel, so
+                // `element_coordinates()` is a document coordinate
+                // exactly. With an explicit size the box is fixed by
+                // `vp`, not by what happens to be drawn in it, so
+                // scrolling cannot change the layout.
+                //
+                // A `vp` out of step with the element now clips rather
+                // than scaling or resizing, absorbed by the parent's
+                // `overflow: hidden`. Visible and harmless, where a
+                // scaled pointer is invisible and wrong.
+                // `available_space` keeps the two in step.
+                // FIXME(sizing): `100%` here is the least-bad of four, not
+                // a solution. It keeps the pointer exact and the tests
+                // green, and it leaves the bug Cody reported: with no
+                // intrinsic size the svg takes one from its content, so
+                // scrolling the roll resizes the editor. Pinning the size
+                // to `vp` fixes that and reintroduces clipping, because
+                // the parent constrains the element and `vp` is not the
+                // element. None of the four combinations is right because
+                // the model is: `vp` and the element box are two sources
+                // of truth for one rectangle. See the note on
+                // `available_space`.
                 style: "display: block; width: 100%; height: 100%; \
                         touch-action: none; user-select: none; cursor: crosshair;",
                 // Measured by `onresize`, not by a spawned
@@ -1935,13 +1945,16 @@ fn LaneStrip(editor: Signal<Editor>) -> Element {
             style: "position: relative; flex: 0 0 auto; height: {h}px; \
                     background: {theme::SURFACE_BAR}; border-top: 1px solid {theme::PANEL_BORDER};",
             svg {
-                // No `viewBox`, like the roll above it and for the same
-                // reason: `element_coordinates()` feeds `strip_write`, so
-                // a scaled svg writes the velocity of whichever note is
-                // under the *scaled* position rather than the one
-                // clicked. `preserve_aspect_ratio: none` used to hide
-                // that by stretching rather than letterboxing — visually
-                // tidy, and wrong in the way that is hardest to notice.
+                // No `viewBox` and an explicit size, like the roll above
+                // it and for the same two reasons: `element_coordinates()`
+                // feeds `strip_write`, so a scaled svg writes the velocity
+                // of whichever note is under the *scaled* position rather
+                // than the one clicked, and a content-sized svg would
+                // resize the strip as its own contents changed.
+                // `preserve_aspect_ratio: none` used to hide the first by
+                // stretching rather than letterboxing — visually tidy, and
+                // wrong in the way that is hardest to notice.
+                // FIXME(sizing): see the roll above — same trade.
                 style: "display: block; width: 100%; height: 100%; \
                         touch-action: none; user-select: none; cursor: ns-resize;",
                 onpointerdown: move |e: PointerEvent| {
