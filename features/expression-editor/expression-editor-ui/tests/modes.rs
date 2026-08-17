@@ -19,7 +19,7 @@ use dioxus::prelude::*;
 use dioxus_test::keyboard_types::Modifiers;
 use dioxus_test::{by_testid, render};
 use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
-use expression_editor_core::{Editor, Mode, RowSpace, Viewport};
+use expression_editor_core::{Editor, Mode, RowSpace, Tool, Viewport};
 use expression_editor_ui::ExpressionEditor;
 
 const PPQ: f64 = 960.0;
@@ -52,6 +52,11 @@ fn editor_in(mode: Mode) -> Editor {
 
     let mut ed = Editor::new(doc, Viewport::new(900.0, 480.0));
     ed.set_mode(mode);
+    // Select explicitly, rather than inheriting `Tool`'s `#[default]`
+    // (Curve). Since a tool now claims the plain drag, the default would
+    // make every assertion below about the curve tool instead of about
+    // the mode — which is what these are supposed to isolate.
+    ed.tool = Tool::Select;
     ed.reset_view();
     ed
 }

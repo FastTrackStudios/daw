@@ -346,12 +346,58 @@ impl MouseMap {
             .unwrap_or(Action::None)
     }
 
+    /// [`Self::resolve`], with the armed tool given first refusal.
+    ///
+    /// Without this the tool is very nearly decorative: `pointer_down`
+    /// resolves the map first and only reaches the tool-driven path when
+    /// the map says [`Action::None`] — and the shipped presets bind every
+    /// modifier on the roll and on a note. So arming the Pen and dragging
+    /// marqueed, and the note eraser could not be reached by dragging a
+    /// note at all.
+    ///
+    /// The tool is consulted rather than *installed into* the map, so
+    /// there is no layer to keep in step with `Editor::tool` — which is a
+    /// public field anyone can assign — and the user's own bindings (or
+    /// the host's `reaper-mouse.ini` overlay) are never rewritten.
+    ///
+    /// A tool claims plain gestures only. Claiming `Ctrl+drag` would
+    /// silently take the pen override, the razor, or whatever the user
+    /// had put there.
+    pub fn resolve_for(
+        &self,
+        context: Context,
+        gesture: Gesture,
+        mods: Mods,
+        tool: crate::Tool,
+    ) -> Action {
+        if ModKey::of(mods) == ModKey::NONE
+            && tool.claims().contains(&(context, gesture))
+        {
+            // `run_action` declines this one so the gesture reaches the
+            // tool-driven path. The map says *whose* gesture it is; the
+            // tool says what it does.
+            return Action::ActiveTool;
+        }
+        self.resolve(context, gesture, mods)
+    }
+
     fn find(&self, context: Context, gesture: Gesture, mods: ModKey) -> Option<Action> {
-        self.bindings
+        Self::find_in(&self.bindings, context, gesture, mods)
+    }
+
+    fn find_in(
+        bindings: &[Binding],
+        context: Context,
+        gesture: Gesture,
+        mods: ModKey,
+    ) -> Option<Action> {
+        bindings
             .iter()
             .find(|b| b.context == context && b.gesture == gesture && b.mods == mods)
             .map(|b| b.action)
     }
+
+
 
     pub fn bindings(&self) -> &[Binding] {
         &self.bindings

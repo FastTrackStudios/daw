@@ -23,6 +23,35 @@ pub enum Tool {
 }
 
 impl Tool {
+    /// The gestures this tool takes over from the base map.
+    ///
+    /// Plain (unmodified) gestures only. A tool claiming
+    /// `Ctrl+drag` would silently take the pen override, or the razor,
+    /// or whatever the user had bound there — the modified gestures are
+    /// the map's and stay the map's.
+    ///
+    /// Empty means "the base map already does the right thing", which is
+    /// true of Select: a plain drag already marquees on the roll and
+    /// moves a note.
+    pub fn claims(self) -> &'static [(crate::mouse::Context, crate::mouse::Gesture)] {
+        use crate::mouse::{Context as C, Gesture as G};
+        match self {
+            // The base map is already this tool.
+            Tool::Select => &[],
+            // The expression tools want the roll *and* notes: a freehand
+            // stroke that stopped at the edge of a note would be useless.
+            Tool::Pen | Tool::Curve | Tool::Eraser => {
+                &[(C::PianoRoll, G::Drag), (C::Note, G::Drag)]
+            }
+            // Drawing owns empty roll; a drag that starts on a note still
+            // moves it, which is what every DAW does with a pencil.
+            Tool::NoteDraw => &[(C::PianoRoll, G::Drag)],
+            // Erasing owns both, or sweeping across notes would move the
+            // first one it touched instead of deleting it.
+            Tool::NoteErase => &[(C::PianoRoll, G::Drag), (C::Note, G::Drag)],
+        }
+    }
+
     pub const ALL: [Tool; 6] = [
         Tool::Select,
         Tool::Pen,

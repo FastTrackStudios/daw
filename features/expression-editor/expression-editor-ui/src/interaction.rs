@@ -293,7 +293,7 @@ pub fn pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16) ->
     }
 
     let context = context_at(ed, x, y);
-    let action = ed.mouse.resolve(context, gesture, mods);
+    let action = ed.mouse.resolve_for(context, gesture, mods, ed.tool);
     if action != Action::None
         && let Some(drag) = run_action(ed, action, context, x, y, mods) {
             return drag;

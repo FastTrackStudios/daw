@@ -216,11 +216,16 @@ async fn sweep(
     (x1, y1): (f64, f64),
     m: Mod,
 ) {
+    // Enough samples that the path is continuous over a note-width.
+    // A real pointer emits dozens of moves across a drag; six skipped
+    // straight over the notes a sweep was supposed to meet, which read
+    // as "the tool does nothing" rather than "the test undersampled".
+    const STEPS: usize = 20;
     let mods = m.to_modifiers();
     tester.pointer_down_mods(x0, y0, mods);
     let _ = tester.pump().await;
-    for i in 1..=6 {
-        let t = i as f64 / 6.0;
+    for i in 1..=STEPS {
+        let t = i as f64 / STEPS as f64;
         tester.pointer_move_mods(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, true, mods);
         let _ = tester.pump().await;
     }
@@ -337,31 +342,102 @@ async fn dragging_a_note_moves_it_rather_than_selecting() -> dioxus_test::Result
 }
 
 #[tokio::test]
-async fn the_map_outranks_the_armed_tool_on_a_note() -> dioxus_test::Result<()> {
-    // Pins something surprising rather than asserting it is right.
-    //
-    // `legacy_pointer_down` checks `ed.tool == Tool::NoteErase` before
-    // its tool match — but `pointer_down` resolves the mouse map *first*
-    // and only falls through when the map returns `Action::None`. The
-    // shipped `reaper_like` map binds `Note + drag + no modifier` to
-    // `MoveNote`, so dragging a note with the eraser armed moves it.
-    //
-    // The result: the note eraser cannot be reached by dragging a note
-    // at all under the default map. If that is intended, this test says
-    // so out loud; if it is not, this is the test that fails when it is
-    // fixed.
+async fn the_note_eraser_sweeps_notes_away() -> dioxus_test::Result<()> {
+    // The armed tool takes the plain drag. Before `resolve_for`, the map
+    // answered first and bound `PianoRoll + drag` to `MarqueeSelect` and
+    // `Note + drag` to `MoveNote`, so the eraser could not be reached by
+    // dragging at all — arming it and sweeping selected, or moved, the
+    // notes it was supposed to delete.
     let before = editor_with_notes(Tool::NoteErase, Mode::Midi);
     let notes = before.doc.notes.len();
-    let html = drag_from_first_note(before, (0.6, 0.0), Mod::None).await?;
-    assert_eq!(
-        field(&html, "notes"),
-        notes,
-        "the map no longer outranks the tool — good, but update this test"
+    // Diagonally, so the sweep crosses every row: the notes sit on four
+    // different pitches and a horizontal line meets at most one of them.
+    let html = drag(before, (0.02, 0.05), (0.98, 0.95), Mod::None).await?;
+    assert!(
+        field(&html, "notes") < notes,
+        "sweeping with the eraser armed deleted nothing (was {notes}): {html}"
     );
-    assert_eq!(
-        field(&html, "undo"),
-        1,
-        "the gesture did nothing at all, which is neither behaviour: {html}"
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_tool_claims_only_the_plain_gesture() -> dioxus_test::Result<()> {
+    // The other half of the contract: a tool owns the unmodified drag and
+    // nothing else, so the modified gestures stay whatever the user
+    // configured. With the eraser armed, alt+drag must still paint.
+    let before = editor_with_notes(Tool::NoteErase, Mode::Midi);
+    let notes = before.doc.notes.len();
+
+    let vp = before.viewport;
+    let empty = (1..20)
+        .flat_map(|iy| (1..20).map(move |ix| (ix as f64 / 20.0, iy as f64 / 20.0)))
+        .map(|(fx, fy)| (fx * vp.w, fy * vp.h))
+        .find(|&(x, y)| {
+            expression_editor_ui::interaction::context_at(&before, x, y)
+                == expression_editor_core::mouse::Context::PianoRoll
+        })
+        .expect("some part of the roll is empty");
+    let from = (empty.0 / vp.w, empty.1 / vp.h);
+    let html = drag(before, from, (0.95, from.1), Mod::Alt).await?;
+    assert!(
+        field(&html, "notes") > notes,
+        "the eraser swallowed alt+drag, which the map binds to paint: {html}"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn arming_the_pen_makes_a_plain_drag_draw() -> dioxus_test::Result<()> {
+    // The headline of `resolve_for`: before it, this drag marqueed,
+    // because the map bound `PianoRoll + drag` to `MarqueeSelect` and
+    // never asked which tool was armed. Ctrl+drag was the only way to
+    // reach the pen, from any tool — a temporary override standing in
+    // for the tool that was supposed to be selected.
+    let mut before = editor_with_notes(Tool::Pen, Mode::Mpe);
+    before.selection.notes = before.doc.notes.iter().map(|n| n.id).collect();
+    before.dimension = Dimension::Pitch;
+    let html = drag(before, (0.05, 0.6), (0.9, 0.35), Mod::None).await?;
+    assert!(
+        field(&html, "points") > 0,
+        "the pen is armed and a plain drag wrote no curve: {html}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn arming_note_draw_makes_a_plain_drag_insert() -> dioxus_test::Result<()> {
+    let before = editor_with_notes(Tool::NoteDraw, Mode::Midi);
+    let notes = before.doc.notes.len();
+
+    let vp = before.viewport;
+    let empty = (1..20)
+        .flat_map(|iy| (1..20).map(move |ix| (ix as f64 / 20.0, iy as f64 / 20.0)))
+        .map(|(fx, fy)| (fx * vp.w, fy * vp.h))
+        .find(|&(x, y)| {
+            expression_editor_ui::interaction::context_at(&before, x, y)
+                == expression_editor_core::mouse::Context::PianoRoll
+        })
+        .expect("some part of the roll is empty");
+    let from = (empty.0 / vp.w, empty.1 / vp.h);
+    let html = drag(before, from, (from.0 + 0.15, from.1), Mod::None).await?;
+    assert!(
+        field(&html, "notes") > notes,
+        "note draw is armed and a plain drag inserted nothing (was {notes}): {html}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn select_still_marquees_because_it_claims_nothing() -> dioxus_test::Result<()> {
+    // The baseline the others are measured against: `Tool::Select`
+    // claims no gestures, because the shipped map already does exactly
+    // what it wants. A tool that needed an overlay to reproduce the
+    // default would be a sign the default was wrong.
+    assert!(Tool::Select.claims().is_empty());
+    let before = editor_with_notes(Tool::Select, Mode::Midi);
+    let notes = before.doc.notes.len();
+    let html = drag(before, (0.02, 0.05), (0.98, 0.95), Mod::None).await?;
+    assert!(field(&html, "sel") > 0, "{html}");
+    assert_eq!(field(&html, "notes"), notes, "{html}");
     Ok(())
 }
