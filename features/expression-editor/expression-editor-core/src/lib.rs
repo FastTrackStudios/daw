@@ -34,6 +34,7 @@ pub mod draft;
 pub mod edit;
 pub mod flam;
 pub mod handles;
+pub mod memagic;
 pub mod menu;
 pub mod mode;
 pub mod modulation;
@@ -1077,6 +1078,61 @@ impl Editor {
         // else leaves them exactly where they are, including edits that
         // push content out of view.
         self.fit_lanes();
+    }
+
+    /// Contextual zoom and scroll — MeMagic, applied to this document.
+    ///
+    /// One entry point for every region, so a host binds a single action
+    /// and the region decides what it means. See [`memagic`] for the
+    /// design and where it comes from.
+    ///
+    /// Returns whether anything moved, so a caller can fall through to
+    /// another binding when the gesture had nothing to say (a
+    /// `ScrollToAnchor` with no row under the pointer, say).
+    pub fn memagic(&mut self, region: memagic::Region, anchor: memagic::Anchor) -> bool {
+        self.memagic_with(region.modes(), anchor, &memagic::Config::default())
+    }
+
+    /// The same, with the mode pair and tuning spelled out.
+    pub fn memagic_with(
+        &mut self,
+        modes: memagic::Modes,
+        anchor: memagic::Anchor,
+        cfg: &memagic::Config,
+    ) -> bool {
+        let content = self.content();
+        let upb = self.units_per_bar();
+        let view = self.camera.time_span(self.viewport);
+        let mut moved = false;
+
+        // Horizontal first: the vertical `InView` scope reads the time
+        // window, so it has to see the one the gesture is producing
+        // rather than the one it is replacing.
+        if let Some((t0, len)) = memagic::horizontal_span(
+            &self.doc, content, modes.horizontal, anchor, upb, view, cfg,
+        ) {
+            self.camera.t0 = t0;
+            self.camera.units_per_px = (len / self.viewport.w.max(1.0)).max(1e-9);
+            moved = true;
+        }
+
+        let view = self.camera.time_span(self.viewport);
+        if let Some((lo, hi)) =
+            memagic::vertical_range(&self.doc, content, modes.vertical, anchor, view, cfg)
+        {
+            let rows = (hi - lo + 1.0).max(1.0);
+            self.camera.vertical.center = (lo + hi) / 2.0;
+            // The row-height ceiling is what stops a two-note passage
+            // filling the lane with two enormous rows.
+            self.camera.vertical.px_per_row =
+                (self.viewport.h / rows).min(cfg.max_px_per_row).max(1e-6);
+            moved = true;
+        }
+
+        if moved {
+            self.camera.constrain(self.bounds(), self.viewport);
+        }
+        moved
     }
 
     pub fn bounds(&self) -> Bounds {

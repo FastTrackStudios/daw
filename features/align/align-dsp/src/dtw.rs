@@ -231,12 +231,33 @@ pub fn warp(
     } else {
         1.0
     };
-    let centre = |i: usize| (offset_frames + i as f64 * scale).round() as isize;
+    let last_reference = m as isize - 1;
+    let ideal = move |i: usize| (offset_frames + i as f64 * scale).round() as isize;
+    // The centre held inside the reference, which is what the rolling
+    // window is indexed against. A dub that begins a second before the
+    // reference does has an ideal centre off the matrix entirely for its
+    // first second, and a row with no cells in range leaves every later
+    // row unreachable — the traceback then walks a matrix of infinities
+    // and returns nonsense.
+    let centre = move |i: usize| ideal(i).clamp(0, last_reference);
 
     let width = band * 2 + 1;
-    let index = |i: usize, j: isize| -> Option<usize> {
+    let index = move |i: usize, j: isize| -> Option<usize> {
         let offset = j - centre(i) + band as isize;
         (offset >= 0 && (offset as usize) < width).then_some(offset as usize)
+    };
+    // The searchable range for a row, from the *unclamped* centre. This
+    // is the part that matters: those leading frames are not merely
+    // "somewhere near the start of the reference", they are all before it
+    // began, and the only place they can go is its first frame. Given a
+    // full band instead, the path wanders forward through the reference
+    // while the dub is still silent, and then cannot come back — DTW is
+    // monotonic, so an early over-advance is permanent, and the whole
+    // take lands late by however far it strayed.
+    let range = move |i: usize| -> (isize, isize) {
+        let lo = (ideal(i) - band as isize).clamp(0, last_reference);
+        let hi = (ideal(i) + band as isize).clamp(0, last_reference);
+        (lo.min(hi), hi.max(lo))
     };
 
     let infinity = f64::INFINITY;
@@ -248,20 +269,24 @@ pub fn warp(
 
     for i in 0..n {
         current.iter_mut().for_each(|c| *c = infinity);
-        let lo = (centre(i) - band as isize).max(0);
-        let hi = (centre(i) + band as isize).min(m as isize - 1);
-        if lo > hi {
-            continue;
-        }
+        let (lo, hi) = range(i);
         for j in lo..=hi {
             let Some(o) = index(i, j) else { continue };
-            // The tiebreak is measured against *not moving*, not against
+            // The tiebreak is measured against *not warping* — the dub
+            // where the macro offset already puts it — and not against
             // the band's centre. The centre leans with the length ratio,
             // which spreads a difference in total length evenly across
-            // the take — so biasing toward it would argue for a uniform
+            // the take, so biasing toward it would argue for a uniform
             // compression when the truth is that the dub simply came in
             // late and the correction belongs at the front.
-            let drift = (j - i as isize).unsigned_abs() as f64 / band as f64;
+            //
+            // Measuring against bare `i` instead, as this did while the
+            // macro stage did not exist, is worse than useless once it
+            // does: for a dub a second late, every correct cell is a
+            // second away from `i`, so the bias pulls the path *off* the
+            // offset it was just handed — far enough, on anything as
+            // repetitive as a sung phrase, to settle a syllable out.
+            let drift = ((j as f64) - (i as f64 + offset_frames)).abs() / band as f64;
             let c = cost(dub[i], reference[j as usize], &cost_cfg)
                 + warp_cfg.diagonal_bias * drift;
 
@@ -318,7 +343,7 @@ pub fn warp(
         core::mem::swap(&mut previous, &mut current);
     }
 
-    trace_back(&back, &previous, n, m, width, band, centre, index)
+    trace_back(&back, &previous, n, width, range, index)
 }
 
 fn step_penalty(cfg: &WarpConfig, consumed_is_silent: bool, repeats: bool) -> f64 {
@@ -333,21 +358,17 @@ fn step_penalty(cfg: &WarpConfig, consumed_is_silent: bool, repeats: bool) -> f6
 }
 
 /// Walk the back-pointers from the cheapest end cell.
-#[allow(clippy::too_many_arguments)]
 fn trace_back(
     back: &[u8],
     last_row: &[f64],
     n: usize,
-    m: usize,
     width: usize,
-    band: usize,
-    centre: impl Fn(usize) -> isize,
+    range: impl Fn(usize) -> (isize, isize),
     index: impl Fn(usize, isize) -> Option<usize>,
 ) -> Vec<f64> {
     let last = n - 1;
-    let lo = (centre(last) - band as isize).max(0);
-    let hi = (centre(last) + band as isize).min(m as isize - 1);
-    let mut best_j = hi.max(lo);
+    let (lo, hi) = range(last);
+    let mut best_j = hi;
     let mut best = f64::INFINITY;
     for j in lo..=hi {
         if let Some(o) = index(last, j).filter(|&o| last_row[o] < best) {

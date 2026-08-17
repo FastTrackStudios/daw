@@ -107,6 +107,10 @@ pub struct FeatureConfig {
     pub silence_db: f64,
     /// Where the normalized level scale bottoms out, in dB below peak.
     /// Frames quieter than this all read as 0.
+    ///
+    /// Must sit below `silence_db`, or the silence test can never fire —
+    /// the two are points on the same scale and silence is defined as
+    /// being some distance up from the floor.
     pub floor_db: f64,
 }
 
@@ -118,7 +122,7 @@ impl Default for FeatureConfig {
             // noise rather than pitch.
             crossovers: [300.0, 2_500.0, 6_000.0],
             silence_db: -60.0,
-            floor_db: -60.0,
+            floor_db: -90.0,
         }
     }
 }

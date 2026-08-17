@@ -78,13 +78,18 @@ pub struct AnchorConfig {
     /// Largest stretch ratio between consecutive anchors. `1.8` means a
     /// segment may play at most 1.8× longer or shorter than it was.
     pub max_stretch_ratio: f64,
-    /// Widest correction, in seconds — a hard cap on how far any material
-    /// may move.
+    /// Widest correction, in seconds, **beyond the global offset**.
     ///
-    /// A promise about the *result*, not about the search. The search
-    /// band is around the offset-and-length-scaled diagonal so two takes
-    /// of different length can match at all, and a match within that band
+    /// A promise about the result rather than about the search: the band
+    /// is around the offset-and-length-scaled diagonal so two takes of
+    /// different lengths can match at all, and a match inside that band
     /// can still be further than the user agreed to allow.
+    ///
+    /// The global offset is exempt because it is not a correction to the
+    /// performance — it is where the take *is*. A dub that came in a
+    /// second and a half late must be allowed to move a second and a
+    /// half, while still being held to a few hundred milliseconds of
+    /// warping once it is in the right place.
     pub max_shift_secs: f64,
     /// How much of the correction is applied. `1.0` lands exactly on the
     /// reference; less leaves some of the dub's own feel.
@@ -136,6 +141,7 @@ pub fn anchors(
     dub: &[Frame],
     reference: &[Frame],
     frame_rate: f64,
+    offset_frames: f64,
     cfg: AnchorConfig,
 ) -> Vec<Anchor> {
     if map.is_empty() {
@@ -145,11 +151,18 @@ pub fn anchors(
     let cap = cfg.max_shift_secs.max(0.0) * frame_rate.max(1e-9);
     let min_gap = (cfg.min_gap_secs * frame_rate).max(1.0);
 
-    // Corrected target for a dub frame, with the strength and the shift
-    // cap applied. The cap is on the *correction*, because that is what
-    // the promise is about.
+    // Corrected target for a dub frame. Strength and the cap apply to the
+    // warp only — the part of the move that is a judgement about the
+    // performance. The global offset passes through both untouched,
+    // because it is a fact about where the take sits.
+    // Not clamped to zero. A negative reference position means the dub
+    // must move earlier than the reference's own first frame, which is a
+    // real answer for a dub that was recorded late; clamping it here
+    // would flatten the shift near the start into a stretch, and turn a
+    // rigid move into a warp. Where the take's start actually lies is the
+    // host's business.
     let target = |i: usize| -> f64 {
-        let source = i as f64;
+        let source = i as f64 + offset_frames;
         source + (map[i] - source).clamp(-cap, cap) * strength
     };
 
@@ -180,7 +193,7 @@ pub fn anchors(
         if confidence < cfg.min_confidence {
             continue;
         }
-        if (i - previous_dub) as f64 < min_gap {
+        if ((i - previous_dub) as f64) < min_gap {
             continue;
         }
         previous_dub = i;
@@ -314,11 +327,11 @@ pub fn map_from_anchors(anchors: &[Anchor], frames: usize) -> Vec<f64> {
             let t = ((x - x0) / (x1 - x0)).clamp(0.0, 1.0);
             a.shift() + (b.shift() - a.shift()) * t
         };
-        map.push((x + shift).max(0.0));
+        map.push(x + shift);
     }
 
-    // Interpolation between monotonic anchors cannot go backwards, but
-    // clamping at zero above can.
+    // Interpolation between monotonic anchors cannot go backwards, but a
+    // ratio clamp on the final anchor can leave one flat step.
     for i in 1..map.len() {
         if map[i] < map[i - 1] {
             map[i] = map[i - 1];

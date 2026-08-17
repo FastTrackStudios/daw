@@ -15,6 +15,7 @@
 
 use dioxus::prelude::*;
 use dioxus_elements::input_data::MouseButton;
+use expression_editor_core::memagic;
 use expression_editor_core::tools::Mods;
 use expression_editor_core::{Editor, Dimension, Viewport};
 use keyboard_types::Modifiers;
@@ -262,6 +263,41 @@ enum Chrome {
     Key(i32),
 }
 
+/// Which region the pointer is in, and what to anchor on.
+///
+/// The anchor follows MeMagic's priority chain: the playhead while the
+/// transport is running, else the pointer, else the middle of the view.
+/// Zooming during playback should frame the music, not wherever the
+/// mouse happened to be left.
+///
+/// With no pointer at all — a toolbar press, a key with the mouse
+/// elsewhere — the region is `Elsewhere`, which fits the whole item
+/// rather than guessing at a position.
+fn memagic_at(ed: &Editor, hover: Option<(f64, f64)>) -> (memagic::Region, memagic::Anchor) {
+    let Some((x, y)) = hover else {
+        return (
+            memagic::Region::Elsewhere,
+            memagic::Anchor {
+                t: ed.playhead.unwrap_or_else(|| ed.camera.t_at(ed.viewport.w * 0.5)),
+                row: None,
+            },
+        );
+    };
+    let region = match chrome_at(ed, x, y) {
+        Chrome::Ruler(_) => memagic::Region::Ruler,
+        Chrome::Key(_) => memagic::Region::Piano,
+        Chrome::Roll => memagic::Region::NoteArea,
+    };
+    let pointer_t = ed.camera.t_at(x - canvas::GUTTER_W);
+    (
+        region,
+        memagic::Anchor {
+            t: ed.playhead.unwrap_or(pointer_t),
+            row: Some(ed.camera.pitch_at(y - canvas::RULER_H, ed.viewport)),
+        },
+    )
+}
+
 fn chrome_at(ed: &Editor, x: f64, y: f64) -> Chrome {
     if y < canvas::RULER_H {
         Chrome::Ruler(ed.camera.t_at(x - canvas::GUTTER_W))
@@ -334,6 +370,13 @@ fn Canvas(
     let mut drawer = drawer;
     let mut menu_state = menu_state;
     let mut draft = draft;
+
+    // Where the pointer last was, in element coordinates.
+    //
+    // Needed because a keypress carries no position and MeMagic is
+    // anchored on one — "zoom to what I am pointing at" has to know
+    // where that is. `None` until the pointer has been over the canvas.
+    let mut hover = use_signal(|| None::<(f64, f64)>);
 
     // The canvas cell, once mounted, and the loop that keeps the
     // document's viewport equal to it.
@@ -472,6 +515,17 @@ fn Canvas(
             onkeydown: move |e: KeyboardEvent| {
                 let key = e.key().to_string();
                 let m = mods_of(e.modifiers());
+
+                // MeMagic. Handled here rather than in `key_down`
+                // because it is the only binding that needs the pointer,
+                // and this is where the hover signal lives.
+                if key == "z" && !m.ctrl {
+                    let (region, anchor) = memagic_at(&editor.read(), hover());
+                    if editor.write().memagic(region, anchor) {
+                        e.prevent_default();
+                        return;
+                    }
+                }
 
                 // A pitch drawing is modal, so it takes its keys first
                 // and Ctrl+Z means *its* undo — the document's history
@@ -751,6 +805,9 @@ fn Canvas(
                     drag.set(d);
                 },
                 onpointermove: move |e: PointerEvent| {
+                    // Recorded before the drag guard: the anchor has to
+                    // follow the pointer whether or not a drag is live.
+                    hover.set(Some(local(&e)));
                     if !drag.read().is_active() {
                         return;
                     }
