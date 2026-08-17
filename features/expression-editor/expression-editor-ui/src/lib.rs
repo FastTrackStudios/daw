@@ -742,18 +742,28 @@ fn Canvas(
                 // `overflow: hidden`. Visible and harmless, where a
                 // scaled pointer is invisible and wrong.
                 // `available_space` keeps the two in step.
-                // FIXME(sizing): `100%` here is the least-bad of four, not
-                // a solution. It keeps the pointer exact and the tests
-                // green, and it leaves the bug Cody reported: with no
-                // intrinsic size the svg takes one from its content, so
-                // scrolling the roll resizes the editor. Pinning the size
-                // to `vp` fixes that and reintroduces clipping, because
-                // the parent constrains the element and `vp` is not the
-                // element. None of the four combinations is right because
-                // the model is: `vp` and the element box are two sources
-                // of truth for one rectangle. See the note on
-                // `available_space`.
-                style: "display: block; width: 100%; height: 100%; \
+                // **The element box is the truth, and it comes from
+                // layout — never from `vp`, never from the content.**
+                //
+                // `position: absolute; inset: 0` against the cell's
+                // `position: relative` is what gets both. An absolutely
+                // positioned box is sized by its containing block, so it
+                // is exactly the cell: responsive, no pixel constants,
+                // and — the part `100%` did not give — *independent of
+                // its own children*, so scrolling the roll can no longer
+                // resize the editor.
+                //
+                // No `viewBox`, so an svg user unit is a CSS pixel and
+                // `element_coordinates()` is a document coordinate
+                // exactly. Nothing scales, so nothing can drift.
+                //
+                // The four combinations of {viewBox, none} x {100%, px}
+                // were each tried and each traded one bug for another —
+                // a scaled pointer, a clipped roll, or a canvas that
+                // resized as it scrolled. They failed for one reason:
+                // `vp` and the element were two sources of truth for one
+                // rectangle. Here the element decides and `vp` follows.
+                style: "position: absolute; inset: 0; display: block; \
                         touch-action: none; user-select: none; cursor: crosshair;",
                 // Measured by `onresize`, not by a spawned
                 // `get_client_rect().await`.
