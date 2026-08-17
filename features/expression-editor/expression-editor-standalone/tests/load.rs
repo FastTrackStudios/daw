@@ -326,3 +326,31 @@ fn a_transcription_opens_as_a_guitar_roll() {
     let (lo, hi) = editor.doc.row_space.bounds();
     assert!(editor.doc.notes.iter().all(|n| n.row >= lo && n.row <= hi));
 }
+
+/// A format-1 MIDI file opens on the track that has the music (#real).
+///
+/// The regression: SMF format 1 — nearly every file anyone has — puts
+/// tempo, time signature and the sequence name in track 0 and the notes
+/// in track 1 onward. The runner opened track 0, so a real `.mid` showed
+/// an empty roll saying "No notes" while the notes sat one track over.
+#[test]
+fn a_format_1_midi_file_opens_on_the_track_with_notes() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../crates/keyflow/keyflow/tests/midi/Bennie And The Jets - Elton John.mid");
+    if !path.exists() {
+        eprintln!("SKIP: no fixture at {}", path.display());
+        return;
+    }
+    let source = Source::parse(path.to_str().unwrap()).expect("a .mid");
+    let runner = Runner::open(
+        &source,
+        &Target::default(),
+        Viewport::new(1200.0, 536.0),
+        None,
+    )
+    .expect("opens");
+    assert!(
+        !runner.loaded.editor().doc.notes.is_empty(),
+        "opened an empty roll: the conductor track again"
+    );
+}

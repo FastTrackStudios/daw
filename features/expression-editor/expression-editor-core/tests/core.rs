@@ -772,7 +772,11 @@ fn the_reset_tail_stays_out_until_the_final_stretch() {
 }
 
 #[test]
-fn constrain_never_shows_more_than_the_cushioned_item() {
+fn zooming_out_can_see_past_either_end_of_the_item() {
+    // Time is open. An item sits in a timeline, and placing it against
+    // what surrounds it means being able to pull back off it — this used
+    // to stop dead at the cushioned item, so you could never see the
+    // space either side.
     let vp = Viewport::new(800.0, 480.0);
     let bounds = Bounds {
         t_min: 0.0,
@@ -783,14 +787,114 @@ fn constrain_never_shows_more_than_the_cushioned_item() {
         fold: Default::default(),
         t0: -99999.0,
         units_per_px: 1000.0,
-        vertical: VerticalCamera { center: 200.0, px_per_row: 0.001 },
+        vertical: VerticalCamera { center: 60.0, px_per_row: 8.0 },
     };
     cam.constrain(bounds, vp);
     let (t0, t1) = cam.time_span(vp);
-    assert!(t1 - t0 <= 4000.0 + 1e-6);
-    assert!(cam.vertical.center <= 127.0 && cam.vertical.center >= 0.0);
-    assert!(cam.vertical.px_per_row >= bounds.min_px_per_semitone);
-    assert!(t0 >= bounds.t_min - (t1 - t0) * bounds.edge_whitespace - 1e-6);
+    assert!(
+        t1 - t0 > 4000.0,
+        "should be able to zoom out past the item, got {}",
+        t1 - t0
+    );
+
+    // Centre what is now a wider-than-the-item view on the item, so the
+    // question is whether both ends can be off-screen at once rather
+    // than whether this particular camera happened to be against a
+    // clamp.
+    cam.t0 = (bounds.t_min + bounds.t_max) / 2.0 - (t1 - t0) / 2.0;
+    cam.constrain(bounds, vp);
+    let (t0, t1) = cam.time_span(vp);
+    assert!(t0 < bounds.t_min, "cannot see before the item starts: {t0}");
+    assert!(t1 > bounds.t_max, "cannot see after it ends: {t1}");
+}
+
+#[test]
+fn zooming_out_still_stops_somewhere() {
+    // Open is not unbounded: past `max_zoom_out` the item is a smear and
+    // there is nothing to edit.
+    let vp = Viewport::new(800.0, 480.0);
+    let bounds = Bounds {
+        t_min: 0.0,
+        t_max: 4000.0,
+        ..Bounds::default()
+    };
+    let mut cam = Camera {
+        fold: Default::default(),
+        t0: 0.0,
+        units_per_px: 1e9,
+        vertical: VerticalCamera { center: 60.0, px_per_row: 8.0 },
+    };
+    cam.constrain(bounds, vp);
+    let (t0, t1) = cam.time_span(vp);
+    assert!(
+        t1 - t0 <= 4000.0 * bounds.max_zoom_out + 1e-6,
+        "unbounded zoom-out: {}",
+        t1 - t0
+    );
+}
+
+#[test]
+fn the_roll_never_shows_empty_space_above_or_below_the_keys() {
+    // Pitch is closed, unlike time: the rows *are* the instrument, and
+    // there is nothing past the top or bottom key to look at.
+    let vp = Viewport::new(800.0, 480.0);
+    let bounds = Bounds {
+        t_min: 0.0,
+        t_max: 4000.0,
+        ..Bounds::default()
+    };
+    let mut cam = Camera {
+        fold: Default::default(),
+        t0: 0.0,
+        units_per_px: 1.0,
+        // Far too small to fill the lane, and centred off the top.
+        vertical: VerticalCamera { center: 200.0, px_per_row: 0.001 },
+    };
+    cam.constrain(bounds, vp);
+
+    let rows_visible = vp.h / cam.vertical.px_per_row;
+    let total = bounds.row_max - bounds.row_min + 1.0;
+    assert!(
+        rows_visible <= total + 1e-6,
+        "showing {rows_visible} rows of {total}"
+    );
+    // And the visible window sits over real rows at both edges.
+    let half = rows_visible / 2.0;
+    assert!(
+        cam.vertical.center - half >= bounds.row_min - 1e-6,
+        "empty space below: centre {} half {half}",
+        cam.vertical.center
+    );
+    assert!(
+        cam.vertical.center + half <= bounds.row_max + 1.0 + 1e-6,
+        "empty space above: centre {} half {half}",
+        cam.vertical.center
+    );
+}
+
+#[test]
+fn a_short_row_space_is_fitted_to_its_own_lanes() {
+    // A drum map is twenty lanes, not 128. Fitting the roll to the pitch
+    // range would leave a screen of empty rows under the kit.
+    let vp = Viewport::new(800.0, 480.0);
+    let bounds = Bounds {
+        t_min: 0.0,
+        t_max: 4000.0,
+        row_min: 0.0,
+        row_max: 19.0,
+        ..Bounds::default()
+    };
+    let mut cam = Camera {
+        fold: Default::default(),
+        t0: 0.0,
+        units_per_px: 1.0,
+        vertical: VerticalCamera { center: 10.0, px_per_row: 0.5 },
+    };
+    cam.constrain(bounds, vp);
+    assert!(
+        vp.h / cam.vertical.px_per_row <= 20.0 + 1e-6,
+        "showing more than the twenty lanes there are"
+    );
 }
 
 // ── editor integration ───────────────────────────────────────────────

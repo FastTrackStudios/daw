@@ -310,7 +310,7 @@ impl Runner {
                 label: format!("scene: {}", scene.label()),
             },
             Source::Rpp(path) => Self::open_rpp(path, target, viewport)?,
-            Source::Midi(path) => Self::open_midi(path, viewport)?,
+            Source::Midi(path) => Self::open_midi(path, target, viewport)?,
             Source::GuitarPro(path) => Self::open_guitar_pro(path, viewport)?,
         };
         if let Some(mode) = mode {
@@ -346,7 +346,7 @@ impl Runner {
         })
     }
 
-    fn open_midi(path: &Path, viewport: Viewport) -> Result<Self, LoadError> {
+    fn open_midi(path: &Path, target: &Target, viewport: Viewport) -> Result<Self, LoadError> {
         let daw = Standalone::new();
         // A file session still needs somewhere a later write would go.
         // Nothing writes yet, but seeding a project now means adding
@@ -357,8 +357,10 @@ impl Runner {
             ItemRef::Index(0),
             TakeRef::Active,
         );
+        let text = path.to_string_lossy().to_string();
+        let track = Self::midi_track_to_open(&daw, &text, target);
         let session =
-            Session::from_file(&daw, &path.to_string_lossy(), 0, location, DEFAULT_BEND_RANGE, viewport)
+            Session::from_file(&daw, &text, track, location, DEFAULT_BEND_RANGE, viewport)
                 .ok_or_else(|| LoadError::MidiFile(path.to_path_buf()))?;
         Ok(Runner {
             label: format!("{} — {} notes", file_label(path), session.editor.doc.notes.len()),
@@ -366,6 +368,33 @@ impl Runner {
             loaded: Loaded::Midi(Box::new(session)),
         })
     }
+/// Which track of a standard MIDI file to open.
+///
+/// `--track N` wins, as an index. Otherwise the first track that has any
+/// notes in it.
+///
+/// Not simply track 0, which is what this used to do: an SMF **format 1**
+/// file — which is nearly every file anyone has — puts tempo, time
+/// signature and the sequence name in track 0 and the music in track 1
+/// onward. So opening a real `.mid` showed an empty roll saying "No
+/// notes" while the notes sat one track over.
+///
+/// Falls back to 0 when nothing has notes, so an genuinely empty file
+/// still opens (empty) rather than refusing.
+fn midi_track_to_open<D: daw::service::midi::Midi>(daw: &D, path: &str, target: &Target) -> u32 {
+    if let Some(want) = target.track.as_ref().and_then(|t| t.parse::<u32>().ok()) {
+        return want;
+    }
+    // Bounded: a file with this many empty tracks is not one we are
+    // going to find music in by looking further.
+    const MAX_PROBE: u32 = 64;
+    (0..MAX_PROBE)
+        .find(|&t| {
+            daw.read_midi_file(path.to_string(), t)
+                .is_some_and(|s| !s.notes.is_empty())
+        })
+        .unwrap_or(0)
+}
 
     fn open_rpp(path: &Path, target: &Target, viewport: Viewport) -> Result<Self, LoadError> {
         let text = std::fs::read_to_string(path)

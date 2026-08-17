@@ -1671,7 +1671,12 @@ fn Canvas(
                     div {
                         div { style: "color: {theme::TEXT}; font-size: 14px;", "No notes" }
                         div { "{draw_hint}" }
-                        div { "Scroll zooms \u{b7} Alt+scroll pans \u{b7} Ctrl+Alt+scroll scrolls pitch" }
+                        // Read from the bindings, not restated here:
+                        // this line still said "Scroll zooms ·
+                        // Alt+scroll pans" after the shared config made
+                        // that wrong, which is what a hardcoded hint is
+                        // for.
+                        div { "{scroll::hint()}" }
                     }
                 }
             }

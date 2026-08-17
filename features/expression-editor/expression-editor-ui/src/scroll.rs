@@ -79,6 +79,35 @@ pub fn action_for(dx: f64, dy: f64, mods: Mods) -> Option<ActionId> {
     table().match_event(&event, &ActionContext::new())
 }
 
+/// A one-line summary of the wheel gestures, built from the bindings.
+///
+/// The empty roll used to state them as literal text, which went stale
+/// the moment the config changed. Describing the table instead means the
+/// hint cannot disagree with what the wheel actually does.
+pub fn hint() -> String {
+    let mut parts = Vec::new();
+    for (label, mods) in [
+        ("scroll", Mods { ctrl: false, alt: false, shift: false }),
+        ("shift", Mods { ctrl: false, alt: false, shift: true }),
+        ("alt", Mods { ctrl: false, alt: true, shift: false }),
+        ("alt+shift", Mods { ctrl: false, alt: true, shift: true }),
+    ] {
+        let Some(action) = action_for(0.0, 1.0, mods) else {
+            continue;
+        };
+        let what = match action.0.as_str() {
+            "view.vscroll" => "scrolls",
+            "view.hscroll" => "scrolls sideways",
+            "view.zoom_v" => "zooms pitch",
+            "view.zoom_h" => "zooms time",
+            "view.zoom_both" => "zooms",
+            other => other,
+        };
+        parts.push(format!("{label} {what}"));
+    }
+    parts.join(" \u{b7} ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,6 +156,16 @@ mod tests {
             act(0.0, 10.0, mods(true, false, true)).as_deref(),
             Some("edit.nudge_time")
         );
+    }
+
+    #[test]
+    fn the_hint_describes_the_bindings_rather_than_a_fixed_string() {
+        let h = hint();
+        assert!(h.contains("shift scrolls sideways"), "{h}");
+        assert!(h.contains("alt zooms pitch"), "{h}");
+        // The failure this catches is the old one: a hint that says the
+        // plain wheel zooms when the config says it scrolls.
+        assert!(!h.contains("scroll zooms"), "stale hint: {h}");
     }
 
     #[test]

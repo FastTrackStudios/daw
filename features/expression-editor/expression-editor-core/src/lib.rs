@@ -1082,9 +1082,16 @@ impl Editor {
     pub fn bounds(&self) -> Bounds {
         let c = self.content();
         let span = (c.t_end - c.t_start).max(1.0);
+        // The row range comes from the mode's row space, not from a
+        // constant: a drum map is twenty lanes and a pitch roll is 128,
+        // and fitting the roll to "128" in drums mode would leave a
+        // screen of empty rows under the kit.
+        let (row_min, row_max) = self.doc.row_space.bounds();
         Bounds {
             t_min: c.t_start - span * CUSHION,
             t_max: c.t_end + span * CUSHION,
+            row_min: row_min as f64,
+            row_max: row_max as f64,
             ..Bounds::default()
         }
     }

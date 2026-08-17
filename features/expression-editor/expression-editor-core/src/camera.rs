@@ -167,6 +167,12 @@ impl RowFold {
         self.len == 0
     }
 
+    /// How many rows this fold hides — the difference between the row
+    /// range and the number of lanes actually drawn.
+    pub fn hidden_count(&self) -> usize {
+        self.len
+    }
+
     fn is_hidden(&self, row: i32) -> bool {
         self.rows().binary_search(&row).is_ok()
     }
@@ -228,6 +234,16 @@ pub struct Bounds {
     /// Editable time span, already cushioned.
     pub t_min: f64,
     pub t_max: f64,
+    /// Inclusive row range the roll can show, from the mode's row space.
+    /// The vertical camera is fitted to exactly this — never wider, so
+    /// the roll cannot show empty space above or below the keys.
+    pub row_min: f64,
+    pub row_max: f64,
+    /// How many times the cushioned content span the view may zoom out
+    /// to. Time is not clamped to the item: a take has to be placeable
+    /// against what surrounds it, so you can pull back and see either
+    /// side of it.
+    pub max_zoom_out: f64,
     /// Row height floor for manual zoom — below the readable minimum
     /// Reset View uses, so an overview stays available.
     pub min_px_per_semitone: f64,
@@ -241,6 +257,9 @@ impl Default for Bounds {
         Self {
             t_min: 0.0,
             t_max: 1.0,
+            row_min: 0.0,
+            row_max: 127.0,
+            max_zoom_out: 20.0,
             min_px_per_semitone: 3.5,
             max_px_per_semitone: 400.0,
             edge_whitespace: 0.2,
@@ -308,24 +327,57 @@ impl Camera {
     }
 
     /// Clamp to `bounds`. Applied once, after blending.
+    /// Hold the camera inside what the document can meaningfully show.
+    ///
+    /// The two axes get opposite treatment, because they mean different
+    /// things. Time is open: an item sits in a timeline, and you have to
+    /// be able to pull back and see what is either side of it, so the
+    /// only ceiling is a sanity limit on how small the content may get.
+    /// Pitch is closed: the rows *are* the instrument, and there is
+    /// nothing above the top key or below the bottom one to look at, so
+    /// the roll is fitted to them and never shows empty space.
     pub fn constrain(&mut self, bounds: Bounds, vp: Viewport) {
-        let span = bounds.t_max - bounds.t_min;
-        // Never show more than the cushioned item.
-        let max_upp = span / vp.w;
+        // ── time: free, within reason ────────────────────────────────
+        let span = (bounds.t_max - bounds.t_min).max(1e-9);
+        // Zooming out used to stop at exactly the cushioned item, which
+        // made it impossible to see past either end of the take.
+        let max_upp = span * bounds.max_zoom_out / vp.w.max(1.0);
         if max_upp > 0.0 {
             self.units_per_px = self.units_per_px.min(max_upp).max(1e-9);
         }
         let visible = vp.w * self.units_per_px;
-        let slack = visible * bounds.edge_whitespace;
-        self.t0 = self.t0.clamp(
-            bounds.t_min - slack,
-            (bounds.t_max + slack - visible).max(bounds.t_min - slack),
-        );
+        // A whole screen of slack each side, not a fifth of one: the
+        // point is to be able to look *off* the item.
+        let slack = visible.max(span * bounds.edge_whitespace);
+        let lo = bounds.t_min - slack;
+        let hi = (bounds.t_max + slack - visible).max(lo);
+        self.t0 = self.t0.clamp(lo, hi);
 
-        self.vertical.px_per_row = self
-            .vertical.px_per_row
-            .clamp(bounds.min_px_per_semitone, bounds.max_px_per_semitone);
-        self.vertical.center = self.vertical.center.clamp(0.0, 127.0);
+        // ── pitch: fitted to the keys ────────────────────────────────
+        // The rows the roll actually draws: the mode's range, less
+        // whatever the fold collapses away.
+        let rows = ((bounds.row_max - bounds.row_min + 1.0)
+            - self.fold.hidden_count() as f64)
+            .max(1.0);
+        // Tall enough that `rows` of them always cover the lane. This is
+        // the floor that stops a zoom-out leaving empty space where
+        // there are no keys.
+        let fit = vp.h / rows;
+        let min_ppr = fit.max(bounds.min_px_per_semitone.min(fit));
+        let max_ppr = bounds.max_px_per_semitone.max(min_ppr);
+        self.vertical.px_per_row = self.vertical.px_per_row.clamp(min_ppr, max_ppr);
+
+        // And centred so the window stays over real rows. When the whole
+        // range is on screen there is only one legal centre, so the
+        // clamp collapses to it rather than inverting.
+        let half = (vp.h * 0.5) / self.vertical.px_per_row.max(1e-9);
+        let c_lo = bounds.row_min + half;
+        let c_hi = bounds.row_max + 1.0 - half;
+        self.vertical.center = if c_lo <= c_hi {
+            self.vertical.center.clamp(c_lo, c_hi)
+        } else {
+            (bounds.row_min + bounds.row_max + 1.0) / 2.0
+        };
     }
 }
 
