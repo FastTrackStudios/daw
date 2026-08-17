@@ -10,6 +10,19 @@
 //                   undo/redo (Ctrl+Z / Ctrl+Shift+Z), arrows, escape —
 //                   and NEVER on to REAPER's global shortcuts.
 //
+// That fall-through is what gives the panel the *same* shortcuts here as
+// in the standalone runner, including the which-key sequences the editor
+// resolves from the shared `input` keymap:
+//
+//   z z  contextual MeMagic zoom     z c  centre on notes
+//   z i  fit item                    z t  top of range
+//   z n  fit notes in view           z b  bottom of range
+//
+// Note `z` is the global "Zoom" which-key prefix in this profile
+// (scrolling.styx) — it does not fire here, because this context resolves
+// only its own bindings and never falls back to the global table. Adding
+// a `z` binding below would take the editor's whole zoom family away.
+//
 // Mouse modifiers are separate: the editor overlays your live
 // reaper-mouse.ini MIDI contexts onto its own mouse map at startup.
 

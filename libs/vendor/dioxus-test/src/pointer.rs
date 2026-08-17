@@ -92,6 +92,49 @@ impl DocumentTester {
         )));
     }
 
+    /// [`DocumentTester::pointer_down`] with modifiers held.
+    ///
+    /// Surfaces whose gesture map is keyed on modifiers — an editor
+    /// where Alt+drag draws and a plain drag marquees — cannot be driven
+    /// without this, and the plain variants above hardcode
+    /// `Modifiers::empty()`.
+    pub fn pointer_down_mods(&self, x: f64, y: f64, mods: Modifiers) {
+        self.send_ui_event(UiEvent::PointerDown(pointer_event(
+            x,
+            y,
+            MouseEventButton::Main,
+            MouseEventButtons::Primary,
+            mods,
+        )));
+    }
+
+    /// [`DocumentTester::pointer_move`] with modifiers held.
+    pub fn pointer_move_mods(&self, x: f64, y: f64, held: bool, mods: Modifiers) {
+        let buttons = if held {
+            MouseEventButtons::Primary
+        } else {
+            MouseEventButtons::None
+        };
+        self.send_ui_event(UiEvent::PointerMove(pointer_event(
+            x,
+            y,
+            MouseEventButton::Main,
+            buttons,
+            mods,
+        )));
+    }
+
+    /// [`DocumentTester::pointer_up`] with modifiers held.
+    pub fn pointer_up_mods(&self, x: f64, y: f64, mods: Modifiers) {
+        self.send_ui_event(UiEvent::PointerUp(pointer_event(
+            x,
+            y,
+            MouseEventButton::Main,
+            MouseEventButtons::None,
+            mods,
+        )));
+    }
+
     /// Releases the primary mouse button at document coordinates `(x, y)`.
     pub fn pointer_up(&self, x: f64, y: f64) {
         self.send_ui_event(UiEvent::PointerUp(pointer_event(

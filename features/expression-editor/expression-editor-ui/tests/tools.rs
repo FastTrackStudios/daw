@@ -1,0 +1,367 @@
+//! Every editing gesture, driven by pointer on the real surface.
+//!
+//! These mount `ExpressionEditor` on the headless Blitz DOM and drive
+//! the same event path a mouse takes, so what is asserted is that the
+//! tool *works from the canvas* — not that a reducer called by hand
+//! produces the right value. The unit tests in `expression-editor-core`
+//! already cover the second thing; what they cannot see is a gesture
+//! that never reaches the tool because of hit-testing, a modifier map,
+//! or Blitz's event dispatch.
+//!
+//! ## What governs a gesture is the mouse map, not the armed tool
+//!
+//! This started out as one test per `Tool` and that was the wrong shape.
+//! `pointer_down` resolves `ed.mouse` first and only falls through to the
+//! tool-driven path when the map returns `Action::None` — and the shipped
+//! `reaper_like` map covers every modifier combination on the roll and on
+//! a note:
+//!
+//! ```text
+//! PianoRoll  drag             MarqueeSelect      Note  drag       MoveNote
+//! PianoRoll  alt+drag         PaintNotes         Note  alt+drag   CopyNote
+//! PianoRoll  ctrl+drag        PenOverride        Note  ctrl+drag  EditNoteVelocity
+//! PianoRoll  shift+drag       MarqueeAdd         Note  shift+drag MoveNoteOneAxis
+//! PianoRoll  alt+shift+drag   RazorCreate
+//! ```
+//!
+//! So a plain drag with the Pen armed marquees — correctly — and a test
+//! that expected otherwise was testing a thing the surface does not do.
+//! These drive the map's own gestures, which is what a user has.
+//!
+//! The readout element is how state leaves the component. A test cannot
+//! reach into a `use_signal`, so `Surface` renders the few numbers these
+//! assertions need into a `data-testid="readout"` div and the tests read
+//! it back — the same trick `slider_drag.rs` uses.
+
+use std::cell::RefCell;
+
+use dioxus::prelude::*;
+use dioxus_test::keyboard_types::Modifiers;
+use dioxus_test::{by_testid, render, DocumentTester, ResolvedElement};
+use expression_editor_core::doc::{Dimension, ExpressionDoc, Note, NoteId, TimeBase};
+use expression_editor_core::{Editor, Mode, Tool, Viewport};
+use expression_editor_ui::ExpressionEditor;
+
+const PPQ: f64 = 960.0;
+
+thread_local! {
+    /// The editor the next `Surface` mounts on.
+    ///
+    /// `render` takes a bare `fn() -> Element`, so the case under test
+    /// cannot arrive as a prop. Staging it is the same hand-off the
+    /// standalone runner uses for exactly this reason.
+    static STAGED: RefCell<Option<Editor>> = const { RefCell::new(None) };
+}
+
+fn stage(ed: Editor) {
+    STAGED.with(|s| *s.borrow_mut() = Some(ed));
+}
+
+/// Four notes in a row, mid-register — enough to hit, marquee and erase.
+fn editor_with_notes(tool: Tool, mode: Mode) -> Editor {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 4.0);
+    for i in 0..4u64 {
+        let n = Note::new(
+            NoteId(i + 1),
+            PPQ * i as f64 * 0.9,
+            PPQ * i as f64 * 0.9 + PPQ * 0.7,
+            60 + i as i32 * 3,
+        );
+        doc.push(n);
+    }
+    let mut ed = Editor::new(doc, Viewport::new(900.0, 480.0));
+    ed.set_mode(mode);
+    ed.tool = tool;
+    ed.dimension = Dimension::Pitch;
+    ed.reset_view();
+    ed
+}
+
+/// The editor, plus the numbers a gesture should have moved.
+#[component]
+fn Surface() -> Element {
+    let editor = use_signal(|| {
+        STAGED
+            .with(|s| s.borrow_mut().take())
+            .unwrap_or_else(|| editor_with_notes(Tool::Select, Mode::Midi))
+    });
+    let ed = editor.read();
+    let points: usize = ed
+        .doc
+        .notes
+        .iter()
+        .map(|n| n.curve(Dimension::Pitch).len())
+        .sum();
+    let readout = format!(
+        "notes={} sel={} points={} undo={} tool={:?} dim={:?}",
+        ed.doc.notes.len(),
+        ed.selection.notes.len(),
+        points,
+        ed.can_undo() as u8,
+        ed.tool,
+        ed.dimension,
+    );
+    drop(ed);
+    rsx! {
+        div { "data-testid": "readout", "{readout}" }
+        ExpressionEditor { editor }
+    }
+}
+
+/// One number out of the readout.
+fn field(html: &str, key: &str) -> usize {
+    html.split_whitespace()
+        .find_map(|kv| kv.strip_prefix(&format!("{key}="))?.parse().ok())
+        .unwrap_or_else(|| panic!("no `{key}` in readout: {html}"))
+}
+
+/// Which modifier the gesture is made with.
+///
+/// Named rather than a bare `Modifiers`, because the map is keyed on
+/// exactly these and the test then reads as the table above.
+#[derive(Clone, Copy)]
+enum Mod {
+    None,
+    Shift,
+    Alt,
+    Ctrl,
+}
+
+impl Mod {
+    fn to_modifiers(self) -> Modifiers {
+        match self {
+            Mod::None => Modifiers::empty(),
+            Mod::Shift => Modifiers::SHIFT,
+            Mod::Alt => Modifiers::ALT,
+            Mod::Ctrl => Modifiers::CONTROL,
+        }
+    }
+}
+
+/// The note area's origin and size: the roll's box less the key gutter
+/// down the left and the ruler across the top.
+///
+/// Fractions of the whole element would put a 5% y inside the ruler and
+/// a 2% x inside the piano keys, where the surface routes the gesture to
+/// the playhead or a row selection instead. That is real behaviour, and
+/// not the one these tests are about.
+fn note_area(el: &ResolvedElement) -> (f64, f64, f64, f64) {
+    let (ox, oy) = el.document_origin();
+    let (w, h) = el.size();
+    (
+        ox + expression_editor_ui::canvas::GUTTER_W,
+        oy + expression_editor_ui::canvas::RULER_H,
+        (w as f64 - expression_editor_ui::canvas::GUTTER_W).max(1.0),
+        (h as f64 - expression_editor_ui::canvas::RULER_H).max(1.0),
+    )
+}
+
+/// Drag from `from` to `to`, both in fractions of the note area, and
+/// return the readout afterwards.
+async fn drag(
+    ed: Editor,
+    from: (f64, f64),
+    to: (f64, f64),
+    m: Mod,
+) -> dioxus_test::Result<String> {
+    stage(ed);
+    let tester = render(Surface).with_window_size(1000, 620).build();
+    let el = tester.query(by_testid("roll")).immediately()?;
+    let (ox, oy, w, h) = note_area(&el);
+    sweep(
+        &tester,
+        (ox + w * from.0, oy + h * from.1),
+        (ox + w * to.0, oy + h * to.1),
+        m,
+    )
+    .await;
+    Ok(tester.query(by_testid("readout")).immediately()?.inner_html())
+}
+
+/// Drag starting *on the first note*, offset by `delta` in fractions of
+/// the note area.
+///
+/// Hitting a note by eye is what made the first version of these tests
+/// unreliable, so the start point is computed from the camera the editor
+/// is actually using rather than guessed at.
+async fn drag_from_first_note(
+    ed: Editor,
+    delta: (f64, f64),
+    m: Mod,
+) -> dioxus_test::Result<String> {
+    let note = ed.doc.notes[0].clone();
+    let mid_t = (note.start + note.end) / 2.0;
+    let nx = ed.camera.x(mid_t);
+    let ny = ed.camera.y(note.row as f64, ed.viewport);
+
+    stage(ed);
+    let tester = render(Surface).with_window_size(1000, 620).build();
+    let el = tester.query(by_testid("roll")).immediately()?;
+    let (ox, oy, w, h) = note_area(&el);
+    let start = (ox + nx, oy + ny);
+    sweep(
+        &tester,
+        start,
+        (start.0 + w * delta.0, start.1 + h * delta.1),
+        m,
+    )
+    .await;
+    Ok(tester.query(by_testid("readout")).immediately()?.inner_html())
+}
+
+/// Press, move in steps, release.
+async fn sweep(
+    tester: &DocumentTester,
+    (x0, y0): (f64, f64),
+    (x1, y1): (f64, f64),
+    m: Mod,
+) {
+    let mods = m.to_modifiers();
+    tester.pointer_down_mods(x0, y0, mods);
+    let _ = tester.pump().await;
+    for i in 1..=6 {
+        let t = i as f64 / 6.0;
+        tester.pointer_move_mods(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, true, mods);
+        let _ = tester.pump().await;
+    }
+    tester.pointer_up_mods(x1, y1, mods);
+    let _ = tester.pump().await;
+}
+
+#[tokio::test]
+async fn the_roll_has_area_for_every_tool() -> dioxus_test::Result<()> {
+    // The precondition for all of it: whichever tool is armed, the
+    // surface still mounts and the roll is a real element. A tool that
+    // changed the layout enough to collapse the canvas would make every
+    // gesture below silently do nothing — and the failure would look
+    // like the gesture, not the layout.
+    for tool in Tool::ALL {
+        stage(editor_with_notes(tool, Mode::Midi));
+        let tester = render(Surface).with_window_size(1000, 620).build();
+        let el = tester.query(by_testid("roll")).immediately()?;
+        let (w, h) = el.size();
+        assert!(w > 0.0 && h > 0.0, "{tool:?}: roll has no area ({w}x{h})");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_plain_drag_marquees() -> dioxus_test::Result<()> {
+    let before = editor_with_notes(Tool::Select, Mode::Midi);
+    let notes = before.doc.notes.len();
+    let html = drag(before, (0.02, 0.05), (0.98, 0.95), Mod::None).await?;
+    assert_eq!(field(&html, "notes"), notes, "a marquee must not edit notes");
+    assert!(
+        field(&html, "sel") > 0,
+        "a box over every note selected none: {html}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn shift_drag_adds_to_the_selection() -> dioxus_test::Result<()> {
+    // MarqueeAdd, the difference that makes building a selection across
+    // two passes possible.
+    let mut before = editor_with_notes(Tool::Select, Mode::Midi);
+    let first = before.doc.notes[0].id;
+    before.selection.set_single(first);
+    let html = drag(before, (0.02, 0.05), (0.98, 0.95), Mod::Shift).await?;
+    assert!(
+        field(&html, "sel") > 1,
+        "shift-drag replaced the selection instead of adding: {html}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn alt_drag_paints_notes() -> dioxus_test::Result<()> {
+    // PaintNotes — the gesture the empty roll advertises as "Alt+drag
+    // draws a note".
+    //
+    // The start point is *found* rather than guessed: the map is keyed on
+    // `context_at`, and a fraction that happens to land on a note gives
+    // `Context::Note` and a completely different action. Ask the editor
+    // which point is empty roll, then paint there.
+    let before = editor_with_notes(Tool::Select, Mode::Midi);
+    let notes = before.doc.notes.len();
+
+    let vp = before.viewport;
+    let empty = (1..20)
+        .flat_map(|iy| (1..20).map(move |ix| (ix as f64 / 20.0, iy as f64 / 20.0)))
+        .map(|(fx, fy)| (fx * vp.w, fy * vp.h))
+        .find(|&(x, y)| {
+            expression_editor_ui::interaction::context_at(&before, x, y)
+                == expression_editor_core::mouse::Context::PianoRoll
+        })
+        .expect("some part of the roll is empty");
+    let from = (empty.0 / vp.w, empty.1 / vp.h);
+    let html = drag(before, from, (0.95, from.1), Mod::Alt).await?;
+    assert!(
+        field(&html, "notes") > notes,
+        "alt-drag across empty roll from {from:?} painted nothing \
+         (was {notes}): {html}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn ctrl_drag_is_the_pen() -> dioxus_test::Result<()> {
+    // PenOverride: freehand into the active dimension from any tool.
+    let mut before = editor_with_notes(Tool::Select, Mode::Mpe);
+    before.selection.notes = before.doc.notes.iter().map(|n| n.id).collect();
+    before.dimension = Dimension::Pitch;
+    let html = drag(before, (0.05, 0.6), (0.9, 0.35), Mod::Ctrl).await?;
+    assert!(
+        field(&html, "points") > 0,
+        "ctrl-drag wrote no curve points: {html}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn dragging_a_note_moves_it_rather_than_selecting() -> dioxus_test::Result<()> {
+    // MoveNote. The assertion is that the document changed and the note
+    // count did not — a move, not an insert and not a marquee.
+    let before = editor_with_notes(Tool::Select, Mode::Midi);
+    let notes = before.doc.notes.len();
+    let first_start = before.doc.notes[0].start;
+    let html = drag_from_first_note(before, (0.25, 0.0), Mod::None).await?;
+    assert_eq!(field(&html, "notes"), notes, "the drag inserted or deleted");
+    assert_eq!(
+        field(&html, "undo"),
+        1,
+        "moving a note left nothing to undo: {html}"
+    );
+    let _ = first_start;
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_map_outranks_the_armed_tool_on_a_note() -> dioxus_test::Result<()> {
+    // Pins something surprising rather than asserting it is right.
+    //
+    // `legacy_pointer_down` checks `ed.tool == Tool::NoteErase` before
+    // its tool match — but `pointer_down` resolves the mouse map *first*
+    // and only falls through when the map returns `Action::None`. The
+    // shipped `reaper_like` map binds `Note + drag + no modifier` to
+    // `MoveNote`, so dragging a note with the eraser armed moves it.
+    //
+    // The result: the note eraser cannot be reached by dragging a note
+    // at all under the default map. If that is intended, this test says
+    // so out loud; if it is not, this is the test that fails when it is
+    // fixed.
+    let before = editor_with_notes(Tool::NoteErase, Mode::Midi);
+    let notes = before.doc.notes.len();
+    let html = drag_from_first_note(before, (0.6, 0.0), Mod::None).await?;
+    assert_eq!(
+        field(&html, "notes"),
+        notes,
+        "the map no longer outranks the tool — good, but update this test"
+    );
+    assert_eq!(
+        field(&html, "undo"),
+        1,
+        "the gesture did nothing at all, which is neither behaviour: {html}"
+    );
+    Ok(())
+}

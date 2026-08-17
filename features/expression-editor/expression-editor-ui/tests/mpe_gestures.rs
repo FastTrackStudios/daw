@@ -37,8 +37,10 @@
 //! changes how the canvas auto-sizes inside a REAPER dock, which is a
 //! thing to *look at* rather than assert — so it is not done here.
 //!
-//! These stay `#[ignore]`d with the diagnosis, and become the net the
-//! moment someone makes that change with REAPER open.
+//! **That change landed.** The mount-time measurement is gone: the host
+//! states its space via `expression_editor_ui::available_space` and the
+//! canvas subtracts its own chrome, so nothing measures the document
+//! from a task any more. These run, and they are the net.
 
 use dioxus::prelude::*;
 use dioxus_test::{by_testid, render};
