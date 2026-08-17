@@ -15,6 +15,11 @@ native = ["dep:nice-plug-dioxus", "dep:architect-ui"]
 
 [dependencies]
 expression-editor-tools.workspace = true
+# The shared scroll/wheel bindings. The editor resolves gestures from the
+# same keymap the arrange view and REAPER use rather than hardcoding a
+# modifier match, which is how three schemes for one gesture happened.
+# Wasm-clean (serde + tracing only), so this does not cost the web build.
+input.workspace = true
 expression-editor-core = { workspace = true }
 level-dsp.workspace = true
 # The canonical FTS palette — every colour below comes from here.

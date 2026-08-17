@@ -33,6 +33,7 @@ pub mod interaction;
 pub mod menu_ui;
 pub mod multitool_ui;
 pub mod quantize_panel;
+pub mod scroll;
 pub mod stack;
 pub mod switcher;
 pub mod theme;
@@ -281,6 +282,42 @@ fn mods_of(m: Modifiers) -> Mods {
     }
 }
 
+/// Chrome the editor draws around the roll — toolbar, track switcher,
+/// chord row, lane strip and status bar, top and bottom combined.
+///
+/// A constant rather than a measurement, because measuring it is what
+/// kept going wrong. `onresize` never fires under dioxus-native
+/// (`convert_resize_data` is `unimplemented!()`), and reading the cell
+/// with `get_client_rect` from a task re-enters dioxus's document during
+/// event dispatch — "RefCell already borrowed", the #167 panic, which
+/// `tests/mpe_gestures.rs` still guards.
+///
+/// Measured off a rendered shot; re-measure with `--example shot` if the
+/// toolbar grows a row.
+pub const CHROME_HEIGHT: f64 = 224.0;
+
+/// The space the host has given the editor, in CSS pixels.
+///
+/// The editor cannot discover this for itself in any renderer it runs
+/// in, so the host states it: a desktop window from its winit resize
+/// event, the REAPER panel from its dock callback. `None` until someone
+/// says, which leaves the viewport the document was built with.
+pub static AVAILABLE: GlobalSignal<Option<(f64, f64)>> = Signal::global(|| None);
+
+/// Tell the editor how much room it has. Idempotent; call it as often as
+/// a resize drag fires.
+pub fn available_space(width: f64, height: f64) {
+    let next = Some((width, height));
+    if *AVAILABLE.read() != next {
+        *AVAILABLE.write() = next;
+    }
+}
+
+/// The roll's viewport inside `(width, height)` of host space.
+pub fn viewport_in(width: f64, height: f64) -> Viewport {
+    Viewport::new(width.max(1.0), (height - CHROME_HEIGHT).max(1.0))
+}
+
 #[component]
 fn Canvas(
     editor: Signal<Editor>,
@@ -297,6 +334,39 @@ fn Canvas(
     let mut drawer = drawer;
     let mut menu_state = menu_state;
     let mut draft = draft;
+
+    // The canvas cell, once mounted, and the loop that keeps the
+    // document's viewport equal to it.
+    //
+    // Without this the surface cannot grow. The svg fills the cell by
+    // CSS, but its `viewBox` comes from `Editor::viewport`, and an svg
+    // with a viewBox has an intrinsic aspect ratio — so a viewport left
+    // at its opening size letterboxes the roll inside a wider window
+    // instead of using it. On a 5120x1440 display that is most of the
+    // screen left as background.
+    //
+    // A poll rather than an event because dioxus-native never sends
+    // one, and a poll rather than a measurement at mount because the
+    // window is resized long after mount. It reads a rect the renderer
+    // has already computed, and only writes when the size actually
+    // changed, so a still window costs a comparison every tick.
+    // Follow the host's report of how much room there is.
+    //
+    // An effect, not a poll and not an element measurement: it runs when
+    // `AVAILABLE` changes and never touches the document, so there is no
+    // relayout per tick (which ended in `wgpu error: Out of Memory`) and
+    // nothing to re-enter mid-dispatch (the #167 "RefCell already
+    // borrowed" panic).
+    use_effect(move || {
+        let Some((w, h)) = AVAILABLE() else { return };
+        let want = viewport_in(w, h);
+        if let Ok(mut ed) = editor.try_write()
+            && ((ed.viewport.w - want.w).abs() >= 1.0 || (ed.viewport.h - want.h).abs() >= 1.0)
+        {
+            ed.resize(want);
+        }
+    });
+
     // While the drawer is open its target is locked: editing gestures
     // are blocked, but every navigation path stays live so the preview
     // can be auditioned in context.
@@ -374,18 +444,29 @@ fn Canvas(
 
     rsx! {
         div {
-            // `flex: 1 1 auto` + a floor, not `flex: 1 1 0`: when the
-            // parent's height does not resolve (a plugin window before
-            // its first resize, a headless mount), a zero basis would
-            // collapse the canvas to nothing and the svg is the only
-            // child that could have given it height back.
-            style: "position: relative; flex: 1 1 auto; min-height: 360px; \
+            // `flex: 1 1 0` + a floor. The zero basis is load-bearing:
+            // with `auto`, the basis comes from the content, and the
+            // content is an svg whose intrinsic size is the `viewBox` —
+            // which is `Editor::viewport`, which the measure below sets
+            // *from this cell*. That is a loop: cell sizes svg, svg
+            // sizes cell, and the measure drives it round every tick.
+            // It showed up as `wgpu error: Out of Memory`, because each
+            // pass is a full re-render.
+            //
+            // The floor is what the old `auto` basis was really for: a
+            // parent whose height does not resolve (a plugin window
+            // before its first resize, a headless mount) would otherwise
+            // collapse the canvas to nothing, and the svg no longer
+            // volunteers any height of its own.
+            style: "position: relative; flex: 1 1 0; min-height: 360px; \
                     overflow: hidden; outline: none;",
-            // The cell is what a host measures to drive `Editor::resize`
-            // (element resize events don't exist under dioxus-native, so
-            // the REAPER panel polls this element's layout size): the
-            // svg itself is fixed to the viewport and would only ever
-            // report the size it was last given.
+            // The cell is what gets measured to drive `Editor::resize`.
+            // `onresize` cannot do it: dioxus-native's
+            // `convert_resize_data` is `unimplemented!()`, so an element
+            // resize event never arrives in the renderer the plugin, the
+            // REAPER panel and the desktop runner all use. The measure
+            // below polls this element instead, which is what the REAPER
+            // panel already did from outside.
             "data-testid": "canvas-cell",
             tabindex: "0",
             onkeydown: move |e: KeyboardEvent| {
@@ -538,9 +619,24 @@ fn Canvas(
                 // is stale; a stale `vp` only costs clipped or
                 // letterboxed rendering until the host resizes the
                 // editor, and the parent's overflow:hidden absorbs that.
-                style: "display: block; \
-                        width: {vp.w + canvas::GUTTER_W:.0}px; \
-                        height: {vp.h + canvas::RULER_H:.0}px; \
+                // Fills the cell rather than taking its size *from* `vp`.
+                //
+                // Sizing the svg in `vp` pixels made the surface unable to
+                // grow: the element was sized from `vp`, and `vp` was
+                // measured back off the element, so the pair sat at
+                // whatever fixed point the window opened at and a wider
+                // window just left background beside the roll. Filling the
+                // cell breaks the loop — layout drives the element, the
+                // element reports its size, `vp` follows.
+                //
+                // The 1:1 px-to-viewBox mapping the old comment protected
+                // still holds *at rest*, because `onresize` writes `vp`
+                // from this element's own content box. It is only untrue
+                // for the frame between a resize and that write, where the
+                // viewBox stretches; a gesture in that frame lands off by
+                // the stretch factor, which is cheaper than a surface that
+                // never resizes at all.
+                style: "display: block; width: 100%; height: 100%; \
                         touch-action: none; user-select: none; cursor: crosshair;",
                 view_box: "0 0 {vp.w + canvas::GUTTER_W:.0} {vp.h + canvas::RULER_H:.0}",
                 // Measured by `onresize`, not by a spawned

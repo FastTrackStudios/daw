@@ -32,7 +32,13 @@ tracing = { workspace = true }
 # what lets `dx serve --example serve` push an `rsx!` edit into the
 # running editor. It costs a websocket client that finds no server when
 # the binary is run directly, so `--example editor` is unaffected.
-nice-plug-dioxus = { workspace = true, features = ["hot-reload"] }
+nice-plug-dioxus = { workspace = true }
+# The window for `--example serve`. dioxus's own desktop path — Blitz ->
+# Vello -> winit — rather than nice-plug-dioxus, which opens a *plugin
+# editor* window through baseview: the right host for a VST3/CLAP editor
+# and the wrong one for an app that is not a plugin. Same renderer either
+# way, so parity with the plugin is kept.
+dioxus-native = { workspace = true }
 # The CPU rasterizer behind `--example shot`.
 dioxus-test = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "time"] }

@@ -20,10 +20,13 @@ use crate::{Source, scene_names};
 
 /// How deep to walk below the root.
 ///
-/// Three levels reaches `songs/<song>/<take>.mid` — the way the demo
-/// material is actually laid out — without turning a home directory
-/// into a minute-long scan.
-const MAX_DEPTH: usize = 3;
+/// Seven, because the default root under `dx serve` is the repo itself
+/// and its material is committed at depths like
+/// `crates/keyflow/keyflow/tests/midi/<file>.mid` — at three the runner
+/// scanned the whole tree and reported nothing openable. With `target/`
+/// and `node_modules/` pruned this is 45 ms over the monorepo, so depth
+/// is not what a scan costs.
+const MAX_DEPTH: usize = 7;
 
 /// Stop rather than enumerate a music library. A runner that opens with
 /// four hundred rows has not helped anyone choose.
@@ -128,8 +131,9 @@ fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<Entry>) {
         let path = entry.path();
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        // Dotfiles, and the two directories that would otherwise
-        // dominate any scan rooted at the repo.
+        // Dotfiles (which covers .git and .claude/worktrees, the two
+        // that would otherwise multiply the whole tree), and the build
+        // directories that dominate any scan rooted at a repo.
         if name.starts_with('.') || name == "target" || name == "node_modules" {
             continue;
         }
@@ -214,6 +218,24 @@ mod tests {
             "a filesystem scan yields no scenes"
         );
         assert!(found.len() <= MAX_ENTRIES);
+    }
+
+    #[test]
+    fn a_scan_from_the_repo_root_finds_real_material() {
+        // The regression this pins: at MAX_DEPTH 3 the served runner
+        // scanned the whole monorepo and reported "0 openable", because
+        // every committed fixture sits deeper than that. A chooser whose
+        // list is empty on the repo it ships with is the bug.
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .canonicalize()
+            .expect("repo root");
+        let found = scan(&root);
+        assert!(
+            found.iter().any(|e| e.kind == Kind::Midi),
+            "no MIDI found under {} — the walk is too shallow again",
+            root.display()
+        );
     }
 
     #[test]

@@ -1159,6 +1159,28 @@ impl Editor {
         self.camera.constrain(self.bounds(), self.viewport);
     }
 
+    /// Zoom the time axis alone, about the pointer.
+    ///
+    /// Deliberately without the magnets [`zoom_in_at`](Self::zoom_in_at)
+    /// blends in. Those aim the camera on *both* axes — edge, local pitch,
+    /// deep-zoom centre — and a gesture the user asked to move one axis
+    /// must not quietly move the other. The magnets belong to the
+    /// both-axes zoom, where there is no such promise to keep.
+    pub fn zoom_time_at(&mut self, mouse_x: f64, factor: f64) {
+        let anchor_t = self.camera.t_at(mouse_x);
+        self.camera.zoom_time_about(anchor_t, factor);
+        self.camera.constrain(self.bounds(), self.viewport);
+    }
+
+    /// Zoom the pitch axis alone, about the pointer. See
+    /// [`zoom_time_at`](Self::zoom_time_at) for why the magnets are absent.
+    pub fn zoom_pitch_at(&mut self, mouse_y: f64, factor: f64) {
+        let anchor_pitch = self.camera.pitch_at(mouse_y, self.viewport);
+        self.camera
+            .zoom_pitch_about(anchor_pitch, factor, self.viewport);
+        self.camera.constrain(self.bounds(), self.viewport);
+    }
+
     pub fn pan_px(&mut self, dx: f64, dy: f64) {
         self.camera.pan_px(dx, dy);
         self.camera.constrain(self.bounds(), self.viewport);

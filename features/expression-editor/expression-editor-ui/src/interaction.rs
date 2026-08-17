@@ -1643,13 +1643,64 @@ pub fn apply_shape(ed: &mut Editor, drag: &Drag, shape: Shape) {
     }
 }
 
+/// Pixels panned per pixel of wheel travel.
+///
+/// A wheel notch reports a small delta — winit hands Blitz line-ish
+/// units, not the screen distance a trackpad would — so panning by the
+/// raw delta moved the view a few pixels a notch and read as broken.
+/// Tuned by hand at the window rather than derived: the units differ per
+/// platform and input device, so there is no figure to compute.
+const PAN_GAIN: f64 = 14.0;
+
+/// Wheel travel that doubles the zoom, near enough.
+///
+/// `e^(travel/D)`: at 300 a notch was a percent or two and zooming
+/// anywhere took a wrist. Lower is more sensitive.
+const ZOOM_DIVISOR: f64 = 30.0;
+
 /// Wheel/trackpad routing. `(dx, dy)` are the raw deltas.
+///
+/// Which gesture means what is **not decided here** — it comes from the
+/// shared input configuration via [`crate::scroll`], so the editor,
+/// the arrange view and REAPER agree. This function only knows how to
+/// carry out the actions that config names.
+///
+/// The binding resolves the gesture; the delta still supplies direction
+/// and amount, because the binding table drops it.
 pub fn wheel(ed: &mut Editor, x: f64, y: f64, dx: f64, dy: f64, mods: Mods) {
-    let factor = (dy.abs() / 300.0).exp();
-    match (mods.ctrl, mods.alt, mods.shift) {
-        // Ctrl+shift nudges selected notes off-grid — the fine-timing
-        // gesture that grid snapping would otherwise make impossible.
-        (true, _, true) => {
+    let Some(action) = crate::scroll::action_for(dx, dy, mods) else {
+        // Deliberately nothing. An unbound gesture that still moved the
+        // view is how the editor drifted away from the DAW's scheme in
+        // the first place.
+        return;
+    };
+
+    // A horizontal gesture carries its travel in `dx`, a modifier-driven
+    // one in `dy`. Taking the larger reads both without having to ask
+    // which the binding matched on.
+    let travel = if dx.abs() > dy.abs() { dx } else { dy };
+    let factor = (travel.abs() / ZOOM_DIVISOR).exp();
+    let zoom_in = travel < 0.0;
+
+    match action.as_str() {
+        "view.vscroll" => ed.pan_px(0.0, -dy * PAN_GAIN),
+        "view.hscroll" => ed.pan_px(-travel * PAN_GAIN, 0.0),
+        // Vertical is pitch and horizontal is time — the axis names are
+        // the DAW's, the meaning is this document's.
+        "view.zoom_v" => ed.zoom_pitch_at(y, if zoom_in { factor } else { 1.0 / factor }),
+        "view.zoom_h" => ed.zoom_time_at(x, if zoom_in { factor } else { 1.0 / factor }),
+        // Both axes at once is the editor's designed zoom, magnets and
+        // all — there is no single-axis promise to keep.
+        "view.zoom_both" => {
+            if zoom_in {
+                ed.zoom_in_at(x, y, factor);
+            } else {
+                ed.zoom_out_at(x, y, factor);
+            }
+        }
+        // The editor's own gesture: nudge selected notes off-grid, the
+        // fine-timing move grid snapping would otherwise make impossible.
+        "edit.nudge_time" => {
             let notes = ed.selection.notes.clone();
             if !notes.is_empty() {
                 let step = match ed.doc.time_base {
@@ -1662,29 +1713,7 @@ pub fn wheel(ed: &mut Editor, x: f64, y: f64, dx: f64, dy: f64, mods: Mods) {
                 });
             }
         }
-        // Ctrl+alt scrolls vertically.
-        (true, true, _) => ed.pan_px(0.0, -dy),
-        // Ctrl zooms pitch.
-        (true, false, _) => {
-            if dy < 0.0 {
-                ed.zoom_in_at(x, y, factor);
-            } else {
-                ed.zoom_out_at(x, y, factor);
-            }
-        }
-        // Alt scrolls horizontally.
-        (false, true, _) => ed.pan_px(-dy, 0.0),
-        // Plain wheel zooms time at the pointer; a horizontal
-        // trackpad swipe scrolls.
-        _ => {
-            if dx.abs() > dy.abs() {
-                ed.pan_px(-dx, 0.0);
-            } else if dy < 0.0 {
-                ed.zoom_in_at(x, y, factor);
-            } else {
-                ed.zoom_out_at(x, y, factor);
-            }
-        }
+        _ => {}
     }
 }
 

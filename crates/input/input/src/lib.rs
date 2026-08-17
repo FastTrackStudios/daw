@@ -32,6 +32,6 @@ pub use macros::MacroRecorder;
 pub use mode::{ModeDefinition, ModeId, ModeStack};
 pub use mouse::{MouseBindingTable, MousePattern};
 pub use processor::InputProcessor;
-pub use scroll::{ScrollAxis, ScrollBindingTable, ScrollPattern};
+pub use scroll::{ScrollAxis, ScrollBindingTable, ScrollPattern, table_for_surface};
 pub use sequence::{SequenceResult, SequenceState};
 pub use trie::{KeyTrie, LeafAction, TrieNode};
