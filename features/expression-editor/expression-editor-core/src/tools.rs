@@ -13,9 +13,14 @@ use crate::doc::{ExpressionDoc, Dimension, NoteId, Target};
 /// The active drawing tool.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum Tool {
+    /// The default, and the only tool that claims no gestures: an editor
+    /// constructed without choosing one behaves exactly as the mouse map
+    /// says. Any other default would mean a fresh `Editor` silently
+    /// reassigned the plain drag — which is what Curve, the previous
+    /// default, started doing the moment tools began claiming gestures.
+    #[default]
     Select,
     Pen,
-    #[default]
     Curve,
     Eraser,
     NoteDraw,
