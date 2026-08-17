@@ -27,7 +27,12 @@ tracing = { workspace = true }
 # Blitz/vello/wgpu into it would make every consumer pay for a window
 # they may not open. Examples get dev-dependencies, so `--example
 # editor` still links it.
-nice-plug-dioxus = { workspace = true }
+#
+# `hot-reload` wires dioxus-devtools into the baseview window, which is
+# what lets `dx serve --example serve` push an `rsx!` edit into the
+# running editor. It costs a websocket client that finds no server when
+# the binary is run directly, so `--example editor` is unaffected.
+nice-plug-dioxus = { workspace = true, features = ["hot-reload"] }
 # The CPU rasterizer behind `--example shot`.
 dioxus-test = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "time"] }

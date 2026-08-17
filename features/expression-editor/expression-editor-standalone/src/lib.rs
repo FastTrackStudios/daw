@@ -51,9 +51,12 @@ use expression_editor_ui::demo::{self, Scene};
 
 pub mod app;
 pub mod cli;
+pub mod dev;
+pub mod library;
 
 pub use app::{App, stage};
 pub use cli::Args;
+pub use dev::DevApp;
 
 /// Default MPE bend range, matching the REAPER module. Must match the
 /// receiving instrument or every pitch curve reads wrong by a factor;
