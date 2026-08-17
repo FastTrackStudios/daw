@@ -137,21 +137,42 @@ fn the_top_bar_follows_the_mode() {
     );
 }
 
+/// Every note reaches the drawing.
+///
+/// Asserted against the scene rather than the markup, because the roll
+/// is painted now: there is no `<rect fill=…>` in the DOM to count, and
+/// counting one would have been testing the emission rather than the
+/// picture anyway. A scene is a plain list of draw commands, so this
+/// asks the real question — does the number of things drawn follow the
+/// number of notes?
 #[test]
 fn every_note_reaches_the_canvas() {
+    use expression_editor_ui::paint;
+
     let ed = demo_editor(false, false);
-    let expected = ed.doc.notes.len();
-    let html = render(ed);
-    // Each note draws one body rect with a pitch-class fill.
-    let drawn = expression_editor_ui::theme::PITCH_CLASS
-        .iter()
-        .map(|c| html.matches(&format!("fill=\"{c}\"")).count())
-        .sum::<usize>();
+    let notes = ed.doc.notes.len();
+    let mut labels = expression_editor_ui::text::Labeller::new();
+
+    let with_notes = paint::roll_scene(&ed, 900.0, 480.0, &paint::Overlay::default(), &mut labels)
+        .commands
+        .len();
+
+    // The same view with nothing in it, so the comparison is against
+    // this roll's own chrome rather than a guessed constant: rows, grid,
+    // keyboard and ruler are drawn either way.
+    let mut empty = demo_editor(false, false);
+    empty.doc.notes.clear();
+    empty.selection.notes.clear();
+    let without =
+        paint::roll_scene(&empty, 900.0, 480.0, &paint::Overlay::default(), &mut labels)
+            .commands
+            .len();
+
     assert!(
-        drawn >= expected,
-        "expected at least {expected} note bodies, found {drawn}"
+        with_notes >= without + notes,
+        "{notes} notes added only {} draw commands — some did not reach the scene",
+        with_notes.saturating_sub(without)
     );
-    assert!(html.contains("<polyline"), "pitch curves must render");
 }
 
 #[test]

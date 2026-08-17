@@ -234,35 +234,46 @@ fn the_chrome_is_the_size_its_constants_claim() {
     );
 }
 
-/// The invariant the scale rests on: what the svg *declares* it is and
-/// what it is *laid out as* must be the same number.
+/// The invariant the whole surface rests on: the box the scene is *built
+/// for* and the box it is *drawn in* are the same box.
 ///
-/// Blitz paints an inline svg with a hardcoded `object-fit: contain`, so
-/// everything drawn is scaled by (element box / declared size). At 1:1
-/// that scale is 1 and an svg user unit is a CSS pixel, which is what
-/// makes `element_coordinates()` a document coordinate. Any other ratio
-/// scales the drawing *and* the pointer mapping, invisibly.
+/// The scene is painted in CSS pixels against `Editor::viewport` plus the
+/// gutter and ruler. The widget is handed its element's box. Nothing
+/// reconciles those two — by design, because the last thing that tried
+/// to (Blitz scaling an inline svg to fit) is what silently rescaled the
+/// drawing and every pointer position with it. They agree because the
+/// editor computes both from one number, and this is what says so.
 #[test]
-fn the_roll_is_laid_out_at_the_size_it_declares() {
+fn the_scene_is_built_for_the_box_it_is_drawn_in() {
     let doc = mounted();
-    let roll = doc
-        .query(by_testid("roll"))
-        .immediately()
-        .expect("no roll");
-    let declared = (
-        roll.attribute("width").expect("svg declares no width"),
-        roll.attribute("height").expect("svg declares no height"),
+    let drawn = size_of(&doc, "roll");
+    let built = editor_viewport(&doc);
+    let built = (
+        (built.0 + expression_editor_ui::canvas::GUTTER_W) as f32,
+        (built.1 + expression_editor_ui::canvas::RULER_H) as f32,
     );
-    let declared: (f32, f32) = (
-        declared.0.parse().expect("width is not a number"),
-        declared.1.parse().expect("height is not a number"),
-    );
-    let laid_out = roll.size();
     assert!(
-        (declared.0 - laid_out.0).abs() < 1.0 && (declared.1 - laid_out.1).abs() < 1.0,
-        "roll declares {declared:?} but is laid out at {laid_out:?} — \
-         everything drawn is scaled by the ratio"
+        (built.0 - drawn.0).abs() < 1.0 && (built.1 - drawn.1).abs() < 1.0,
+        "the scene was built for {built:?} but is drawn in {drawn:?}"
     );
+}
+
+/// The editor's viewport, read back off the surface.
+///
+/// Reported by the status bar rather than reached for through a signal,
+/// because what this test cares about is the viewport the *mounted*
+/// surface is using, not the one a fixture was built with.
+fn editor_viewport(doc: &dioxus_test::DocumentTester) -> (f64, f64) {
+    let raw = doc
+        .query(by_testid("viewport"))
+        .immediately()
+        .expect("no viewport readout")
+        .inner_html();
+    let (w, h) = raw.split_once('x').unwrap_or_else(|| panic!("bad readout {raw:?}"));
+    (
+        w.trim().parse().expect("width"),
+        h.trim().parse().expect("height"),
+    )
 }
 
 /// The whole point of the arithmetic: told how much room it has, the
@@ -284,25 +295,28 @@ fn the_roll_exactly_fills_its_cell() {
     );
 }
 
-/// And that declared size must not follow the content either.
+/// And the two still agree after the roll has been scrolled a long way.
+///
+/// This is the original bug, stated in the new model. It was possible at
+/// all because the drawing's own extent fed back into the size it was
+/// drawn at; a widget's box comes from layout and a scene is built to
+/// order, so there is no path from content back to size for a scroll to
+/// travel down.
 #[test]
-fn the_declared_size_does_not_follow_the_content() {
+fn scrolling_does_not_change_either_box() {
     let doc = mounted();
-    let declared = |d: &dioxus_test::DocumentTester| {
-        let roll = d.query(by_testid("roll")).immediately().expect("no roll");
-        (
-            roll.attribute("width").expect("no width"),
-            roll.attribute("height").expect("no height"),
-        )
-    };
-    let before = declared(&doc);
+    let before = (size_of(&doc, "roll"), editor_viewport(&doc));
     doc.query(by_testid("scroll-down"))
         .immediately()
         .expect("no scroll button")
         .click();
     doc.drain();
     doc.relayout();
-    assert_eq!(before, declared(&doc), "the roll re-declared its size as it scrolled");
+    assert_eq!(
+        before,
+        (size_of(&doc, "roll"), editor_viewport(&doc)),
+        "scrolling resized the roll"
+    );
 }
 
 /// The update meter reports a number once the editor has been touched.

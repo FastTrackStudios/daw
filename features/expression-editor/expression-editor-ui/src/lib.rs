@@ -36,12 +36,17 @@ pub mod interaction;
 pub mod lane_strip;
 pub mod menu_ui;
 pub mod multitool_ui;
+pub mod paint;
 pub mod quantize_panel;
 pub mod roll;
+/// The renderer seam. Native only — everything above it is portable.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod roll_widget;
 pub mod scroll;
 pub mod sizing;
 pub mod stack;
 pub mod switcher;
+pub mod text;
 pub mod theme;
 pub mod toolbar;
 pub mod widgets;

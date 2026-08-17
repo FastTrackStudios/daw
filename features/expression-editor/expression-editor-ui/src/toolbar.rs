@@ -557,6 +557,7 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
     let ambiguous = ed.doc.notes.iter().filter(|n| n.ambiguous).count();
     let razors = ed.razor.areas.len();
     let mouse_preset = ed.mouse.name;
+    let (vp_w, vp_h) = (ed.viewport.w, ed.viewport.h);
     drop(ed);
 
     rsx! {
@@ -691,6 +692,18 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
                     }
                 }
                 span { "{count} selected" }
+                // The roll's box, as the editor believes it to be.
+                //
+                // On screen it is a size readout; in tests it is the only
+                // way to ask the *mounted* surface what it is drawing
+                // for, which is what pins the scene and the element to
+                // one box. Hidden until you look for it — a size in the
+                // corner of every screenshot would be noise.
+                span {
+                    "data-testid": "viewport",
+                    style: "color: {theme::TEXT_FAINT};",
+                    "{vp_w:.0}x{vp_h:.0}"
+                }
             }
         }
     }

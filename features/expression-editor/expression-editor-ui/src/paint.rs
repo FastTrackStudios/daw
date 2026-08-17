@@ -1,0 +1,808 @@
+//! The roll, drawn as an [`anyrender::Scene`].
+//!
+//! This is the whole drawing, and it is *only* the drawing: no DOM, no
+//! renderer, no window, no dioxus. A [`Scene`] is a plain recording of
+//! draw commands, so this module compiles anywhere the geometry does —
+//! including wasm — and whatever anyrender backend is present replays
+//! it. `paint.rs` is portable; only the [`crate::roll_widget`] seam that
+//! puts a scene on screen is native.
+//!
+//! ## Why this exists at all
+//!
+//! The roll used to be an inline `<svg>` subtree. That cost two things
+//! it could not afford:
+//!
+//! - **Correctness.** Blitz paints an inline svg as a *replaced element*
+//!   with a hardcoded `object-fit: contain`, so everything drawn is
+//!   scaled by (element box / declared size) — and an svg that declares
+//!   no size takes it from its own content. The drawing therefore
+//!   rescaled as the roll scrolled, and the pointer mapping with it.
+//!   See `crate::sizing` for the full account.
+//! - **Speed.** Every camera move rebuilt the roll's markup, which Blitz
+//!   re-parsed into a usvg tree before drawing a pixel. That cost scales
+//!   with the note count and there is no way to tune it from above.
+//!
+//! A scene has neither problem. Nothing is scaled unless this module
+//! scales it, and the recording is rebuilt only when the state it draws
+//! actually changes — the renderer replays it every frame regardless.
+//!
+//! ## Coordinates
+//!
+//! Element space: `(0, 0)` is the top-left of the roll's own box, so the
+//! keyboard gutter occupies the first [`canvas::GUTTER_W`] pixels and
+//! the ruler the first [`canvas::RULER_H`]. Roll content is translated
+//! past both and clipped to what is left, which is exactly what the
+//! `<g transform=… clip-path=…>` did.
+
+use anyrender::{PaintScene, Scene};
+use expression_editor_core::{Dimension, Editor};
+use kurbo::{Affine, BezPath, Line, Point, Rect, Stroke};
+use peniko::{Color, Fill};
+
+use crate::canvas;
+use crate::text::{self, Labeller};
+use crate::theme;
+
+/// View state the document does not carry.
+///
+/// Everything else is read from the [`Editor`]. These are the few things
+/// that live in component signals — a drag in progress, a modal drawing
+/// — and they are passed in rather than reached for, so this function
+/// stays a pure map from state to picture.
+#[derive(Default)]
+pub struct Overlay {
+    /// The marquee rectangle, in roll space, while one is being dragged.
+    pub marquee: Option<(f64, f64, f64, f64)>,
+    /// An open pitch drawing, which owns the surface while it is up.
+    pub draft: Option<canvas::DraftView>,
+    /// Where a string roll draws its bend flow (#161).
+    pub flow: crate::guitar::BendFlow,
+}
+
+/// Parse a theme colour.
+///
+/// The palette is CSS strings because it is shared with the parts of the
+/// surface that are still DOM. Falling back to transparent rather than
+/// panicking: a mistyped colour should cost a shape, not the window.
+pub fn color(css: &str) -> Color {
+    peniko::color::parse_color(css)
+        .map(|c| c.to_alpha_color())
+        .unwrap_or(Color::TRANSPARENT)
+}
+
+fn with_alpha(c: Color, alpha: f64) -> Color {
+    c.with_alpha(alpha as f32)
+}
+
+/// Parse the `"x,y x,y "` point lists the geometry layer produces.
+///
+/// Those strings exist because they were svg `points` attributes. They
+/// are parsed back here rather than changed at the source so that this
+/// port does not also rewrite every producer in `canvas.rs`; the
+/// producers can grow structured forms one at a time, and this goes away
+/// with the last of them.
+fn points_of(s: &str) -> Vec<Point> {
+    s.split_whitespace()
+        .filter_map(|pair| {
+            let (x, y) = pair.split_once(',')?;
+            Some(Point::new(x.parse().ok()?, y.parse().ok()?))
+        })
+        .collect()
+}
+
+fn polyline(s: &str) -> BezPath {
+    let mut path = BezPath::new();
+    for (i, p) in points_of(s).into_iter().enumerate() {
+        if i == 0 {
+            path.move_to(p);
+        } else {
+            path.line_to(p);
+        }
+    }
+    path
+}
+
+fn polygon(s: &str) -> BezPath {
+    let mut path = polyline(s);
+    if !path.is_empty() {
+        path.close_path();
+    }
+    path
+}
+
+fn stroke_of(width: f64) -> Stroke {
+    Stroke::new(width)
+}
+
+/// Draw the roll into a scene sized `w` x `h` in CSS pixels.
+///
+/// `w` and `h` are the element's box, handed down by the widget. Nothing
+/// here derives a size from the content, which is the property the svg
+/// could not offer.
+pub fn roll_scene(
+    ed: &Editor,
+    w: f64,
+    h: f64,
+    overlay: &Overlay,
+    labels: &mut Labeller,
+) -> Scene {
+    let mut scene = Scene::new();
+    let vp = ed.viewport;
+
+    // The background covers the whole element, gutter and ruler included.
+    scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        color(theme::BG),
+        None,
+        &Rect::new(0.0, 0.0, w, h),
+    );
+
+    // ── the roll proper ──────────────────────────────────────────────
+    //
+    // Translated past the chrome and clipped to what is left, so a pitch
+    // curve that travels off-screen cannot paint over the ruler or the
+    // keyboard.
+    let roll_at = Affine::translate((canvas::GUTTER_W, canvas::RULER_H));
+    scene.push_clip_layer(
+        roll_at,
+        &Rect::new(0.0, 0.0, (w - canvas::GUTTER_W).max(0.0), (h - canvas::RULER_H).max(0.0)),
+    );
+
+    rows(&mut scene, ed, roll_at, vp.w);
+    grid(&mut scene, ed, roll_at, vp.h);
+    lanes(&mut scene, ed, roll_at, vp.w);
+    guides(&mut scene, ed, roll_at, vp.w, labels);
+    audio(&mut scene, ed, roll_at);
+    razors(&mut scene, ed, roll_at);
+    references(&mut scene, ed, roll_at);
+    notes(&mut scene, ed, roll_at, labels);
+    curves(&mut scene, ed, roll_at);
+    strings(&mut scene, ed, roll_at, overlay, labels);
+    draft(&mut scene, overlay, roll_at);
+    controllers(&mut scene, ed, roll_at, vp.w, vp.h, labels);
+    playhead(&mut scene, ed, roll_at, vp.h);
+
+    if let Some((x, y, mw, mh)) = overlay.marquee {
+        let r = Rect::new(x, y, x + mw, y + mh);
+        scene.fill(
+            Fill::NonZero,
+            roll_at,
+            with_alpha(color(theme::ACCENT), 0.15),
+            None,
+            &r,
+        );
+        scene.stroke(
+            &stroke_of(1.0),
+            roll_at,
+            color(theme::ACCENT),
+            None,
+            &r,
+        );
+    }
+
+    scene.pop_layer();
+
+    // ── chrome ───────────────────────────────────────────────────────
+    //
+    // Painted after the roll, so anything that overflowed is covered
+    // rather than showing through the keyboard.
+    keyboard(&mut scene, ed, h, labels);
+    ruler(&mut scene, ed, w, labels);
+
+    scene
+}
+
+/// Draw a label, shaping it if it has not been seen before.
+fn label(
+    scene: &mut Scene,
+    labels: &mut Labeller,
+    s: &str,
+    x: f64,
+    y: f64,
+    size: f32,
+    align: text::Align,
+    c: Color,
+    at: Affine,
+) {
+    let shaped = labels.shape(s, size);
+    text::draw(scene, &shaped, x, y, align, c, at);
+}
+
+fn rows(scene: &mut Scene, ed: &Editor, at: Affine, w: f64) {
+    for r in canvas::rows(ed) {
+        scene.fill(
+            Fill::NonZero,
+            at,
+            color(r.fill),
+            None,
+            &Rect::new(0.0, r.y, w, r.y + r.h),
+        );
+        // One divider per group rather than per row: evenly-ruled lanes
+        // give the eye nothing to steer by.
+        if r.starts_group {
+            scene.stroke(
+                &stroke_of(1.0),
+                at,
+                color(theme::PANEL_BORDER),
+                None,
+                &Line::new((0.0, r.y), (w, r.y)),
+            );
+        }
+    }
+}
+
+fn grid(scene: &mut Scene, ed: &Editor, at: Affine, h: f64) {
+    for g in canvas::grid_lines(ed) {
+        let c = if g.beat { theme::GRID_BEAT } else { theme::GRID_SUB };
+        scene.stroke(
+            &stroke_of(1.0),
+            at,
+            color(c),
+            None,
+            &Line::new((g.x, 0.0), (g.x, h)),
+        );
+    }
+}
+
+fn lanes(scene: &mut Scene, ed: &Editor, at: Affine, w: f64) {
+    let _ = w;
+    for b in canvas::lane_boxes(ed) {
+        let r = Rect::new(b.x, b.y, b.x + b.w, b.y + b.h);
+        scene.fill(
+            Fill::NonZero,
+            at,
+            with_alpha(color(theme::SURFACE_INSET), 0.55),
+            None,
+            &r,
+        );
+        scene.stroke(&stroke_of(1.0), at, color(theme::PANEL_BORDER), None, &r);
+    }
+}
+
+fn guides(scene: &mut Scene, ed: &Editor, at: Affine, w: f64, labels: &mut Labeller) {
+    for g in canvas::tuning_guides(ed) {
+        scene.stroke(
+            &stroke_of(1.0),
+            at,
+            with_alpha(color(theme::GOLD), 0.7),
+            None,
+            &Line::new((0.0, g.y), (w, g.y)),
+        );
+        label(
+            scene,
+            labels,
+            &g.label,
+            4.0,
+            g.y - 3.0,
+            9.0,
+            text::Align::Left,
+            color(theme::GOLD),
+            at,
+        );
+    }
+    for z in canvas::zone_guides(ed) {
+        scene.stroke(
+            &stroke_of(1.0),
+            at,
+            with_alpha(color(theme::ZONE), 0.8),
+            None,
+            &Line::new((z.x0, z.y), (z.x1, z.y)),
+        );
+    }
+    for s in canvas::separators(ed) {
+        scene.stroke(
+            &stroke_of(2.0),
+            at,
+            color(s.color),
+            None,
+            &Line::new((s.x, s.tick_y - 6.0), (s.x, s.tick_y + 6.0)),
+        );
+    }
+}
+
+/// The take's waveform, and the sibilants inside it.
+///
+/// Both are audio-mode furniture: the waveform says where the sound is,
+/// and the shaded bands say which spans an amplitude drag will hit —
+/// "the dark areas in the waveform" the manual describes. A band over an
+/// already-dark backdrop is nearly invisible, so it is edged as well as
+/// filled.
+fn audio(scene: &mut Scene, ed: &Editor, at: Affine) {
+    if let Some(wave) = canvas::take_waveform(ed) {
+        scene.fill(
+            Fill::NonZero,
+            at,
+            with_alpha(color(theme::REFERENCE), 0.13),
+            None,
+            &polygon(&wave),
+        );
+    }
+    if !ed.sibilant_scope {
+        return;
+    }
+    for (sx, ex) in canvas::sibilant_bands(ed) {
+        let r = Rect::new(sx, 0.0, sx + (ex - sx).max(1.0), ed.viewport.h);
+        scene.fill(Fill::NonZero, at, with_alpha(Color::BLACK, 0.35), None, &r);
+        scene.stroke(
+            &stroke_of(1.0),
+            at,
+            with_alpha(color(theme::ACCENT), 0.5),
+            None,
+            &r,
+        );
+    }
+}
+
+/// The string roll's bend flow (#161 prototype).
+///
+/// The string's own line, lifted off its row by the bend, drawn thick
+/// and in the string's colour so it reads as "the string moved" rather
+/// than as an overlay. A guitarist reads bends as "full" and "half", so
+/// the peak carries the number and the curve only shows how it got
+/// there.
+fn strings(
+    scene: &mut Scene,
+    ed: &Editor,
+    at: Affine,
+    overlay: &Overlay,
+    labels: &mut Labeller,
+) {
+    if overlay.flow.on_row() {
+        for f in crate::guitar::flow_paths(ed) {
+            scene.stroke(
+                &stroke_of(if f.selected { 3.5 } else { 2.5 }),
+                at,
+                with_alpha(color(f.color), 0.95),
+                None,
+                &polyline(&f.points),
+            );
+            if let Some(peak) = &f.peak_label {
+                label(
+                    scene,
+                    labels,
+                    peak,
+                    f.peak_at.0 + 3.0,
+                    f.peak_at.1 - 4.0,
+                    9.0,
+                    text::Align::Left,
+                    color(theme::ACCENT),
+                    at,
+                );
+            }
+        }
+    }
+    // Joins between two notes on one string: a hammer-on gets an arc, a
+    // slide a straight connector — deliberately two different marks.
+    for j in crate::guitar::joins(ed) {
+        if let Ok(path) = kurbo::BezPath::from_svg(&j.d) {
+            scene.stroke(&stroke_of(1.5), at, color(j.color), None, &path);
+        }
+    }
+}
+
+/// An open pitch drawing: the line being drawn, what it is replacing,
+/// and the anchors that shape it.
+fn draft(scene: &mut Scene, overlay: &Overlay, at: Affine) {
+    let Some(d) = &overlay.draft else { return };
+    // The curve as it was before drawing began — the thin line
+    // underneath, which is how you can see what you are changing.
+    scene.stroke(
+        &stroke_of(1.0),
+        at,
+        with_alpha(color(theme::TEXT_DIM), 0.6),
+        None,
+        &polyline(&d.original),
+    );
+    scene.stroke(
+        &stroke_of(2.0),
+        at,
+        color(theme::ACCENT),
+        None,
+        &polyline(&d.line),
+    );
+    for (x, y) in &d.anchors {
+        let r = 3.5;
+        scene.fill(
+            Fill::NonZero,
+            at,
+            color(theme::ACCENT),
+            None,
+            &kurbo::Circle::new((*x, *y), r),
+        );
+    }
+}
+
+fn razors(scene: &mut Scene, ed: &Editor, at: Affine) {
+    for r in canvas::razor_rects(ed) {
+        scene.fill(
+            Fill::NonZero,
+            at,
+            with_alpha(color(theme::RAZOR), 0.25),
+            None,
+            &Rect::new(r.x, r.y, r.x + r.w, r.y + r.h),
+        );
+    }
+}
+
+fn references(scene: &mut Scene, ed: &Editor, at: Affine) {
+    let opacity = if ed.refs_to_front { 0.95 } else { 0.45 };
+    for r in canvas::reference_rects(ed) {
+        let box_ = Rect::new(r.x, r.y, r.x + r.w, r.y + r.h);
+        // `None` is outline-only — `RefColor::Shadow`, a reference that
+        // shows its shape without competing with the notes in front.
+        if let Some(fill) = &r.fill {
+            scene.fill(
+                Fill::NonZero,
+                at,
+                with_alpha(color(fill), opacity * 0.5),
+                None,
+                &box_,
+            );
+        }
+        scene.stroke(
+            &stroke_of(1.0),
+            at,
+            with_alpha(color(&r.stroke), opacity),
+            None,
+            &box_,
+        );
+    }
+    for r in canvas::midi_reference_rects(ed) {
+        scene.stroke(
+            &stroke_of(1.0),
+            at,
+            with_alpha(color(theme::TEXT_DIM), 0.8),
+            None,
+            &Rect::new(r.x, r.y, r.x + r.w, r.y + r.h),
+        );
+    }
+}
+
+fn notes(scene: &mut Scene, ed: &Editor, at: Affine, labels: &mut Labeller) {
+    // Notes recede while a controller is being edited: the roll is that
+    // dimension's editing surface for the moment, and full-strength
+    // notes would compete with the curve for the same pixels.
+    let dim = if ed.cc_editing() { ed.cc_display.note_dim } else { 1.0 };
+
+    for n in canvas::note_rects(ed) {
+        let alpha = n.opacity * dim;
+        let fill = with_alpha(color(n.fill), alpha);
+
+        // A mode that draws sung blobs or struck heads draws those
+        // *instead* of the bar, in that order of precedence.
+        if let Some(blob) = &n.blob {
+            scene.fill(Fill::NonZero, at, fill, None, &polygon(blob));
+            if let Some(cy) = n.blob_center {
+                scene.stroke(
+                    &stroke_of(1.0),
+                    at,
+                    with_alpha(color(theme::TEXT), 0.5 * alpha),
+                    None,
+                    &Line::new((n.x, cy), (n.x + n.w, cy)),
+                );
+            }
+        } else if let Some(head) = &n.head {
+            scene.fill(Fill::NonZero, at, fill, None, &polygon(head));
+        } else {
+            let r = Rect::new(n.x, n.y, n.x + n.w, n.y + n.h);
+            scene.fill(Fill::NonZero, at, fill, None, &r);
+            if let Some(ribbon) = &n.ribbon {
+                scene.fill(
+                    Fill::NonZero,
+                    at,
+                    with_alpha(color(theme::SELECTED), 0.18 * alpha),
+                    None,
+                    &polygon(ribbon),
+                );
+            }
+            // Zones, and which one a write would land on.
+            for (x0, x1, active) in &n.zones {
+                scene.stroke(
+                    &stroke_of(if *active { 2.0 } else { 1.0 }),
+                    at,
+                    color(if *active { theme::ACCENT } else { theme::ZONE }),
+                    None,
+                    &Line::new((*x0, n.y), (*x0, n.y + n.h)),
+                );
+                let _ = x1;
+            }
+            scene.stroke(
+                &stroke_of(if n.selected { 2.0 } else { 1.0 }),
+                at,
+                color(if n.ambiguous {
+                    theme::ZONE
+                } else if n.selected {
+                    theme::SELECTED
+                } else {
+                    theme::BORDER_STRONG
+                }),
+                None,
+                &r,
+            );
+        }
+
+        // What the body prints — note name, fret number, or lyric.
+        //
+        // Dark on the body, because these sit on a saturated fill and
+        // light text on a yellow string is unreadable.
+        //
+        // Black rather than the panel's dark grey, and at full weight of
+        // alpha, because the svg drew this at `font-weight: 600` and the
+        // shaper here has only the regular face. At the seven pixels a
+        // dense roll gives a note, a mid-grey regular is illegible where
+        // a dark-grey semibold was fine.
+        if let Some(text_) = &n.label {
+            label(
+                scene,
+                labels,
+                text_,
+                n.x + 5.0,
+                n.y + n.h * 0.5 + 3.5,
+                10.0,
+                text::Align::Left,
+                with_alpha(Color::BLACK, alpha),
+                at,
+            );
+        }
+        if let Some(badge) = n.badge {
+            label(
+                scene,
+                labels,
+                badge,
+                n.x,
+                n.y - 3.0,
+                8.0,
+                text::Align::Left,
+                with_alpha(color(theme::TEXT_DIM), alpha),
+                at,
+            );
+        }
+    }
+
+    handles(scene, ed, at);
+}
+
+fn handles(scene: &mut Scene, ed: &Editor, at: Affine) {
+    for set in canvas::note_handles(ed) {
+        // The temporary-note range, when a drawing is open on this note.
+        if let Some((x0, x1)) = set.scope {
+            scene.stroke(
+                &stroke_of(1.0),
+                at,
+                with_alpha(color(theme::ACCENT), 0.6),
+                None,
+                &Line::new((x0, 0.0), (x1, 0.0)),
+            );
+        }
+        for h in &set.rects {
+            let c = Rect::new(h.x, h.y, h.x + h.w, h.y + h.h);
+            scene.fill(
+                Fill::NonZero,
+                at,
+                with_alpha(color(theme::HANDLE), 0.9),
+                None,
+                &c,
+            );
+            scene.stroke(&stroke_of(1.0), at, color(theme::ACCENT), None, &c);
+            // Each mark says what the handle *does* rather than naming
+            // it. At fourteen pixels there is no room for a word, and a
+            // shape is faster to read than one anyway.
+            let (cx, cy) = (h.x + h.w * 0.5, h.y + h.h * 0.5);
+            let half = h.w.min(h.h) * 0.5;
+            let hollow = matches!(h.handle, expression_editor_core::Handle::Amplitude)
+                && ed.sibilant_scope;
+            if let Ok(mark) = kurbo::BezPath::from_svg(&crate::handle_mark(
+                h.handle, cx, cy, half, hollow,
+            )) {
+                scene.stroke(&stroke_of(1.2), at, color(theme::TEXT), None, &mark);
+            }
+        }
+    }
+}
+
+fn curves(scene: &mut Scene, ed: &Editor, at: Affine) {
+    for c in canvas::curve_paths(ed) {
+        let path = polyline(&c.points);
+        if path.is_empty() {
+            continue;
+        }
+        scene.stroke(
+            &stroke_of(if c.active { 2.5 } else { 1.5 }),
+            at,
+            color(c.color),
+            None,
+            &path,
+        );
+    }
+}
+
+fn controllers(
+    scene: &mut Scene,
+    ed: &Editor,
+    at: Affine,
+    w: f64,
+    h: f64,
+    labels: &mut Labeller,
+) {
+    let _ = (w, h);
+    for (i, c) in canvas::cc_paths(ed).into_iter().enumerate() {
+        let fill = polygon(&c.fill);
+        if !fill.is_empty() {
+            scene.fill(
+                Fill::NonZero,
+                at,
+                with_alpha(color(c.color), c.opacity * 0.25),
+                None,
+                &fill,
+            );
+        }
+        let line = polyline(&c.points);
+        if !line.is_empty() {
+            scene.stroke(
+                &stroke_of(if c.active { 2.0 } else { 1.0 }),
+                at,
+                with_alpha(color(c.color), c.opacity),
+                None,
+                &line,
+            );
+            // Stacked down the left edge, one line per lane: a pinned
+            // lane spans the whole roll height, so there is no single
+            // "its own" y to hang the name off.
+            label(
+                scene,
+                labels,
+                &c.label,
+                3.0,
+                12.0 + i as f64 * 11.0,
+                9.0,
+                text::Align::Left,
+                with_alpha(color(c.color), c.opacity),
+                at,
+            );
+        }
+    }
+}
+
+fn playhead(scene: &mut Scene, ed: &Editor, at: Affine, h: f64) {
+    let Some(t) = ed.playhead else { return };
+    let x = ed.camera.x(t);
+    scene.stroke(
+        &stroke_of(2.0),
+        at,
+        color(theme::ACCENT),
+        None,
+        &Line::new((x, 0.0), (x, h)),
+    );
+}
+
+fn keyboard(scene: &mut Scene, ed: &Editor, h: f64, labels: &mut Labeller) {
+    let at = Affine::translate((0.0, canvas::RULER_H));
+    scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        color(theme::SURFACE_BAR),
+        None,
+        &Rect::new(0.0, 0.0, canvas::GUTTER_W, h),
+    );
+    for k in canvas::keyboard(ed) {
+        let r = Rect::new(0.0, k.y, canvas::GUTTER_W, k.y + k.h);
+        scene.fill(
+            Fill::NonZero,
+            at,
+            color(if k.black { theme::KEY_BLACK } else { theme::KEY_WHITE }),
+            None,
+            &r,
+        );
+        scene.stroke(
+            &stroke_of(0.5),
+            at,
+            with_alpha(color(theme::PANEL_BORDER), 0.8),
+            None,
+            &Line::new((0.0, k.y), (canvas::GUTTER_W, k.y)),
+        );
+        // Only C rows are labelled, so the gutter stays readable when
+        // the rows get short — and only when the row can hold the text.
+        if let Some(name) = &k.label
+            && k.h >= 9.0
+        {
+            label(
+                scene,
+                labels,
+                name,
+                canvas::GUTTER_W - 4.0,
+                k.y + k.h * 0.5 + 3.0,
+                9.0,
+                text::Align::Right,
+                color(theme::KEY_LABEL),
+                at,
+            );
+        }
+    }
+
+    // Braces over the rows of a split piece, so `L` and `R` read as two
+    // hands of one instrument rather than two unrelated lanes.
+    for g in canvas::key_groups(ed, &canvas::keyboard(ed)) {
+        label(
+            scene,
+            labels,
+            &g.label,
+            3.0,
+            g.y + g.h * 0.5 + 3.0,
+            9.0,
+            text::Align::Left,
+            color(theme::TEXT_DIM),
+            at,
+        );
+    }
+    // The gutter's right edge, which is also the roll's left edge.
+    scene.stroke(
+        &stroke_of(1.0),
+        Affine::IDENTITY,
+        color(theme::PANEL_BORDER),
+        None,
+        &Line::new((canvas::GUTTER_W, 0.0), (canvas::GUTTER_W, h)),
+    );
+}
+
+fn ruler(scene: &mut Scene, ed: &Editor, w: f64, labels: &mut Labeller) {
+    scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        color(theme::SURFACE_BAR),
+        None,
+        &Rect::new(0.0, 0.0, w, canvas::RULER_H),
+    );
+    let at = Affine::translate((canvas::GUTTER_W, 0.0));
+    for t in canvas::ruler(ed) {
+        let top = if t.bar { 6.0 } else { canvas::RULER_H - 7.0 };
+        scene.stroke(
+            &stroke_of(1.0),
+            at,
+            color(if t.bar { theme::TEXT_DIM } else { theme::GRID_SUB }),
+            None,
+            &Line::new((t.x, top), (t.x, canvas::RULER_H)),
+        );
+        if let Some(n) = &t.label {
+            label(
+                scene,
+                labels,
+                n,
+                t.x + 3.0,
+                11.0,
+                9.0,
+                text::Align::Left,
+                color(theme::TEXT_DIM),
+                at,
+            );
+        }
+    }
+    for m in canvas::markers(ed) {
+        scene.fill(
+            Fill::NonZero,
+            at,
+            color(theme::GOLD),
+            None,
+            &Rect::new(m.x, 2.0, m.x + 6.0, 8.0),
+        );
+        label(
+            scene,
+            labels,
+            &m.label,
+            m.x + 8.0,
+            canvas::RULER_H - 6.0,
+            9.0,
+            text::Align::Left,
+            color(theme::GOLD),
+            at,
+        );
+    }
+    scene.stroke(
+        &stroke_of(1.0),
+        Affine::IDENTITY,
+        color(theme::PANEL_BORDER),
+        None,
+        &Line::new((0.0, canvas::RULER_H), (w, canvas::RULER_H)),
+    );
+    let _ = Dimension::Pitch;
+}

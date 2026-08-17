@@ -18,6 +18,20 @@ level-dsp.workspace = true
 # The canonical FTS palette — every colour below comes from here.
 daw-theme = { workspace = true }
 dioxus = { workspace = true }
+# The painter. `anyrender::Scene` is a plain recording of draw commands —
+# no window, no GPU, no renderer — so `paint` stays portable and the
+# browser build can replay the same scene through whichever anyrender
+# backend it has. peniko brings kurbo (paths, affines) with it.
+anyrender = { workspace = true }
+peniko = { workspace = true }
+kurbo = { workspace = true }
+parley = { workspace = true }
+# The widget that hands the painter its box and puts the scene on screen.
+# Native only: this is the DOM/renderer seam, and everything above it is
+# deliberately free of it.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+blitz-dom = { workspace = true, features = ["custom-widget"] }
+dioxus-native-dom = { workspace = true }
 
 [dev-dependencies]
 expression-editor-guitarpro.workspace = true
