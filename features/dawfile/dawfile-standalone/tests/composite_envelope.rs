@@ -179,9 +179,15 @@ fn dawproject_carries_the_composite_too() {
     let a = points[0];
     assert_eq!(a.target.expression, Some(ExpressionType::Gain));
     // The composite's values, not a source's: 0.25 and 0.81 against the
-    // sources' 0.5 and 0.9.
+    // sources' 0.5 and 0.9. The trailing 1.0 is #249's return to unity
+    // at the item's end — an item's ride is scoped to its item, so it
+    // does not attenuate the timeline behind it.
     let values: Vec<f64> = a.points.iter().map(|p| p.value).collect();
-    assert_eq!(values, vec![0.25, 0.81], "a source envelope crossed instead");
+    assert_eq!(
+        values,
+        vec![0.25, 0.81, 1.0],
+        "a source envelope crossed instead"
+    );
 }
 
 #[test]
@@ -261,7 +267,11 @@ fn item_envelope_times_become_absolute_on_the_timeline() {
         .expect("automation");
 
     let times: Vec<f64> = a.points.iter().map(|p| p.time).collect();
-    assert_eq!(times, vec![origin, origin + 2.0]);
+    // The item's own two points, offset onto the timeline. The trailing
+    // point is #249's return to unity at the item's end, which is what
+    // keeps the ride from colouring the timeline behind it.
+    assert_eq!(&times[..2], &[origin, origin + 2.0]);
+    assert_eq!(a.points.last().map(|p| p.value), Some(1.0), "{times:?}");
 }
 
 #[test]
@@ -302,7 +312,11 @@ fn one_lane_per_track_however_many_items_ride() {
     let LaneContent::Automation(a) = &arrangement.lanes[0].content else {
         panic!("not automation");
     };
-    assert_eq!(a.points.len(), items, "every item's ride should be present");
+    // Every item's ride is present. Counted by value rather than by
+    // total, because #249 also puts a unity point at each item's end —
+    // the ride itself is the 0.7.
+    let rides = a.points.iter().filter(|p| p.value == 0.7).count();
+    assert_eq!(rides, items, "every item's ride should be present");
     // Ascending, because a reader walks them in order.
     assert!(a.points.windows(2).all(|w| w[0].time <= w[1].time));
 }

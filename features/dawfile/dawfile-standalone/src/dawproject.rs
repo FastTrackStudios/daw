@@ -34,6 +34,22 @@
 //! That is a real limit, and the important part is that it is not
 //! silent: a mix handed to Cubase keeps its volume ride, and the four
 //! it was built from are simply not there to edit.
+//!
+//! **An item ride is scoped to its item, and overlapping items do not
+//! cross at all.** Folding item envelopes into a track lane is only
+//! sound where the items are disjoint, which a comped vocal — the exact
+//! material scenario 1 is built on — is not:
+//!
+//! - *Overlapping items export no lane for that track.* Two composites
+//!   concatenated into one curve alternate between two different rides.
+//!   Refusing follows the same rule as an ambiguous item: this module
+//!   prefers "does not cross" over "quietly wrong".
+//! - *A gap returns to unity.* A track lane holds its last value until
+//!   the next point, so an item that ends ducked would attenuate the
+//!   silence behind it and the next phrase's attack. Each item's ride
+//!   ends with a unity point at the item's end — except where the next
+//!   item abuts exactly, where such a point would collide with that
+//!   item's first.
 
 use crate::document::{DawDocument, MarkerNode, TrackNode};
 use crate::error::DawResult;
@@ -101,6 +117,10 @@ pub fn to_dawproject(document: &DawDocument) -> dp::DawProject {
 /// documents that came from either side.
 const COMPOSITE: &str = "VOLENV";
 
+/// Linear gain that changes nothing — what the lane returns to between
+/// items so one item's ride does not colour the next one's silence.
+const UNITY_GAIN: f64 = 1.0;
+
 /// An arrangement carrying each item's composite volume automation.
 ///
 /// `None` when there is nothing to say, rather than an empty
@@ -111,28 +131,69 @@ fn automation_arrangement(document: &DawDocument) -> Option<dp::Arrangement> {
     let mut lanes = Vec::new();
 
     for node in &document.tracks {
-        // One lane per *track*, not per item. A track's items are
-        // disjoint in time, and their composites concatenate into the
-        // one gain curve DAWproject models — two lanes with the same
-        // track IDREF and the same Gain expression would be asking the
-        // reader to choose.
-        let mut points: Vec<dp::AutomationPoint> = Vec::new();
+        // One lane per *track*, not per item. Their composites
+        // concatenate into the one gain curve DAWproject models — two
+        // lanes with the same track IDREF and the same Gain expression
+        // would be asking the reader to choose.
+        //
+        // Only the items that actually carry a composite matter here: an
+        // item with no volume ride contributes nothing to the lane, so it
+        // cannot conflict with one that does.
+        let mut riding: Vec<(f64, f64, &crate::document::EnvelopeNode)> = node
+            .items
+            .iter()
+            .filter_map(|item| {
+                let env = composite_of(item)?;
+                let start = item.item.position.as_seconds();
+                Some((start, start + item.item.length.as_seconds(), env))
+            })
+            .collect();
+        if riding.is_empty() {
+            continue;
+        }
+        riding.sort_by(|a, b| a.0.total_cmp(&b.0));
 
-        for item in &node.items {
-            let Some(env) = composite_of(item) else {
-                continue;
-            };
+        // Overlapping items — crossfades, comped takes — cannot be folded
+        // into one curve. Concatenating them produces a lane that
+        // alternates between two rides, which is worse than saying
+        // nothing: this module prefers "does not cross" over "quietly
+        // wrong", the same rule `composite_of` applies to an ambiguous
+        // item.
+        if riding.windows(2).any(|w| w[1].0 < w[0].1) {
+            continue;
+        }
+
+        let mut points: Vec<dp::AutomationPoint> = Vec::new();
+        for (i, (start, end, env)) in riding.iter().enumerate() {
             // Item envelope times are relative to the item, which is
             // how both `.rpp` and our own format store them. The
             // arrangement's are absolute, so they have to be offset —
             // without this every item's ride is stacked at the top of
             // the timeline.
-            let origin = item.item.position.as_seconds();
             points.extend(env.points.iter().map(|p| dp::AutomationPoint {
-                time: origin + p.time.as_seconds(),
+                time: start + p.time.as_seconds(),
                 value: p.value,
                 interpolation: dp::Interpolation::Linear,
             }));
+
+            // An item envelope becomes a *track* lane, and a track lane
+            // holds its last value until the next point. An item that
+            // ends ducked would therefore attenuate the silence after it
+            // — and the next phrase's attack, which is worse. Returning
+            // to unity at the item's end scopes the ride to its item.
+            //
+            // Only across a real gap: for items that abut exactly, a
+            // unity point would land on the next item's first point and
+            // reintroduce the ambiguity this function just refused.
+            let gap_follows = riding.get(i + 1).is_none_or(|next| next.0 > *end);
+            let ends_before = points.last().is_none_or(|p| p.time < *end);
+            if gap_follows && ends_before {
+                points.push(dp::AutomationPoint {
+                    time: *end,
+                    value: UNITY_GAIN,
+                    interpolation: dp::Interpolation::Linear,
+                });
+            }
         }
 
         if points.is_empty() {

@@ -812,11 +812,20 @@ impl Edit {
                 // The fret is derived, so setting one *transposes*: it
                 // keeps the string and moves the pitch, which is what
                 // sliding a finger up the neck does.
+                //
+                // A note with no string has no fret to set — under the
+                // current model that is a legitimate plain MIDI note on
+                // a guitar track, not an error. Reporting the edit as
+                // applied would push an undo step that undoes nothing,
+                // so the result is whether any note actually moved.
+                let mut moved = false;
                 map_notes(doc, notes, |n| {
                     if let Some(s) = n.string {
                         n.row = tuning.open(s as usize) + fret;
+                        moved = true;
                     }
-                })
+                });
+                moved
             }
             Edit::AddNote(note) => {
                 doc.push((**note).clone());

@@ -584,15 +584,26 @@ impl Editor {
             return false;
         };
         let mut bands = bands.clone();
-        let Some(slot) = bands.splits.get_mut(index) else {
+        if index >= bands.splits.len() {
             return false;
+        }
+        // Splits are ascending by contract, and the caller addresses one
+        // by index — the inspector's -/+ buttons key on the render-time
+        // position. Re-sorting after a write would hand the next click a
+        // different split, so a split is instead penned between its
+        // neighbours: crossing one has no meaning, since the bands *are*
+        // the ascending boundaries.
+        let lower = if index == 0 {
+            f64::NEG_INFINITY
+        } else {
+            bands.splits[index - 1]
         };
-        *slot = hz;
-        // Splits are ascending by contract; dragging one past its
-        // neighbour is a reorder, not an error.
-        bands
+        let upper = bands
             .splits
-            .sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+            .get(index + 1)
+            .copied()
+            .unwrap_or(f64::INFINITY);
+        bands.splits[index] = hz.clamp(lower, upper);
         let ok = self.apply(&Edit::SetBands {
             bands: bands.clone(),
         });
@@ -1318,13 +1329,43 @@ impl Editor {
                 let Some(n) = self.doc.note(*id) else {
                     return false;
                 };
+                let RowSpace::Strings(tuning) = self.doc.row_space.clone() else {
+                    return false;
+                };
                 // The string is on the note; the row is the pitch. Using
                 // the row here cycled to a "string" that was a MIDI
                 // pitch number.
-                let next = n.string.map(|s| s as i32 + 1).unwrap_or(0);
+                //
+                // Cycling walks the strings that can actually *play* this
+                // pitch, and wraps. A plain `+ 1` clamped at the top into
+                // a no-op that still reported success, and dead-ended
+                // mid-neck the moment the next string could not reach the
+                // note (the A string's 2nd fret is fret -3 on the D).
+                let count = tuning.strings();
+                if count == 0 {
+                    return false;
+                }
+                let current = n.string;
+                let pitch = n.row;
+                let reachable = |s: usize| {
+                    let fret = pitch - tuning.open(s);
+                    (0..=tuning.frets as i32).contains(&fret)
+                };
+                // Start past the current string, or at the lowest for a
+                // note that carries none yet, then wrap once.
+                let start = current.map(|s| s as usize + 1).unwrap_or(0);
+                let Some(next) = (0..count)
+                    .map(|i| (start + i) % count)
+                    .find(|&s| Some(s as u8) != current && reachable(s))
+                else {
+                    // No other string reaches this pitch — the note is
+                    // playable in one place, so there is nothing to
+                    // cycle to and nothing to undo.
+                    return false;
+                };
                 self.apply(&Edit::SetString {
                     note: *id,
-                    string: next,
+                    string: next as i32,
                 })
             }
             C::ToggleLegato(id) => {

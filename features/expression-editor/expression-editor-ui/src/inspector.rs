@@ -286,11 +286,16 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
                             style: "display: flex; align-items: center; gap: 4px; \
                                     padding: 0 10px 6px;",
                             span {
+                                "data-testid": "split-{i}-hz",
                                 style: format!("font-size: 10px; width: 54px; color: {};", theme::TEXT_DIM),
                                 "{hz:.0} Hz"
                             }
-                            for (label, factor) in [("−", 0.917f64), ("+", 1.09)] {
+                            for (label, factor, dir) in [("−", 0.917f64, "down"), ("+", 1.09, "up")] {
                                 button {
+                                    // Addressed by row, because the bug
+                                    // this guards is the row and the
+                                    // split disagreeing after a move.
+                                    "data-testid": "split-{i}-{dir}",
                                     style: "flex: 1; height: 20px; font-size: 10px; \
                                             border-radius: 4px; cursor: pointer;",
                                     // Proportional, not additive: pitch

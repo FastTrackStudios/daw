@@ -4341,3 +4341,170 @@ fn undo_brings_the_row_space_view_back_with_the_document() {
         "the view kept the undone splits"
     );
 }
+
+// ── #250 / #251 / #252: what code review found on the guitar model ───
+
+#[test]
+fn setting_a_fret_on_stringless_notes_reports_no_change() {
+    // A plain MIDI note on a guitar track is legitimate — `rows::fret_of`
+    // documents exactly that case. `SetFret` cannot move it, so it must
+    // not report an edit and push an undo step that undoes nothing.
+    let tuning = StringTuning::guitar_standard();
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 4.0);
+    doc.row_space = RowSpace::Strings(tuning.clone());
+    doc.push(Note::new(NoteId(1), 0.0, PPQ, 60));
+
+    let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
+    ed.selection.set_single(NoteId(1));
+    assert!(!ed.set_fret_of_selection(7), "nothing had a string to fret");
+    assert_eq!(ed.doc.note(NoteId(1)).unwrap().row, 60, "the pitch stood");
+    assert!(!ed.undo(), "and no empty undo step was recorded");
+}
+
+#[test]
+fn setting_a_fret_moves_what_it_can_in_a_mixed_selection() {
+    let tuning = StringTuning::guitar_standard();
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 4.0);
+    doc.row_space = RowSpace::Strings(tuning.clone());
+    let mut fretted = Note::new(NoteId(1), 0.0, PPQ, tuning.open(2) + 5);
+    fretted.string = Some(2);
+    doc.push(fretted);
+    doc.push(Note::new(NoteId(2), 0.0, PPQ, 60));
+
+    let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
+    ed.selection.notes = vec![NoteId(1), NoteId(2)];
+    assert!(ed.set_fret_of_selection(7), "one of the two moved");
+    assert_eq!(ed.doc.note(NoteId(1)).unwrap().row, tuning.open(2) + 7);
+    assert_eq!(
+        ed.doc.note(NoteId(2)).unwrap().row,
+        60,
+        "the stringless note was left alone"
+    );
+}
+
+/// Cycle a note that starts on `string`, and report where it lands.
+fn cycle_from(tuning: &StringTuning, string: Option<u8>, pitch: i32) -> (bool, Option<u8>) {
+    use expression_editor_core::menu::Command;
+
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 4.0);
+    doc.row_space = RowSpace::Strings(tuning.clone());
+    let mut n = Note::new(NoteId(1), 0.0, PPQ, pitch);
+    n.string = string;
+    doc.push(n);
+
+    let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
+    let ok = ed.run_command(&Command::CycleString(NoteId(1)), None);
+    (ok, ed.doc.note(NoteId(1)).unwrap().string)
+}
+
+#[test]
+fn cycling_string_wraps_past_the_top() {
+    let tuning = StringTuning::guitar_standard();
+    // High E, 5th fret (A=69) — reachable on the B and G strings too, so
+    // cycling off the top string must come back round rather than
+    // clamping into a no-op that still claims to have worked.
+    let pitch = tuning.pitch(5, 5);
+    let (ok, landed) = cycle_from(&tuning, Some(5), pitch);
+    assert!(ok, "the cycle wrapped instead of clamping");
+    let landed = landed.expect("still on a string");
+    assert_ne!(landed, 5, "it left the top string");
+    let fret = pitch - tuning.open(landed as usize);
+    assert!(
+        (0..=tuning.frets as i32).contains(&fret),
+        "and landed somewhere the pitch is actually playable (fret {fret})"
+    );
+}
+
+#[test]
+fn cycling_string_skips_a_string_the_pitch_cannot_reach() {
+    let tuning = StringTuning::guitar_standard();
+    // A string, 2nd fret (B=47). The D string above it would be fret -3,
+    // so the old `string + 1` dead-ended here instead of moving on.
+    let pitch = tuning.pitch(1, 2);
+    let (ok, landed) = cycle_from(&tuning, Some(1), pitch);
+    assert!(ok, "an unreachable string is skipped, not the end of the road");
+    let landed = landed.expect("still on a string");
+    assert_ne!(landed, 1);
+    let fret = pitch - tuning.open(landed as usize);
+    assert!((0..=tuning.frets as i32).contains(&fret), "fret {fret}");
+}
+
+#[test]
+fn a_note_playable_on_one_string_reports_no_change() {
+    let tuning = StringTuning::guitar_standard();
+    // The low E open (E=40) is below every other string's open pitch, so
+    // there is nowhere else to put it.
+    let (ok, landed) = cycle_from(&tuning, Some(0), tuning.open(0));
+    assert!(!ok, "nothing to cycle to");
+    assert_eq!(landed, Some(0), "and it stayed where it was");
+}
+
+#[test]
+fn cycling_a_stringless_note_finds_it_a_string() {
+    let tuning = StringTuning::guitar_standard();
+    // The new model allows a note with no string at all; cycling should
+    // assign the first one that can play it rather than falling over.
+    let pitch = tuning.pitch(2, 5);
+    let (ok, landed) = cycle_from(&tuning, None, pitch);
+    assert!(ok);
+    let landed = landed.expect("picked up a string");
+    let fret = pitch - tuning.open(landed as usize);
+    assert!((0..=tuning.frets as i32).contains(&fret), "fret {fret}");
+}
+
+#[test]
+fn repeatedly_nudging_one_band_split_keeps_moving_that_split() {
+    use expression_editor_core::rows::SliceBands;
+
+    // The inspector's -/+ buttons key on the render-time index. When a
+    // write re-sorted the list, a split dragged past its neighbour swapped
+    // positions and the next click moved the *neighbour* instead.
+    let bands = SliceBands::default();
+    assert!(bands.splits.len() >= 2, "needs two splits to cross");
+    let mut doc = ExpressionDoc::new(TimeBase::Frames { frame_rate: 100.0 }, 0.0, 100.0);
+    doc.row_space = RowSpace::Bands(bands.clone());
+    let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
+
+    // Walk split 1 down hard enough that it would have crossed split 0.
+    let mut hz = bands.splits[1];
+    for _ in 0..8 {
+        hz *= 0.5;
+        assert!(ed.move_band_split(1, hz));
+    }
+
+    let RowSpace::Bands(after) = &ed.doc.row_space else {
+        panic!("still banded");
+    };
+    assert!(
+        after.splits[1] >= after.splits[0],
+        "split 1 stayed above split 0 ({:?})",
+        after.splits
+    );
+    assert_eq!(
+        after.splits[0], bands.splits[0],
+        "and split 0 never moved — the clicks all addressed split 1"
+    );
+}
+
+#[test]
+fn a_band_split_cannot_be_pushed_past_its_neighbour() {
+    use expression_editor_core::rows::SliceBands;
+
+    let bands = SliceBands::default();
+    let mut doc = ExpressionDoc::new(TimeBase::Frames { frame_rate: 100.0 }, 0.0, 100.0);
+    doc.row_space = RowSpace::Bands(bands.clone());
+    let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
+
+    // Shove split 0 way above split 1, and the other way round.
+    assert!(ed.move_band_split(0, bands.splits[1] * 4.0));
+    assert!(ed.move_band_split(1, 1.0));
+
+    let RowSpace::Bands(after) = &ed.doc.row_space else {
+        panic!("still banded");
+    };
+    assert!(
+        after.splits.windows(2).all(|w| w[0] <= w[1]),
+        "splits stayed ascending: {:?}",
+        after.splits
+    );
+}
