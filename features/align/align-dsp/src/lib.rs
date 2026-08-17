@@ -36,13 +36,22 @@
 //!
 //! ## Provenance
 //!
-//! Clean-room. The *shape* of the feature — capture a reference, capture
-//! dubs, macro-shift then micro-warp, write sparse markers — is common to
-//! every tool in this category, VocAlign and the GPL ReaScript VoxAlign
-//! among them. No code is taken from any of them; this workspace is
-//! MIT/Apache-2.0 and must stay that way. The techniques used here
-//! (normalized cross-correlation, banded DTW with slope constraints,
-//! parabolic peak interpolation) are standard published DSP.
+//! Independently written, from published DSP: normalized cross-correlation
+//! with an FFT, banded DTW with slope constraints, parabolic peak
+//! interpolation. No code is taken from any other aligner.
+//!
+//! Three ideas here were *prompted* by reading VoxAlign, the GPL-3.0
+//! ReaScript by Acrosonus Mastering — a macro offset stage before the
+//! warp, sparse confidence-filtered anchors instead of a marker per
+//! frame, and a bound on the stretch ratio between markers. This
+//! workspace is GPL-3.0-or-later, so its code could have been used with
+//! attribution; it was not, because a 2400-line Lua script built around
+//! ReaScript's item API and a global settings table is not a useful basis
+//! for a host-agnostic Rust crate. Where the two disagree, they disagree
+//! on purpose: the band here is scaled to the two takes' lengths, the
+//! stretch bound is enforced on written segments rather than on DTW
+//! cells, and the feature vector carries a real pitch track rather than
+//! zero-crossing rate as a proxy for one.
 
 pub mod anchors;
 pub mod dtw;

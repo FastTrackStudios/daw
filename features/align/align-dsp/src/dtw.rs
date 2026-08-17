@@ -266,6 +266,10 @@ pub fn warp(
     let mut previous = vec![infinity; width];
     let mut current = vec![infinity; width];
     let mut back = vec![DIAGONAL; n * width];
+    // Where the dub actually starts sounding. Zero when it starts
+    // immediately, which makes the rule below reduce to a free first
+    // frame — the behaviour a path with no lead-in wants anyway.
+    let first_sound = dub.iter().position(|f| !f.silent).unwrap_or(0);
 
     for i in 0..n {
         current.iter_mut().for_each(|c| *c = infinity);
@@ -287,30 +291,21 @@ pub fn warp(
             // offset it was just handed — far enough, on anything as
             // repetitive as a sung phrase, to settle a syllable out.
             let drift = ((j as f64) - (i as f64 + offset_frames)).abs() / band as f64;
-            let c = cost(dub[i], reference[j as usize], &cost_cfg)
-                + warp_cfg.diagonal_bias * drift;
+            let c = cost(dub[i], reference[j as usize], &cost_cfg) + warp_cfg.diagonal_bias * drift;
 
-            if i == 0 {
-                // The first dub frame may start anywhere in the band, so
-                // a dub that begins late is not forced to stretch its
-                // opening silence to reach the reference.
-                current[o] = c;
-                back[o] = DIAGONAL;
-                continue;
-            }
-
-            let diagonal = index(i - 1, j - 1).map(|p| previous[p]).unwrap_or(infinity);
+            let previous_row = i.checked_sub(1);
+            let diagonal = previous_row
+                .and_then(|p| index(p, j - 1))
+                .map(|p| previous[p])
+                .unwrap_or(infinity);
             // Compressing consumes this dub frame; stretching consumes
             // this reference frame. Which one it is decides whose silence
             // makes the step cheap.
-            let compress = index(i - 1, j)
-                .map(|p| {
+            let compress = previous_row
+                .and_then(|row| index(row, j).map(|p| (row, p)))
+                .map(|(row, p)| {
                     previous[p]
-                        + step_penalty(
-                            warp_cfg,
-                            dub[i].silent,
-                            back[(i - 1) * width + p] == COMPRESS,
-                        )
+                        + step_penalty(warp_cfg, dub[i].silent, back[row * width + p] == COMPRESS)
                 })
                 .unwrap_or(infinity);
             let stretch = if j > lo {
@@ -328,13 +323,32 @@ pub fn warp(
                 infinity
             };
 
-            let (best, direction) = if diagonal <= compress && diagonal <= stretch {
+            let (mut best, direction) = if diagonal <= compress && diagonal <= stretch {
                 (diagonal, DIAGONAL)
             } else if compress <= stretch {
                 (compress, COMPRESS)
             } else {
                 (stretch, STRETCH)
             };
+            // Open begin, over the dub's silent lead-in only.
+            //
+            // A path forced to start at the dub's first frame has to
+            // account for every frame before the singer comes in, and
+            // those frames have no partner — there is nothing in the
+            // reference they correspond to. Charged for them, the search
+            // does the rational thing and goes looking for somewhere
+            // cheap to put them, and the cheapest place is the
+            // reference's first *gap between phrases* — which lands the
+            // dub's opening syllable on the reference's second one, an
+            // alignment that is perfectly optimal and entirely wrong.
+            //
+            // Letting the path simply begin where the audio does removes
+            // the pressure rather than penalising the symptom. It is the
+            // standard open-begin DTW, restricted to the run of leading
+            // silence so that it cannot be used to skip a real phrase.
+            if i <= first_sound {
+                best = best.min(0.0);
+            }
             if best.is_finite() {
                 current[o] = best + c;
                 back[i * width + o] = direction;

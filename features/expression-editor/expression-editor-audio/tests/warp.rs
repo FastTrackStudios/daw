@@ -132,10 +132,7 @@ fn the_markers_are_sorted_and_have_no_repeated_knots() {
 
 #[test]
 fn an_empty_alignment_writes_nothing() {
-    let alignment = expression_editor_audio::align::Alignment {
-        map: Vec::new(),
-        frame_rate: RATE,
-    };
+    let alignment = expression_editor_audio::align::Alignment::from_map(Vec::new(), RATE);
     assert!(alignment_markers(&alignment, TakePlacement::unit(RATE)).is_empty());
 }
 

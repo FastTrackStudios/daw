@@ -187,7 +187,36 @@ impl Plan {
                 map[i] = map[i - 1];
             }
         }
-        Some(Alignment { map, frame_rate })
+        // The knots are already known — they are the moves, plus the two
+        // held ends — so the alignment carries them rather than making
+        // the write path rediscover them from the map. One stretch
+        // marker per quantized hit, not one per analysis frame.
+        let last_index = anchors.len().saturating_sub(1);
+        let warp_anchors = anchors
+            .iter()
+            .enumerate()
+            .map(|(i, &(x, shift))| crate::align::Anchor {
+                dub: x as usize,
+                // Clamped exactly as the map above is: there is no
+                // global offset in a quantize plan, so a target before
+                // the take's own start is not a take that belongs
+                // earlier — it is a correction with nowhere to go.
+                reference: (x + shift).max(0.0),
+                confidence: 1.0,
+                kind: match i {
+                    0 => crate::align::AnchorKind::Start,
+                    i if i == last_index => crate::align::AnchorKind::End,
+                    _ => crate::align::AnchorKind::Onset,
+                },
+            })
+            .collect();
+
+        Some(Alignment {
+            map,
+            anchors: warp_anchors,
+            offset: crate::align::Offset::NONE,
+            frame_rate,
+        })
     }
 
     /// The plan as a list of pieces to cut and move, for SPLIT mode.

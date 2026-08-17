@@ -61,7 +61,10 @@ fn with_nothing_on_there_is_no_envelope_rather_than_a_flat_one() {
     assert!(l.sum().is_none());
 
     l.set(DynamicsLane::Gate, flat(10, 0.0));
-    assert!(l.sum().is_some(), "a dimension at 0 dB is still switched on");
+    assert!(
+        l.sum().is_some(),
+        "a dimension at 0 dB is still switched on"
+    );
 }
 
 #[test]

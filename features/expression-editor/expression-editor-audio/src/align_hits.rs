@@ -188,5 +188,34 @@ pub fn align_hits(
         }
     }
 
-    Some(Alignment { map, frame_rate })
+    // The anchors are already known here — they are the paired hits, and
+    // the two held ends. Saying so means the write path gets a marker per
+    // hit rather than one per frame, exactly as it does for the frame
+    // matcher, and for the same reason: the moments worth pinning on a
+    // kit are the hits, and nothing in a decay corresponds to anything.
+    let last_index = anchors.len().saturating_sub(1);
+    let warp_anchors = anchors
+        .iter()
+        .enumerate()
+        .map(|(i, &(x, shift))| crate::align::Anchor {
+            dub: x as usize,
+            // Clamped as the map is: hit pairing has no offset stage, so
+            // a target before the take's start is a correction with
+            // nowhere to go rather than a take that belongs earlier.
+            reference: (x + shift).max(0.0),
+            confidence: 1.0,
+            kind: match i {
+                0 => crate::align::AnchorKind::Start,
+                i if i == last_index => crate::align::AnchorKind::End,
+                _ => crate::align::AnchorKind::Onset,
+            },
+        })
+        .collect();
+
+    Some(Alignment {
+        map,
+        anchors: warp_anchors,
+        offset: crate::align::Offset::NONE,
+        frame_rate,
+    })
 }

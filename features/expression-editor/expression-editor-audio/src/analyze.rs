@@ -36,6 +36,15 @@ pub struct Analysis {
     /// Raw per-frame detection, kept so a re-segmentation does not have
     /// to re-run YIN over the whole take.
     pub frames: TuneAnalysis,
+    /// The same frames described the way [`crate::align`] needs them:
+    /// four bands of energy, onset strength, noisiness, and the pitch
+    /// track folded in.
+    ///
+    /// Extracted here rather than on demand because it must be measured
+    /// at exactly `frames`' hop and window — frame *i* has to mean the
+    /// same audio in both, and reconstructing that from a caller is how
+    /// two frame indices quietly stop describing the same moment.
+    pub align: align_dsp::Features,
 }
 
 /// How the take is analysed.
@@ -102,11 +111,31 @@ pub fn analyze_take(samples: &[f64], sample_rate: f64, cfg: TakeConfig) -> Analy
         .collect();
 
     let doc = crate::to_doc_with_audio(&pitch, frame_rate, &rms, &voiced_or_silent);
+
+    // `tune_dsp::analyze` frames every `hop` samples over a window four
+    // times that (its YIN window, quartered), so this reproduces its
+    // framing exactly and the two frame counts agree.
+    let hop = frames.hop.max(1);
+    let semitones: Vec<Option<f64>> = frames
+        .frames
+        .iter()
+        .map(|f| f.f0_hz.map(tune_dsp::hz_to_midi))
+        .collect();
+    let align = align_dsp::extract(
+        samples,
+        sample_rate,
+        hop,
+        hop * 4,
+        align_dsp::FeatureConfig::default(),
+    )
+    .with_pitch(&semitones);
+
     Analysis {
         doc,
         pitch,
         frame_rate,
         frames,
+        align,
     }
 }
 

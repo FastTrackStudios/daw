@@ -22,6 +22,7 @@ expression-editor-core = { workspace = true }
 # pitch-detected notes, so this is where their `Timed` impl is wanted.
 expression-editor-tools = { workspace = true, features = ["pitch"] }
 tune-dsp = { workspace = true }
+align-dsp = { workspace = true }
 realfft = { workspace = true }
 daw = { workspace = true, optional = true }
 

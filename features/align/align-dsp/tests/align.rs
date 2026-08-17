@@ -146,7 +146,11 @@ fn a_late_dub_reports_how_late_it_is() {
         offset.seconds,
         offset.score
     );
-    assert!(offset.score > 0.5, "a real match should score: {}", offset.score);
+    assert!(
+        offset.score > 0.5,
+        "a real match should score: {}",
+        offset.score
+    );
 }
 
 #[test]
@@ -366,10 +370,20 @@ fn strength_scales_the_correction_but_not_the_offset() {
     let a = align(&r, &d, &full).expect("aligned");
     let b = align(&r, &d, &half).expect("aligned");
 
-    let (a_late, b_late) = (shift_at(&a, 2.0).abs(), shift_at(&b, 2.0).abs());
+    // Measured against the offset, not against zero. Strength is a
+    // judgement about the *performance* — how much of the dub's own
+    // phrasing to keep — and where the take sits on the timeline is not
+    // a matter of phrasing. So the global offset is applied in full at
+    // any strength, and only the warp on top of it is scaled.
+    let warp_of = |x: &align_dsp::Alignment| shift_at(x, 2.0) - x.offset.seconds;
+    let (full_warp, half_warp) = (warp_of(&a), warp_of(&b));
     assert!(
-        b_late < a_late * 0.75,
-        "half strength should correct roughly half as far: {a_late:.4} vs {b_late:.4}"
+        full_warp.abs() > 0.02,
+        "the fixture must actually need warping, or this proves nothing: {full_warp:.4} s"
+    );
+    assert!(
+        (half_warp - full_warp * 0.5).abs() < 0.1 * full_warp.abs() + 0.003,
+        "half strength should warp half as far: {full_warp:.4} → {half_warp:.4}"
     );
 }
 
@@ -397,8 +411,15 @@ fn the_same_source_preset_shifts_without_stretching() {
     dub.extend(phrase(LINE, 0.0, 1.0, 1.0));
 
     let cfg = AlignConfig::for_material(Material::SameSource);
-    let a = align_audio(&analyse(&reference), &reference, &analyse(&dub), &dub, SR, &cfg)
-        .expect("aligned");
+    let a = align_audio(
+        &analyse(&reference),
+        &reference,
+        &analyse(&dub),
+        &dub,
+        SR,
+        &cfg,
+    )
+    .expect("aligned");
 
     assert!(
         (a.max_stretch_ratio() - 1.0).abs() < 1e-6,
@@ -441,8 +462,15 @@ fn a_percussive_pair_aligns_on_its_transients() {
     let dub = hits(&pattern, 0.070);
 
     let cfg = AlignConfig::for_material(Material::Percussive);
-    let a = align_audio(&analyse(&reference), &reference, &analyse(&dub), &dub, SR, &cfg)
-        .expect("aligned");
+    let a = align_audio(
+        &analyse(&reference),
+        &reference,
+        &analyse(&dub),
+        &dub,
+        SR,
+        &cfg,
+    )
+    .expect("aligned");
 
     assert!(
         (a.offset.seconds + 0.070).abs() < 0.010,
@@ -487,25 +515,5 @@ fn silence_reads_as_silence_and_a_note_does_not() {
     let f = analyse(&audio);
 
     assert!(f.frames[10].silent, "the opening gap is silence");
-    assert!(
-        !f.frames[f.len() - 10].silent,
-        "and the note is not"
-    );
-}
-
-#[test]
-#[ignore = "diagnostic"]
-fn diagnostic() {
-    let (_, r) = analyse_sung(LINE, 0.0, 1.0, 1.0, 0.0);
-    let (_, d) = analyse_sung(LINE, 0.0, 1.06, 1.0, 0.0);
-    let a = align(&r, &d, &vocal()).expect("aligned");
-    println!("ref frames {} dub frames {}", r.len(), d.len());
-    println!("offset {:?}", a.offset);
-    println!("anchors {}", a.anchors.len());
-    for an in a.anchors.iter().take(8) {
-        println!("  dub {} -> {:.1} ({:?} conf {:.2})", an.dub, an.reference, an.kind, an.confidence);
-    }
-    for t in [0.2, 1.0, 2.0] {
-        println!("shift at {t} = {:.4}", shift_at(&a, t));
-    }
+    assert!(!f.frames[f.len() - 10].silent, "and the note is not");
 }

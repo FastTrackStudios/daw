@@ -31,6 +31,14 @@
       "Escape": "mode:normal",
       "d": "operator:delete",
       "y": "operator:yank"
+    },
+    "editor": {
+      "z z": "view.memagic",
+      "z i": "view.memagic.fit_item",
+      "z n": "view.memagic.fit_notes",
+      "z c": "view.memagic.center",
+      "z t": "view.memagic.top",
+      "z b": "view.memagic.bottom"
     }
   },
   "keymap_context": {

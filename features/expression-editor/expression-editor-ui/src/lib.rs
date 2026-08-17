@@ -16,6 +16,7 @@
 use dioxus::prelude::*;
 use dioxus_elements::input_data::MouseButton;
 use expression_editor_core::memagic;
+use input::InputCommand;
 use expression_editor_core::tools::Mods;
 use expression_editor_core::{Editor, Dimension, Viewport};
 use keyboard_types::Modifiers;
@@ -30,6 +31,7 @@ pub mod envelopes;
 pub mod velocity_panel;
 pub mod guitar;
 pub mod inspector;
+pub mod keys;
 pub mod interaction;
 pub mod menu_ui;
 pub mod multitool_ui;
@@ -378,6 +380,10 @@ fn Canvas(
     // where that is. `None` until the pointer has been over the canvas.
     let mut hover = use_signal(|| None::<(f64, f64)>);
 
+    // What can follow the keys typed so far. Empty means no sequence is
+    // live, which is the overlay's cue to stay hidden.
+    let mut which_key = use_signal(Vec::<keys::Continuation>::new);
+
     // The canvas cell, once mounted, and the loop that keeps the
     // document's viewport equal to it.
     //
@@ -516,15 +522,35 @@ fn Canvas(
                 let key = e.key().to_string();
                 let m = mods_of(e.modifiers());
 
-                // MeMagic. Handled here rather than in `key_down`
-                // because it is the only binding that needs the pointer,
-                // and this is where the hover signal lives.
-                if key == "z" && !m.ctrl {
-                    let (region, anchor) = memagic_at(&editor.read(), hover());
-                    if editor.write().memagic(region, anchor) {
-                        e.prevent_default();
-                        return;
+                // The shared keymap gets first refusal, so which-key
+                // sequences resolve before any hardcoded binding. `z`
+                // used to be hardcoded here, which ate the first key of
+                // every zoom sequence the REAPER profile defines.
+                if key == "Escape" && keys::is_pending() {
+                    keys::cancel();
+                    which_key.set(Vec::new());
+                    e.prevent_default();
+                    return;
+                }
+                let commands = keys::resolve(&key, m);
+                let mut ran = false;
+                for cmd in &commands {
+                    let action = match cmd {
+                        InputCommand::Action(a) => Some(a.0.as_str()),
+                        InputCommand::ActionWithArgs { action, .. } => Some(action.0.as_str()),
+                        _ => None,
+                    };
+                    if let Some(action) = action {
+                        let (region, anchor) = memagic_at(&editor.read(), hover());
+                        ran |= keys::dispatch(&mut editor.write(), action, region, anchor);
                     }
+                }
+                // A half-typed sequence owns the key too: `z` on its way
+                // to `z i` must not also fire the tool shortcut.
+                which_key.set(keys::continuations());
+                if ran || keys::is_pending() {
+                    e.prevent_default();
+                    return;
                 }
 
                 // A pitch drawing is modal, so it takes its keys first
@@ -1770,6 +1796,44 @@ fn Canvas(
                             border-radius: 4px; color: {theme::GOLD}; \
                             font-size: 10px; padding: 2px 7px; pointer-events: none;",
                     "{temperament_name}"
+                }
+            }
+            // ── which-key ────────────────────────────────────────
+            // Shown while a key sequence is half-typed: what can follow,
+            // and what each one does. Bottom-left so it never covers the
+            // pointer, which is what the pending gesture is anchored on.
+            if !which_key().is_empty() {
+                div {
+                    "data-testid": "which-key",
+                    style: format!(
+                        "position: absolute; left: 10px; bottom: 10px; z-index: 40; \
+                         min-width: 220px; max-height: 60%; overflow-y: auto; \
+                         padding: 6px 0; border-radius: 6px; \
+                         border: 1px solid {}; background: {}; color: {}; \
+                         font-size: 11px; box-shadow: 0 6px 24px rgba(0,0,0,0.45);",
+                        theme::PANEL_BORDER, theme::SURFACE_INSET, theme::TEXT,
+                    ),
+                    for c in which_key().into_iter() {
+                        div {
+                            key: "{c.key}",
+                            style: "display: flex; align-items: baseline; gap: 8px; \
+                                    padding: 2px 10px;",
+                            span {
+                                style: format!(
+                                    "min-width: 34px; font-weight: 600; color: {};",
+                                    theme::ACCENT,
+                                ),
+                                "{c.key}"
+                            }
+                            span {
+                                style: format!(
+                                    "color: {};",
+                                    if c.is_group { theme::TEXT_DIM } else { theme::TEXT },
+                                ),
+                                if c.is_group { "+{c.label}" } else { "{c.label}" }
+                            }
+                        }
+                    }
                 }
             }
         }

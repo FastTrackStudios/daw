@@ -155,12 +155,12 @@ pub fn anchors(
     // warp only — the part of the move that is a judgement about the
     // performance. The global offset passes through both untouched,
     // because it is a fact about where the take sits.
-    // Not clamped to zero. A negative reference position means the dub
-    // must move earlier than the reference's own first frame, which is a
-    // real answer for a dub that was recorded late; clamping it here
-    // would flatten the shift near the start into a stretch, and turn a
-    // rigid move into a warp. Where the take's start actually lies is the
-    // host's business.
+    //
+    // Not clamped to zero, either: a negative target means the dub must
+    // move earlier than the reference's own first frame, which is the
+    // right answer for a dub recorded late. Clamping here would flatten
+    // the shift near the start into a stretch, turning a rigid move into
+    // a warp. Where the take's start actually lies is the host's problem.
     let target = |i: usize| -> f64 {
         let source = i as f64 + offset_frames;
         source + (map[i] - source).clamp(-cap, cap) * strength
@@ -175,7 +175,7 @@ pub fn anchors(
     }];
 
     let mut previous_dub = 0usize;
-    for i in 1..last {
+    for (i, &mapped) in map.iter().enumerate().take(last).skip(1) {
         let strength_dub = onset_strength(dub, i);
         if strength_dub < cfg.onset_strength {
             continue;
@@ -185,7 +185,7 @@ pub fn anchors(
         if strength_dub < onset_strength(dub, i + 1) || strength_dub <= onset_strength(dub, i - 1) {
             continue;
         }
-        let strength_reference = onset_strength_near(reference, map[i]);
+        let strength_reference = onset_strength_near(reference, mapped);
         // The weaker of the two: an onset only one take can see is not
         // agreement, and acting on it moves audio on one take's evidence.
         let agreement = strength_dub.min(strength_reference);

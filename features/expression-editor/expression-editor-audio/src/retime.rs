@@ -115,9 +115,17 @@ pub fn stretch_markers(
 /// between anchors, which keeps the material continuous — the reason to
 /// have both.
 ///
-/// One marker per anchor in the alignment: where a frame plays now, and
-/// where it played before. Everything between two markers stretches to
-/// fit.
+/// One marker per **anchor** in the alignment: where a moment plays now,
+/// and where it played before. Everything between two markers stretches
+/// to fit.
+///
+/// Anchors, not frames. This wrote a marker per analysis frame until an
+/// alignment learned to say which of its frames were load-bearing — some
+/// eighteen thousand markers on a three-minute take, which pinned the
+/// inside of every sustained note to whatever the matcher happened to
+/// decide and left a result no one could edit afterwards. An alignment
+/// built by hand still has no anchors, and still gets the dense
+/// treatment; it has nothing better to offer.
 ///
 /// Returns empty when the alignment corrects nothing, which is the case
 /// worth being cheap about: an untouched take must not acquire a warp
@@ -136,10 +144,24 @@ pub fn alignment_markers(
     };
     let secs = |frames: f64| frames / rate.max(1e-9);
 
+    let knots: Vec<(f64, f64)> = if alignment.anchors.is_empty() {
+        alignment
+            .map
+            .iter()
+            .enumerate()
+            .map(|(i, &target)| (i as f64, target))
+            .collect()
+    } else {
+        alignment
+            .anchors
+            .iter()
+            .map(|a| (a.dub as f64, a.reference))
+            .collect()
+    };
+
     let mut out = Vec::new();
     let mut corrected = false;
-    for (i, &target) in alignment.map.iter().enumerate() {
-        let was = i as f64;
+    for (was, target) in knots {
         if (target - was).abs() > 1e-9 {
             corrected = true;
         }

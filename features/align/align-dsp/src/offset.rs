@@ -41,7 +41,8 @@ pub struct Offset {
     /// Seconds to **add to dub time** to land on reference time. A dub
     /// that came in late has a negative offset — it must move earlier.
     pub seconds: f64,
-    /// Peak correlation, `0.0..=1.0`. Below about 0.3 the answer is not
+    /// Peak correlation, `0.0..=1.0`, discounted by how much of the two
+    /// takes overlapped at that lag. Below about 0.3 the answer is not
     /// evidence of anything.
     pub score: f64,
 }
@@ -190,13 +191,28 @@ pub fn correlate(
         if hi <= lo || hi - lo < floor.max(4) {
             continue;
         }
-        let ea = energy(&energy_a, (lo as isize + lag) as usize, (hi as isize + lag) as usize);
+        let ea = energy(
+            &energy_a,
+            (lo as isize + lag) as usize,
+            (hi as isize + lag) as usize,
+        );
         let eb = energy(&energy_b, lo, hi);
         let norm = (ea * eb).sqrt();
         if norm <= 1e-12 {
             continue;
         }
-        let score = raw_at(&raw, lag) / norm;
+        // Discounted by how much of the shorter take actually overlaps.
+        //
+        // Without this the search reliably prefers a lag where only a
+        // third of the material lines up, because a normalized
+        // correlation over two well-matched seconds beats one over a
+        // whole take that agrees slightly less — and any repetitive
+        // performance, which is to say any performance, offers such a
+        // lag. The discount is free where it should be: when one take is
+        // simply late, the shorter of the two still overlaps completely
+        // at the true lag, so the correct answer is never penalised.
+        let overlap = (hi - lo) as f64 / n.min(m) as f64;
+        let score = raw_at(&raw, lag) / norm * overlap;
         scores[(lag - lag_lo) as usize] = score;
         if score > best {
             best = score;

@@ -135,59 +135,73 @@ fn strength_scales_the_correction_without_changing_its_shape() {
     dub.extend(phrase(LINE, 0.0, 1.0));
     let (r, d) = (analyse(&reference), analyse(&dub));
 
-    let full = align(&r, &d, AlignConfig::default()).unwrap();
-    let half = align(
-        &r,
-        &d,
-        AlignConfig {
-            strength: 0.5,
+    let strength = |v: f64| AlignConfig {
+        anchors: expression_editor_audio::align::AnchorConfig {
+            strength: v,
             ..Default::default()
         },
-    )
-    .unwrap();
-    let none = align(
-        &r,
-        &d,
-        AlignConfig {
-            strength: 0.0,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+        ..Default::default()
+    };
+    let full = align(&r, &d, strength(1.0)).unwrap();
+    let half = align(&r, &d, strength(0.5)).unwrap();
+    let none = align(&r, &d, strength(0.0)).unwrap();
 
-    let (f, h) = (shift_at(&full, 0.6), shift_at(&half, 0.6));
-    assert!((h - f * 0.5).abs() < 0.02, "half is half: {f} vs {h}");
+    // Measured against the offset. Strength is a judgement about the
+    // performance — how much of the dub's own phrasing to keep — and
+    // where the take sits on the timeline is not a matter of phrasing,
+    // so the global offset is applied in full at every strength and only
+    // the warp on top of it is scaled.
+    let warp = |a: &expression_editor_audio::Alignment| shift_at(a, 0.6) - a.offset.seconds;
+    let (f, h) = (warp(&full), warp(&half));
     assert!(
-        none.max_shift_secs() < 1e-9,
-        "zero strength leaves the dub exactly as sung"
+        (h - f * 0.5).abs() < 0.1 * f.abs() + 0.01,
+        "half is half: {f} vs {h}"
+    );
+    assert!(
+        warp(&none).abs() < 1e-9,
+        "zero strength leaves the dub's phrasing exactly as sung"
     );
 }
 
 #[test]
-fn nothing_moves_further_than_the_configured_limit() {
-    // A dub a second and a half late. Alignment *could* fix it — the
-    // parts do correspond — but the user asked for corrections no
-    // larger than 300 ms, and that is a promise about the result rather
-    // than a hint to the search. Better a partly-corrected take than
-    // one silently dragged five times further than allowed.
+fn a_badly_placed_dub_moves_as_far_as_it_must_but_warps_only_as_far_as_allowed() {
+    // A dub a second and a half late. This used to be unfixable and the
+    // limit said so: corrections were capped at `max_shift_secs`, and a
+    // take outside that was left partly corrected rather than silently
+    // dragged. With a macro offset stage the two are no longer the same
+    // question. *Where the take sits* is a fact, and it is fixed in
+    // full; *how its phrasing is bent* is a judgement, and that is what
+    // the limit governs.
     let reference = phrase(LINE, 0.0, 1.0);
     let mut dub = gap(1.5);
     dub.extend(phrase(LINE, 0.0, 1.0));
 
     let cfg = AlignConfig {
-        max_shift_secs: 0.3,
+        anchors: expression_editor_audio::align::AnchorConfig {
+            max_shift_secs: 0.3,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let a = align(&analyse(&reference), &analyse(&dub), cfg).expect("aligned");
+
     assert!(
-        a.max_shift_secs() <= 0.35,
-        "nothing moved further than the band allows: {} s",
-        a.max_shift_secs()
+        (a.offset.seconds + 1.5).abs() < 0.05,
+        "the offset stage should find the whole 1.5 s: {} s",
+        a.offset.seconds
     );
+    // Sampled inside the phrase, past the lead-in the offset moved.
+    for t in [1.8, 2.2, 2.6] {
+        let warp = shift_at(&a, t) - a.offset.seconds;
+        assert!(
+            warp.abs() <= 0.31,
+            "warped {warp} s at {t} s, beyond the 0.3 s asked for"
+        );
+    }
 }
 
 #[test]
-fn markers_are_thinned_but_keep_both_ends() {
+fn markers_land_on_anchors_and_keep_both_ends() {
     let reference = phrase(LINE, 0.0, 1.0);
     let mut dub = gap(0.1);
     dub.extend(phrase(LINE, 0.0, 1.0));
@@ -195,20 +209,31 @@ fn markers_are_thinned_but_keep_both_ends() {
     let a = align(&analyse(&reference), &d, AlignConfig::default()).expect("aligned");
 
     let hop = d.frames.hop;
-    let dense = a.markers(hop, 1);
-    let thin = a.markers(hop, 16);
-    assert_eq!(dense.len(), a.map.len());
-    assert!(thin.len() < dense.len() / 8);
+    let markers = expression_editor_audio::align::warp_markers(&a, hop);
 
-    // Both ends survive thinning, or the map would be undefined at the
-    // edges and the take would snap back there.
-    assert_eq!(thin.first().unwrap().sample, dense.first().unwrap().sample);
-    assert_eq!(thin.last().unwrap().sample, dense.last().unwrap().sample);
+    // One per anchor, not one per frame. A marker per frame pins the
+    // inside of every sustained note to whatever the matcher decided,
+    // and leaves a result no one can edit by hand afterwards.
+    assert_eq!(markers.len(), a.anchors.len());
+    assert!(
+        markers.len() < a.map.len() / 8,
+        "{} markers for {} frames is not a reduction",
+        markers.len(),
+        a.map.len()
+    );
+
+    // Both ends survive, or the map is undefined at the edges and the
+    // take snaps back there.
+    assert_eq!(markers.first().unwrap().sample, 0.0);
+    assert_eq!(
+        markers.last().unwrap().sample,
+        ((a.map.len() - 1) * hop) as f64
+    );
     // Anchored at dub time, sorted, and carrying a real correction.
-    for pair in thin.windows(2) {
+    for pair in markers.windows(2) {
         assert!(pair[1].sample > pair[0].sample);
     }
-    assert!(thin.iter().any(|m| m.d_time.abs() > 1.0));
+    assert!(markers.iter().any(|m| m.d_time.abs() > 1.0));
 }
 
 #[test]
@@ -220,18 +245,33 @@ fn an_empty_take_declines_to_align() {
 }
 
 #[test]
-fn the_map_covers_every_dub_frame_and_stays_in_the_reference() {
+fn the_map_covers_every_dub_frame_and_moves_no_further_than_allowed() {
     let reference = phrase(LINE, 0.0, 1.0);
     let dub = phrase(LINE, 0.0, 1.2);
     let (r, d) = (analyse(&reference), analyse(&dub));
-    let a = align(&r, &d, AlignConfig::default()).expect("aligned");
+    let cfg = AlignConfig::default();
+    let a = align(&r, &d, cfg).expect("aligned");
 
     assert_eq!(a.map.len(), d.frames.frames.len());
-    let last_ref = (r.frames.frames.len() - 1) as f64;
-    assert!(
-        a.map.iter().all(|&v| v >= 0.0 && v <= last_ref),
-        "the map never points outside the reference"
-    );
+    for pair in a.map.windows(2) {
+        assert!(pair[1] >= pair[0], "monotonic, or it stutters: {pair:?}");
+    }
+
+    // Deliberately *not* "inside the reference". A map value is a time,
+    // not an index into the reference's frames, and a dub that has to
+    // move earlier than the reference's own first frame produces
+    // negative values that mean exactly what they say. What is bounded
+    // is the warp: how far the phrasing is bent, over and above wherever
+    // the offset stage decided the take belongs.
+    let offset_frames = a.offset.seconds * a.frame_rate;
+    let limit = cfg.anchors.max_shift_secs * a.frame_rate + 1.0;
+    for (i, &v) in a.map.iter().enumerate() {
+        let warp = v - i as f64 - offset_frames;
+        assert!(
+            warp.abs() <= limit,
+            "frame {i} warped {warp} frames, beyond the {limit} allowed"
+        );
+    }
 }
 
 #[cfg(feature = "render")]
@@ -245,7 +285,7 @@ fn an_aligned_dub_renders_and_keeps_its_pitch() {
     let mut d = analyse(&dub_audio);
 
     let a = align(&r, &d, AlignConfig::default()).expect("aligned");
-    d.pitch.markers = a.markers(d.frames.hop, 8);
+    d.pitch.markers = expression_editor_audio::align::warp_markers(&a, d.frames.hop);
     let out = d.render(&dub_audio);
     assert!(!out.is_empty());
 
