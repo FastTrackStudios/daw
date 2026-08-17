@@ -8,7 +8,12 @@ repository = "https://github.com/DioxusLabs/dioxus-test/"
 publish = false
 
 [dependencies]
-blitz-dom = { workspace = true, features = ["autofocus"] }
+# `custom-widget` because dioxus-native enables it, and a harness that
+# did not would lay a custom widget out and then paint nothing where it
+# is — the failure would look like a bug in the widget rather than a
+# missing feature in the test build. Features unify per build graph, and
+# dioxus-native is not in the graph when a UI crate runs its own tests.
+blitz-dom = { workspace = true, features = ["autofocus", "custom-widget"] }
 # HTML parser provider so `dangerous_inner_html` works in tests exactly
 # as under dioxus-native (which registers the same provider).
 blitz-html = { workspace = true }
@@ -27,7 +32,7 @@ smol_str = "0.3"
 # — the same anyrender_vello_cpu path blitz's own screenshot tests use.
 anyrender = { workspace = true }
 anyrender_vello_cpu = { workspace = true }
-blitz-paint = { workspace = true }
+blitz-paint = { workspace = true, features = ["custom-widget"] }
 peniko = { workspace = true }
 png = "0.17"
 
