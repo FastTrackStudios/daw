@@ -113,6 +113,11 @@ const STATUS: f64 = 18.0;
 
 
 /// Hand the editor the room left under the chooser and status line.
+///
+/// The runner subtracts only its *own* chrome. What the editor draws
+/// around the roll is the editor's business, and `sizing::Chrome`
+/// accounts for it — a host that tried to subtract the toolbar too would
+/// be the second source of truth all over again.
 fn report_space(window_w: f64, window_h: f64) {
     expression_editor_ui::available_space(window_w, (window_h - BAR - STATUS).max(1.0));
 }

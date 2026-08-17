@@ -44,6 +44,10 @@ use expression_editor_ui::ExpressionEditor;
 
 const PPQ: f64 = 960.0;
 
+/// The window every gesture here is made in. One constant, because the
+/// editor is told this same size and the two must agree.
+const WINDOW: (u32, u32) = (1000, 620);
+
 thread_local! {
     /// The editor the next `Surface` mounts on.
     ///
@@ -73,6 +77,12 @@ fn editor_with_notes(tool: Tool, mode: Mode) -> Editor {
     ed.set_mode(mode);
     ed.tool = tool;
     ed.dimension = Dimension::Pitch;
+    // Fit the fixture to the window it is about to be mounted in, so the
+    // camera these tests compute note positions from is the camera the
+    // surface is actually drawn with. Left at an arbitrary size, the
+    // editor resized itself on mount and every precomputed coordinate
+    // pointed at where the note used to be.
+    expression_editor_ui::sizing::fit(&mut ed, WINDOW.0 as f64, WINDOW.1 as f64, true);
     ed.reset_view();
     ed
 }
@@ -80,6 +90,10 @@ fn editor_with_notes(tool: Tool, mode: Mode) -> Editor {
 /// The editor, plus the numbers a gesture should have moved.
 #[component]
 fn Surface() -> Element {
+    // What a host does. Without it the editor keeps the viewport its
+    // fixture was built with, which need not match the cell it is laid
+    // out in — and the roll would then overflow and be clipped.
+    use_hook(|| expression_editor_ui::available_space(WINDOW.0 as f64, WINDOW.1 as f64));
     let editor = use_signal(|| {
         STAGED
             .with(|s| s.borrow_mut().take())
@@ -103,8 +117,21 @@ fn Surface() -> Element {
     );
     drop(ed);
     rsx! {
-        div { "data-testid": "readout", "{readout}" }
-        ExpressionEditor { editor }
+        style { "html, body {{ margin: 0; padding: 0; width: 100%; height: 100%; }}" }
+        // Out of flow, so the editor gets the whole window and the space
+        // reported below is the truth. In flow it stole a band off the
+        // top, the roll was drawn taller than the cell it sat in, and the
+        // bottom of a sweep landed outside the element — which is how a
+        // full-height eraser drag came to hit nothing.
+        div {
+            "data-testid": "readout",
+            style: "position: absolute; top: 0; left: 0; z-index: 10;",
+            "{readout}"
+        }
+        div {
+            style: "width: 100vw; height: 100vh;",
+            ExpressionEditor { editor }
+        }
     }
 }
 
@@ -165,13 +192,48 @@ async fn drag(
     m: Mod,
 ) -> dioxus_test::Result<String> {
     stage(ed);
-    let tester = render(Surface).with_window_size(1000, 620).build();
+    let tester = render(Surface).with_window_size(WINDOW.0, WINDOW.1).build();
+    tester.drain();
+    tester.relayout();
     let el = tester.query(by_testid("roll")).immediately()?;
     let (ox, oy, w, h) = note_area(&el);
     sweep(
         &tester,
         (ox + w * from.0, oy + h * from.1),
         (ox + w * to.0, oy + h * to.1),
+        m,
+    )
+    .await;
+    Ok(tester.query(by_testid("readout")).immediately()?.inner_html())
+}
+
+/// Sweep from the centre of the first note to the centre of the last.
+///
+/// Computed from the camera for the same reason `drag_from_first_note`
+/// is: a sweep stated in fractions of the note area only crosses the
+/// notes at one particular viewport shape, and it silently stops
+/// crossing them when that shape changes. This one crosses every note by
+/// construction, whatever the window.
+async fn drag_across_notes(ed: Editor, m: Mod) -> dioxus_test::Result<String> {
+    let at = |n: &Note, ed: &Editor| {
+        (
+            ed.camera.x((n.start + n.end) / 2.0),
+            ed.camera.y(n.row as f64, ed.viewport),
+        )
+    };
+    let first = at(&ed.doc.notes[0], &ed);
+    let last = at(ed.doc.notes.last().expect("no notes"), &ed);
+
+    stage(ed);
+    let tester = render(Surface).with_window_size(WINDOW.0, WINDOW.1).build();
+    tester.drain();
+    tester.relayout();
+    let el = tester.query(by_testid("roll")).immediately()?;
+    let (ox, oy, _, _) = note_area(&el);
+    sweep(
+        &tester,
+        (ox + first.0, oy + first.1),
+        (ox + last.0, oy + last.1),
         m,
     )
     .await;
@@ -195,7 +257,9 @@ async fn drag_from_first_note(
     let ny = ed.camera.y(note.row as f64, ed.viewport);
 
     stage(ed);
-    let tester = render(Surface).with_window_size(1000, 620).build();
+    let tester = render(Surface).with_window_size(WINDOW.0, WINDOW.1).build();
+    tester.drain();
+    tester.relayout();
     let el = tester.query(by_testid("roll")).immediately()?;
     let (ox, oy, w, h) = note_area(&el);
     let start = (ox + nx, oy + ny);
@@ -245,7 +309,9 @@ async fn the_roll_has_area_for_every_tool() -> dioxus_test::Result<()> {
     // like the gesture, not the layout.
     for tool in Tool::ALL {
         stage(editor_with_notes(tool, Mode::Midi));
-        let tester = render(Surface).with_window_size(1000, 620).build();
+        let tester = render(Surface).with_window_size(WINDOW.0, WINDOW.1).build();
+    tester.drain();
+    tester.relayout();
         let el = tester.query(by_testid("roll")).immediately()?;
         let (w, h) = el.size();
         assert!(w > 0.0 && h > 0.0, "{tool:?}: roll has no area ({w}x{h})");
@@ -353,9 +419,10 @@ async fn the_note_eraser_sweeps_notes_away() -> dioxus_test::Result<()> {
     // notes it was supposed to delete.
     let before = editor_with_notes(Tool::NoteErase, Mode::Midi);
     let notes = before.doc.notes.len();
-    // Diagonally, so the sweep crosses every row: the notes sit on four
-    // different pitches and a horizontal line meets at most one of them.
-    let html = drag(before, (0.02, 0.05), (0.98, 0.95), Mod::None).await?;
+    // Along the notes rather than across the box: they sit on four
+    // different pitches, so a sweep stated in fractions of the area only
+    // meets them at one particular viewport shape.
+    let html = drag_across_notes(before, Mod::None).await?;
     assert!(
         field(&html, "notes") < notes,
         "sweeping with the eraser armed deleted nothing (was {notes}): {html}"

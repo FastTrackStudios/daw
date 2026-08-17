@@ -138,8 +138,22 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
             // `overflow: hidden` silently amputates whatever is on the
             // right, and letting the segments shrink collides each
             // icon with its own label.
-            style: "display: flex; flex: 0 0 auto; flex-wrap: wrap; \
-                    align-items: center; gap: 5px; \
+            "data-testid": "toolbar",
+            // A fixed height that scrolls, not a wrapping one that grows.
+            //
+            // Wrapping made the bar's height a function of the window
+            // *width*, and the roll is sized by subtracting this bar
+            // from the window — so a narrow window silently stole a row
+            // from the roll and the two disagreed about where the roll
+            // began. `overflow-x: auto` keeps everything reachable at
+            // any width without the height ever moving.
+            // `border-box`, so the constant is the row's *total* height.
+            // With the default `content-box` the padding and border
+            // stack on top, and the roll was sized against a number 11px
+            // smaller than the row it was subtracting.
+            style: "display: flex; flex: 0 0 auto; flex-wrap: nowrap; \
+                    box-sizing: border-box; height: {crate::sizing::TOOLBAR_H}px; \
+                    align-items: center; gap: 5px; overflow-x: auto; \
                     padding: 5px 8px; background: {theme::PANEL}; \
                     border-bottom: 1px solid {theme::PANEL_BORDER}; \
                     font-family: system-ui, sans-serif;",
@@ -462,8 +476,11 @@ pub fn ChordBox(editor: Signal<Editor>) -> Element {
 
     rsx! {
         div {
+            "data-testid": "chord-box",
             style: "display: flex; flex: 0 0 auto; align-items: center; gap: 10px; \
-                    height: 30px; padding: 0 10px; background: {theme::SURFACE_BAR}; \
+                    box-sizing: border-box; height: {crate::sizing::CHORD_H}px; \
+                    padding: 0 10px; \
+                    background: {theme::SURFACE_BAR}; \
                     border-bottom: 1px solid {theme::PANEL_BORDER}; \
                     font-family: system-ui, sans-serif; overflow: hidden;",
 
@@ -550,8 +567,10 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
 
     rsx! {
         div {
+            "data-testid": "status-bar",
             style: "display: flex; flex: 0 0 auto; align-items: center; gap: 5px; \
-                    padding: 4px 8px; background: {theme::PANEL}; \
+                    box-sizing: border-box; height: {crate::sizing::STATUS_H}px; \
+                    padding: 0 8px; background: {theme::PANEL}; \
                     border-top: 1px solid {theme::PANEL_BORDER}; \
                     color: {theme::TEXT_DIM}; font-size: 10px; \
                     font-family: system-ui, sans-serif; overflow: hidden;",

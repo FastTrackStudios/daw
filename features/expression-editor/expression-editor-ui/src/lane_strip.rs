@@ -78,20 +78,29 @@ pub fn LaneStrip(editor: Signal<Editor>) -> Element {
 
     rsx! {
         div {
-            style: "position: relative; flex: 0 0 auto; height: {h}px; \
+            "data-testid": "lane-strip",
+            style: "position: relative; flex: 0 0 auto; box-sizing: border-box; \
+                    height: {h}px; overflow: hidden; \
                     background: {theme::SURFACE_BAR}; border-top: 1px solid {theme::PANEL_BORDER};",
             svg {
-                // No `viewBox`, so `element_coordinates()` — which feeds
-                // `strip_write` — is a document coordinate. A scaled svg
-                // would write the velocity of whichever note sat under
-                // the *scaled* position rather than the one clicked.
-                // `preserve_aspect_ratio: none` used to hide exactly that
-                // by stretching rather than letterboxing.
+                // Declared size and used size are the same number, for
+                // the reason spelled out on the roll's svg in `roll.rs`:
+                // Blitz paints an inline svg as a replaced element with
+                // a hardcoded `object-fit: contain`, so anything drawn
+                // is scaled by (element box / declared size).
                 //
-                // The strip's height is fixed by its parent, so unlike
-                // the roll it has no content-sizing problem to solve and
-                // `100%` is enough here.
-                style: "display: block; width: 100%; height: 100%; \
+                // `width: 100%` was *not* enough. A percentage resolves
+                // against layout and leaves the declared size absent, so
+                // usvg still took the tree size from the content bounding
+                // box — and a stem dragged past the top of the strip
+                // rescaled the whole lane. Out of flow with both axes
+                // given, the scale is exactly 1 and
+                // `element_coordinates()` — which feeds `strip_write` —
+                // is a document coordinate.
+                width: "{vp.w + canvas::GUTTER_W:.0}",
+                height: "{h:.0}",
+                style: "position: absolute; left: 0; top: 0; display: block; \
+                        width: {vp.w + canvas::GUTTER_W:.0}px; height: {h:.0}px; \
                         touch-action: none; user-select: none; cursor: ns-resize;",
                 onpointerdown: move |e: PointerEvent| {
                     let c = e.data().element_coordinates();

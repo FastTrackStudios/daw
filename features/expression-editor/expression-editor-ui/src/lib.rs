@@ -133,6 +133,19 @@ pub fn ExpressionEditor(
     let draft = use_signal(|| initial_draft.clone());
     let mut pending = use_signal(|| None::<menu_ui::Pending>);
 
+    // The roll's box, computed here because this is the only component
+    // that knows the whole chrome: the inspector's state is a signal it
+    // owns, and the lane strip's height is a document property. Handing
+    // the answer down is what makes the geometry single-sourced — the
+    // canvas used to read the host's report itself and subtract a
+    // constant that knew about neither.
+    let want = {
+        let ed = editor.read();
+        sizing::AVAILABLE().map(|(w, h)| {
+            sizing::viewport_within(w, h, sizing::chrome_of(&ed, inspector_open()))
+        })
+    };
+
     // Menu items the core could not finish become UI: Properties simply
     // opens the inspector, which is where the note's fields already
     // live. The rest are picked up by the panels that own them.
@@ -161,7 +174,7 @@ pub fn ExpressionEditor(
                     if editor.read().stacked {
                         stack::StackView { editor }
                     } else {
-                        Canvas { editor, drag, drawer, multi, menu_state, pending, draft }
+                        Canvas { editor, drag, drawer, multi, menu_state, pending, draft, want }
                         LaneStrip { editor }
                     }
                 }

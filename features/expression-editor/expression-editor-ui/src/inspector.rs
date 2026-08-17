@@ -54,7 +54,9 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
         // A tab, not a hidden panel: the way back has to be visible.
         return rsx! {
             div {
-                style: "flex: 0 0 auto; width: 18px; display: flex; align-items: center; \
+                "data-testid": "inspector",
+                style: "flex: 0 0 auto; width: {crate::sizing::INSPECTOR_TAB_W}px; \
+                        display: flex; align-items: center; \
                         justify-content: center; background: {theme::PANEL}; \
                         border-left: 1px solid {theme::PANEL_BORDER}; cursor: pointer; \
                         color: {theme::TEXT_DIM}; font-size: 10px;",
@@ -123,7 +125,12 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
 
     rsx! {
         div {
-            style: "flex: 0 0 auto; width: 236px; display: flex; flex-direction: column; \
+            "data-testid": "inspector",
+            // `border-box`: the 1px left border is part of the width the
+            // roll is sized against, not an extra pixel on top of it.
+            style: "flex: 0 0 auto; box-sizing: border-box; \
+                    width: {crate::sizing::INSPECTOR_W}px; \
+                    display: flex; flex-direction: column; \
                     background: {theme::PANEL}; overflow-y: auto; \
                     border-left: 1px solid {theme::PANEL_BORDER}; \
                     color: {theme::TEXT}; font-family: system-ui, sans-serif;",

@@ -1,0 +1,306 @@
+//! The roll's box is stable under scroll.
+//!
+//! The bug this pins: scrolling the roll far enough resized the editor.
+//! An svg whose size comes from its own content is a loop — the drawing
+//! decides the element, the element decides the viewport, the viewport
+//! decides the drawing — and the visible symptom is a piano roll that
+//! shrinks as you scroll down it.
+//!
+//! Measured on the real Blitz DOM, because this is a *layout* claim: a
+//! DOM-shape assertion would pass while the pixels moved.
+
+use dioxus::prelude::*;
+use dioxus_test::{by_testid, render};
+use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
+use expression_editor_core::{Editor, Viewport};
+use expression_editor_ui::ExpressionEditor;
+
+const PPQ: f64 = 960.0;
+
+const WINDOW: (u32, u32) = (1200, 760);
+
+/// A roll with notes spread over three octaves, so scrolling changes
+/// which of them are on screen and by how much the drawn content
+/// overflows the box.
+fn scrollable() -> Editor {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    for i in 0..24u64 {
+        let mut n = Note::new(
+            NoteId(i + 1),
+            PPQ * (i as f64 * 0.3),
+            PPQ * (i as f64 * 0.3 + 0.8),
+            40 + i as i32 * 2,
+        );
+        // Curves that travel: pitch drawings are the content most likely
+        // to reach outside the clip, which is what an intrinsic size
+        // would measure.
+        for k in 0..16 {
+            let f = k as f64 / 15.0;
+            n.pitch.set(n.start + (n.end - n.start) * f, -2.0 + 4.0 * f);
+        }
+        doc.push(n);
+    }
+    let mut ed = Editor::new(doc, Viewport::new(1100.0, 500.0));
+    ed.reset_view();
+    ed
+}
+
+/// The editor, plus a button that scrolls it a long way down.
+///
+/// A button rather than a synthesized wheel event: the claim is about
+/// what a scrolled camera does to layout, and driving the camera
+/// directly keeps the wheel binding out of the test.
+#[component]
+fn Surface() -> Element {
+    let mut editor = use_signal(scrollable);
+    // What a host does: state the space, once. The desktop runner does
+    // this from winit's resize event. Without it the editor keeps the
+    // viewport its document was built with, which is the one case where
+    // `vp` and the cell are allowed to disagree.
+    use_hook(|| expression_editor_ui::available_space(WINDOW.0 as f64, WINDOW.1 as f64));
+    rsx! {
+        // The editor must get the whole window, or `available_space`
+        // above would be a lie and every assertion here would be
+        // measuring the harness's own chrome.
+        style { "html, body {{ margin: 0; padding: 0; width: 100%; height: 100%; }}" }
+        div {
+            style: "width: 100vw; height: 100vh;",
+            // Out of flow, so it costs the editor no space. It is only
+            // ever reached by `.click()`, which dispatches to the element
+            // rather than hit-testing a point, so overlapping the
+            // toolbar does not matter.
+            button {
+                "data-testid": "scroll-down",
+                style: "position: absolute; top: 0; left: 0; z-index: 10; height: 12px;",
+                onclick: move |_| {
+                    let mut ed = editor.write();
+                    for _ in 0..40 {
+                        ed.pan_px(0.0, -400.0);
+                    }
+                },
+                "scroll"
+            }
+            ExpressionEditor { editor }
+        }
+    }
+}
+
+/// Mount, and let the resize effect settle.
+///
+/// The editor is told its space during the first render; applying it is
+/// an effect, so the viewport it produces only reaches layout on the
+/// pass after. Measuring before that pass measures the document's
+/// opening viewport, not the one the host asked for.
+fn mounted() -> dioxus_test::DocumentTester {
+    let doc = render(Surface).with_window_size(WINDOW.0, WINDOW.1).build();
+    doc.drain();
+    doc.relayout();
+    doc
+}
+
+fn size_of(doc: &dioxus_test::DocumentTester, testid: &str) -> (f32, f32) {
+    doc.query(by_testid(testid))
+        .immediately()
+        .unwrap_or_else(|e| panic!("no element {testid}: {e:?}"))
+        .size()
+}
+
+/// Scrolling must not change the size of anything.
+#[test]
+fn the_roll_keeps_its_box_while_it_scrolls() {
+    let doc = mounted();
+
+    let before_cell = size_of(&doc, "canvas-cell");
+    let before_roll = size_of(&doc, "roll");
+
+    doc.query(by_testid("scroll-down"))
+        .immediately()
+        .expect("no scroll button")
+        .click();
+    doc.drain();
+    doc.relayout();
+
+    let after_cell = size_of(&doc, "canvas-cell");
+    let after_roll = size_of(&doc, "roll");
+
+    assert_eq!(
+        before_cell, after_cell,
+        "the canvas cell resized as the roll scrolled"
+    );
+    assert_eq!(
+        before_roll, after_roll,
+        "the roll resized as it scrolled: {before_roll:?} -> {after_roll:?}"
+    );
+}
+
+/// Diagnostic: what the roll actually *paints* before and after a
+/// scroll. Layout can be stable while the painted content is not —
+/// Blitz draws an inline `<svg>` as a replaced element with a hardcoded
+/// `object-fit: contain`, so the scale is (element box / usvg tree
+/// size), and a tree with no width/height takes its size from content.
+#[test]
+#[ignore = "diagnostic — writes PNGs for a human to look at"]
+fn shoot_before_and_after_scroll() {
+    let doc = mounted();
+    std::fs::create_dir_all("target/geometry").unwrap();
+    doc.render_png("target/geometry/before.png");
+    doc.query(by_testid("scroll-down"))
+        .immediately()
+        .expect("no scroll button")
+        .click();
+    doc.drain();
+    doc.relayout();
+    doc.render_png("target/geometry/after.png");
+}
+
+/// Diagnostic: what every piece of chrome actually costs.
+#[test]
+#[ignore = "diagnostic — prints measurements"]
+fn measure_the_chrome() {
+    let doc = mounted();
+    println!("window {:?}", WINDOW);
+    for id in [
+        "canvas-cell",
+        "roll",
+        "toolbar",
+        "track-switcher",
+        "chord-box",
+        "lane-strip",
+        "status-bar",
+        "inspector",
+    ] {
+        match doc.query(by_testid(id)).immediately() {
+            Ok(el) => println!("  {id:>16}: size {:?} origin {:?}", el.size(), el.document_origin()),
+            Err(_) => println!("  {id:>16}: (no data-testid)"),
+        }
+    }
+}
+
+/// Every chrome row is the height its constant says it is.
+///
+/// The roll's box is the window less these rows, so a component that
+/// drifted from its constant would not misplace itself — it would
+/// misplace the *roll*, by making that subtraction wrong. Which is what
+/// the single measured `CHROME_HEIGHT` constant did for months.
+#[test]
+fn the_chrome_is_the_size_its_constants_claim() {
+    use expression_editor_ui::sizing;
+    let doc = mounted();
+
+    // Measured from where each row *starts*, not from `size()`, which
+    // reports the content box — padding and borders are exactly what
+    // this is checking for, so a content box would measure past them.
+    let top_of = |id: &str| {
+        doc.query(by_testid(id))
+            .immediately()
+            .unwrap_or_else(|e| panic!("no {id}: {e:?}"))
+            .document_origin()
+            .1
+    };
+
+    let rows = [
+        ("toolbar", "chord-box", sizing::TOOLBAR_H),
+        ("chord-box", "canvas-cell", sizing::CHORD_H),
+    ];
+    for (id, next, want) in rows {
+        let got = top_of(next) - top_of(id);
+        assert!(
+            (got - want).abs() < 1.0,
+            "{id} occupies {got}px but its constant says {want}px — \
+             the roll is sized by subtracting that constant"
+        );
+    }
+
+    // The status bar is last, so it is measured against the window.
+    let status = WINDOW.1 as f64 - top_of("status-bar");
+    assert!(
+        (status - sizing::STATUS_H).abs() < 1.0,
+        "status bar occupies {status}px, constant says {}px",
+        sizing::STATUS_H
+    );
+
+    // And the inspector is the width term the subtraction kept missing.
+    let inspector = WINDOW.0 as f64
+        - doc
+            .query(by_testid("inspector"))
+            .immediately()
+            .expect("no inspector")
+            .document_origin()
+            .0;
+    assert!(
+        (inspector - sizing::INSPECTOR_W).abs() < 1.0,
+        "inspector occupies {inspector}px, constant says {}px",
+        sizing::INSPECTOR_W
+    );
+}
+
+/// The invariant the scale rests on: what the svg *declares* it is and
+/// what it is *laid out as* must be the same number.
+///
+/// Blitz paints an inline svg with a hardcoded `object-fit: contain`, so
+/// everything drawn is scaled by (element box / declared size). At 1:1
+/// that scale is 1 and an svg user unit is a CSS pixel, which is what
+/// makes `element_coordinates()` a document coordinate. Any other ratio
+/// scales the drawing *and* the pointer mapping, invisibly.
+#[test]
+fn the_roll_is_laid_out_at_the_size_it_declares() {
+    let doc = mounted();
+    let roll = doc
+        .query(by_testid("roll"))
+        .immediately()
+        .expect("no roll");
+    let declared = (
+        roll.attribute("width").expect("svg declares no width"),
+        roll.attribute("height").expect("svg declares no height"),
+    );
+    let declared: (f32, f32) = (
+        declared.0.parse().expect("width is not a number"),
+        declared.1.parse().expect("height is not a number"),
+    );
+    let laid_out = roll.size();
+    assert!(
+        (declared.0 - laid_out.0).abs() < 1.0 && (declared.1 - laid_out.1).abs() < 1.0,
+        "roll declares {declared:?} but is laid out at {laid_out:?} — \
+         everything drawn is scaled by the ratio"
+    );
+}
+
+/// The whole point of the arithmetic: told how much room it has, the
+/// editor gives the roll exactly the cell that is left over.
+///
+/// This is what `sizing::Chrome` is for. When the subtraction forgot the
+/// inspector, the roll was drawn 236px wider than its cell and that
+/// strip of it lived permanently underneath the panel.
+#[test]
+fn the_roll_exactly_fills_its_cell() {
+    let doc = mounted();
+    let cell = size_of(&doc, "canvas-cell");
+    let roll = size_of(&doc, "roll");
+    assert!(
+        (cell.0 - roll.0).abs() < 1.0 && (cell.1 - roll.1).abs() < 1.0,
+        "roll {roll:?} does not fill its cell {cell:?} — \
+         the chrome subtraction is off by {:?}",
+        (cell.0 - roll.0, cell.1 - roll.1)
+    );
+}
+
+/// And that declared size must not follow the content either.
+#[test]
+fn the_declared_size_does_not_follow_the_content() {
+    let doc = mounted();
+    let declared = |d: &dioxus_test::DocumentTester| {
+        let roll = d.query(by_testid("roll")).immediately().expect("no roll");
+        (
+            roll.attribute("width").expect("no width"),
+            roll.attribute("height").expect("no height"),
+        )
+    };
+    let before = declared(&doc);
+    doc.query(by_testid("scroll-down"))
+        .immediately()
+        .expect("no scroll button")
+        .click();
+    doc.drain();
+    doc.relayout();
+    assert_eq!(before, declared(&doc), "the roll re-declared its size as it scrolled");
+}

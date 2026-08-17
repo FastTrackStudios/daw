@@ -20,14 +20,25 @@ fn shortcut(i: usize) -> Option<String> {
     (i < 10).then(|| format!("{}", (i + 1) % 10))
 }
 
+/// Whether the switcher takes a row at all.
+///
+/// One track is the ordinary case and a switcher for it is pure chrome,
+/// so it stays hidden until there is something to switch to.
+///
+/// Public because the roll's box is the window less the chrome above it,
+/// so `sizing` has to ask the same question this component answers. Two
+/// copies of the predicate would mean a second track silently stealing a
+/// row from the roll.
+pub fn is_shown(ed: &Editor) -> bool {
+    ed.tracks.len() >= 2
+}
+
 #[component]
 pub fn TrackSwitcher(editor: Signal<Editor>) -> Element {
     let mut editor = editor;
 
     let ed = editor.read();
-    // One track is the ordinary case and a switcher for it is pure
-    // chrome, so it stays hidden until there is something to switch to.
-    if ed.tracks.len() < 2 {
+    if !is_shown(&ed) {
         return rsx! {};
     }
     let active = ed.active_track();
@@ -42,8 +53,10 @@ pub fn TrackSwitcher(editor: Signal<Editor>) -> Element {
 
     rsx! {
         div {
+            "data-testid": "track-switcher",
             style: "display: flex; flex: 0 0 auto; align-items: stretch; gap: 4px; \
-                    padding: 4px 6px; background: {theme::SURFACE_BAR}; \
+                    box-sizing: border-box; height: {crate::sizing::SWITCHER_H}px; \
+                    padding: 0 6px; background: {theme::SURFACE_BAR}; \
                     border-bottom: 1px solid {theme::PANEL_BORDER}; \
                     font-size: 11px; overflow-x: auto;",
             for (i, name, is_ref, ref_color) in rows {

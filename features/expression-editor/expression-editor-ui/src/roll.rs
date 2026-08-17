@@ -33,7 +33,6 @@ use keyboard_types::Modifiers;
 use crate::interaction::{self, Drag};
 use crate::menu_ui::{self, ContextMenu};
 use crate::multitool_ui::{self, MultiTool};
-use crate::sizing::{viewport_in, AVAILABLE};
 use crate::{canvas, drawer, drawer::ModDrawer, guitar, keys, scroll, theme};
 use crate::{draw_hint_of, handle_mark, BendFlow};
 /// Pointer coordinates in **roll** space — element coordinates minus
@@ -119,6 +118,17 @@ pub fn Canvas(
     menu_state: Signal<ContextMenu>,
     pending: Signal<Option<menu_ui::Pending>>,
     draft: Signal<Option<expression_editor_core::PitchDraft>>,
+    /// The box the roll has been given, computed by the editor root from
+    /// the host's reported space less all of its chrome. `None` until a
+    /// host has said how much room there is, which leaves the viewport
+    /// the document was built with.
+    ///
+    /// A prop rather than something read from `AVAILABLE` here, because
+    /// the terms that decide it — the inspector's width, the lane
+    /// strip's height — are owned up there. Subtracting a constant from
+    /// the window down here is what made the roll an inspector too wide.
+    #[props(default)]
+    want: Option<Viewport>,
 ) -> Element {
     let mut multi = multi;
     let mut editor = editor;
@@ -138,15 +148,14 @@ pub fn Canvas(
     // live, which is the overlay's cue to stay hidden.
     let mut which_key = use_signal(Vec::<keys::Continuation>::new);
 
-    // Follow the host's report of how much room there is.
+    // Take the box the root worked out for us.
     //
     // An effect, not a poll and not an element measurement: it runs when
-    // `AVAILABLE` changes and never touches the document, so there is no
+    // `want` changes and never touches the document, so there is no
     // relayout per tick and nothing to re-enter mid-dispatch. See
     // `crate::sizing` for why measuring directly is not on the table.
     use_effect(move || {
-        let Some((w, h)) = AVAILABLE() else { return };
-        let want = viewport_in(w, h);
+        let Some(want) = want else { return };
         if let Ok(mut ed) = editor.try_write()
             && ((ed.viewport.w - want.w).abs() >= 1.0 || (ed.viewport.h - want.h).abs() >= 1.0)
         {
@@ -428,56 +437,62 @@ pub fn Canvas(
                 // The roll is the surface every gesture lands on, so it
                 // carries an id a test can aim a pointer at (#167).
                 "data-testid": "roll",
-                // **No `viewBox`, and an explicit pixel size.** Both
-                // halves are load-bearing, and each of the other three
-                // combinations was tried and is wrong:
+                // **The declared size and the element box are the same
+                // number, and that number is `vp`.** Both halves are
+                // load-bearing, for one reason that took four failed
+                // attempts to find:
                 //
-                // - `viewBox` + `100%`: the drawing scales to the
-                //   element, and the factor is the ratio of two numbers
-                //   nothing keeps equal (`vp` vs layout). Pointer lands
-                //   off — worse the further from the origin.
-                // - `viewBox` + px: same, because the parent constrains a
-                //   too-wide svg. A 954-unit box rendered into 747 px and
-                //   every click landed short by a fifth.
-                // - none + `100%`: pointer exact, but an svg with no
-                //   viewBox and no size takes its intrinsic size from its
-                //   *content*, which changes as the roll scrolls — so the
-                //   editor resized itself while you scrolled.
+                // Blitz paints an inline `<svg>` as a *replaced element*
+                // with a hardcoded `object-fit: contain`
+                // (`blitz-paint/src/render.rs`, `draw_svg`). Everything
+                // drawn is scaled by
                 //
-                // Without a viewBox an svg user unit *is* a CSS pixel, so
+                //     element content box / usvg tree size
+                //
+                // So a mismatch between the two does not clip and does
+                // not resize — it silently *scales*, which is why every
+                // earlier combination traded one bug for another:
+                //
+                // - declared nothing: usvg takes the tree size from the
+                //   content bounding box, which moves as the roll
+                //   scrolls. The scale therefore changes as you scroll,
+                //   and the roll grows or shrinks inside a frame that
+                //   never moves. This is the bug `tests/geometry.rs`
+                //   pins.
+                // - declared `100%`: same, because a percentage is
+                //   resolved against layout, not against the tree.
+                // - `viewBox`: sets the tree size to the viewBox, so the
+                //   scale is `layout / viewBox` — constant, but only 1
+                //   when those agree, which nothing enforced.
+                //
+                // Setting the CSS box *and* the svg attributes from `vp`
+                // makes the two sides of that ratio the same number by
+                // construction. The scale is exactly 1, always, and no
+                // longer depends on what is drawn. With no viewBox an
+                // svg user unit is then a CSS pixel, so
                 // `element_coordinates()` is a document coordinate
-                // exactly. With an explicit size the box is fixed by
-                // `vp`, not by what happens to be drawn in it, so
-                // scrolling cannot change the layout.
+                // exactly — the pointer cannot drift.
                 //
-                // A `vp` out of step with the element now clips rather
-                // than scaling or resizing, absorbed by the parent's
-                // `overflow: hidden`. Visible and harmless, where a
-                // scaled pointer is invisible and wrong.
-                // `available_space` keeps the two in step.
-                // **The element box is the truth, and it comes from
-                // layout — never from `vp`, never from the content.**
-                //
-                // `position: absolute; inset: 0` against the cell's
-                // `position: relative` is what gets both. An absolutely
-                // positioned box is sized by its containing block, so it
-                // is exactly the cell: responsive, no pixel constants,
-                // and — the part `100%` did not give — *independent of
-                // its own children*, so scrolling the roll can no longer
-                // resize the editor.
-                //
-                // No `viewBox`, so an svg user unit is a CSS pixel and
-                // `element_coordinates()` is a document coordinate
-                // exactly. Nothing scales, so nothing can drift.
-                //
-                // The four combinations of {viewBox, none} x {100%, px}
-                // were each tried and each traded one bug for another —
-                // a scaled pointer, a clipped roll, or a canvas that
-                // resized as it scrolled. They failed for one reason:
-                // `vp` and the element were two sources of truth for one
-                // rectangle. Here the element decides and `vp` follows.
-                style: "position: absolute; inset: 0; display: block; \
-                        touch-action: none; user-select: none; cursor: crosshair;",
+                // `vp` out of step with the *cell* is now the only
+                // failure left, and it clips or leaves background rather
+                // than scaling: visible and harmless, where a scaled
+                // pointer is invisible and wrong. `available_space`
+                // keeps the two in step.
+                width: "{vp.w + canvas::GUTTER_W:.0}",
+                height: "{vp.h + canvas::RULER_H:.0}",
+                // `position: absolute` is what keeps the declared size
+                // *used*. An in-flow svg is a replaced element, so the
+                // cell shrink-fits it to preserve its aspect ratio —
+                // laid out at 963x441 where it declared 1154x528, which
+                // is a 0.83 scale on everything drawn and on every
+                // pointer position. Out of flow with both axes given,
+                // the used size is exactly the declared size, and a `vp`
+                // larger than the cell is clipped by the cell's
+                // `overflow: hidden` instead of silently rescaling.
+                style: "position: absolute; left: 0; top: 0; display: block; \
+                        touch-action: none; user-select: none; cursor: crosshair; \
+                        width: {vp.w + canvas::GUTTER_W:.0}px; \
+                        height: {vp.h + canvas::RULER_H:.0}px;",
                 // Measured by `onresize`, not by a spawned
                 // `get_client_rect().await`.
                 //
