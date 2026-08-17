@@ -242,8 +242,15 @@ pub fn DevApp() -> Element {
     }
 }
 
-/// The viewport a freshly loaded document starts at, before the first
-/// resize event reports the real window.
+/// The viewport a freshly loaded document starts at.
+///
+/// The *current* window, not the opening one. This used to be a constant,
+/// so every scene or file opened reset the surface to 1200x760 however
+/// wide the window had been dragged — the roll snapped back to its
+/// opening aspect on each load.
 fn viewport() -> Viewport {
-    expression_editor_ui::viewport_in(1200.0, 760.0 - BAR - STATUS)
+    expression_editor_ui::current_viewport(expression_editor_ui::viewport_in(
+        1200.0,
+        760.0 - BAR - STATUS,
+    ))
 }

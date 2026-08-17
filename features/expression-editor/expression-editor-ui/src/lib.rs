@@ -351,9 +351,34 @@ pub fn available_space(width: f64, height: f64) {
     }
 }
 
+/// The viewport for whatever space the host last reported.
+///
+/// What a *new* document should be built with. Constructing one against
+/// a fixed size — which is what the runner's constant did — resets the
+/// surface to that size every time a scene or a file is opened, so the
+/// editor snapped back to its opening aspect no matter how wide the
+/// window had been dragged.
+///
+/// `fallback` covers the first load, before any host has said anything.
+pub fn current_viewport(fallback: Viewport) -> Viewport {
+    AVAILABLE()
+        .map(|(w, h)| viewport_in(w, h))
+        .unwrap_or(fallback)
+}
+
 /// The roll's viewport inside `(width, height)` of host space.
 pub fn viewport_in(width: f64, height: f64) -> Viewport {
-    Viewport::new(width.max(1.0), (height - CHROME_HEIGHT).max(1.0))
+    // The gutter comes off the width for the same reason the chrome
+    // comes off the height: `vp` is the *roll*, and the svg drawn for it
+    // is `vp.w + GUTTER_W` wide. Leaving the gutter in made the viewBox
+    // 54 units wider than the element it was drawn into, so the svg
+    // scaled and every pointer position was read as a viewBox unit while
+    // being an element pixel — a selection that landed further off the
+    // further right you clicked.
+    Viewport::new(
+        (width - canvas::GUTTER_W).max(1.0),
+        (height - CHROME_HEIGHT).max(1.0),
+    )
 }
 
 #[component]
@@ -699,26 +724,27 @@ fn Canvas(
                 // is stale; a stale `vp` only costs clipped or
                 // letterboxed rendering until the host resizes the
                 // editor, and the parent's overflow:hidden absorbs that.
-                // Fills the cell rather than taking its size *from* `vp`.
+                // **No `viewBox`.** Without one an svg user unit is a CSS
+                // pixel, so `element_coordinates()` is a document
+                // coordinate exactly, at any element size.
                 //
-                // Sizing the svg in `vp` pixels made the surface unable to
-                // grow: the element was sized from `vp`, and `vp` was
-                // measured back off the element, so the pair sat at
-                // whatever fixed point the window opened at and a wider
-                // window just left background beside the roll. Filling the
-                // cell breaks the loop — layout drives the element, the
-                // element reports its size, `vp` follows.
+                // A viewBox is how this went wrong twice. It scales the
+                // drawing to the element, and the scale factor is the
+                // ratio of two numbers nothing keeps equal: the viewBox
+                // comes from `vp`, the element size comes from layout.
+                // Sizing the element in px did not fix it either — the
+                // parent constrains a too-wide svg, so a 954-unit viewBox
+                // rendered into 747 px and every click landed short by a
+                // fifth. Removing the viewBox removes the factor.
                 //
-                // The 1:1 px-to-viewBox mapping the old comment protected
-                // still holds *at rest*, because `onresize` writes `vp`
-                // from this element's own content box. It is only untrue
-                // for the frame between a resize and that write, where the
-                // viewBox stretches; a gesture in that frame lands off by
-                // the stretch factor, which is cheaper than a surface that
-                // never resizes at all.
+                // The cost is that a `vp` out of step with the element no
+                // longer stretches to fit: the roll is drawn at its own
+                // size and the remainder is background or is clipped. That
+                // is visible and harmless, where a scaled pointer is
+                // invisible and wrong. `available_space` keeps the two in
+                // step in the ordinary case.
                 style: "display: block; width: 100%; height: 100%; \
                         touch-action: none; user-select: none; cursor: crosshair;",
-                view_box: "0 0 {vp.w + canvas::GUTTER_W:.0} {vp.h + canvas::RULER_H:.0}",
                 // Measured by `onresize`, not by a spawned
                 // `get_client_rect().await`.
                 //
@@ -1909,10 +1935,15 @@ fn LaneStrip(editor: Signal<Editor>) -> Element {
             style: "position: relative; flex: 0 0 auto; height: {h}px; \
                     background: {theme::SURFACE_BAR}; border-top: 1px solid {theme::PANEL_BORDER};",
             svg {
+                // No `viewBox`, like the roll above it and for the same
+                // reason: `element_coordinates()` feeds `strip_write`, so
+                // a scaled svg writes the velocity of whichever note is
+                // under the *scaled* position rather than the one
+                // clicked. `preserve_aspect_ratio: none` used to hide
+                // that by stretching rather than letterboxing — visually
+                // tidy, and wrong in the way that is hardest to notice.
                 style: "display: block; width: 100%; height: 100%; \
                         touch-action: none; user-select: none; cursor: ns-resize;",
-                view_box: "0 0 {vp.w + canvas::GUTTER_W:.0} {h:.0}",
-                preserve_aspect_ratio: "none",
                 onpointerdown: move |e: PointerEvent| {
                     let c = e.data().element_coordinates();
                     if !per_note {

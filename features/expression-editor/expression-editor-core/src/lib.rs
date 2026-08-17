@@ -222,7 +222,10 @@ impl Editor {
             stack_scroll: 0.0,
             lanes_visible: 5,
             viewport,
-            tool: Tool::Curve,
+            // `Tool::default()`, not a literal: this said `Tool::Curve`
+            // and silently outranked the enum's own default, so changing
+            // that default changed nothing anyone could see.
+            tool: Tool::default(),
             dimension: Dimension::Pitch,
             overlays: Vec::new(),
             selection: Selection::default(),

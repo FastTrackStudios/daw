@@ -3,10 +3,21 @@
 //! Mounts `ExpressionEditor` on the headless Blitz DOM and paints it
 //! through `DocumentTester::render_png` — CPU rasterizer, no GPU, no
 //! DAW, no browser. Nothing asserts about looks; a wrong-looking canvas
-//! is a picture you have to open:
+//! is a picture you have to open.
+//!
+//! **Every test here is `#[ignore]`d, because none of them is a test.**
+//! They produce artefacts for a human to look at, and they are
+//! expensive: `shoot_every_scene` paints ~49 scenes through a software
+//! rasterizer and runs for minutes. Left in the default run it did more
+//! than waste time — nextest schedules the whole suite in parallel, so
+//! one test holding a core for six minutes starved the rest and two
+//! dozen unrelated tests failed on the 30-second timeout. A suite that
+//! goes red for reasons unconnected to the code is worse than a slow
+//! one.
 //!
 //! ```sh
-//! cargo test -p expression-editor-ui --test screenshots
+//! just ee-shots        # or: cargo test -p expression-editor-ui \
+//!                      #       --test screenshots -- --ignored
 //! ```
 //!
 //! Output lands in `target/gui-shots/expression-editor/` (override with
@@ -133,6 +144,7 @@ async fn shoot_inner(
 }
 
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_every_scene() {
     for scene in Scene::ALL {
         let ed = demo::editor(scene, Viewport::new(W as f64, CANVAS_H));
@@ -147,6 +159,7 @@ async fn shoot_every_scene() {
 /// out to a whole-song overview and back in to one bend filling the
 /// screen.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_guitar_zoom_ladder() {
     use expression_editor_ui::BendFlow;
 
@@ -183,6 +196,7 @@ async fn shoot_guitar_zoom_ladder() {
 /// The same phrase at three zoom depths — the camera is most of the
 /// feel, and it is the part a still picture can still show.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_zoom_levels() {
     let base = || demo::editor(Scene::Phrase, Viewport::new(W as f64, CANVAS_H));
 
@@ -202,6 +216,7 @@ async fn shoot_zoom_levels() {
 
 /// Before and after the Robot button, on the same note.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_flatten() {
     let vp = Viewport::new(W as f64, CANVAS_H);
     let mut ed = demo::editor(Scene::Phrase, vp);
@@ -227,6 +242,7 @@ async fn shoot_flatten() {
 
 /// The modulation drawer, opened through its real capture path.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_modulation_drawer() {
     let mut ed = demo::editor(Scene::Phrase, Viewport::new(W as f64, CANVAS_H));
     for _ in 0..3 {
@@ -241,6 +257,7 @@ async fn shoot_modulation_drawer() {
 /// Contextual zoom on a part whose density changes: the same gesture at
 /// two positions must produce two different zoom levels.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_smart_zoom() {
     use expression_editor_core::zoom::ZoomModes;
 
@@ -262,6 +279,7 @@ async fn shoot_smart_zoom() {
 
 /// Razor edits: an area over held notes, and the result of moving it.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_razor() {
     use expression_editor_core::razor::{self, RazorArea};
 
@@ -282,6 +300,7 @@ async fn shoot_razor() {
 
 /// The chord box on a real chord, with the velocity strip populated.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_chord_box() {
     let vp = Viewport::new(W as f64, CANVAS_H);
     let mut ed = demo::editor(Scene::Held, vp);
@@ -296,6 +315,7 @@ async fn shoot_chord_box() {
 
 /// Pinned controller lanes behind the roll, and CC edit mode.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_cc_lanes() {
     let vp = Viewport::new(W as f64, CANVAS_H);
     let ed = demo::editor(Scene::Orchestral, vp);
@@ -335,6 +355,7 @@ async fn shoot_cc_lanes() {
 
 /// The Multi Tool zones over a selection, and the modes they belong to.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_multitool_and_modes() {
     use expression_editor_core::Mode;
 
@@ -353,6 +374,7 @@ async fn shoot_multitool_and_modes() {
 
 /// The Multi Tool zones lit over a selection.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_multitool() {
     let vp = Viewport::new(W as f64, CANVAS_H);
     let mut ed = demo::editor(Scene::Held, vp);
@@ -369,6 +391,7 @@ async fn shoot_multitool() {
 
 /// The seven note handles, and the temporary note scoping them.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_note_handles() {
     use expression_editor_core::Mode;
 
@@ -395,6 +418,7 @@ async fn shoot_note_handles() {
 /// flat. The row never changes, so any vertical separation on screen is
 /// the audio's pitch and nothing else.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_blob_pitch_carry() {
     use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
     use expression_editor_core::Mode;
@@ -432,6 +456,7 @@ async fn shoot_blob_pitch_carry() {
 /// The take's waveform behind the roll, unvoiced gaps in the pitch
 /// track, and sibilant bands with the hollow amplitude handle.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_audio_backdrop() {
     use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
     use expression_editor_core::Mode;
@@ -506,6 +531,7 @@ async fn shoot_audio_backdrop() {
 /// A pitch drawing open: anchors, the sinusoidal line, and the original
 /// underneath.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_pitch_drawing() {
     use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
     use expression_editor_core::{Mode, PitchDraft};
@@ -553,6 +579,7 @@ async fn shoot_pitch_drawing() {
 
 /// Timing separators, and the MIDI reference behind the sung notes.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_timing_and_reference() {
     use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
     use expression_editor_core::{MidiReference, Mode, RefNote};
@@ -615,6 +642,7 @@ async fn shoot_timing_and_reference() {
 /// The stacked multitrack view: a vocal, its reference MIDI, a guitar
 /// and a kit, each drawn in its own mode on one shared timeline.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_stack() {
     use expression_editor_core::rows::{RowSpace, SliceBands, StringTuning};
     use expression_editor_core::tracks::Track;
@@ -703,6 +731,7 @@ async fn shoot_stack() {
 /// strings, twelve articulations, and one bend that survives at full
 /// fidelity. Skips if the corpus is not checked out.
 #[tokio::test]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn real_guitar_pro_file() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../expression-editor-guitarpro/tests/fixtures/Effects.gp3");
@@ -725,6 +754,7 @@ async fn real_guitar_pro_file() {
 /// transcriptions. These are public-domain compositions, rendered
 /// locally for a look rather than checked in.
 #[tokio::test]
+#[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn staged_real_music() {
     let dir = std::path::Path::new("/tmp/gp-music");
     if !dir.exists() {

@@ -223,11 +223,14 @@ async fn sweep(
     const STEPS: usize = 20;
     let mods = m.to_modifiers();
     tester.pointer_down_mods(x0, y0, mods);
-    let _ = tester.pump().await;
+    tester.drain();
     for i in 1..=STEPS {
         let t = i as f64 / STEPS as f64;
         tester.pointer_move_mods(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, true, mods);
-        let _ = tester.pump().await;
+        // `drain`, not `pump`: a move that changes nothing leaves `pump`
+        // waiting a full second for work that never comes, so twenty of
+        // them cost twenty seconds of nothing. See `DocumentTester::drain`.
+        tester.drain();
     }
     tester.pointer_up_mods(x1, y1, mods);
     let _ = tester.pump().await;

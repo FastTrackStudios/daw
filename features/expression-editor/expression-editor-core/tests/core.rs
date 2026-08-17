@@ -920,7 +920,16 @@ fn a_new_editor_frames_its_content() {
     let c = content_of(&ed.doc);
     let (lo, hi) = ed.camera.pitch_span(ed.viewport);
     assert!(lo <= c.pitch_lo && hi >= c.pitch_hi);
-    assert_eq!(ed.tool, Tool::Curve, "Curve is the default tool");
+    // Select, and it matters more than it used to: a tool now claims the
+    // plain drag, so the default tool decides what dragging does in an
+    // editor nobody has configured. Select is the one that claims
+    // nothing, so an unconfigured editor behaves exactly as its mouse
+    // map says.
+    assert_eq!(ed.tool, Tool::Select, "Select is the default tool");
+    assert!(
+        ed.tool.claims().is_empty(),
+        "the default tool must not reassign gestures"
+    );
     assert_eq!(ed.dimension, Dimension::Pitch);
 }
 

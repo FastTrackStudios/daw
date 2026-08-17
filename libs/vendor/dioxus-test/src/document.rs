@@ -140,6 +140,28 @@ impl DocumentTester {
         Ok(())
     }
 
+    /// Run the work that is already queued, without waiting for more.
+    ///
+    /// FTS extension, and the one to reach for inside a gesture. [`pump`]
+    /// *waits* for work — an event that produces no re-render leaves it
+    /// blocked until `PUMP_TIMEOUT`, a full second, and it then reports a
+    /// timeout that reads like an error but is just silence. A drag that
+    /// pumps after each of twenty pointer moves therefore costs upwards
+    /// of fifteen seconds of pure waiting, none of it rendering, which is
+    /// slow enough to starve a parallel test run into failing on its own
+    /// timeouts.
+    ///
+    /// Draining is synchronous and cannot block: it polls until there is
+    /// nothing left to do and returns. Use it for the intermediate events
+    /// of a gesture and call [`pump`] once at the end, where you actually
+    /// expect the result.
+    ///
+    /// [`pump`]: Self::pump
+    pub fn drain(&self) {
+        let mut document = self.document.borrow_mut();
+        while document.poll(None) {}
+    }
+
     /// Recompute styles and layout for the document as it currently stands.
     ///
     /// FTS extension. [`Self::pump`] invokes event handlers and applies the

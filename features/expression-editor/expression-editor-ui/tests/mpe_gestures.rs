@@ -101,14 +101,17 @@ async fn drag_across(app: fn() -> Element) -> dioxus_test::Result<()> {
     let y = oy + h as f64 * 0.45;
 
     tester.pointer_down(ox + w as f64 * 0.12, y);
-    let _ = tester.pump().await;
+    tester.drain();
     for i in 1..=5 {
         tester.pointer_move(
             ox + w as f64 * (0.12 + 0.5 * i as f64 / 5.0),
             y - i as f64 * 4.0,
             true,
         );
-        let _ = tester.pump().await;
+        // `drain`, not `pump`. A move that renders nothing leaves `pump`
+        // waiting a full second for work that never arrives, which is
+        // what made each of these take five seconds of doing nothing.
+        tester.drain();
     }
     tester.pointer_up(ox + w as f64 * 0.62, y - 20.0);
     let _ = tester.pump().await;

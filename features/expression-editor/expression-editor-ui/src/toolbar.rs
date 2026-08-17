@@ -418,6 +418,7 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
                         "Fit"
                     }
                 }
+                Fps {}
             }
         }
     }
@@ -677,6 +678,89 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
                     }
                 }
                 span { "{count} selected" }
+            }
+        }
+    }
+}
+
+/// Frames per second, top right.
+///
+/// Measured from the interval between renders of *this* component, which
+/// re-renders whenever anything in the editor does — so it reports the
+/// rate the surface is actually being redrawn at, not the rate a timer
+/// is firing at. An idle editor renders rarely and reads low, which is
+/// correct: nothing is being drawn.
+///
+/// Averaged over a short window rather than shown per-frame. A raw
+/// reciprocal jitters far too much to read, and a number nobody can read
+/// is not a diagnostic.
+#[component]
+fn Fps() -> Element {
+    // Deliberately **not** a signal.
+    //
+    // A signal written during render schedules another render, which
+    // writes it again: the surface spins at 100% forever and never
+    // settles. It is not a subtle failure — it hung the headless test
+    // suite outright, every gesture test timing out at thirty seconds
+    // while this component re-rendered underneath them.
+    //
+    // The measurement is not view state anyway. It describes how often
+    // the view is being drawn, so it must be a passive observer of that
+    // and never a cause of it. A plain `RefCell` behind `use_hook` gives
+    // per-component storage that reading and writing cannot invalidate.
+    let state = use_hook(|| {
+        std::rc::Rc::new(std::cell::RefCell::new((
+            Vec::<f64>::new(),
+            None::<std::time::Instant>,
+        )))
+    });
+
+    let now = std::time::Instant::now();
+    let s = {
+        let (samples, last) = &mut *state.borrow_mut();
+        if let Some(previous) = last.replace(now) {
+            let ms = now.duration_since(previous).as_secs_f64() * 1000.0;
+            // Drop the idle gaps: a frame after a second of nothing is
+            // not a 1 fps frame, it is the first frame of a new burst.
+            if ms < 500.0 {
+                samples.push(ms);
+                if samples.len() > 30 {
+                    samples.remove(0);
+                }
+            }
+        }
+        samples.clone()
+    };
+
+    let fps = if s.is_empty() {
+        None
+    } else {
+        let mean = s.iter().sum::<f64>() / s.len() as f64;
+        (mean > 0.0).then(|| 1000.0 / mean)
+    };
+
+    // Quiet while it is healthy, and only asks for attention when it is
+    // not: dim above a screen refresh, gold where a drag starts to feel
+    // it, and the razor colour below the rate at which motion reads as
+    // motion. A readout that is loud when nothing is wrong gets ignored
+    // when something is.
+    let color = match fps {
+        Some(f) if f >= 50.0 => theme::TEXT_DIM,
+        Some(f) if f >= 24.0 => theme::GOLD,
+        Some(_) => theme::RAZOR,
+        None => theme::TEXT_DIM,
+    };
+    rsx! {
+        div {
+            "data-testid": "fps",
+            title: "Frames per second, averaged over the last 30 renders",
+            style: format!(
+                "min-width: 46px; text-align: right; font-size: 10px; \
+                 font-variant-numeric: tabular-nums; color: {color};",
+            ),
+            match fps {
+                Some(f) => format!("{f:.0} fps"),
+                None => "— fps".to_string(),
             }
         }
     }
