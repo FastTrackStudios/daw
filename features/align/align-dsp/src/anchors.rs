@@ -214,16 +214,26 @@ pub fn anchors(
         });
     }
 
-    // Material with no onsets — a pad, a bowed note, a held vowel — would
-    // otherwise get two anchors and a single straight line across the
-    // whole take, throwing away everything the match found. Sample the
-    // path instead: there is no moment worth pinning, but the shape of
-    // the correction is still real.
-    if candidates.len() <= 2 && last > 0 {
-        candidates = fallback_anchors(map, frame_rate, cfg, target);
-    }
+    let kept = enforce_ratio(candidates, cfg.max_stretch_ratio);
 
-    enforce_ratio(candidates, cfg.max_stretch_ratio)
+    // Material with no usable onsets — a pad, a bowed note, a held vowel —
+    // would otherwise get two anchors and a single straight line across
+    // the whole take, throwing away everything the match found. Sample
+    // the path instead: there is no moment worth pinning, but the shape
+    // of the correction is still real.
+    //
+    // Tested on what *survives*, not on what was proposed. A sustained
+    // take that opens with an attack offers exactly one candidate, the
+    // ratio check drops it for spanning no reference time, and a
+    // fallback that had already decided not to run leaves the take with
+    // nothing between its two ends.
+    if kept.len() <= 2 && last > 0 {
+        return enforce_ratio(
+            fallback_anchors(map, frame_rate, cfg, target),
+            cfg.max_stretch_ratio,
+        );
+    }
+    kept
 }
 
 fn fallback_anchors(

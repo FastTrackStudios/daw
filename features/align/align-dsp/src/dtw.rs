@@ -180,8 +180,15 @@ fn cost(d: Frame, r: Frame, cfg: &CostConfig) -> f64 {
         + cfg.flux * sq(d.flux, r.flux)
         + cfg.delta * sq(d.delta, r.delta)
         + cfg.zcr * sq(d.zcr, r.zcr);
-    for k in 0..4 {
-        c += cfg.bands[k] * sq(d.bands[k], r.bands[k]);
+    // Spectral shape, where there is one. A silent frame's shape is the
+    // shape of a noise floor, and comparing that to a sung vowel would
+    // add a large and entirely meaningless distance on top of the level
+    // difference that already says these two frames are not the same
+    // thing.
+    if !d.silent && !r.silent {
+        for k in 0..4 {
+            c += cfg.bands[k] * sq(d.bands[k], r.bands[k]);
+        }
     }
     match (d.pitch, r.pitch) {
         // Per octave, capped: two takes an octave apart are as different

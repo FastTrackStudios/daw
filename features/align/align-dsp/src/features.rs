@@ -43,8 +43,20 @@ use audiocore_dsp::biquad::{Biquad, FilterType};
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Frame {
     /// Broadband level, log scale, normalized against the take's peak.
+    /// The only feature here that carries loudness.
     pub level: f64,
-    /// Per-band levels, same scale as `level`: sub, mid, presence, air.
+    /// Spectral shape: how much each of sub, mid, presence and air is
+    /// carrying *relative to this frame's own average*, so the vector
+    /// says where the energy sits and says nothing about how much of it
+    /// there is.
+    ///
+    /// Loudness lives in `level` alone, deliberately. Bands measured
+    /// against the take's peak would rise and fall together every time
+    /// the performance did, which makes them a second, noisier copy of
+    /// `level` rather than four independent cues.
+    ///
+    /// Undefined for a silent frame, which has no shape to speak of —
+    /// [`crate::dtw`] skips the term rather than reading noise.
     pub bands: [f64; 4],
     /// Rise in air-band energy since the previous frame, normalized.
     ///
@@ -98,20 +110,39 @@ impl Features {
 pub struct FeatureConfig {
     /// Band edges in Hz: sub|mid, mid|presence, presence|air.
     pub crossovers: [f64; 3],
-    /// Level below the take's peak, in dB, that reads as silence.
+    /// Length of the window each frame is measured over, in milliseconds.
     ///
-    /// A level rather than an absolute threshold because the input may
-    /// be at any gain, and 60 dB below the loudest moment of a vocal is
-    /// reliably "not singing" on anything that has been through a
-    /// preamp.
-    pub silence_db: f64,
+    /// Deliberately **not** the caller's analysis window. Only the hop and
+    /// the frame count have to match a caller's own framing for frame *i*
+    /// to mean the same moment in both; how much audio is averaged to
+    /// describe that moment is this crate's business, and it wants far
+    /// less than a pitch detector does.
+    ///
+    /// A YIN window has to span two periods of the lowest note it can
+    /// find, so it runs ~46 ms. Measuring energy over 46 ms smears a
+    /// transient across four frames: the rise is averaged out, `flux`
+    /// peaks broad and late, and the local-maximum test that picks
+    /// anchors compares frames that mostly contain the same audio. Ten
+    /// milliseconds is short enough to see an attack and long enough to
+    /// hold two cycles of anything above 200 Hz.
+    pub measure_ms: f64,
+    /// Percentile of frame levels taken as the take's noise floor.
+    pub noise_percentile: f64,
+    /// How far above the measured noise floor, in dB, still reads as
+    /// silence.
+    pub silence_margin_db: f64,
+    /// Highest the silence gate may ever sit, in dB below the take's peak.
+    ///
+    /// The backstop for material that never stops sounding: a sustained
+    /// pad has no gaps, so its tenth percentile is real audio, and a gate
+    /// placed above it would mark the performance as silence.
+    pub silence_ceiling_db: f64,
     /// Where the normalized level scale bottoms out, in dB below peak.
     /// Frames quieter than this all read as 0.
-    ///
-    /// Must sit below `silence_db`, or the silence test can never fire —
-    /// the two are points on the same scale and silence is defined as
-    /// being some distance up from the floor.
     pub floor_db: f64,
+    /// How far below a frame's own average level a band may sit before it
+    /// reads as empty, in dB. Sets the resolution of the spectral shape.
+    pub shape_floor_db: f64,
 }
 
 impl Default for FeatureConfig {
@@ -121,18 +152,26 @@ impl Default for FeatureConfig {
             // the sung fundamental range so band 3 is sibilance and stick
             // noise rather than pitch.
             crossovers: [300.0, 2_500.0, 6_000.0],
-            silence_db: -60.0,
+            measure_ms: 10.0,
+            noise_percentile: 0.10,
+            silence_margin_db: 6.0,
+            silence_ceiling_db: -30.0,
             floor_db: -90.0,
+            shape_floor_db: -40.0,
         }
     }
 }
 
 /// Extract features from a mono buffer.
 ///
-/// `hop` and `window` must be the ones the caller's own analysis used, so
-/// frame *i* here describes the same audio as frame *i* there. Frames are
-/// taken while a whole window fits, which is the convention `tune_dsp`
-/// uses and therefore the one that keeps the two frame counts equal.
+/// `hop` and `window` describe the caller's *framing* — frames are taken
+/// every `hop` samples while a whole `window` fits, which is `tune_dsp`'s
+/// convention and therefore what keeps the two frame counts equal, so
+/// frame *i* here is frame *i* there.
+///
+/// The audio each frame is actually measured over is
+/// [`FeatureConfig::measure_ms`], centred on the framing window, and is
+/// normally much shorter. See that field for why.
 pub fn extract(
     samples: &[f64],
     sample_rate: f64,
@@ -152,11 +191,21 @@ pub fn extract(
 
     let bands = split_bands(samples, sample_rate, cfg.crossovers);
 
+    // Never longer than the framing window — a measurement that reached
+    // outside it would describe audio the caller's frame *i* does not
+    // cover — and never so short that an RMS is meaningless.
+    let measure = ((cfg.measure_ms / 1000.0 * sample_rate).round() as usize).clamp(8, window);
+    let inset = (window - measure) / 2;
+
     let count = (samples.len() - window) / hop + 1;
     let mut raw: Vec<RawFrame> = Vec::with_capacity(count);
     for i in 0..count {
-        let start = i * hop;
-        let end = (start + window).min(samples.len());
+        // Centred on the framing window, so a feature and the pitch
+        // measured at the same index describe the same instant. Off-centre
+        // would put a fixed bias between the onset times this finds and
+        // the note boundaries the caller found.
+        let start = i * hop + inset;
+        let end = (start + measure).min(samples.len());
         raw.push(RawFrame {
             band_rms: [
                 rms(&bands[0][start..end]),
@@ -202,23 +251,57 @@ fn normalize(raw: Vec<RawFrame>, frame_rate: f64, cfg: FeatureConfig) -> Feature
         };
     }
 
-    let to_norm = |v: f64| {
-        let db = 20.0 * (v.max(1e-9) / peak).log10();
-        ((db - cfg.floor_db) / -cfg.floor_db).clamp(0.0, 1.0)
-    };
-    let silence = ((cfg.silence_db - cfg.floor_db) / -cfg.floor_db).clamp(0.0, 1.0);
+    let to_db = |v: f64| 20.0 * (v.max(1e-12) / peak).log10();
+    let to_norm = |v: f64| ((to_db(v) - cfg.floor_db) / -cfg.floor_db).clamp(0.0, 1.0);
+
+    // The silence gate is measured, not assumed.
+    //
+    // A fixed level below the peak — the obvious choice, and the one this
+    // had — works on a fixture and fails on a recording. Anything tracked
+    // with a room, an amp or a live band has a floor well above 60 dB down
+    // from its own peak, so no frame is ever silent, and every rule built
+    // on silence (pairing gaps at zero cost, discounting the step penalty
+    // through them) quietly stops applying on exactly the material it
+    // exists for. The tenth percentile of frame levels is what the noise
+    // floor actually is; a few dB above it is the first thing that could
+    // be a performance.
+    let mut sorted: Vec<f64> = broadband.iter().map(|&v| to_db(v)).collect();
+    sorted.sort_by(f64::total_cmp);
+    let at = ((sorted.len() as f64 * cfg.noise_percentile) as usize).min(sorted.len() - 1);
+    let noise_db = sorted[at];
+    // Held strictly above the floor. A take with real digital silence in
+    // it has a noise floor *at* the floor, and a gate sitting exactly
+    // there is a test nothing can pass — which is the same way the fixed
+    // threshold failed, arrived at from the other direction.
+    let gate_db = (noise_db + cfg.silence_margin_db).clamp(
+        cfg.floor_db + cfg.silence_margin_db,
+        cfg.silence_ceiling_db.min(0.0),
+    );
+    let silence = ((gate_db - cfg.floor_db) / -cfg.floor_db).clamp(0.0, 1.0);
 
     // Rises are measured on the normalized scale, then scaled by the
     // largest rise in the take: what matters is which onsets are the
     // strong ones *within this take*, not how loud the take is.
+    //
+    // Flux comes off the air band's *absolute* level, not its share of the
+    // frame — an onset is energy arriving, and a share can rise while
+    // everything gets quieter.
     let air: Vec<f64> = raw.iter().map(|f| to_norm(f.band_rms[3])).collect();
     let level: Vec<f64> = broadband.iter().map(|&v| to_norm(v)).collect();
+    // The frame before the take is treated as silence rather than as
+    // nothing.
+    //
+    // Measured against a previous frame that does not exist, the first
+    // frame can never show a rise — so a take trimmed to its own first
+    // transient, which is how anyone crops an item, has an opening
+    // attack that no onset test can see. Its partner take then finds no
+    // agreement there, drops the anchor, and the whole opening phrase is
+    // left to interpolate from the take's start instead of being pinned
+    // to its downbeat. A take that begins in silence is unaffected: its
+    // first frame is quiet, so the rise from nothing is nothing.
     let rise = |series: &[f64], i: usize| {
-        if i == 0 {
-            0.0
-        } else {
-            (series[i] - series[i - 1]).max(0.0)
-        }
+        let previous = if i == 0 { 0.0 } else { series[i - 1] };
+        (series[i] - previous).max(0.0)
     };
     let max_flux = (0..raw.len())
         .map(|i| rise(&air, i))
@@ -229,16 +312,30 @@ fn normalize(raw: Vec<RawFrame>, frame_rate: f64, cfg: FeatureConfig) -> Feature
         .fold(0.0_f64, f64::max)
         .max(1e-9);
 
+    // Each band's level relative to its own frame's average, so `bands`
+    // describes spectral *shape* and nothing else.
+    //
+    // Measured against the take's peak — as this did — every band moves
+    // whenever the singer gets louder, in lockstep with `level`, so four
+    // of the five terms in the cost were re-weighting the same fact.
+    // Against the frame's own average, "the energy is up top" means that
+    // whether the frame is loud or quiet, which is the only reading that
+    // tells a hat from a kick.
+    let shape = |band: f64, frame_average: f64| {
+        let db = 20.0 * (band.max(1e-12) / frame_average.max(1e-12)).log10();
+        ((db - cfg.shape_floor_db) / -cfg.shape_floor_db).clamp(0.0, 1.0)
+    };
+
     let frames = raw
         .iter()
         .enumerate()
         .map(|(i, f)| Frame {
             level: level[i],
             bands: [
-                to_norm(f.band_rms[0]),
-                to_norm(f.band_rms[1]),
-                to_norm(f.band_rms[2]),
-                air[i],
+                shape(f.band_rms[0], broadband[i]),
+                shape(f.band_rms[1], broadband[i]),
+                shape(f.band_rms[2], broadband[i]),
+                shape(f.band_rms[3], broadband[i]),
             ],
             flux: (rise(&air, i) / max_flux).clamp(0.0, 1.0),
             delta: (rise(&level, i) / max_delta).clamp(0.0, 1.0),

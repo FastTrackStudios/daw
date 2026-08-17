@@ -517,3 +517,158 @@ fn silence_reads_as_silence_and_a_note_does_not() {
     assert!(f.frames[10].silent, "the opening gap is silence");
     assert!(!f.frames[f.len() - 10].silent, "and the note is not");
 }
+
+// ── the feature stage ─────────────────────────────────────────────────
+
+/// Deterministic low-level noise, standing in for a room, an amp, or a
+/// preamp — anything tracked outside a computer.
+fn noise(secs: f64, amplitude: f64) -> Vec<f64> {
+    let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+    (0..(SR * secs) as usize)
+        .map(|_| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            ((seed >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0) * amplitude
+        })
+        .collect()
+}
+
+#[test]
+fn a_short_measurement_window_sharpens_the_onset() {
+    // The fix this asserts: the window features are measured over is not
+    // the caller's analysis window. A pitch detector needs ~46 ms and an
+    // onset is over in ten, so measuring at the detector's length smears
+    // every attack across four frames and blunts every anchor.
+    // The framing the shipping path actually uses: `tune_dsp`'s YIN
+    // window is 2048 samples, hop a quarter of that. Measuring at the
+    // framing length is what this used to do.
+    const YIN_WINDOW: usize = 2048;
+    const YIN_HOP: usize = YIN_WINDOW / 4;
+
+    let mut audio = silence(0.5);
+    audio.extend(syllable(60.0, 0.5, 1.0));
+
+    // Where the attack really is, in frames: the audio starts at 0.5 s,
+    // and a frame's measurement is centred on its framing window.
+    let true_frame = (0.5 * SR - (YIN_WINDOW / 2) as f64) / YIN_HOP as f64;
+
+    let flux_peak = |measure_ms: f64| {
+        let f = extract(
+            &audio,
+            SR,
+            YIN_HOP,
+            YIN_WINDOW,
+            features::FeatureConfig {
+                measure_ms,
+                ..Default::default()
+            },
+        );
+        let peak = f.frames.iter().map(|x| x.flux).fold(0.0_f64, f64::max);
+        f.frames.iter().position(|x| x.flux >= peak).unwrap() as f64
+    };
+
+    let framing_ms = YIN_WINDOW as f64 * 1000.0 / SR;
+    let sharp = (flux_peak(10.0) - true_frame).abs();
+    let smeared = (flux_peak(framing_ms) - true_frame).abs();
+
+    assert!(
+        sharp < 0.5,
+        "a 10 ms window should put the flux peak on the attack: {sharp:.2} frames out"
+    );
+    // The wide window sees the attack enter one side of itself long
+    // before the frame it belongs to, so it fires early — and an anchor
+    // is only ever as accurate as the onset that placed it.
+    assert!(
+        smeared > sharp + 0.5,
+        "the {framing_ms:.0} ms framing window should be measurably worse: \
+         {smeared:.2} frames out vs {sharp:.2}"
+    );
+}
+
+#[test]
+fn a_take_with_a_real_noise_floor_still_has_silence_in_it() {
+    // The gate is measured, not assumed. Anything recorded with a room
+    // has a floor well above 60 dB below its own peak, so a fixed
+    // threshold never fires and every rule built on silence — pairing
+    // gaps at zero cost, discounting the step penalty through them —
+    // stops applying on exactly the material it exists for.
+    let mut audio = noise(0.5, 0.003);
+    audio.extend(
+        syllable(60.0, 0.5, 1.0)
+            .iter()
+            .zip(noise(0.5, 0.003))
+            .map(|(s, n)| s + n)
+            .collect::<Vec<_>>(),
+    );
+    let f = analyse(&audio);
+
+    let quiet = f.frames[20];
+    let sung = f.frames[f.len() - 20];
+    assert!(
+        quiet.silent,
+        "a gap that is only room noise is still a gap (level {:.3})",
+        quiet.level
+    );
+    assert!(
+        !sung.silent,
+        "and the note is not (level {:.3})",
+        sung.level
+    );
+}
+
+#[test]
+fn the_spectral_shape_ignores_how_loud_the_frame_is() {
+    // The same note, the second half 12 dB down. `bands` describes where
+    // the energy sits and must not move; `level` describes how much
+    // there is and must. Measured against the take's peak instead, all
+    // five would move together and the band terms would be four noisy
+    // copies of the level term.
+    let mut audio = syllable(60.0, 0.6, 1.0);
+    audio.extend(syllable(60.0, 0.6, 0.25));
+    let f = analyse(&audio);
+
+    let loud = f.frames[(0.3 * FPS) as usize];
+    let quiet = f.frames[(0.9 * FPS) as usize];
+
+    assert!(
+        loud.level - quiet.level > 0.1,
+        "the level should register the 12 dB: {:.3} vs {:.3}",
+        loud.level,
+        quiet.level
+    );
+    for k in 0..4 {
+        assert!(
+            (loud.bands[k] - quiet.bands[k]).abs() < 0.06,
+            "band {k} moved with the gain: {:.3} vs {:.3}",
+            loud.bands[k],
+            quiet.bands[k]
+        );
+    }
+}
+
+#[test]
+fn a_take_trimmed_to_its_own_attack_has_an_onset_at_the_first_frame() {
+    // How anyone crops an item. Measured against a previous frame that
+    // does not exist, the opening attack shows no rise at all, its
+    // partner take finds no agreement there, and the whole first phrase
+    // interpolates from the take's start instead of being pinned to its
+    // downbeat.
+    let f = analyse(&syllable(60.0, 1.0, 1.0));
+    assert!(
+        f.frames[0].delta > 0.5,
+        "the take begins with everything arriving at once: {:.3}",
+        f.frames[0].delta
+    );
+
+    // And a take that opens in silence still reads as quiet, or every
+    // alignment would acquire a spurious anchor at frame zero.
+    let mut opens_quiet = silence(0.3);
+    opens_quiet.extend(syllable(60.0, 1.0, 1.0));
+    let g = analyse(&opens_quiet);
+    assert!(
+        g.frames[0].delta < 0.05,
+        "nothing arrives at the start of a silent lead-in: {:.3}",
+        g.frames[0].delta
+    );
+}
