@@ -6,13 +6,6 @@ license.workspace = true
 edition.workspace = true
 description = "Expression editor GUI — the Melodyne/MPE canvas, toolbar, and inspector as a portable Dioxus surface"
 
-[features]
-default = []
-# The Blitz/vello plugin editor. Off → the surface still compiles for
-# wasm remotes and the web build, which is the whole point: the same
-# component renders standalone, in a VST3/CLAP window, and in a browser.
-native = ["dep:nice-plug-dioxus", "dep:architect-ui"]
-
 [dependencies]
 expression-editor-tools.workspace = true
 # The shared scroll/wheel bindings. The editor resolves gestures from the
@@ -25,8 +18,6 @@ level-dsp.workspace = true
 # The canonical FTS palette — every colour below comes from here.
 daw-theme = { workspace = true }
 dioxus = { workspace = true }
-architect-ui = { workspace = true, optional = true }
-nice-plug-dioxus = { workspace = true, optional = true }
 
 [dev-dependencies]
 expression-editor-guitarpro.workspace = true

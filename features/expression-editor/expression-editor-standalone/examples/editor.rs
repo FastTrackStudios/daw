@@ -7,14 +7,44 @@
 //! cargo run -p expression-editor-standalone --example editor -- part.mid --mode mpe
 //! ```
 //!
-//! The window comes from `nice_plug_dioxus::open_standalone_with_state`
-//! — Blitz → Vello → baseview, the same pipeline a VST3/CLAP editor and
-//! the REAPER panel render through. `dioxus::desktop::LaunchBuilder`
-//! would put WebKit/WRY behind the same component and show something
-//! the plugin will never show, which is why it is never used here.
+//! The window comes from `dioxus_native::launch_cfg` — Blitz → Vello →
+//! winit, dioxus's own desktop path, the same one `--example serve`
+//! uses. `dioxus::desktop::LaunchBuilder` would put WebKit/WRY behind
+//! the same component and render it through a different engine
+//! entirely, which is why it is never used here.
 
+use dioxus::prelude::*;
+use dioxus_native::{Config, LogicalSize, WindowAttributes, launch_cfg};
 use expression_editor_standalone::cli::ArgsError;
 use expression_editor_standalone::{App, Args, Runner, stage};
+
+/// [`App`], plus the one thing only a window can supply.
+///
+/// The editor sizes its roll by subtracting its own chrome from the
+/// space it has been given, and it cannot discover that space for
+/// itself: dioxus-native delivers no element resize event. winit does
+/// report the *window*, so turning a drag of the window edge into "your
+/// space changed" is the host's job — here, and the REAPER panel's dock
+/// callback there.
+///
+/// A wrapper in the example rather than inside [`App`] because `App` is
+/// also mounted headless by `--example shot`, where `use_window` would
+/// find no window to consume.
+#[component]
+fn WindowedApp() -> Element {
+    let window = dioxus_native::use_window();
+    dioxus_native::use_window_event(move |event, _| {
+        if let dioxus_native::winit::event::WindowEvent::SurfaceResized(size) = event {
+            // Physical pixels from winit, CSS pixels for the editor.
+            let scale = window.scale_factor();
+            expression_editor_ui::available_space(
+                size.width as f64 / scale,
+                size.height as f64 / scale,
+            );
+        }
+    });
+    rsx! { App {} }
+}
 
 fn main() {
     let args = match Args::from_env() {
@@ -52,5 +82,13 @@ fn main() {
     // to the moment write-back lands.
     let _daw = runner.daw;
     stage(runner.loaded.into_editor());
-    nice_plug_dioxus::open_standalone_with_state(App, args.width, args.height, None);
+
+    let window = WindowAttributes::default()
+        .with_title(format!("Expression editor — {}", runner.label))
+        .with_surface_size(LogicalSize::new(args.width as f64, args.height as f64));
+    launch_cfg(
+        WindowedApp,
+        vec![],
+        vec![Box::new(Config::new().with_window_attributes(window))],
+    );
 }

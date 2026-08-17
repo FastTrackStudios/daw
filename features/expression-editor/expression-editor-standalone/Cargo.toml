@@ -28,16 +28,14 @@ tracing = { workspace = true }
 # they may not open. Examples get dev-dependencies, so `--example
 # editor` still links it.
 #
-# `hot-reload` wires dioxus-devtools into the baseview window, which is
-# what lets `dx serve --example serve` push an `rsx!` edit into the
-# running editor. It costs a websocket client that finds no server when
-# the binary is run directly, so `--example editor` is unaffected.
-nice-plug-dioxus = { workspace = true }
-# The window for `--example serve`. dioxus's own desktop path — Blitz ->
-# Vello -> winit — rather than nice-plug-dioxus, which opens a *plugin
-# editor* window through baseview: the right host for a VST3/CLAP editor
-# and the wrong one for an app that is not a plugin. Same renderer either
-# way, so parity with the plugin is kept.
+# The window, for both `--example editor` and `--example serve`.
+# dioxus's own desktop path: Blitz -> Vello -> winit.
+#
+# This used to be `nice-plug-dioxus`, which opens a *plugin editor*
+# window through baseview. The expression editor is an application, not
+# a VST3/CLAP plugin, and carrying a plugin framework to open an app
+# window bought a second windowing path and a second renderer to keep in
+# parity with, for nothing this crate needs.
 dioxus-native = { workspace = true }
 # The CPU rasterizer behind `--example shot`.
 dioxus-test = { workspace = true }

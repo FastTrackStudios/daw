@@ -29,14 +29,20 @@
 //!
 //! ## The window rule
 //!
-//! Standalone windows go through
-//! `nice_plug_dioxus::open_standalone_with_state`, never
-//! `dioxus::desktop::LaunchBuilder`: WebKit/WRY renders differently
-//! from the Blitz→Vello→baseview pipeline a VST3/CLAP editor and the
-//! REAPER panel both use, so a WRY window would show something the
-//! plugin will not. That launcher takes a bare `fn() -> Element`, which
-//! is why the loaded document reaches the component through
-//! [`stage`]/[`App`] rather than through props.
+//! Windows go through `dioxus_native::launch_cfg` — Blitz → Vello →
+//! winit, dioxus's own desktop path. Not `dioxus::desktop`, which is
+//! WebKit/WRY and a completely different rendering engine.
+//!
+//! And not `nice-plug-dioxus`, which is what this used to open: that
+//! opens a *plugin editor* window through baseview, and the expression
+//! editor is an application, not a VST3/CLAP plugin. Carrying a plugin
+//! framework to open an app window cost a second windowing path, a
+//! second renderer to keep in parity, and a `native` feature on the UI
+//! crate that existed only to pull it in.
+//!
+//! `launch_cfg` takes a bare `fn() -> Element`, which is why the loaded
+//! document reaches the component through [`stage`]/[`App`] rather than
+//! through props.
 
 use std::path::{Path, PathBuf};
 

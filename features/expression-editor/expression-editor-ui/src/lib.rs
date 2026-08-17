@@ -1,12 +1,17 @@
 //! `expression-editor-ui` — the Dioxus surface for the expression
 //! editor.
 //!
-//! One component renders in three places without changing: standalone,
-//! as a VST3/CLAP editor through `nice-plug-dioxus` → Blitz, and in the
-//! browser via the wasm build. That is why every style here is inline
-//! and why the root component takes no props it cannot get from a
-//! signal — a stylesheet reference or a desktop-only launcher would
-//! break one of the three.
+//! One component renders in two places without changing: as a desktop
+//! window through `dioxus-native` → Blitz, and in the browser via the
+//! wasm build. That is why every style here is inline and why the root
+//! component takes no props it cannot get from a signal — a stylesheet
+//! reference or a desktop-only launcher would break one of the two.
+//!
+//! It is an application, not a plugin. There is no VST3/CLAP editor and
+//! no `nice-plug-dioxus`: that opens a plugin window through baseview,
+//! and carrying a plugin framework to open an app window cost a second
+//! windowing path and a `native` feature that existed only to pull it
+//! in.
 //!
 //! State lives in [`expression_editor_core::Editor`], owned by the host
 //! as a `Signal`. The component mutates view state (camera, tool,
