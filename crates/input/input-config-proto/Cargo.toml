@@ -2,6 +2,7 @@
 name = "input-config-proto"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 
 # Wire contract for keybind/workflow configuration: the facet/styx config
 # types (profiles, sections, overlays, workflows) extracted from

@@ -2,6 +2,7 @@
 name = "daw-bridge"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [package.metadata]
 

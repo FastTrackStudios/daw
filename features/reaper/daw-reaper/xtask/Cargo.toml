@@ -2,6 +2,7 @@
 name = "daw-reaper-xtask"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 description = "REAPER integration-test runner for the daw domain (daw::test harness + daw-bridge); invoked via `just daw-reaper-test`"
 
 [[bin]]

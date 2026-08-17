@@ -3,6 +3,7 @@ name = "dock-proto"
 description = "Dock protocol — domain types for modular layout/docking system"
 version.workspace = true
 edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+license.workspace = true
 
 [dependencies]
 facet = { workspace = true, features = ["uuid"] }

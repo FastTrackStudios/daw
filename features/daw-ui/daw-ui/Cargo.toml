@@ -3,6 +3,7 @@ name = "daw-ui"
 description = "DAW UI — Dioxus components for DAW integration (mixer, TCP, arrangement, FX browser)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [package.metadata]
 

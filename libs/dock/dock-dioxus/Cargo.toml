@@ -3,6 +3,7 @@ name = "dock-dioxus"
 description = "Dock Dioxus — modular docking layout UI components"
 version.workspace = true
 edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+license.workspace = true
 
 [dependencies]
 dock-proto.workspace = true

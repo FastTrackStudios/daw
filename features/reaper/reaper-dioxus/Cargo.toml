@@ -2,6 +2,7 @@
 name = "reaper-dioxus"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 description = "Dioxus-native overlay rendering for REAPER extensions"
 
 [dependencies]

@@ -2,7 +2,7 @@
 name = "fts-launcher"
 version.workspace = true
 edition.workspace = true
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "FastTrackStudios launcher for Reaper — audio production workflow launcher"
 repository = "https://github.com/FastTrackStudios/FastTrackStudio"
 

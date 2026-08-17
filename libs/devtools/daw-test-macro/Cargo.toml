@@ -2,6 +2,7 @@
 name = "daw-test-macro"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 description = "Proc-macro for #[daw_test] / #[reaper_test] attributes"
 
 [lib]

@@ -2,6 +2,7 @@
 name = "actions-proto"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 description = "Protocol definitions for the actions system"
 
 [dependencies]

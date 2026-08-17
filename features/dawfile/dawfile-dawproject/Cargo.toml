@@ -3,7 +3,7 @@ name = "dawfile-dawproject"
 version = "0.1.0"
 edition = "2024"
 description = "DawProject file parser (.dawproject) — open exchange format by Bitwig"
-license = "MIT OR Apache-2.0"
+license = "GPL-3.0-or-later"
 
 [package.metadata]
 

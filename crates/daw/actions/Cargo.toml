@@ -2,6 +2,7 @@
 name = "daw-actions"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 
 [dependencies]
 # The `daw` facade (not daw-proto directly): these modules drive a live

@@ -2,6 +2,7 @@
 name = "reaper-embed"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 description = "Transparent overlay windows with Vello rendering for REAPER extensions"
 
 [dependencies]

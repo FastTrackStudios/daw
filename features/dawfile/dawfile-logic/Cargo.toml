@@ -3,7 +3,7 @@ name = "dawfile-logic"
 version = "0.1.0"
 edition = "2024"
 description = "Logic Pro session file parser (.logicx) — pure Rust, no C dependencies"
-license = "MIT OR Apache-2.0"
+license = "GPL-3.0-or-later"
 
 [package.metadata]
 

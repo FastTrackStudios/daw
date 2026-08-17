@@ -3,7 +3,7 @@ name = "dawfile-standalone"
 version = "0.1.0"
 edition = "2024"
 description = "The native `.daw` project format — styx on the inside, daw_proto via Facet"
-license = "MIT"
+license = "GPL-3.0-or-later"
 
 [package.metadata]
 
