@@ -304,3 +304,35 @@ fn the_declared_size_does_not_follow_the_content() {
     doc.relayout();
     assert_eq!(before, declared(&doc), "the roll re-declared its size as it scrolled");
 }
+
+/// The update meter reports a number once the editor has been touched.
+///
+/// It used to read `— ups` forever: `Fps {}` took no props, dioxus
+/// memoizes a component whose props have not changed, so it rendered
+/// once at mount and never again — and a rate needs two samples. The
+/// meter subscribes to the editor now, so a change to the document is a
+/// tick.
+#[test]
+fn the_update_meter_reports_once_there_is_something_to_report() {
+    let doc = mounted();
+    let read = |d: &dioxus_test::DocumentTester| {
+        d.query(by_testid("fps"))
+            .immediately()
+            .expect("no meter")
+            .inner_html()
+    };
+    // Editor updates, which are what it counts.
+    for _ in 0..2 {
+        doc.query(by_testid("scroll-down"))
+            .immediately()
+            .expect("no scroll button")
+            .click();
+        doc.drain();
+    }
+    let got = read(&doc);
+    assert!(
+        !got.contains('—'),
+        "the meter still reports nothing after three renders: {got:?} — \
+         it is memoized away again"
+    );
+}

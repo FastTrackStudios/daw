@@ -132,12 +132,6 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
 
     rsx! {
         div {
-            // Wraps rather than clips. With seven modes plus the tool,
-            // dimension and view segments the bar does not fit a narrow
-            // plugin window, and the alternatives are both worse:
-            // `overflow: hidden` silently amputates whatever is on the
-            // right, and letting the segments shrink collides each
-            // icon with its own label.
             "data-testid": "toolbar",
             // A fixed height that scrolls, not a wrapping one that grows.
             //
@@ -432,7 +426,7 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
                         "Fit"
                     }
                 }
-                Fps {}
+                Fps { editor }
             }
         }
     }
@@ -702,19 +696,37 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
     }
 }
 
-/// Frames per second, top right.
+/// The update rate, top right.
 ///
-/// Measured from the interval between renders of *this* component, which
-/// re-renders whenever anything in the editor does — so it reports the
-/// rate the surface is actually being redrawn at, not the rate a timer
-/// is firing at. An idle editor renders rarely and reads low, which is
-/// correct: nothing is being drawn.
+/// Measured from the interval between renders of *this* component. It
+/// took a signal to make that mean anything: `Fps {}` has no props, and
+/// dioxus memoizes a component whose props have not changed, so it
+/// rendered exactly once at mount and then never again. The average was
+/// therefore taken over a single sample forever, which is why the
+/// readout sat at `— fps` no matter how hard the surface was working.
+///
+/// Reading `editor` here is what fixes it: a subscription re-renders the
+/// component whether or not its props changed, so this now ticks once
+/// per editor update — which during a drag is the interaction rate, the
+/// number worth watching.
+///
+/// It is deliberately **not** the renderer's frame rate. Blitz paints on
+/// its own schedule and dioxus-native exposes no per-frame hook, so
+/// there is nothing here that could honestly count painted frames; the
+/// label says "ups" rather than "fps" so it cannot be mistaken for one.
+/// A true frame counter comes with the custom-widget roll, whose `paint`
+/// is called once per frame by the renderer itself.
 ///
 /// Averaged over a short window rather than shown per-frame. A raw
 /// reciprocal jitters far too much to read, and a number nobody can read
 /// is not a diagnostic.
 #[component]
-fn Fps() -> Element {
+fn Fps(editor: Signal<Editor>) -> Element {
+    // The subscription. Reading any field is enough — the component is
+    // then re-run on every write to the editor, which is the event being
+    // counted. Cheap on purpose: a clone of the document here would make
+    // the meter itself the slow thing it is measuring.
+    let _tick = editor.read().doc.notes.len();
     // Deliberately **not** a signal.
     //
     // A signal written during render schedules another render, which
@@ -772,14 +784,14 @@ fn Fps() -> Element {
     rsx! {
         div {
             "data-testid": "fps",
-            title: "Frames per second, averaged over the last 30 renders",
+            title: "Editor updates per second, averaged over the last 30",
             style: format!(
                 "min-width: 46px; text-align: right; font-size: 10px; \
                  font-variant-numeric: tabular-nums; color: {color};",
             ),
             match fps {
-                Some(f) => format!("{f:.0} fps"),
-                None => "— fps".to_string(),
+                Some(f) => format!("{f:.0} ups"),
+                None => "— ups".to_string(),
             }
         }
     }
