@@ -319,15 +319,24 @@ fn scrolling_does_not_change_either_box() {
     );
 }
 
-/// The update meter reports a number once the editor has been touched.
+/// The frame meter counts painted frames, and reports them.
 ///
-/// It used to read `— ups` forever: `Fps {}` took no props, dioxus
-/// memoizes a component whose props have not changed, so it rendered
-/// once at mount and never again — and a rate needs two samples. The
-/// meter subscribes to the editor now, so a change to the document is a
-/// tick.
+/// Two separate failures are pinned here, because the readout sat at
+/// `—` for both reasons in turn:
+///
+/// - it must be re-rendered at all (`Fps {}` took no props, and dioxus
+///   memoizes a component whose props have not changed, so it rendered
+///   once at mount and never again);
+/// - and it must be counting something real. It used to time its own
+///   renders, which is how often dioxus rebuilds a component — not how
+///   often anything reaches the screen.
+///
+/// So this paints, which is the only thing that produces a frame, and
+/// then re-renders to read the number back. Laying out is deliberately
+/// not enough: if it were, the meter would be measuring the wrong thing
+/// again.
 #[test]
-fn the_update_meter_reports_once_there_is_something_to_report() {
+fn the_frame_meter_counts_painted_frames() {
     let doc = mounted();
     let read = |d: &dioxus_test::DocumentTester| {
         d.query(by_testid("fps"))
@@ -335,18 +344,29 @@ fn the_update_meter_reports_once_there_is_something_to_report() {
             .expect("no meter")
             .inner_html()
     };
-    // Editor updates, which are what it counts.
-    for _ in 0..2 {
-        doc.query(by_testid("scroll-down"))
-            .immediately()
-            .expect("no scroll button")
-            .click();
-        doc.drain();
+    assert!(
+        read(&doc).contains('—'),
+        "the meter reported a rate before anything had been painted"
+    );
+
+    // Frames. `render_png` runs the same `blitz_paint::paint_scene` the
+    // window does, so the roll widget's `paint` — and its counter — run
+    // exactly as they do on screen.
+    let shot = std::env::temp_dir().join("expression-editor-frame-meter.png");
+    for _ in 0..3 {
+        doc.render_png(&shot);
     }
+
+    // A render, to bring the count into the DOM.
+    doc.query(by_testid("scroll-down"))
+        .immediately()
+        .expect("no scroll button")
+        .click();
+    doc.drain();
+
     let got = read(&doc);
     assert!(
         !got.contains('—'),
-        "the meter still reports nothing after three renders: {got:?} — \
-         it is memoized away again"
+        "three painted frames and the meter still reports nothing: {got:?}"
     );
 }

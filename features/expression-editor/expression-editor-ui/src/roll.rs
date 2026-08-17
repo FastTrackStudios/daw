@@ -175,8 +175,12 @@ pub fn Canvas(
     // DOM takes the widget out of it on the first mutation — so building
     // a new one per render would hand the second render an empty
     // attribute and the roll would go blank.
+    let frames = use_context::<roll_widget::Frames>();
     let widget = use_hook(|| {
-        dioxus_native_dom::CustomWidgetAttr::new(roll_widget::RollWidget::new(slot.clone()))
+        dioxus_native_dom::CustomWidgetAttr::new(roll_widget::RollWidget::new(
+            slot.clone(),
+            frames,
+        ))
     });
 
     // While the drawer is open its target is locked: editing gestures

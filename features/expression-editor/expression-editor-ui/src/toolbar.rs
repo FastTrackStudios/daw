@@ -709,26 +709,29 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
     }
 }
 
-/// The update rate, top right.
+/// The frame rate, top right.
 ///
-/// Measured from the interval between renders of *this* component. It
-/// took a signal to make that mean anything: `Fps {}` has no props, and
-/// dioxus memoizes a component whose props have not changed, so it
-/// rendered exactly once at mount and then never again. The average was
-/// therefore taken over a single sample forever, which is why the
-/// readout sat at `— fps` no matter how hard the surface was working.
+/// Two things had to be true before this could report anything.
 ///
-/// Reading `editor` here is what fixes it: a subscription re-renders the
-/// component whether or not its props changed, so this now ticks once
-/// per editor update — which during a drag is the interaction rate, the
-/// number worth watching.
+/// It has to be *re-rendered*: `Fps {}` took no props, and dioxus
+/// memoizes a component whose props have not changed, so it rendered
+/// once at mount and never again — the readout sat at `—` no matter how
+/// hard the surface was working. Reading `editor` fixes that, because a
+/// subscription re-runs a component whether or not its props changed.
 ///
-/// It is deliberately **not** the renderer's frame rate. Blitz paints on
-/// its own schedule and dioxus-native exposes no per-frame hook, so
-/// there is nothing here that could honestly count painted frames; the
-/// label says "ups" rather than "fps" so it cannot be mistaken for one.
-/// A true frame counter comes with the custom-widget roll, whose `paint`
-/// is called once per frame by the renderer itself.
+/// And it has to have something honest to count. This used to time its
+/// own renders, which is how often dioxus rebuilds a component, not how
+/// often anything reaches the screen.
+///
+/// It reports the **renderer's** frame rate, counted in the roll
+/// widget's `paint` — which the renderer calls once per frame. That
+/// became possible only when the roll stopped being an svg subtree and
+/// became a custom widget; before that there was no per-frame hook
+/// anywhere in the surface, and this reported editor updates instead.
+///
+/// Reading it still needs a render, so what is on screen is the frame
+/// rate as of the last editor update. That is the right time to look:
+/// the number matters while something is moving.
 ///
 /// Averaged over a short window rather than shown per-frame. A raw
 /// reciprocal jitters far too much to read, and a number nobody can read
@@ -740,48 +743,21 @@ fn Fps(editor: Signal<Editor>) -> Element {
     // counted. Cheap on purpose: a clone of the document here would make
     // the meter itself the slow thing it is measuring.
     let _tick = editor.read().doc.notes.len();
-    // Deliberately **not** a signal.
-    //
-    // A signal written during render schedules another render, which
-    // writes it again: the surface spins at 100% forever and never
-    // settles. It is not a subtle failure — it hung the headless test
-    // suite outright, every gesture test timing out at thirty seconds
-    // while this component re-rendered underneath them.
-    //
-    // The measurement is not view state anyway. It describes how often
-    // the view is being drawn, so it must be a passive observer of that
-    // and never a cause of it. A plain `RefCell` behind `use_hook` gives
-    // per-component storage that reading and writing cannot invalidate.
-    let state = use_hook(|| {
-        std::rc::Rc::new(std::cell::RefCell::new((
-            Vec::<f64>::new(),
-            None::<std::time::Instant>,
-        )))
-    });
 
-    let now = std::time::Instant::now();
-    let s = {
-        let (samples, last) = &mut *state.borrow_mut();
-        if let Some(previous) = last.replace(now) {
-            let ms = now.duration_since(previous).as_secs_f64() * 1000.0;
-            // Drop the idle gaps: a frame after a second of nothing is
-            // not a 1 fps frame, it is the first frame of a new burst.
-            if ms < 500.0 {
-                samples.push(ms);
-                if samples.len() > 30 {
-                    samples.remove(0);
-                }
-            }
-        }
-        samples.clone()
-    };
-
-    let fps = if s.is_empty() {
-        None
-    } else {
-        let mean = s.iter().sum::<f64>() / s.len() as f64;
-        (mean > 0.0).then(|| 1000.0 / mean)
-    };
+    // Counted where frames actually happen — the roll widget's `paint`.
+    //
+    // Deliberately **read**, never written here. A signal written during
+    // render schedules another render, which writes it again: the
+    // surface spins at 100% forever and never settles. That is not a
+    // subtle failure — it hung the headless suite outright, every
+    // gesture test timing out at thirty seconds while this component
+    // re-rendered underneath them. A meter must be a passive observer of
+    // drawing and never a cause of it.
+    //
+    // `try_consume_context` rather than `use_context`: the panels are
+    // also mounted outside `ExpressionEditor` by their own tests, where
+    // there is no roll and so no frame counter to find.
+    let fps = try_consume_context::<crate::roll_widget::Frames>().and_then(|f| f.fps());
 
     // Quiet while it is healthy, and only asks for attention when it is
     // not: dim above a screen refresh, gold where a drag starts to feel
@@ -797,14 +773,14 @@ fn Fps(editor: Signal<Editor>) -> Element {
     rsx! {
         div {
             "data-testid": "fps",
-            title: "Editor updates per second, averaged over the last 30",
+            title: "Frames painted per second, averaged over the last 60",
             style: format!(
                 "min-width: 46px; text-align: right; font-size: 10px; \
                  font-variant-numeric: tabular-nums; color: {color};",
             ),
             match fps {
-                Some(f) => format!("{f:.0} ups"),
-                None => "— ups".to_string(),
+                Some(f) => format!("{f:.0} fps"),
+                None => "— fps".to_string(),
             }
         }
     }

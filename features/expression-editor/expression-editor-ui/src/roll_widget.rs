@@ -61,17 +61,73 @@ impl SceneSlot {
     }
 }
 
+/// Painted frames, counted where they actually happen.
+///
+/// The editor's meter used to time its own re-renders, which is the rate
+/// dioxus rebuilds a component at — not the rate anything reaches the
+/// screen. `Widget::paint` is called by the renderer once per frame, so
+/// this is the first place in the surface that can honestly say "fps".
+///
+/// A ring of recent intervals rather than a running average: what you
+/// want to see while dragging is whether frames are *arriving evenly*,
+/// and a lifetime mean hides exactly that.
+#[derive(Clone, Default)]
+pub struct Frames(Rc<RefCell<FrameLog>>);
+
+#[derive(Default)]
+pub struct FrameLog {
+    last: Option<std::time::Instant>,
+    intervals: Vec<f64>,
+}
+
+impl Frames {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record that a frame was just painted.
+    fn tick(&self) {
+        let Ok(mut log) = self.0.try_borrow_mut() else {
+            return;
+        };
+        let now = std::time::Instant::now();
+        if let Some(previous) = log.last.replace(now) {
+            let ms = now.duration_since(previous).as_secs_f64() * 1000.0;
+            // Drop the idle gaps: the first frame after a second of
+            // nothing is not a 1 fps frame, it is the start of a burst.
+            if ms < 500.0 {
+                log.intervals.push(ms);
+                if log.intervals.len() > 60 {
+                    log.intervals.remove(0);
+                }
+            }
+        }
+    }
+
+    /// Frames per second over the recent window, once there are enough
+    /// frames to divide by.
+    pub fn fps(&self) -> Option<f64> {
+        let log = self.0.try_borrow().ok()?;
+        if log.intervals.is_empty() {
+            return None;
+        }
+        let mean = log.intervals.iter().sum::<f64>() / log.intervals.len() as f64;
+        (mean > 0.0).then(|| 1000.0 / mean)
+    }
+}
+
 /// The roll's custom widget.
 ///
-/// Holds nothing but the slot: everything it draws was decided by the
-/// component that filled it.
+/// Holds nothing but the slot and the frame counter: everything it draws
+/// was decided by the component that filled it.
 pub struct RollWidget {
     slot: SceneSlot,
+    frames: Frames,
 }
 
 impl RollWidget {
-    pub fn new(slot: SceneSlot) -> Self {
-        Self { slot }
+    pub fn new(slot: SceneSlot, frames: Frames) -> Self {
+        Self { slot, frames }
     }
 }
 
@@ -90,6 +146,7 @@ impl blitz_dom::Widget for RollWidget {
         // (`crate::sizing`), and the renderer applies the device scale
         // for us. Reading them here and scaling the drawing would
         // reintroduce the very ratio that made the svg wrong.
+        self.frames.tick();
         self.slot.take_scene().unwrap_or_default()
     }
 }

@@ -135,6 +135,10 @@ pub fn ExpressionEditor(
     // Context rather than a prop chain: the flow variant is read deep
     // inside the canvas and nothing between here and there cares.
     use_context_provider(|| bend_flow.unwrap_or_default());
+    // Painted frames, shared between the roll that counts them and the
+    // status bar that reports them. Provided here because those two are
+    // siblings — the counter belongs to neither.
+    use_context_provider(roll_widget::Frames::new);
     let drag = use_signal(Drag::default);
     let drawer = use_signal(|| initial_drawer.clone().unwrap_or_default());
     let mut inspector_open = use_signal(|| true);
