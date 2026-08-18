@@ -733,6 +733,13 @@ fn notes(scene: &mut Scene, ed: &Editor, at: Affine, labels: &mut Labeller) {
     handles(scene, ed, at);
 }
 
+/// How far a black key reaches across the gutter, as a fraction of it.
+///
+/// Roughly the ratio on a real keyboard, and the point is only that it is
+/// clearly less than one: the white keys have to stay visibly continuous
+/// underneath or the shape stops reading as a keyboard.
+const BLACK_KEY_W: f64 = 0.62;
+
 /// The smallest note body worth printing a name on.
 ///
 /// Below this the glyphs overlap the rows above and below and read as
@@ -875,19 +882,59 @@ fn keyboard(scene: &mut Scene, ed: &Editor, h: f64, labels: &mut Labeller) {
     // cut the way the rows themselves are.
     let band = Rect::new(0.0, 0.0, canvas::GUTTER_W, ed.viewport.h);
     scene.push_clip_layer(at, &band);
-    scene.fill(Fill::NonZero, at, color(theme::SURFACE_BAR), None, &band);
     let keys = canvas::keyboard(ed);
+
+    // A pitch gutter is a *keyboard*; every other row space is a list of
+    // named lanes.
+    //
+    // The difference is the whole reason this reads at a glance. Drawn
+    // as equal full-width bands — which is what it was — a piano gutter
+    // is a grey ladder you have to count, and the eye has nothing to
+    // land on. Inset black keys give it the shape everyone already knows
+    // how to read, so "which octave am I in" stops being a question.
+    // Drum and string spaces keep the full-width bands, because there
+    // the rows genuinely are a list and a piano would be a lie.
+    let piano = matches!(ed.row_space, expression_editor_core::RowSpace::Pitch);
+
+    // The white keys are one continuous bed, and the black ones sit *on*
+    // it. Painting each key as its own band instead leaves the strip
+    // beside an accidental showing the panel behind, which is what made
+    // the gutter look like a table rather than an instrument.
+    scene.fill(
+        Fill::NonZero,
+        at,
+        color(if piano { theme::KEY_WHITE } else { theme::SURFACE_BAR }),
+        None,
+        &band,
+    );
+
     let mut faces = Batch::default();
     let mut edges = Batch::default();
     for k in &keys {
-        faces.add(
-            color(if k.black { theme::KEY_BLACK } else { theme::KEY_WHITE }),
-            &Rect::new(0.0, k.y, canvas::GUTTER_W, k.y + k.h),
-        );
-        edges.add(
-            with_alpha(color(theme::PANEL_BORDER), 0.8),
-            &Line::new((0.0, k.y), (canvas::GUTTER_W, k.y)),
-        );
+        if piano {
+            if k.black {
+                faces.add(
+                    color(theme::KEY_BLACK),
+                    &Rect::new(0.0, k.y, canvas::GUTTER_W * BLACK_KEY_W, k.y + k.h),
+                );
+            } else {
+                // Only the white keys are parted. A rule drawn across a
+                // black key is exactly what made this read as a grid.
+                edges.add(
+                    with_alpha(color(theme::PANEL_BORDER), 0.8),
+                    &Line::new((0.0, k.y), (canvas::GUTTER_W, k.y)),
+                );
+            }
+        } else {
+            faces.add(
+                color(if k.black { theme::KEY_BLACK } else { theme::KEY_WHITE }),
+                &Rect::new(0.0, k.y, canvas::GUTTER_W, k.y + k.h),
+            );
+            edges.add(
+                with_alpha(color(theme::PANEL_BORDER), 0.8),
+                &Line::new((0.0, k.y), (canvas::GUTTER_W, k.y)),
+            );
+        }
     }
     faces.fill(scene, at);
     edges.stroke(scene, at, 0.5);

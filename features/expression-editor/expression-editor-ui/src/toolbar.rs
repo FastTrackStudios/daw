@@ -143,22 +143,35 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
             "data-testid": "toolbar",
             // A fixed height that scrolls, not a wrapping one that grows.
             //
-            // Wrapping made the bar's height a function of the window
-            // *width*, and the roll is sized by subtracting this bar
-            // from the window — so a narrow window silently stole a row
-            // from the roll and the two disagreed about where the roll
-            // began. `overflow-x: auto` keeps everything reachable at
-            // any width without the height ever moving.
-            // `border-box`, so the constant is the row's *total* height.
-            // With the default `content-box` the padding and border
-            // stack on top, and the roll was sized against a number 11px
-            // smaller than the row it was subtracting.
-            style: "display: flex; flex: 0 0 auto; flex-wrap: nowrap; \
+            // **Two rows, on purpose.**
+            //
+            // It used to be one row that wrapped, which made its height a
+            // function of the window *width* — a narrow window silently
+            // stole a row from the roll, and the roll is sized by
+            // subtracting this bar. Pinning the height with `nowrap`
+            // fixed that and broke something worse: with no free space
+            // left, the `margin-left: auto` group stopped being pushed
+            // anywhere and simply fell off the right edge, taking undo,
+            // redo, Mod, Zoom, Fit and the frame meter with it. Controls
+            // you cannot see are worse than a bar that moves.
+            //
+            // Two fixed rows keep the height constant *and* everything
+            // reachable, and the split is meaningful rather than
+            // wherever the text happened to run out: what you are editing
+            // on top, how you are editing it underneath.
+            //
+            // `border-box`, so the constant is the bar's *total* height.
+            style: "display: flex; flex-direction: column; flex: 0 0 auto; \
                     box-sizing: border-box; height: {crate::sizing::TOOLBAR_H}px; \
-                    align-items: center; gap: 5px; overflow-x: auto; \
-                    padding: 5px 8px; background: {theme::PANEL}; \
+                    background: {theme::PANEL}; \
                     border-bottom: 1px solid {theme::PANEL_BORDER}; \
                     font-family: system-ui, sans-serif;",
+
+            // ── what you are editing ─────────────────────────────────
+            div {
+                style: "display: flex; flex: 0 0 auto; align-items: center; \
+                        gap: 5px; height: 29px; padding: 0 8px; \
+                        overflow-x: auto; overflow-y: hidden;",
 
             // The mode leads: everything after it is conditional on
             // what the editor currently is.
@@ -241,6 +254,13 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
 
                 {divider()}
             }
+            }
+
+            // ── how you are editing it ───────────────────────────────
+            div {
+                style: "display: flex; flex: 0 0 auto; align-items: center; \
+                        gap: 5px; height: 29px; padding: 0 8px; \
+                        overflow-x: auto; overflow-y: hidden;",
 
             Segment {
                 for t in Tool::ALL {
@@ -435,6 +455,7 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
                     }
                 }
                 Fps { editor }
+            }
             }
         }
     }

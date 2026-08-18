@@ -37,10 +37,14 @@ use expression_editor_ui::theme;
 use expression_editor_ui::{ExpressionEditor, ModDrawer, MultiTool};
 
 const W: u32 = 1100;
-/// The roll's own height. The window has to hold this plus the top bar,
-/// the chord row, the lane strip and the status bar — the canvas sizes
-/// itself from its intrinsic aspect ratio, so overshooting here pushes
-/// the status bar out of frame rather than shrinking the roll.
+/// The viewport a seeded document is built with.
+///
+/// Only an opening value now: the harness reports its window below, the
+/// same way the desktop runner does, so the editor resizes to fill the
+/// frame on mount. It used to be the final word, which is why every
+/// committed shot showed a roll that stopped short of the inspector with
+/// a dead band under the status bar — the picture was of an editor that
+/// had never been told how much room it had.
 const CANVAS_H: f64 = 400.0;
 const H: u32 = 700;
 
@@ -53,13 +57,22 @@ fn Harness(
     flow: Option<expression_editor_ui::BendFlow>,
 ) -> Element {
     let editor = use_signal(|| seed.clone());
+    // State the space, as a host does. Without it these pictures show an
+    // editor that was never told how big its window is.
+    use_hook(|| expression_editor_ui::available_space(W as f64, H as f64));
     rsx! {
         style {
             "html, body {{ width: 100%; height: 100%; margin: 0; padding: 0; \
               overflow: hidden; background: {theme::BG}; }}"
         }
         div {
-            style: "width: 100%; height: 100%;",
+            // `vh`/`vw`, not `100%`. A percentage height resolves against
+            // the parent, and a headless Blitz mount gives `body` no
+            // resolved height — so the editor laid out to its content
+            // and left a band of background under the status bar in
+            // every shot. The standalone runner's root documents the
+            // same trap; the harness had not followed it.
+            style: "width: 100vw; height: 100vh;",
             ExpressionEditor {
                 editor,
                 initial_drawer: drawer.clone(),
