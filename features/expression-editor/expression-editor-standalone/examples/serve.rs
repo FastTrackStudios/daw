@@ -139,8 +139,17 @@ pub fn DevApp() -> Element {
     // would strand any write-back. Replaced, not accumulated.
     let mut backend = use_signal(|| None::<Standalone>);
 
+    // Jobs first, then the fixtures, then whatever is on disk.
+    //
+    // The scenes are named after what they *demonstrate* — "Q zones",
+    // "Channel conflict", "Guitar Pro import" — which is right for the
+    // screenshot suite and wrong for a person: none of them is a thing
+    // anyone sets out to do. The workflows are that list, and they come
+    // first because they are the answer to "what am I opening this for".
+    // The fixtures stay because they are the coverage.
     let entries = use_signal(|| {
-        let mut all = library::scenes();
+        let mut all = library::workflows();
+        all.extend(library::scenes());
         all.extend(library::scan(&library::root()));
         all
     });

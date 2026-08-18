@@ -56,8 +56,14 @@ fn scene_names_resolve_bare_slugged_and_labelled() {
 }
 
 #[test]
-fn a_scene_name_beats_a_path_and_extensions_dispatch() {
-    assert!(matches!(Source::parse("drums"), Ok(Source::Scene(_))));
+fn a_name_beats_a_path_and_extensions_dispatch() {
+    // A job wins over a fixture that shares its name. `drums` names both
+    // a workflow and a scene, and the workflow is what a person means —
+    // the scene list is named after behaviours to demonstrate, not
+    // things to open.
+    assert!(matches!(Source::parse("drums"), Ok(Source::Workflow(_))));
+    // A fixture with no job of that name still resolves to itself.
+    assert!(matches!(Source::parse("zones"), Ok(Source::Scene(_))));
     assert!(matches!(Source::parse("song.rpp"), Ok(Source::Rpp(_))));
     assert!(matches!(Source::parse("part.MID"), Ok(Source::Midi(_))));
     assert!(matches!(

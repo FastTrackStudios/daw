@@ -54,6 +54,7 @@ use expression_editor_audio::{AudioSession, TakeConfig};
 use expression_editor_core::{Editor, Mode, Viewport};
 use expression_editor_daw::Session;
 use expression_editor_ui::demo::{self, Scene};
+use expression_editor_ui::workflow::Workflow;
 
 pub mod app;
 pub mod cli;
@@ -78,6 +79,9 @@ pub enum Source {
     /// documents the screenshot tests mount, so a scene shown here
     /// cannot drift from the committed pictures.
     Scene(Scene),
+    /// A job rather than a fixture — the list a person is handed. See
+    /// `expression_editor_ui::workflow`.
+    Workflow(Workflow),
     /// A REAPER project. Loaded through `daw-standalone`, so items,
     /// takes, tempo and markers all arrive as facade types.
     Rpp(PathBuf),
@@ -101,6 +105,12 @@ impl Source {
     /// recognised extension is an error here rather than a confusing
     /// failure three layers down.
     pub fn parse(arg: &str) -> Result<Self, LoadError> {
+        // Workflows first: they are the list a person is handed, and a
+        // name collision should resolve to the job rather than to the
+        // fixture that happens to share its material.
+        if let Some(w) = Workflow::by_slug(arg) {
+            return Ok(Source::Workflow(w));
+        }
         if let Some(scene) = scene_by_name(arg) {
             return Ok(Source::Scene(scene));
         }
@@ -314,6 +324,11 @@ impl Runner {
                 daw: None,
                 loaded: Loaded::Scene(Box::new(demo::editor(*scene, viewport))),
                 label: format!("scene: {}", scene.label()),
+            },
+            Source::Workflow(w) => Runner {
+                daw: None,
+                loaded: Loaded::Scene(Box::new(w.editor(viewport))),
+                label: w.label().to_string(),
             },
             Source::Rpp(path) => Self::open_rpp(path, target, viewport)?,
             Source::Midi(path) => Self::open_midi(path, target, viewport)?,

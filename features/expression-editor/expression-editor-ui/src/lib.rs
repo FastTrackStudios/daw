@@ -52,6 +52,7 @@ pub mod text;
 pub mod theme;
 pub mod toolbar;
 pub mod widgets;
+pub mod workflow;
 
 pub use drawer::ModDrawer;
 pub use guitar::BendFlow;
