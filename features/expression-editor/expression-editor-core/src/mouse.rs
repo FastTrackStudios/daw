@@ -302,7 +302,10 @@ pub struct MouseMap {
 
 impl Default for MouseMap {
     fn default() -> Self {
-        host_overlay(Self::reaper_like())
+        // FTS, not REAPER-like. The REAPER map stays available by name
+        // for anyone whose hands already know it — this is a change of
+        // default, not a removal.
+        host_overlay(Self::fts())
     }
 }
 
@@ -604,14 +607,84 @@ impl MouseMap {
         m
     }
 
-    pub const PRESETS: [&'static str; 4] = ["REAPER-like", "Drums", "Riffer (Ample)", "Lyrics"];
+    /// The FTS scheme: one meaning per modifier, and none of them
+    /// navigation.
+    ///
+    /// The REAPER map spreads a modifier's meaning across unrelated
+    /// jobs — `Ctrl` is the pen, `Alt` paints notes, `Ctrl+Alt` zooms,
+    /// `Ctrl+Shift` pans — so what a key *means* depends on which other
+    /// key is down with it. That is learnable, and REAPER users have
+    /// learned it, but it is not derivable.
+    ///
+    /// Here each modifier is one idea, and sub-modifiers refine it
+    /// rather than replacing it:
+    ///
+    /// - nothing — **select**
+    /// - `Alt` — **create**. Shift and Ctrl pick which kind.
+    /// - `Ctrl` — **razor**. Shift and Alt pick which kind.
+    ///
+    /// Navigation is deliberately absent from all of it. Panning is the
+    /// middle button and zooming is the `Z` tool, so no modifier ever has
+    /// to double as "move the view" — which is what forced the old map to
+    /// overload `Ctrl+Alt` and `Ctrl+Shift` in the first place.
+    pub fn fts() -> Self {
+        use Context as C;
+        use Gesture as G;
+        const N: ModKey = ModKey::NONE;
+        const S: ModKey = ModKey::SHIFT;
+        const CT: ModKey = ModKey::CTRL;
+        const AL: ModKey = ModKey::ALT;
+        const SC: ModKey = ModKey(3);
+        const CA: ModKey = ModKey(6);
+        const SA: ModKey = ModKey(5);
+        const ALL3: ModKey = ModKey(7);
+
+        let b = |context, gesture, mods, action| Binding {
+            context,
+            gesture,
+            mods,
+            action,
+        };
+
+        let mut map = Self::reaper_like();
+        map.name = "FTS";
+        // Only the empty-canvas drags differ. Everything the REAPER map
+        // says about notes, edges, handles and the strip is right, and
+        // rewriting it would be change for its own sake.
+        map.bindings
+            .retain(|x| !(x.context == C::PianoRoll && x.gesture == G::Drag));
+        map.bindings.extend([
+            // Select.
+            b(C::PianoRoll, G::Drag, N, Action::MarqueeSelect),
+            b(C::PianoRoll, G::Drag, S, Action::MarqueeAdd),
+            // Create. Alt alone inserts; Shift lets the same drag set the
+            // length, which is the difference between placing a note and
+            // drawing one.
+            b(C::PianoRoll, G::Drag, AL, Action::InsertNote),
+            b(C::PianoRoll, G::Drag, SA, Action::InsertNoteDragToExtend),
+            b(C::PianoRoll, G::Drag, CA, Action::InsertNoteNoSnap),
+            // Razor. Ctrl alone cuts an area; Shift adds to it.
+            b(C::PianoRoll, G::Drag, CT, Action::RazorCreate),
+            b(C::PianoRoll, G::Drag, SC, Action::RazorAddArea),
+            // The last combination belongs to the razor tree, as the
+            // odd one out has to belong to something — an unbound
+            // three-modifier drag is a gesture that silently does
+            // nothing.
+            b(C::PianoRoll, G::Drag, ALL3, Action::RazorMoveContentsNoSnap),
+        ]);
+        map
+    }
+
+    pub const PRESETS: [&'static str; 5] =
+        ["FTS", "REAPER-like", "Drums", "Riffer (Ample)", "Lyrics"];
 
     pub fn preset(name: &str) -> Self {
         match name {
             "Drums" => Self::drums(),
             "Riffer (Ample)" => Self::riffer(),
             "Lyrics" => Self::lyrics(),
-            _ => Self::reaper_like(),
+            "REAPER-like" => Self::reaper_like(),
+            _ => Self::fts(),
         }
     }
 }

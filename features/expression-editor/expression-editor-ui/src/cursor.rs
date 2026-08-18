@@ -94,7 +94,12 @@ pub fn cursor_at(ed: &Editor, x: f64, y: f64, mods: Mods, locked: bool) -> Curso
     // time, and the drag binding is the one with consequences.
     let action = ed.mouse.resolve_for(context, Gesture::Drag, mods, ed.tool);
 
-    if locked && action.is_edit() {
+    // A *view* tool is never forbidden. `is_edit` is asked of the
+    // resolved action, and an armed tool resolves to `ActiveTool` — one
+    // answer for all seven tools, which is right for six of them and
+    // wrong for zoom. The lock exists to stop you changing the material
+    // while a preview is up; looking around is not that.
+    if locked && action.is_edit() && !ed.tool.is_view() {
         return Cursor::Forbidden;
     }
 

@@ -313,6 +313,23 @@ const LABELS: &[(&str, &str)] = &[
 /// means the key was consumed by the sequence and must not also fall
 /// through to the editor's own handling, or `z` would fire the tool
 /// shortcut on its way to `z i`.
+/// Whether the pending sequence is the zoom prefix, and nothing more.
+///
+/// The question the roll asks on a press: a drag *now* means the zoom
+/// tool for the length of the hold, rather than the first half of a
+/// sequence. Which is what makes `z` one idea at two speeds — tap it and
+/// it is a prefix awaiting a target (`z i`), hold it and drag and it is
+/// the tool.
+///
+/// Deliberately narrow. It is true only when `z` alone is pending, so a
+/// half-typed longer sequence is never mistaken for a held tool.
+pub fn zoom_prefix_held() -> bool {
+    PENDING.with(|p| {
+        let pending = p.borrow();
+        pending.len() == 1 && pending[0].key == key_code("z")
+    })
+}
+
 pub fn is_pending() -> bool {
     PROCESSOR.with(|p| {
         p.borrow()

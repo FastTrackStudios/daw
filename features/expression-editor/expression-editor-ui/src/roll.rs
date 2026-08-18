@@ -148,6 +148,14 @@ pub fn Canvas(
     // live, which is the overlay's cue to stay hidden.
     let mut which_key = use_signal(Vec::<keys::Continuation>::new);
 
+    // The tool to go back to when `z` is released, if the hold was used.
+    //
+    // `Some` means a spring-loaded zoom is live. It also means the hold
+    // has been *used* — it is only set once a drag actually starts, so a
+    // tap that never drags leaves it `None` and the which-key tree
+    // survives for its second key.
+    let mut spring_from = use_signal(|| None::<expression_editor_core::Tool>);
+
     // The viewport is followed by `ExpressionEditor`, which is the only
     // component that knows the whole chrome. See the effect there.
 
@@ -424,6 +432,24 @@ pub fn Canvas(
                 match e.key().to_string().as_str() {
                     "r" => editor.write().refs_to_front = false,
                     "m" => editor.write().reference_to_front = false,
+                    // Releasing `z` puts the tool back — but only if the
+                    // hold was *used*. Tap it and the zoom tree stays
+                    // open for its second key (`z i`); hold it and drag
+                    // and you are back where you were the moment you let
+                    // go.
+                    //
+                    // No timer decides which. The gesture does: a drag
+                    // marks the hold used, a key press does not, and
+                    // release just asks which happened. Hold-versus-tap
+                    // by timeout is where this pattern usually goes
+                    // wrong — it makes a slow tap into a hold.
+                    "z" => {
+                        if let Some(previous) = spring_from.take() {
+                            editor.write().tool = previous;
+                            which_key.set(Vec::new());
+                            keys::cancel();
+                        }
+                    }
                     _ => {}
                 }
             },
@@ -496,11 +522,32 @@ pub fn Canvas(
                         }
                         Chrome::Roll => {}
                     }
-                    if locked {
-                        return;
-                    }
                     let (x, y) = local(&e);
                     let m = mods_of(e.modifiers());
+                    // A drag while the zoom prefix is held is the tool,
+                    // not the start of a key sequence. Arming here — at
+                    // the press rather than at the key — is what lets a
+                    // tap still mean `z i`.
+                    if keys::zoom_prefix_held() && spring_from.read().is_none() {
+                        let previous = editor.read().tool;
+                        if previous != expression_editor_core::Tool::Zoom {
+                            spring_from.set(Some(previous));
+                            editor.write().tool = expression_editor_core::Tool::Zoom;
+                        }
+                    }
+                    // The lock stops you *editing*, not looking.
+                    //
+                    // `cursor_at` has always said so — it forbids a
+                    // gesture only when `action.is_edit()` — but the
+                    // handler refused everything, so the pointer drew a
+                    // hand over a surface that would not pan. Navigation
+                    // goes through first, and the lock applies to what is
+                    // left.
+                    let navigating = matches!(e.trigger_button(), Some(MouseButton::Auxiliary))
+                        || editor.read().tool.is_view();
+                    if locked && !navigating {
+                        return;
+                    }
                     let button = match e.trigger_button() {
                         Some(MouseButton::Secondary) => 2,
                         // Middle is a real gesture (hand-scroll pan);

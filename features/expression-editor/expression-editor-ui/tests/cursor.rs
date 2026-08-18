@@ -169,18 +169,35 @@ fn a_locked_surface_says_so() {
 }
 
 /// Navigation survives the lock: only *editing* is blocked, and a cursor
-/// that forbade panning would be describing a restriction that is not
+/// that forbade looking around would describe a restriction that is not
 /// there.
+///
+/// Asserted through the zoom tool rather than `Ctrl+Shift`. Under the FTS
+/// map no modifier navigates at all — panning is the middle button and
+/// zooming is the `Z` tool — precisely so that a modifier means one thing
+/// regardless of what else is held. `Ctrl+Shift` is the razor's
+/// add-to-area now, which *is* an edit, so the lock is right to forbid
+/// it.
 #[test]
-fn a_locked_surface_still_pans() {
-    let ed = one_note();
+fn a_locked_surface_still_navigates() {
+    let mut ed = one_note();
     let (x, y) = at(&ed, PPQ * 3.5);
-    let pan = Mods {
+
+    // The razor is *selection*, not editing — it sits in the non-edit
+    // list beside marquee and pan — so the lock lets it through. Which
+    // is the argument for putting it on `Ctrl` in the first place: plain
+    // drag selects loosely, `Ctrl` selects a precise span of time, and
+    // neither changes a note.
+    let razor = Mods {
         shift: true,
         ctrl: true,
         alt: false,
     };
-    assert_eq!(cursor_at(&ed, x, y, pan, true), Cursor::Hand);
+    assert_eq!(cursor_at(&ed, x, y, razor, true), Cursor::Razor);
+
+    // The zoom tool is not, and the lock must let it through.
+    ed.tool = expression_editor_core::Tool::Zoom;
+    assert_eq!(cursor_at(&ed, x, y, plain(), true), Cursor::Zoom);
 }
 
 // ── on the real DOM ─────────────────────────────────────────────────

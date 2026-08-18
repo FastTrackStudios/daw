@@ -25,6 +25,13 @@ pub enum Tool {
     Eraser,
     NoteDraw,
     NoteErase,
+    /// Change the view, not the material.
+    ///
+    /// Drag up and down to zoom pitch, left and right to zoom time —
+    /// so the direction you drag is the axis you get. Held `z` arms it
+    /// for the length of the hold; it is also a tool like any other, so
+    /// it can be clicked and left on.
+    Zoom,
 }
 
 impl Tool {
@@ -54,17 +61,33 @@ impl Tool {
             // Erasing owns both, or sweeping across notes would move the
             // first one it touched instead of deleting it.
             Tool::NoteErase => &[(C::PianoRoll, G::Drag), (C::Note, G::Drag)],
+            // Zoom owns every drag it can reach. It is a *view* tool:
+            // while it is armed nothing about the material should
+            // change, so a drag that started on a note must zoom rather
+            // than move the note.
+            Tool::Zoom => &[(C::PianoRoll, G::Drag), (C::Note, G::Drag)],
         }
     }
 
-    pub const ALL: [Tool; 6] = [
+    pub const ALL: [Tool; 7] = [
         Tool::Select,
         Tool::Pen,
         Tool::Curve,
         Tool::Eraser,
         Tool::NoteDraw,
         Tool::NoteErase,
+        Tool::Zoom,
     ];
+
+    /// Whether this tool changes the view rather than the material.
+    ///
+    /// A view tool is safe to arm at any moment and safe to leave armed:
+    /// it cannot alter the document, so nothing it does needs undo and
+    /// nothing it does can be lost. That is what makes it reasonable to
+    /// spring-load one onto a held key.
+    pub fn is_view(self) -> bool {
+        matches!(self, Tool::Zoom)
+    }
 
     pub fn label(&self) -> &'static str {
         match self {
@@ -74,6 +97,7 @@ impl Tool {
             Tool::Eraser => "Eraser",
             Tool::NoteDraw => "Note Draw",
             Tool::NoteErase => "Note Erase",
+            Tool::Zoom => "Zoom",
         }
     }
 

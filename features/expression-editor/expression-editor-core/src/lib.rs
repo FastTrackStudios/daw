@@ -1288,6 +1288,33 @@ impl Editor {
         self.settle_camera();
     }
 
+    /// Frame a box of the document: `t0..t1` across, `row_lo..row_hi` down.
+    ///
+    /// What the zoom tool's Alt-sweep lands on, and the honest primitive
+    /// behind "zoom to this". Written as a single assignment of the
+    /// camera rather than a sequence of zoom steps, because a sequence
+    /// has to decide an order and either order leaves the other axis
+    /// anchored on the wrong thing.
+    ///
+    /// Degenerate boxes are refused rather than clamped: a zero-width
+    /// sweep is a click that moved a pixel, and framing it would zoom to
+    /// the maximum and lose the user's place for what looked like a
+    /// misclick.
+    pub fn zoom_to_box(&mut self, t0: f64, t1: f64, row_lo: f64, row_hi: f64) {
+        let (t0, t1) = (t0.min(t1), t0.max(t1));
+        let (lo, hi) = (row_lo.min(row_hi), row_lo.max(row_hi));
+        let span_t = t1 - t0;
+        let span_rows = hi - lo;
+        if !(span_t.is_finite() && span_t > 0.0) || !(span_rows.is_finite() && span_rows > 0.0) {
+            return;
+        }
+        self.camera.units_per_px = (span_t / self.viewport.w.max(1.0)).max(1e-9);
+        self.camera.t0 = t0;
+        self.camera.vertical.px_per_row = (self.viewport.h.max(1.0) / span_rows).max(1e-6);
+        self.camera.vertical.center = (lo + hi) * 0.5;
+        self.settle_camera();
+    }
+
     pub fn pan_px(&mut self, dx: f64, dy: f64) {
         self.camera.pan_px(dx, dy);
         self.settle_camera();

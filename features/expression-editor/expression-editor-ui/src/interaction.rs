@@ -20,6 +20,30 @@ pub enum Drag {
     #[default]
     None,
     /// Right-drag or ctrl+shift-drag.
+    /// The zoom *tool*'s drag.
+    ///
+    /// Distinct from [`Drag::Zoom`], which is REAPER's anchored zoom on
+    /// `Ctrl+Alt` and maps a vertical drag to *time*. This one reads the
+    /// direction as the axis: up and down zoom pitch, left and right
+    /// zoom time, a diagonal does both. You point at the axis you want
+    /// instead of remembering a modifier for it.
+    ///
+    /// Everything is measured against the state at press — the units per
+    /// pixel and the point under the cursor — so the drag is a ratio
+    /// against a fixed base rather than a series that compounds each
+    /// frame and runs away.
+    ZoomTool {
+        origin: (f64, f64),
+        base_units_per_px: f64,
+        base_px_per_row: f64,
+        /// What was under the press, and stays under it.
+        anchor_t: f64,
+        anchor_row: f64,
+        /// Alt: sweep a rectangle and zoom into it on release, rather
+        /// than zooming continuously as you drag.
+        marquee: bool,
+        current: (f64, f64),
+    },
     Pan {
         last: (f64, f64),
     },
@@ -1295,6 +1319,18 @@ fn legacy_pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16)
     let tool = if mods.ctrl { Tool::Pen } else { ed.tool };
 
     match tool {
+        // A view tool, so it never touches the document and never opens
+        // an undo step — which is what makes it safe to spring-load onto
+        // a held key and safe to leave armed.
+        Tool::Zoom => Drag::ZoomTool {
+            origin: (x, y),
+            base_units_per_px: ed.camera.units_per_px,
+            base_px_per_row: ed.camera.vertical.px_per_row,
+            anchor_t: ed.camera.t_at(x),
+            anchor_row: ed.camera.pitch_at(y, ed.viewport),
+            marquee: mods.alt,
+            current: (x, y),
+        },
         Tool::Select => {
             if under.is_some() {
                 ed.begin_gesture();
@@ -1719,6 +1755,38 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             // puts `anchor_t` back under the press.
             ed.camera.t0 = *anchor_t - origin.0 * ed.camera.units_per_px;
         }
+        Drag::ZoomTool {
+            origin,
+            base_units_per_px,
+            base_px_per_row,
+            anchor_t,
+            anchor_row,
+            marquee,
+            current,
+        } => {
+            *current = (x, y);
+            if *marquee {
+                // Sweeping a box; nothing moves until release.
+                return;
+            }
+            // Direction is the axis. Shift is the fine control: the same
+            // travel asks for a quarter as much, so a gesture that
+            // overshot can be repeated slowly rather than undone.
+            let gain = if mods.shift { 800.0 } else { 200.0 };
+            let dx = x - origin.0;
+            let dy = origin.1 - y;
+
+            // Right and up zoom *in*, which is the direction the content
+            // grows in both cases.
+            ed.camera.units_per_px = (*base_units_per_px / (dx / gain).exp()).max(1e-9);
+            ed.camera.vertical.px_per_row = (*base_px_per_row * (dy / gain).exp()).max(1e-6);
+            // Put what was under the press back under it, on both axes.
+            ed.camera.t0 = *anchor_t - origin.0 * ed.camera.units_per_px;
+            ed.camera.vertical.center = *anchor_row
+                - (origin.1 - ed.viewport.h * 0.5) / ed.camera.vertical.px_per_row;
+            let (bounds, vp) = (ed.bounds(), ed.viewport);
+            ed.camera.constrain(bounds, vp);
+        }
         Drag::SelectTouched { .. } => touch_at(ed, drag, x, y),
         Drag::Paint { .. } => paint_at(ed, drag, x, y),
         Drag::DraftAnchor { .. } => {}
@@ -1850,6 +1918,31 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
 /// selected so the shape buttons can restyle it).
 pub fn pointer_up(ed: &mut Editor, drag: Drag, x: f64, y: f64, mods: Mods) -> Drag {
     match drag {
+        Drag::ZoomTool {
+            origin,
+            marquee,
+            current,
+            ..
+        } => {
+            // Only the Alt sweep has anything left to do: the continuous
+            // drag already zoomed on the way.
+            if marquee {
+                let moved = (current.0 - origin.0).abs() + (current.1 - origin.1).abs();
+                // A sweep that never moved is a click, and framing a
+                // click would zoom to the maximum for what looked like a
+                // misclick.
+                if moved > 3.0 {
+                    let vp = ed.viewport;
+                    ed.zoom_to_box(
+                        ed.camera.t_at(origin.0),
+                        ed.camera.t_at(current.0),
+                        ed.camera.pitch_at(origin.1, vp),
+                        ed.camera.pitch_at(current.1, vp),
+                    );
+                }
+            }
+            Drag::None
+        }
         Drag::Marquee {
             origin,
             current,
