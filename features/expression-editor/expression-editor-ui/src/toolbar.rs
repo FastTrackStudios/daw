@@ -260,8 +260,28 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
             div {
                 style: "display: flex; flex: 0 0 auto; align-items: center; \
                         gap: 5px; height: 29px; padding: 0 8px; \
+                        overflow: hidden;",
+
+            // The verbs scroll; the group after them does not.
+            //
+            // Two containers rather than one row, because `margin-left:
+            // auto` needs free space to push into and there is none once
+            // the tools carry their names. Giving the left half its own
+            // `overflow-x` means a narrow window costs you a scroll
+            // through the tools, never the disappearance of undo.
+            div {
+                style: "display: flex; flex: 1 1 auto; min-width: 0; \
+                        align-items: center; gap: 5px; \
                         overflow-x: auto; overflow-y: hidden;",
 
+            // The tools carry their names.
+            //
+            // A `title` is not an affordance here: Blitz draws no
+            // tooltips, so six unlabelled glyphs were six things you
+            // could only learn by clicking them and watching what
+            // happened. These are the verbs of the whole surface — what
+            // a drag will *do* — and the one control that most needs to
+            // say so.
             Segment {
                 for t in Tool::ALL {
                     Seg {
@@ -270,7 +290,11 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
                         accent: true,
                         title: t.label().to_string(),
                         onclick: move |_| editor.write().tool = t,
-                        "{tool_glyph(t)}"
+                        span {
+                            style: "display: flex; align-items: center; gap: 5px;",
+                            span { "{tool_glyph(t)}" }
+                            span { style: "font-size: 10px;", "{t.label()}" }
+                        }
                     }
                 }
             }
@@ -377,6 +401,19 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
 
             {divider()}
 
+            // The shapes keep their glyphs, and gain a caption.
+            //
+            // Unlike the tools these icons are not arbitrary — each one
+            // *is* the curve it applies, which is a better label than the
+            // word "Exponential" would be. What was missing is what the
+            // row of them is for, so the group says it once instead of
+            // six times.
+            span {
+                style: "font-size: 9px; letter-spacing: 0.08em; \
+                        text-transform: uppercase; color: {theme::TEXT_DIM}; \
+                        flex: 0 0 auto; padding-right: 2px;",
+                "Shape"
+            }
             Segment {
                 for s in Shape::ALL {
                     Seg {
@@ -392,10 +429,13 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
                 }
             }
 
-            // Pushed right: history, and things that act on the view
-            // rather than the material.
+            }
+
+            // History, and things that act on the view rather than the
+            // material. Pinned, never pushed.
             div {
-                style: "margin-left: auto; display: flex; align-items: center; gap: 5px;",
+                style: "flex: 0 0 auto; display: flex; align-items: center; gap: 5px; \
+                        padding-left: 6px;",
                 Segment {
                     Seg {
                         active: false,
@@ -586,7 +626,6 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
     let ambiguous = ed.doc.notes.iter().filter(|n| n.ambiguous).count();
     let razors = ed.razor.areas.len();
     let mouse_preset = ed.mouse.name;
-    let (vp_w, vp_h) = (ed.viewport.w, ed.viewport.h);
     let density = ed.grid.adaptive.density;
     let adaptive_on = ed.grid.adaptive.is_adaptive();
     let coarsened = ed.grid.is_coarsened();
@@ -681,9 +720,15 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
                         let next = next_density(editor.read().grid.adaptive.density);
                         editor.write().set_grid_density(next);
                     },
+                    // Says both halves: that the grid can follow the zoom
+                    // at all, and what it is currently set to. A bare
+                    // "AUTO" said the first and hid the second, and a
+                    // bare "WIDE" said the second without ever
+                    // explaining itself.
                     span {
-                        style: "font-size: 9px;",
-                        if adaptive_on { "{density_short}" } else { "AUTO" }
+                        style: "font-size: 9px; display: flex; align-items: center; gap: 4px;",
+                        span { style: "color: {theme::TEXT_DIM};", "AUTO" }
+                        span { if adaptive_on { "{density_short}" } else { "OFF" } }
                     }
                 }
                 Seg {
@@ -775,18 +820,6 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
                     }
                 }
                 span { "{count} selected" }
-                // The roll's box, as the editor believes it to be.
-                //
-                // On screen it is a size readout; in tests it is the only
-                // way to ask the *mounted* surface what it is drawing
-                // for, which is what pins the scene and the element to
-                // one box. Hidden until you look for it — a size in the
-                // corner of every screenshot would be noise.
-                span {
-                    "data-testid": "viewport",
-                    style: "color: {theme::TEXT_FAINT};",
-                    "{vp_w:.0}x{vp_h:.0}"
-                }
             }
         }
     }

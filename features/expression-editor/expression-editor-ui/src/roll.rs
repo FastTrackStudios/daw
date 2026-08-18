@@ -452,6 +452,15 @@ pub fn Canvas(
             object {
                 "data-testid": "roll",
                 "data": widget,
+                // The box the scene was built for, as an attribute
+                // rather than a readout in the status bar.
+                //
+                // It is the only way to ask the *mounted* surface what it
+                // is drawing for, which is what pins the scene and the
+                // element to one box — but a size in the corner of the
+                // window is a debug aid, and debug aids do not belong in
+                // a shipped chrome. `tests/geometry.rs` reads it here.
+                "data-viewport": "{vp.w:.0}x{vp.h:.0}",
                 // Explicit, and the same box the scene was built for.
                 // A widget reports no intrinsic size, so without this it
                 // has none — and blitz-paint skips a widget whose box is

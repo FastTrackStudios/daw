@@ -276,15 +276,18 @@ fn the_scene_is_built_for_the_box_it_is_drawn_in() {
 
 /// The editor's viewport, read back off the surface.
 ///
-/// Reported by the status bar rather than reached for through a signal,
-/// because what this test cares about is the viewport the *mounted*
-/// surface is using, not the one a fixture was built with.
+/// From the roll's own `data-viewport` rather than a signal, because
+/// what this test cares about is the viewport the *mounted* surface is
+/// drawing for, not the one a fixture was built with. It used to be a
+/// readout in the status bar, which put a debug number in the corner of
+/// every screenshot.
 fn editor_viewport(doc: &dioxus_test::DocumentTester) -> (f64, f64) {
     let raw = doc
-        .query(by_testid("viewport"))
+        .query(by_testid("roll"))
         .immediately()
-        .expect("no viewport readout")
-        .inner_html();
+        .expect("no roll")
+        .attribute("data-viewport")
+        .expect("roll carries no data-viewport");
     let (w, h) = raw.split_once('x').unwrap_or_else(|| panic!("bad readout {raw:?}"));
     (
         w.trim().parse().expect("width"),
