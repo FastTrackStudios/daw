@@ -104,22 +104,23 @@ fn main() {
 
 
 /// Height of the chooser strip. Fixed, so the editor below it gets a
-/// stable viewport — the canvas fits its content to the space it is
-/// given, and a bar that changed height would re-fit on every load.
-const BAR: f64 = 34.0;
+/// stable viewport — a bar that changed height would re-fit the roll on
+/// every load.
+///
+/// One row now, and a shorter one: the chooser is a dropdown rather than
+/// a strip of every openable thing, and the status line shares the row
+/// instead of taking a band of its own.
+const BAR: f64 = 26.0;
 
-/// Height of the status line under the chooser.
-const STATUS: f64 = 18.0;
 
-
-/// Hand the editor the room left under the chooser and status line.
+/// Hand the editor the room left under the chooser.
 ///
 /// The runner subtracts only its *own* chrome. What the editor draws
 /// around the roll is the editor's business, and `sizing::Chrome`
 /// accounts for it — a host that tried to subtract the toolbar too would
 /// be the second source of truth all over again.
 fn report_space(window_w: f64, window_h: f64) {
-    expression_editor_ui::available_space(window_w, (window_h - BAR - STATUS).max(1.0));
+    expression_editor_ui::available_space(window_w, (window_h - BAR).max(1.0));
 }
 
 /// The runner's window: a chooser, and the editor under it.
@@ -155,6 +156,8 @@ pub fn DevApp() -> Element {
     });
     let mut status = use_signal(|| String::from("ready"));
     let mut current = use_signal(|| String::new());
+    // Whether the chooser's list is showing.
+    let mut picking = use_signal(|| false);
 
     // The editor measures its canvas when told to, because
     // dioxus-native delivers no element resize event. winit does report
@@ -217,49 +220,107 @@ pub fn DevApp() -> Element {
             style: "width: 100vw; height: 100vh; display: flex; flex-direction: column;",
 
             // ── the chooser ──────────────────────────────────────────
+            //
+            // One dropdown, not a row of every openable thing. There are
+            // ten jobs, eighteen fixtures and whatever is on disk; as
+            // buttons that is a strip wider than the window, scrolling
+            // sideways, permanently occupying a band above the editor to
+            // show choices you make once and then leave alone.
+            //
+            // A custom popup rather than a `<select>`: Blitz treats
+            // `select` as a focusable form control but implements no
+            // dropdown for it, so a native one renders as a dead box.
             div {
                 style: format!(
                     "height: {BAR}px; flex: none; display: flex; align-items: center; \
-                     gap: 6px; padding: 0 8px; overflow-x: auto; \
+                     gap: 10px; padding: 0 8px; position: relative; \
                      background: {}; border-bottom: 1px solid {};",
                     theme::SURFACE_INSET,
                     theme::PANEL_BORDER,
                 ),
-                for entry in entries().into_iter() {
-                    button {
-                        key: "{entry.arg}",
-                        "data-testid": "open-{entry.arg}",
-                        title: "{entry.arg}",
+
+                button {
+                    "data-testid": "chooser",
+                    style: format!(
+                        "flex: none; height: 20px; min-width: 190px; padding: 0 8px; \
+                         display: flex; align-items: center; justify-content: space-between; \
+                         gap: 8px; font-size: 10px; border-radius: 4px; cursor: pointer; \
+                         border: 1px solid {}; background: {}; color: {};",
+                        theme::PANEL_BORDER, theme::CONTROL, theme::TEXT,
+                    ),
+                    onclick: move |_| {
+                        let now = picking();
+                        picking.set(!now);
+                    },
+                    span {
+                        if current().is_empty() { "Open…" } else { "{current()}" }
+                    }
+                    span { style: "color: {theme::TEXT_DIM};", "▾" }
+                }
+
+                // The runner's stdout is not visible under `dx serve`, so
+                // the line `--example editor` prints goes here — on the
+                // same row as the chooser, because a status line is not
+                // worth a band of its own.
+                span {
+                    "data-testid": "status",
+                    style: "font-size: 10px; color: {theme::TEXT_DIM}; \
+                            overflow: hidden; white-space: nowrap;",
+                    "{status()}"
+                }
+
+                if picking() {
+                    div {
+                        "data-testid": "chooser-list",
                         style: format!(
-                            "flex: none; height: 22px; padding: 0 8px; font-size: 10px; \
-                             border-radius: 4px; cursor: pointer; white-space: nowrap; \
-                             border: 1px solid {}; background: {}; color: {};",
-                            if current() == entry.arg { theme::ACCENT } else { theme::PANEL_BORDER },
-                            if current() == entry.arg { theme::CONTROL_ACTIVE } else { theme::SURFACE_INSET },
-                            theme::TEXT,
+                            "position: absolute; left: 8px; top: {BAR}px; z-index: 50; \
+                             width: 320px; max-height: 60vh; overflow-y: auto; \
+                             padding: 4px 0; border-radius: 6px; \
+                             border: 1px solid {}; background: {}; \
+                             box-shadow: 0 8px 28px rgba(0,0,0,0.5);",
+                            theme::PANEL_BORDER, theme::PANEL,
                         ),
-                        onclick: {
-                            let entry = entry.clone();
-                            move |_| open(entry.clone())
-                        },
-                        "{entry.kind.label()} · {entry.label}"
+                        for (i, entry) in entries().into_iter().enumerate() {
+                        div {
+                            // The key belongs on the outermost node of the
+                            // loop body, and the caption below is
+                            // conditional — so the group wraps in a div
+                            // rather than the key sitting on the button.
+                            key: "{entry.arg}",
+                            // A caption whenever the kind changes, so the
+                            // jobs read as a group rather than as the
+                            // first ten of a long list.
+                            if i == 0 || entries()[i - 1].kind != entry.kind {
+                                div {
+                                    style: "font-size: 9px; letter-spacing: 0.08em; \
+                                            text-transform: uppercase; \
+                                            color: {theme::TEXT_DIM}; padding: 6px 10px 2px;",
+                                    "{entry.kind.label()}"
+                                }
+                            }
+                            button {
+                                "data-testid": "open-{entry.arg}",
+                                title: "{entry.arg}",
+                                style: format!(
+                                    "display: block; width: 100%; text-align: left; \
+                                     border: none; padding: 4px 10px; font-size: 11px; \
+                                     cursor: pointer; background: {}; color: {};",
+                                    if current() == entry.arg { theme::CONTROL_ACTIVE } else { "transparent" },
+                                    theme::TEXT,
+                                ),
+                                onclick: {
+                                    let entry = entry.clone();
+                                    move |_| {
+                                        open(entry.clone());
+                                        picking.set(false);
+                                    }
+                                },
+                                "{entry.label}"
+                            }
+                        }
+                        }
                     }
                 }
-            }
-
-            // ── what just happened ───────────────────────────────────
-            // The runner's stdout is not visible under `dx serve`, so
-            // the line the `--example editor` path prints has to be on
-            // screen instead.
-            div {
-                "data-testid": "status",
-                style: format!(
-                    "height: 18px; flex: none; padding: 0 10px; font-size: 10px; \
-                     line-height: 18px; color: {}; background: {};",
-                    theme::TEXT_DIM,
-                    theme::SURFACE_INSET,
-                ),
-                "{status()}"
             }
 
             div {
@@ -277,8 +338,5 @@ pub fn DevApp() -> Element {
 /// wide the window had been dragged — the roll snapped back to its
 /// opening aspect on each load.
 fn viewport() -> Viewport {
-    expression_editor_ui::current_viewport(expression_editor_ui::viewport_in(
-        1200.0,
-        760.0 - BAR - STATUS,
-    ))
+    expression_editor_ui::current_viewport(expression_editor_ui::viewport_in(1200.0, 760.0 - BAR))
 }

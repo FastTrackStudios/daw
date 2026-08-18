@@ -674,13 +674,24 @@ pub fn CursorLayer(
         dioxus_native_dom::CustomWidgetAttr::new(crate::roll_widget::SceneWidget::new(slot.clone()))
     });
 
-    let Some((x, y)) = hover() else {
-        // Nothing drawn and nothing positioned: the glyph must not be
-        // left stranded at the last position the pointer had.
-        return rsx! {};
-    };
+    // Mounted unconditionally, from the very first render.
+    //
+    // This used to return an empty `rsx!` until the pointer arrived, and
+    // that is what made the roll go blank: `CustomWidgetAttr` is
+    // write-once — the DOM takes the widget out of it on the first
+    // mutation — so an `<object>` created on a *later* render gets no
+    // `data` attribute at all. With no widget it is a replaced element
+    // with no intrinsic size, so it lays out 0x0, and blitz-paint skips
+    // a zero-box widget silently. The roll's own object carries a
+    // comment about exactly this trap; the cursor walked into it.
+    //
+    // So the node is permanent and only its *style* changes. Before the
+    // pointer has ever been over the roll there is nothing to draw, and
+    // `visibility: hidden` says so without disturbing the box — a
+    // `display: none` toggle would put the same relayout back.
+    let hovering = hover();
 
-    let cursor = {
+    let cursor = hovering.map(|(x, y)| {
         let ed = editor.read();
         let resolved = cursor_at(&ed, x, y, mods(), locked);
         if drag.read().is_active() {
@@ -688,24 +699,32 @@ pub fn CursorLayer(
         } else {
             resolved
         }
-    };
+    });
 
     let mut scene = Scene::new();
-    draw(&mut scene, cursor, SIZE, SIZE);
+    if let Some(cursor) = cursor {
+        draw(&mut scene, cursor, SIZE, SIZE);
+    }
     slot.put(scene);
 
-    // The box is 2×SIZE so a glyph whose hotspot is at a corner still
+    // The box is 2xSIZE so a glyph whose hotspot is at a corner still
     // has room to draw in every direction from it; the drawing above is
     // centred on (SIZE, SIZE) to match.
     let box_ = SIZE * 2.0;
-    let left = x + canvas::GUTTER_W - SIZE;
-    let top = y + canvas::RULER_H - SIZE;
+    let (left, top) = match hovering {
+        Some((x, y)) => (x + canvas::GUTTER_W - SIZE, y + canvas::RULER_H - SIZE),
+        None => (0.0, 0.0),
+    };
+    let visibility = if hovering.is_some() { "visible" } else { "hidden" };
+    let label = cursor.map(|c| c.label()).unwrap_or("none");
+
     rsx! {
         object {
             "data-testid": "cursor",
-            "data-cursor": cursor.label(),
+            "data-cursor": "{label}",
             "data": widget,
             style: "position: absolute; pointer-events: none; display: block; \
+                    visibility: {visibility}; \
                     left: {left:.1}px; top: {top:.1}px; \
                     width: {box_}px; height: {box_}px;",
         }

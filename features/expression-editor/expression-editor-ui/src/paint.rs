@@ -115,9 +115,6 @@ fn line_of(points: &[(f64, f64)]) -> BezPath {
     path_of(points.iter().map(|&(x, y)| Point::new(x, y)), false)
 }
 
-fn area_of(points: &[(f64, f64)]) -> BezPath {
-    path_of(points.iter().map(|&(x, y)| Point::new(x, y)), true)
-}
 
 fn polygon(s: &str) -> BezPath {
     let mut path = polyline(s);

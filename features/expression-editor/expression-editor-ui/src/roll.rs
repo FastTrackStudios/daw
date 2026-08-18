@@ -465,13 +465,12 @@ pub fn Canvas(
                 // A widget reports no intrinsic size, so without this it
                 // has none — and blitz-paint skips a widget whose box is
                 // zero, silently.
+                // `cursor: none` because `crate::cursor` paints the real
+                // one: CSS has no `[`, no `]`, no pencil and no razor,
+                // and Blitz supports no `cursor: url(…)` to supply them.
                 style: "position: absolute; left: 0; top: 0; display: block; \
                         width: {vp.w + canvas::GUTTER_W:.0}px; \
                         height: {vp.h + canvas::RULER_H:.0}px; \
-                        // The OS cursor is hidden because `crate::cursor`
-                        // paints the real one: CSS has no `[`, no `]`,
-                        // no pencil and no razor, and Blitz supports no
-                        // `cursor: url(…)` to supply them.
                         touch-action: none; user-select: none; cursor: none;",
                 onpointerdown: move |e: PointerEvent| {
                     let raw = e.data().element_coordinates();

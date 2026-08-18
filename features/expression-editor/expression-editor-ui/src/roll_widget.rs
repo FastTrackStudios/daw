@@ -217,6 +217,10 @@ impl SceneWidget {
     }
 }
 
+/// Diagnostic: how many times any `SceneWidget` has been asked to paint.
+pub static SCENE_PAINTS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 impl blitz_dom::Widget for SceneWidget {
     fn paint(
         &mut self,
@@ -226,6 +230,7 @@ impl blitz_dom::Widget for SceneWidget {
         _height: u32,
         _scale: f64,
     ) -> Scene {
+        SCENE_PAINTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.slot.take_scene().unwrap_or_default()
     }
 }

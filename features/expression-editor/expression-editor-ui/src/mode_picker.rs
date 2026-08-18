@@ -1,58 +1,111 @@
-//! Which surface you are working on, down the right-hand side.
+//! Which surface you are working on.
 //!
-//! This was a full-width row across the top — seven buttons that a user
-//! presses a handful of times a session, sitting above the music for the
-//! whole of it. It cost thirty pixels of every window, and thirty pixels
-//! of height is worth far more here than thirty pixels of width: the
-//! roll is a *pitch* axis, and the thing it never has enough of is
-//! vertical room.
+//! This was a full-width row across the top — seven buttons pressed a
+//! handful of times a session, sitting above the music for all of it.
+//! Thirty pixels of height is worth far more here than thirty of width:
+//! the roll is a *pitch* axis, and height is what it never has enough of.
 //!
-//! Down the side it costs width we already had, reads as a list rather
-//! than a strip of icons, and has room to say which family each mode
-//! belongs to — which the top row could only imply with a divider.
+//! It is now one line in the panel that opens when you ask it to. As an
+//! always-open list it was seven rows and two captions — two hundred
+//! pixels of the panel spent, before anything about the note you have
+//! selected, on a choice you make once and leave alone.
 //!
-//! ## Why it lives in the inspector
+//! ## A popup, not a `<select>`
 //!
-//! Rather than a rail of its own beside it. A second right-hand column
-//! would take another hundred pixels from the roll to show seven items,
-//! and the inspector is already the panel for "what am I looking at".
-//! Modes go at the top of it because they are the widest-scoped thing in
-//! there: everything below is about the selection, and this is about the
-//! whole surface.
+//! Blitz treats `select` as a focusable form control but implements no
+//! dropdown behind it, so a native one renders as a box that does
+//! nothing. This is a button and an absolutely-positioned list.
 
 use dioxus::prelude::*;
 use expression_editor_core::{Editor, Mode, ModeFamily};
 
 use crate::theme;
 
-/// The mode list, grouped by family.
+/// The current mode, and a list to change it from.
 #[component]
 pub fn ModePicker(editor: Signal<Editor>) -> Element {
     let mut editor = editor;
+    let mut open = use_signal(|| false);
     let current = editor.read().mode;
 
     rsx! {
         div {
             "data-testid": "mode-picker",
-            style: "display: flex; flex-direction: column; \
+            style: "position: relative; display: flex; align-items: center; \
+                    gap: 8px; padding: 6px 10px; \
                     border-bottom: 1px solid {theme::PANEL_BORDER};",
 
-            for family in ModeFamily::ALL {
-                // The family is a caption rather than a divider. The top
-                // row could only separate these with a rule, which said
-                // "these are different" without ever saying how — and
-                // the difference is exactly the one that decides what an
-                // edit writes back: events on one side, stretch markers
-                // and envelope points on the other.
-                div {
-                    style: "font-size: 9px; letter-spacing: 0.08em; \
-                            text-transform: uppercase; color: {theme::TEXT_DIM}; \
-                            padding: 8px 10px 3px;",
-                    "{family.label()}"
+            span {
+                style: "font-size: 9px; letter-spacing: 0.08em; \
+                        text-transform: uppercase; color: {theme::TEXT_DIM}; \
+                        flex: 0 0 auto;",
+                "Mode"
+            }
+            button {
+                "data-testid": "mode-current",
+                title: "{current.label()}",
+                style: "flex: 1 1 auto; min-width: 0; height: 20px; padding: 0 6px; \
+                        display: flex; align-items: center; justify-content: space-between; \
+                        gap: 6px; cursor: pointer; font-size: 11px; \
+                        font-family: system-ui, sans-serif; border-radius: 4px; \
+                        border: 1px solid {theme::PANEL_BORDER}; \
+                        background: {theme::CONTROL}; color: {theme::TEXT};",
+                onclick: move |_| {
+                    let now = open();
+                    open.set(!now);
+                },
+                span {
+                    style: "display: flex; align-items: center; gap: 6px; overflow: hidden;",
+                    svg {
+                        view_box: "0 0 16 16",
+                        style: "width: 12px; height: 12px; flex: 0 0 auto;",
+                        path {
+                            d: theme::mode_icon(current),
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "1.3",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                        }
+                    }
+                    "{current.label()}"
                 }
-                for m in family.modes().iter().copied() {
-                    ModeRow { key: "{m:?}", mode: m, active: current == m,
-                        onpick: move |_| editor.write().set_mode(m) }
+                span { style: "color: {theme::TEXT_DIM};", "▾" }
+            }
+
+            if open() {
+                div {
+                    "data-testid": "mode-list",
+                    style: "position: absolute; right: 10px; left: 10px; top: 30px; \
+                            z-index: 50; padding: 4px 0; border-radius: 6px; \
+                            border: 1px solid {theme::PANEL_BORDER}; \
+                            background: {theme::PANEL}; \
+                            box-shadow: 0 8px 28px rgba(0,0,0,0.5);",
+                    for family in ModeFamily::ALL {
+                        // The family is a caption rather than a rule. A
+                        // divider says "these are different" without ever
+                        // saying how, and the difference is the one that
+                        // decides what an edit writes back: note events
+                        // on one side, stretch markers and envelope
+                        // points on the other.
+                        div {
+                            style: "font-size: 9px; letter-spacing: 0.08em; \
+                                    text-transform: uppercase; color: {theme::TEXT_DIM}; \
+                                    padding: 5px 10px 2px;",
+                            "{family.label()}"
+                        }
+                        for m in family.modes().iter().copied() {
+                            ModeRow {
+                                key: "{m:?}",
+                                mode: m,
+                                active: current == m,
+                                onpick: move |_| {
+                                    editor.write().set_mode(m);
+                                    open.set(false);
+                                },
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -73,13 +126,13 @@ fn ModeRow(mode: Mode, active: bool, onpick: EventHandler<()>) -> Element {
             title: "{mode.label()}",
             style: "display: flex; align-items: center; gap: 8px; \
                     width: 100%; border: none; text-align: left; \
-                    padding: 5px 10px; cursor: pointer; \
+                    padding: 4px 10px; cursor: pointer; \
                     background: {bg}; color: {fg}; \
                     font-size: 11px; font-family: system-ui, sans-serif;",
             onclick: move |_| onpick.call(()),
             svg {
                 view_box: "0 0 16 16",
-                style: "width: 13px; height: 13px; flex: 0 0 auto;",
+                style: "width: 12px; height: 12px; flex: 0 0 auto;",
                 path {
                     d: theme::mode_icon(mode),
                     fill: "none",

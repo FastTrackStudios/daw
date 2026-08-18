@@ -192,15 +192,26 @@ fn Surface() -> Element {
     rsx! { ExpressionEditor { editor } }
 }
 
-/// Nothing is drawn until the pointer arrives — a glyph parked at the
+/// Nothing is *drawn* until the pointer arrives — a glyph parked at the
 /// origin on mount is a second cursor on screen.
+///
+/// The layer itself is mounted from the first render regardless, and
+/// must be: `CustomWidgetAttr` is write-once, so an `<object>` created
+/// on a later render gets no widget, lays out 0x0, and is skipped by
+/// blitz-paint without a word. Hiding is a style, not a mount.
 #[tokio::test]
 async fn there_is_no_cursor_before_the_pointer_arrives() -> dioxus_test::Result<()> {
     let tester = render(Surface).with_window_size(1000, 620).build();
     tester.query(by_testid("roll")).immediately()?;
+    let el = tester.query(by_testid("cursor")).immediately()?;
+    assert_eq!(
+        el.attribute("data-cursor").as_deref(),
+        Some("none"),
+        "a glyph was resolved before the pointer had been over the roll",
+    );
     assert!(
-        tester.query(by_testid("cursor")).immediately().is_err(),
-        "a cursor was painted before the pointer had been over the roll",
+        el.attribute("style").unwrap_or_default().contains("visibility: hidden"),
+        "the untouched cursor layer is visible",
     );
     Ok(())
 }
@@ -268,5 +279,71 @@ async fn the_cursor_layer_does_not_swallow_gestures() -> dioxus_test::Result<()>
     }
     tester.pointer_up(ox + w as f64 * 0.6, y - 12.0);
     let _ = tester.pump().await;
+    Ok(())
+}
+
+/// blitz-paint skips a widget whose box is zero, silently — the same
+/// trap the roll's own `<object>` carries a comment about. A cursor
+/// layer that mounts, positions itself and paints nothing looks exactly
+/// like a cursor that works, right up until you run the app.
+#[tokio::test]
+async fn the_cursor_layer_has_a_box() -> dioxus_test::Result<()> {
+    let tester = render(Surface).with_window_size(1000, 620).build();
+    let roll = tester.query(by_testid("roll")).immediately()?;
+    let (ox, oy) = roll.document_origin();
+    let (w, h) = roll.size();
+
+    tester.pointer_move(ox + w as f64 * 0.3, oy + h as f64 * 0.5, false);
+    tester.drain();
+
+    // Size, not markup: `outer_html` does not serialize a custom-widget
+    // attribute at all (the roll's own object does not show one either),
+    // so the box is the only evidence the widget actually arrived.
+    let el = tester.query(by_testid("cursor")).immediately()?;
+    let (cw, ch) = el.size();
+    assert!(
+        cw > 0.0 && ch > 0.0,
+        "the cursor layer laid out with no area ({cw}x{ch}); blitz-paint skips it",
+    );
+    Ok(())
+}
+
+/// The glyph reaches actual pixels.
+///
+/// The box test above proves the layer is laid out; it cannot prove the
+/// widget was ever asked to paint, and a scene that is built and never
+/// replayed looks identical from the DOM. So this renders the surface
+/// twice through the CPU rasterizer — once with the pointer away from
+/// the roll, once with it over a note — and requires the two images to
+/// differ.
+#[tokio::test]
+async fn the_glyph_reaches_pixels() -> dioxus_test::Result<()> {
+    let dir = std::env::temp_dir().join("ee-cursor-pixels");
+    std::fs::create_dir_all(&dir).ok();
+    let away = dir.join("away.png");
+    let over = dir.join("over.png");
+
+    let tester = render(Surface).with_window_size(1000, 620).build();
+    let roll = tester.query(by_testid("roll")).immediately()?;
+    let (ox, oy) = roll.document_origin();
+    let (w, h) = roll.size();
+    tester.render_png(&away);
+
+    tester.pointer_move(ox + w as f64 * 0.4, oy + h as f64 * 0.5, false);
+    tester.drain();
+    let _ = tester.pump().await;
+    tester.render_png(&over);
+
+    println!(
+        "SceneWidget paints: {}",
+        expression_editor_ui::roll_widget::SCENE_PAINTS
+            .load(std::sync::atomic::Ordering::Relaxed)
+    );
+    let a = std::fs::read(&away).expect("baseline png");
+    let b = std::fs::read(&over).expect("hovered png");
+    assert_ne!(
+        a, b,
+        "hovering the roll changed no pixels — the cursor layer never painted",
+    );
     Ok(())
 }
