@@ -577,14 +577,17 @@ pub fn Canvas(
                     hover.set(None);
                 },
                 onwheel: move |e: WheelEvent| {
-                    let delta = e.delta().strip_units();
+                    // Normalised to notches: a touchpad reports pixels and a
+                    // mouse reports lines, and the gain constants
+                    // downstream are tuned for lines. See `scroll::notches`.
+                    let (dx, dy) = scroll::notches(&e.delta());
                     let m = mods_of(e.modifiers());
                     // Anchored on the last pointer position when there
                     // is one: a wheel event carries none of its own, and
                     // zooming about the middle of the view when the
                     // mouse is somewhere else is the wrong place.
                     let (x, y) = hover().unwrap_or((vp.w * 0.5, vp.h * 0.5));
-                    interaction::wheel(&mut editor.write(), x, y, delta.x, delta.y, m);
+                    interaction::wheel(&mut editor.write(), x, y, dx, dy, m);
                     e.prevent_default();
                 },
             }
