@@ -802,17 +802,10 @@ pub fn Canvas(
             // different question would be the wrong help.
             if !which_key().is_empty() {
                 KeyPanel { title: None, rows: which_key() }
-            } else if interaction::razor_mode_live(&editor.read()) {
+            } else if !editor.read().razor.is_empty() {
                 KeyPanel {
-                    title: Some("Razor".to_string()),
-                    rows: interaction::RAZOR_KEYS
-                        .iter()
-                        .map(|(key, label)| keys::Continuation {
-                            key: (*key).to_string(),
-                            label: (*label).to_string(),
-                            is_group: false,
-                        })
-                        .collect::<Vec<_>>(),
+                    title: Some(razor_help_title(&editor.read())),
+                    rows: razor_help_rows(&editor.read()),
                 }
             }
         }
@@ -877,5 +870,57 @@ fn KeyPanel(title: Option<String>, rows: Vec<keys::Continuation>) -> Element {
                 }
             }
         }
+    }
+}
+
+/// What the razor help offers right now, which depends on the tool.
+///
+/// The panel is up whenever a razor exists — an area on screen is a
+/// standing instruction, and the keys that act on it should be in front
+/// of you the whole time it is, not only once you have found the tool.
+///
+/// But *which* keys work depends on what is armed, and a panel that
+/// listed keys which do nothing would be worse than no panel. With the
+/// razor armed, the verbs are bare letters. From any other tool those
+/// letters are that tool's shortcuts, so what actually works is the `k`
+/// prefix — and that is what gets listed, read from the keymap rather
+/// than from a copy of it, so a rebound prefix relabels itself.
+///
+/// The side effect is the useful one: draw a razor from Select and the
+/// surface teaches you `k`, which works everywhere and which you would
+/// otherwise have had to go looking for.
+fn razor_help_rows(ed: &Editor) -> Vec<keys::Continuation> {
+    if interaction::razor_mode_live(ed) {
+        return interaction::RAZOR_KEYS
+            .iter()
+            .map(|(key, label)| keys::Continuation {
+                key: (*key).to_string(),
+                label: (*label).to_string(),
+                is_group: false,
+            })
+            .collect();
+    }
+    let mut rows: Vec<keys::Continuation> = keys::continuations_after("k")
+        .into_iter()
+        .map(|c| keys::Continuation {
+            key: format!("k {}", c.key),
+            ..c
+        })
+        .collect();
+    // The way out of the long spelling, since the panel is the only
+    // place that would ever mention it.
+    rows.push(keys::Continuation {
+        key: "x".to_string(),
+        label: "Razor tool — then single keys".to_string(),
+        is_group: false,
+    });
+    rows
+}
+
+fn razor_help_title(ed: &Editor) -> String {
+    if interaction::razor_mode_live(ed) {
+        "Razor".to_string()
+    } else {
+        "Razor · k".to_string()
     }
 }

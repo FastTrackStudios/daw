@@ -235,11 +235,32 @@ pub fn continuations() -> Vec<Continuation> {
     if prefix.is_empty() {
         return Vec::new();
     }
+    walk(prefix)
+}
+
+/// What can follow `key`, whether or not it has been pressed.
+///
+/// The same walk [`continuations`] does, from a prefix the caller names
+/// instead of the one being typed — so a panel can show what `k` offers
+/// as a way of *teaching* it, rather than only as a reply to it.
+///
+/// Read from the keymap rather than from a table beside it, which is the
+/// point: a rebound prefix relabels itself, and a user's own bindings
+/// appear without anything here knowing they exist.
+pub fn continuations_after(key: &str) -> Vec<Continuation> {
+    walk(vec![KeyChord::new(key_code(key), Modifiers::default())])
+}
+
+fn walk(prefix: Vec<KeyChord>) -> Vec<Continuation> {
     PROCESSOR.with(|p| {
-        let slot = p.borrow();
-        let Some(proc) = slot.as_ref() else {
-            return Vec::new();
-        };
+        // `get_or_insert_with`, because a panel may ask before any key
+        // has been pressed — and a processor that does not exist yet has
+        // no keymap to walk, which would show an empty panel exactly
+        // once per session.
+        let mut slot = p.borrow_mut();
+        let proc = slot.get_or_insert_with(|| {
+            InputProcessor::from_config(editor_config()).unwrap_or_default()
+        });
         let Some(trie) = proc.keymaps().get(&ModeId::new("normal")) else {
             return Vec::new();
         };

@@ -625,6 +625,40 @@ async fn razor_mode_lists_its_verbs() -> dioxus_test::Result<()> {
     Ok(())
 }
 
+/// A razor drawn from any tool still gets help — in the spelling that
+/// works from there.
+///
+/// The panel is up whenever a razor exists, because an area on screen is
+/// a standing instruction and the keys that act on it should be in front
+/// of you the whole time it is. But the bare letters are only live with
+/// the razor armed; from Select they are Select's shortcuts. So what is
+/// listed is the `k` prefix, which works from anywhere — and the panel
+/// becomes how you find out `k` exists.
+#[tokio::test]
+async fn a_razor_from_another_tool_lists_the_prefix_spelling()
+-> dioxus_test::Result<()> {
+    let mut ed = one_note();
+    ed.tool = Tool::Select;
+    ed.razor.add(expression_editor_core::RazorArea::new(
+        0.0, PPQ, NOTE_ROW - 1, NOTE_ROW + 1,
+    ));
+    stage(ed);
+
+    let tester = render(Staged).with_window_size(1000, 620).build();
+    tester.query(by_testid("roll")).immediately()?;
+    let html = tester.query(by_testid("which-key")).immediately()?.inner_html();
+
+    assert!(
+        html.contains("k r") || html.contains("k v"),
+        "the panel did not offer the prefix spelling: {html}",
+    );
+    assert!(
+        html.contains("Razor tool"),
+        "the panel never mentions how to reach the single keys: {html}",
+    );
+    Ok(())
+}
+
 /// Nothing to cut, no panel — it is help for a live mode, not a legend.
 #[tokio::test]
 async fn the_key_panel_stays_away_when_there_is_nothing_to_say() -> dioxus_test::Result<()> {
