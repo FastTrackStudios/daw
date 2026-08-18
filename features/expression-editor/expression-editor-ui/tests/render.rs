@@ -102,38 +102,15 @@ fn the_top_bar_follows_the_mode() {
         !midi_html.contains(">Pressure<"),
         "nor the per-note expression lanes"
     );
-    // The mode switcher itself is always present.
-    for mode in Mode::ALL {
-        assert!(
-            midi_html.contains(mode.label()),
-            "missing mode: {}",
-            mode.label()
-        );
-    }
-    // And it is grouped by family rather than one flat run. The check
-    // is positional because that is the whole point of the grouping:
-    // every MIDI-family label must come before every audio-family one,
-    // so the bar reads "which kind of material" left to right.
-    let at = |label: &str| {
-        midi_html
-            .find(label)
-            .unwrap_or_else(|| panic!("missing mode: {label}"))
-    };
-    let last_midi = ModeFamily::Midi
-        .modes()
-        .iter()
-        .map(|m| at(m.label()))
-        .max()
-        .unwrap();
-    let first_audio = ModeFamily::Audio
-        .modes()
-        .iter()
-        .map(|m| at(m.label()))
-        .min()
-        .unwrap();
+    // The mode switcher names the mode you are in.
+    //
+    // Only that one: the picker is a line in the panel that opens a list
+    // when asked, so the other six are not in the markup until it does.
+    // That the list offers all of them, grouped by family, is
+    // `tests/geometry.rs` — it needs a click, which SSR cannot give.
     assert!(
-        last_midi < first_audio,
-        "the two families must render as separate runs, MIDI first"
+        midi_html.contains(Mode::Midi.label()),
+        "the picker must name the current mode"
     );
 }
 

@@ -103,24 +103,17 @@ fn main() {
 // ── the runner's root component ─────────────────────────────────────
 
 
-/// Height of the chooser strip. Fixed, so the editor below it gets a
-/// stable viewport — a bar that changed height would re-fit the roll on
-/// every load.
-///
-/// One row now, and a shorter one: the chooser is a dropdown rather than
-/// a strip of every openable thing, and the status line shares the row
-/// instead of taking a band of its own.
-const BAR: f64 = 26.0;
 
 
-/// Hand the editor the room left under the chooser.
+/// Hand the editor the whole window.
 ///
-/// The runner subtracts only its *own* chrome. What the editor draws
-/// around the roll is the editor's business, and `sizing::Chrome`
-/// accounts for it — a host that tried to subtract the toolbar too would
-/// be the second source of truth all over again.
+/// The runner has no chrome of its own left to subtract: its chooser
+/// lives inside the editor's panel rather than in a bar above it. What
+/// the editor draws around the roll is the editor's business, and
+/// `sizing::Chrome` accounts for it — a host that tried to subtract the
+/// toolbar too would be the second source of truth all over again.
 fn report_space(window_w: f64, window_h: f64) {
-    expression_editor_ui::available_space(window_w, (window_h - BAR).max(1.0));
+    expression_editor_ui::available_space(window_w, window_h.max(1.0));
 }
 
 /// The runner's window: a chooser, and the editor under it.
@@ -211,38 +204,25 @@ pub fn DevApp() -> Element {
         }
     };
 
-    rsx! {
-        style {
-            "html, body {{ width: 100%; height: 100%; margin: 0; padding: 0; \
-              overflow: hidden; background: {theme::BG}; }}"
-        }
-        div {
-            style: "width: 100vw; height: 100vh; display: flex; flex-direction: column;",
-
-            // ── the chooser ──────────────────────────────────────────
-            //
-            // One dropdown, not a row of every openable thing. There are
-            // ten jobs, eighteen fixtures and whatever is on disk; as
-            // buttons that is a strip wider than the window, scrolling
-            // sideways, permanently occupying a band above the editor to
-            // show choices you make once and then leave alone.
-            //
-            // A custom popup rather than a `<select>`: Blitz treats
-            // `select` as a focusable form control but implements no
-            // dropdown for it, so a native one renders as a dead box.
+    // What to open, and what just happened. Built here and handed to the
+    // editor's panel slot below.
+    //
+    // A custom popup rather than a `<select>`: Blitz treats `select` as a
+    // focusable form control but implements no dropdown for it, so a
+    // native one renders as a dead box.
+    let chooser = rsx! {
             div {
                 style: format!(
-                    "height: {BAR}px; flex: none; display: flex; align-items: center; \
-                     gap: 10px; padding: 0 8px; position: relative; \
-                     background: {}; border-bottom: 1px solid {};",
-                    theme::SURFACE_INSET,
+                    "display: flex; flex-direction: column; align-items: stretch; \
+                     gap: 6px; padding: 8px 10px; position: relative; \
+                     border-bottom: 1px solid {};",
                     theme::PANEL_BORDER,
                 ),
 
                 button {
                     "data-testid": "chooser",
                     style: format!(
-                        "flex: none; height: 20px; min-width: 190px; padding: 0 8px; \
+                        "flex: none; height: 20px; width: 100%; padding: 0 8px; \
                          display: flex; align-items: center; justify-content: space-between; \
                          gap: 8px; font-size: 10px; border-radius: 4px; cursor: pointer; \
                          border: 1px solid {}; background: {}; color: {};",
@@ -259,13 +239,13 @@ pub fn DevApp() -> Element {
                 }
 
                 // The runner's stdout is not visible under `dx serve`, so
-                // the line `--example editor` prints goes here — on the
-                // same row as the chooser, because a status line is not
-                // worth a band of its own.
+                // the line `--example editor` prints goes here — under
+                // the chooser in the panel, where it costs the roll
+                // nothing.
                 span {
                     "data-testid": "status",
-                    style: "font-size: 10px; color: {theme::TEXT_DIM}; \
-                            overflow: hidden; white-space: nowrap;",
+                    style: "font-size: 9px; color: {theme::TEXT_DIM}; \
+                            overflow: hidden; word-break: break-word;",
                     "{status()}"
                 }
 
@@ -273,8 +253,8 @@ pub fn DevApp() -> Element {
                     div {
                         "data-testid": "chooser-list",
                         style: format!(
-                            "position: absolute; left: 8px; top: {BAR}px; z-index: 50; \
-                             width: 320px; max-height: 60vh; overflow-y: auto; \
+                            "position: absolute; right: 10px; left: 10px; top: 34px; \
+                             z-index: 50; max-height: 70vh; overflow-y: auto; \
                              padding: 4px 0; border-radius: 6px; \
                              border: 1px solid {}; background: {}; \
                              box-shadow: 0 8px 28px rgba(0,0,0,0.5);",
@@ -323,9 +303,24 @@ pub fn DevApp() -> Element {
                 }
             }
 
+    };
+
+    rsx! {
+        style {
+            "html, body {{ width: 100%; height: 100%; margin: 0; padding: 0; \
+              overflow: hidden; background: {theme::BG}; }}"
+        }
+        div {
+            style: "width: 100vw; height: 100vh; display: flex; flex-direction: column;",
+
             div {
                 style: "flex: 1; min-height: 0;",
-                ExpressionEditor { editor }
+                // The chooser goes *inside* the editor's panel. A bar of
+                // its own above the roll is vertical space, which is the
+                // scarcest thing on this surface; the panel down the
+                // right has room to spare and is already where
+                // session-scoped choices live.
+                ExpressionEditor { editor, panel_top: chooser }
             }
         }
     }
@@ -338,5 +333,5 @@ pub fn DevApp() -> Element {
 /// wide the window had been dragged — the roll snapped back to its
 /// opening aspect on each load.
 fn viewport() -> Viewport {
-    expression_editor_ui::current_viewport(expression_editor_ui::viewport_in(1200.0, 760.0 - BAR))
+    expression_editor_ui::current_viewport(expression_editor_ui::viewport_in(1200.0, 760.0))
 }

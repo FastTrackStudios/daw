@@ -217,7 +217,15 @@ impl SceneWidget {
     }
 }
 
-/// Diagnostic: how many times any `SceneWidget` has been asked to paint.
+/// How many times a [`SceneWidget`] has been asked to paint.
+///
+/// The one thing a headless test can check about a custom widget.
+/// `DocumentTester::render_png` rasterizes through `blitz_paint`, which
+/// composites ordinary boxes but *not* custom-widget scenes — a plain
+/// `div` shows up in the PNG and an `<object>` carrying a widget does
+/// not. So a pixel diff cannot tell "the widget never painted" from "the
+/// rasterizer does not draw widgets", and this can: the renderer calls
+/// `paint` only for a widget it has laid out and intends to draw.
 pub static SCENE_PAINTS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 

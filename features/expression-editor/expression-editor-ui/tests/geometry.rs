@@ -478,3 +478,57 @@ fn the_status_bar_carries_the_grid_and_its_adaptive_setting() {
          {adaptive} vs {fixed}"
     );
 }
+
+/// The mode picker offers every mode, grouped by family.
+///
+/// It is one line until you ask, so this is the test that clicks. The
+/// grouping is checked positionally because that is the whole point of
+/// it: the two families differ in what an edit writes back — note events
+/// on one side, stretch markers and envelope points on the other — and a
+/// list that interleaved them would say the choice was arbitrary.
+#[test]
+fn the_mode_picker_offers_every_mode_grouped_by_family() {
+    use expression_editor_core::{Mode, ModeFamily};
+
+    let doc = mounted();
+    // Closed: only the current mode is named.
+    assert!(
+        doc.query(by_testid("mode-list")).immediately().is_err(),
+        "the list should start closed"
+    );
+
+    doc.query(by_testid("mode-current"))
+        .immediately()
+        .expect("no mode picker")
+        .click();
+    doc.drain();
+    doc.relayout();
+
+    let list = doc
+        .query(by_testid("mode-list"))
+        .immediately()
+        .expect("the list did not open")
+        .inner_html();
+
+    for mode in Mode::ALL {
+        assert!(list.contains(mode.label()), "missing mode: {}", mode.label());
+    }
+
+    let at = |label: &str| list.find(label).expect("just checked");
+    let last_midi = ModeFamily::Midi
+        .modes()
+        .iter()
+        .map(|m| at(m.label()))
+        .max()
+        .unwrap();
+    let first_audio = ModeFamily::Audio
+        .modes()
+        .iter()
+        .map(|m| at(m.label()))
+        .min()
+        .unwrap();
+    assert!(
+        last_midi < first_audio,
+        "the families must read as two runs, MIDI first"
+    );
+}

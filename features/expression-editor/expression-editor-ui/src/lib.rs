@@ -134,6 +134,15 @@ pub fn ExpressionEditor(
     /// Ignored outside `RowSpace::Strings`.
     #[props(default)]
     bend_flow: Option<BendFlow>,
+    /// Anything the host wants at the top of the inspector.
+    ///
+    /// A slot, so a host can put its own controls inside the editor's
+    /// chrome instead of building a bar above it. The standalone runner
+    /// puts its file chooser here; a DAW panel passes nothing. Vertical
+    /// space is the roll's scarcest resource, and a host bar spends it
+    /// on something the panel has room for.
+    #[props(default)]
+    panel_top: Option<Element>,
 ) -> Element {
     // Context rather than a prop chain: the flow variant is read deep
     // inside the canvas and nothing between here and there cares.
@@ -227,7 +236,7 @@ pub fn ExpressionEditor(
                         LaneStrip { editor }
                     }
                 }
-                inspector::Inspector { editor, open: inspector_open }
+                inspector::Inspector { editor, open: inspector_open, panel_top }
             }
             toolbar::StatusBar { editor }
         }

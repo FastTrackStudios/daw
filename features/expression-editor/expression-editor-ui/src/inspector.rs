@@ -46,7 +46,19 @@ fn row(label: &str, value: String) -> Element {
 }
 
 #[component]
-pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
+pub fn Inspector(
+    editor: Signal<Editor>,
+    open: Signal<bool>,
+    /// Anything the host wants at the top of the panel.
+    ///
+    /// A slot rather than a fixed control, because what goes here is the
+    /// host's business: the standalone runner puts its file chooser
+    /// there, and a DAW panel would put nothing. The alternative was a
+    /// bar of its own across the top of the window, which is a band of
+    /// vertical space spent on something the roll wants more.
+    #[props(default)]
+    panel_top: Option<Element>,
+) -> Element {
     let mut editor = editor;
     let mut open = open;
 
@@ -149,6 +161,11 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
                     onclick: move |_| open.set(false),
                     "›"
                 }
+            }
+
+            // ── the host's own controls ──────────────────────────────
+            if let Some(top) = panel_top.clone() {
+                {top}
             }
 
             // ── which surface ────────────────────────────────────────

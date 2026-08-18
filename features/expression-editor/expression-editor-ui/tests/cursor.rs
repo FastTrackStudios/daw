@@ -308,42 +308,47 @@ async fn the_cursor_layer_has_a_box() -> dioxus_test::Result<()> {
     Ok(())
 }
 
-/// The glyph reaches actual pixels.
+/// The renderer asks the cursor's widget to paint.
 ///
-/// The box test above proves the layer is laid out; it cannot prove the
-/// widget was ever asked to paint, and a scene that is built and never
-/// replayed looks identical from the DOM. So this renders the surface
-/// twice through the CPU rasterizer — once with the pointer away from
-/// the roll, once with it over a note — and requires the two images to
-/// differ.
+/// Not a pixel diff, deliberately. `render_png` rasterizes through
+/// `blitz_paint`, which composites ordinary boxes but not custom-widget
+/// scenes — the cursor object's own CSS background shows up in a PNG
+/// while its scene never does, so a pixel comparison would fail
+/// identically whether the widget was broken or merely headless.
+///
+/// The paint count is the honest headless claim: the renderer calls
+/// `paint` only on a widget it has laid out and means to draw. That is
+/// exactly what was false before — the layer mounted conditionally, so
+/// its `<object>` was created on a later render, `CustomWidgetAttr` is
+/// write-once and had already been consumed, and the widget-less element
+/// laid out 0x0 and was skipped without a word.
 #[tokio::test]
-async fn the_glyph_reaches_pixels() -> dioxus_test::Result<()> {
-    let dir = std::env::temp_dir().join("ee-cursor-pixels");
-    std::fs::create_dir_all(&dir).ok();
-    let away = dir.join("away.png");
-    let over = dir.join("over.png");
+async fn the_renderer_paints_the_cursor_widget() -> dioxus_test::Result<()> {
+    use std::sync::atomic::Ordering;
+    use expression_editor_ui::roll_widget::SCENE_PAINTS;
 
     let tester = render(Surface).with_window_size(1000, 620).build();
     let roll = tester.query(by_testid("roll")).immediately()?;
     let (ox, oy) = roll.document_origin();
     let (w, h) = roll.size();
-    tester.render_png(&away);
 
     tester.pointer_move(ox + w as f64 * 0.4, oy + h as f64 * 0.5, false);
     tester.drain();
-    let _ = tester.pump().await;
-    tester.render_png(&over);
+    for _ in 0..4 {
+        let _ = tester.pump().await;
+    }
 
-    println!(
-        "SceneWidget paints: {}",
-        expression_editor_ui::roll_widget::SCENE_PAINTS
-            .load(std::sync::atomic::Ordering::Relaxed)
-    );
-    let a = std::fs::read(&away).expect("baseline png");
-    let b = std::fs::read(&over).expect("hovered png");
-    assert_ne!(
-        a, b,
-        "hovering the roll changed no pixels — the cursor layer never painted",
+    // A paint pass only happens when something rasterizes the document,
+    // and headlessly that is `render_png`. The PNG itself is discarded —
+    // it is the paint call that is being observed, not the image.
+    let before = SCENE_PAINTS.load(Ordering::Relaxed);
+    let scratch = std::env::temp_dir().join("ee-cursor-paint-probe.png");
+    tester.render_png(&scratch);
+    let _ = std::fs::remove_file(&scratch);
+
+    assert!(
+        SCENE_PAINTS.load(Ordering::Relaxed) > before,
+        "the renderer never asked the cursor widget to paint",
     );
     Ok(())
 }
