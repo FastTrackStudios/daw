@@ -2580,10 +2580,44 @@ pub fn wheel(ed: &mut Editor, x: f64, y: f64, dx: f64, dy: f64, mods: Mods) {
 /// The same verbs have an always-available spelling under the `k`
 /// which-key prefix, which lists itself in the overlay. This table is
 /// for when your hand is already on the razor.
+/// The razor verbs, for the overlay to list.
+///
+/// The table exists so the keys can be *shown*. A modal surface whose
+/// commands are undocumented bare letters is one you have to be told
+/// about, and being told about it is not a feature — the whole reason
+/// which-key exists is that a keymap should introduce itself.
+///
+/// Kept beside [`razor_mode_key`], and a test asserts the two agree in
+/// both directions: every key listed here is handled, and no letter it
+/// handles is missing here. That is the only thing keeping a help panel
+/// from becoming a lie the moment a verb is added.
+pub const RAZOR_KEYS: &[(&str, &str)] = &[
+    ("r", "Retrograde"),
+    ("Ctrl+r", "Retrograde pitches only"),
+    ("v", "Invert pitches"),
+    ("x", "Delete contents"),
+    ("d", "Duplicate"),
+    ("s", "Select contents"),
+    ("u", "Unselect contents"),
+    ("f", "Full-lane area"),
+    ("i", "Insert mode"),
+    ("h", "Lock horizontal"),
+    ("l", "Lock vertical"),
+    ("←→", "Move by grid"),
+    ("↑↓", "Move by row"),
+    ("⇧←→", "Resize"),
+    ("Esc", "Drop areas, then exit"),
+];
+
+/// Whether the razor's own verbs are live right now.
+pub fn razor_mode_live(ed: &Editor) -> bool {
+    ed.tool == Tool::Razor && !ed.razor.is_empty()
+}
+
 fn razor_mode_key(ed: &mut Editor, key: &str, mods: Mods) -> Option<bool> {
     use expression_editor_core::razor::RazorAxis;
 
-    if ed.tool != Tool::Razor || ed.razor.is_empty() {
+    if !razor_mode_live(ed) {
         return None;
     }
     Some(match (key, mods.ctrl) {

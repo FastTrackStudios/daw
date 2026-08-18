@@ -1116,3 +1116,58 @@ fn the_arrows_move_and_resize_the_areas() {
     assert!(resized.width() > moved.width(), "Shift+Right did not resize");
     assert_eq!(resized.t0, moved.t0, "a resize moved the area's start");
 }
+
+/// Every listed razor key is handled, and every handled one is listed.
+///
+/// The help panel reads [`RAZOR_KEYS`] and the keyboard reads a `match`.
+/// Nothing but this test stops the two diverging, and a help panel that
+/// has diverged is worse than none: it is the surface making a claim
+/// about itself that is no longer true.
+#[test]
+fn the_razor_help_matches_the_razor_keys() {
+    // Everything advertised does something.
+    for (key, label) in interaction::RAZOR_KEYS {
+        // The rows that describe pointer keys and Escape are handled
+        // elsewhere in `key_down`; they are listed because they are part
+        // of using the razor, not because this table implements them.
+        if key.starts_with(['←', '↑', '⇧']) || *key == "Esc" {
+            continue;
+        }
+        let mut ed = razor_mode(PPQ * 2.0);
+        ed.doc.notes[1].row = ROW + 2;
+        ed.selection.notes = vec![NoteId(1)];
+        let (bare, ctrl) = match key.strip_prefix("Ctrl+") {
+            Some(rest) => (rest, true),
+            None => (*key, false),
+        };
+        let ran = if ctrl {
+            press_ctrl(&mut ed, bare)
+        } else {
+            press(&mut ed, bare)
+        };
+        assert!(ran, "the panel advertises `{key}` ({label}) and it did nothing");
+    }
+
+    // And nothing does something without being advertised. Every letter,
+    // so a verb added to the `match` without a row here is caught.
+    let listed: Vec<String> = interaction::RAZOR_KEYS
+        .iter()
+        .map(|(k, _)| k.trim_start_matches("Ctrl+").to_string())
+        .collect();
+    for ch in 'a'..='z' {
+        let key = ch.to_string();
+        if listed.contains(&key) {
+            continue;
+        }
+        let mut ed = razor_mode(PPQ * 2.0);
+        let before = (ed.doc.notes.len(), ed.tool, ed.razor.areas.clone());
+        press(&mut ed, &key);
+        // Falling through to an ordinary shortcut is fine — what is not
+        // fine is a razor verb nobody can discover.
+        let razor_changed = ed.doc.notes.len() != before.0 || ed.razor.areas != before.2;
+        assert!(
+            !razor_changed,
+            "`{key}` changed the razor's material but is not in the help panel",
+        );
+    }
+}

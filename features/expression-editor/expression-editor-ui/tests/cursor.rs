@@ -596,3 +596,71 @@ async fn rebinding_ctrl_moves_the_highlight_with_it() -> dioxus_test::Result<()>
     );
     Ok(())
 }
+
+// ── the key panel ───────────────────────────────────────────────────
+
+/// The razor's verbs introduce themselves.
+///
+/// Razor mode's commands are bare letters with no prefix to type, so
+/// nothing would ever have prompted you with them — the only way to
+/// learn them would have been to be told, which is not a feature. The
+/// same panel that lists which-key continuations lists these.
+#[tokio::test]
+async fn razor_mode_lists_its_verbs() -> dioxus_test::Result<()> {
+    let mut ed = one_note();
+    ed.tool = Tool::Razor;
+    ed.razor.add(expression_editor_core::RazorArea::new(
+        0.0, PPQ, NOTE_ROW - 1, NOTE_ROW + 1,
+    ));
+    stage(ed);
+
+    let tester = render(Staged).with_window_size(1000, 620).build();
+    tester.query(by_testid("roll")).immediately()?;
+    let panel = tester.query(by_testid("which-key")).immediately()?;
+    let html = panel.inner_html();
+
+    for verb in ["Retrograde", "Invert pitches", "Delete contents"] {
+        assert!(html.contains(verb), "the razor panel does not list {verb}: {html}");
+    }
+    Ok(())
+}
+
+/// Nothing to cut, no panel — it is help for a live mode, not a legend.
+#[tokio::test]
+async fn the_key_panel_stays_away_when_there_is_nothing_to_say() -> dioxus_test::Result<()> {
+    let tester = render(Surface).with_window_size(1000, 620).build();
+    tester.query(by_testid("roll")).immediately()?;
+    assert!(
+        tester.query(by_testid("which-key")).immediately().is_err(),
+        "the key panel was up with no sequence and no razor",
+    );
+    Ok(())
+}
+
+/// Bottom-**right**.
+///
+/// It was bottom-left, over the roll's low register and opposite the
+/// status readouts it belongs with.
+#[tokio::test]
+async fn the_key_panel_sits_in_the_bottom_right() -> dioxus_test::Result<()> {
+    let mut ed = one_note();
+    ed.tool = Tool::Razor;
+    ed.razor.add(expression_editor_core::RazorArea::new(
+        0.0, PPQ, NOTE_ROW - 1, NOTE_ROW + 1,
+    ));
+    stage(ed);
+
+    let tester = render(Staged).with_window_size(1000, 620).build();
+    tester.query(by_testid("roll")).immediately()?;
+    let style = tester
+        .query(by_testid("which-key"))
+        .immediately()?
+        .attribute("style")
+        .unwrap_or_default();
+    assert!(style.contains("right:"), "the panel is not anchored right: {style}");
+    assert!(
+        !style.contains("left:"),
+        "the panel is still anchored left as well: {style}",
+    );
+    Ok(())
+}

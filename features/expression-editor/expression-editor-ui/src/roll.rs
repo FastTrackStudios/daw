@@ -790,40 +790,89 @@ pub fn Canvas(
                 }
             }
             // ── which-key ────────────────────────────────────────
-            // Shown while a key sequence is half-typed: what can follow,
-            // and what each one does. Bottom-left so it never covers the
-            // pointer, which is what the pending gesture is anchored on.
+            //
+            // A half-typed sequence lists what can follow it. A live
+            // razor lists its own verbs, for the same reason and in the
+            // same place: those are bare letters with no prefix to type,
+            // so nothing would ever have prompted you with them and the
+            // only way to learn them would have been to be told.
+            //
+            // The sequence wins when both could show — you are part-way
+            // through saying something specific, and answering a
+            // different question would be the wrong help.
             if !which_key().is_empty() {
+                KeyPanel { title: None, rows: which_key() }
+            } else if interaction::razor_mode_live(&editor.read()) {
+                KeyPanel {
+                    title: Some("Razor".to_string()),
+                    rows: interaction::RAZOR_KEYS
+                        .iter()
+                        .map(|(key, label)| keys::Continuation {
+                            key: (*key).to_string(),
+                            label: (*label).to_string(),
+                            is_group: false,
+                        })
+                        .collect::<Vec<_>>(),
+                }
+            }
+        }
+    }
+}
+
+/// A key/description list, bottom-right.
+///
+/// Shared by the which-key sequence overlay and the razor's verb list so
+/// the two cannot drift into looking like different features — they are
+/// the same promise, that the surface will tell you what it can do
+/// without you having to look it up.
+///
+/// **Bottom-right**, not bottom-left. The status bar's own readouts are
+/// on the right, so a panel on the left sat over the roll's low
+/// register; and the pointer, which is what a pending gesture is
+/// anchored on, is far likelier to be on the left half of a piano roll
+/// than the right, since that is where the material you just clicked is.
+#[component]
+fn KeyPanel(title: Option<String>, rows: Vec<keys::Continuation>) -> Element {
+    rsx! {
+        div {
+            "data-testid": "which-key",
+            style: format!(
+                "position: absolute; right: 10px; bottom: 10px; z-index: 40; \
+                 min-width: 220px; max-height: 60%; overflow-y: auto; \
+                 padding: 6px 0; border-radius: 6px; \
+                 border: 1px solid {}; background: {}; color: {}; \
+                 font-size: 11px; box-shadow: 0 6px 24px rgba(0,0,0,0.45);",
+                theme::PANEL_BORDER, theme::SURFACE_INSET, theme::TEXT,
+            ),
+            if let Some(title) = title {
                 div {
-                    "data-testid": "which-key",
                     style: format!(
-                        "position: absolute; left: 10px; bottom: 10px; z-index: 40; \
-                         min-width: 220px; max-height: 60%; overflow-y: auto; \
-                         padding: 6px 0; border-radius: 6px; \
-                         border: 1px solid {}; background: {}; color: {}; \
-                         font-size: 11px; box-shadow: 0 6px 24px rgba(0,0,0,0.45);",
-                        theme::PANEL_BORDER, theme::SURFACE_INSET, theme::TEXT,
+                        "padding: 2px 10px 5px; margin-bottom: 3px; \
+                         border-bottom: 1px solid {}; color: {}; \
+                         font-weight: 600; letter-spacing: 0.4px;",
+                        theme::PANEL_BORDER, theme::TEXT_DIM,
                     ),
-                    for c in which_key().into_iter() {
-                        div {
-                            key: "{c.key}",
-                            style: "display: flex; align-items: baseline; gap: 8px; \
-                                    padding: 2px 10px;",
-                            span {
-                                style: format!(
-                                    "min-width: 34px; font-weight: 600; color: {};",
-                                    theme::ACCENT,
-                                ),
-                                "{c.key}"
-                            }
-                            span {
-                                style: format!(
-                                    "color: {};",
-                                    if c.is_group { theme::TEXT_DIM } else { theme::TEXT },
-                                ),
-                                if c.is_group { "+{c.label}" } else { "{c.label}" }
-                            }
-                        }
+                    "{title}"
+                }
+            }
+            for c in rows.into_iter() {
+                div {
+                    key: "{c.key}",
+                    style: "display: flex; align-items: baseline; gap: 8px; \
+                            padding: 2px 10px;",
+                    span {
+                        style: format!(
+                            "min-width: 34px; font-weight: 600; color: {};",
+                            theme::ACCENT,
+                        ),
+                        "{c.key}"
+                    }
+                    span {
+                        style: format!(
+                            "color: {};",
+                            if c.is_group { theme::TEXT_DIM } else { theme::TEXT },
+                        ),
+                        if c.is_group { "+{c.label}" } else { "{c.label}" }
                     }
                 }
             }
