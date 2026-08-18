@@ -844,6 +844,10 @@ fn Fps(editor: Signal<Editor>) -> Element {
     // DOM, and knowing which is the difference between a day of
     // profiling and a one-line fix.
     let paint_ms = frames.as_ref().and_then(|f| f.paint_ms());
+    // Renders per second. Higher than the frame rate means the surface
+    // is rebuilding for events the screen never shows — which is what a
+    // drag driven by a high-polling-rate mouse does.
+    let ups = frames.as_ref().and_then(|f| f.builds_per_second());
 
     // Quiet while it is healthy, and only asks for attention when it is
     // not: dim above a screen refresh, gold where a drag starts to feel
@@ -861,12 +865,21 @@ fn Fps(editor: Signal<Editor>) -> Element {
             "data-testid": "fps",
             title: "Frames painted per second, and how much of a frame the roll itself takes",
             style: format!(
-                "min-width: 46px; text-align: right; font-size: 10px; \
+                "min-width: 180px; text-align: right; font-size: 10px; \
+                 white-space: nowrap; \
                  font-variant-numeric: tabular-nums; color: {color};",
             ),
-            match (fps, paint_ms) {
-                (Some(f), Some(ms)) => format!("{f:.0} fps · roll {ms:.2}ms"),
-                (Some(f), None) => format!("{f:.0} fps"),
+            // Three numbers, because a stuttering drag is invisible in
+            // any one of them: how fast frames arrive, how much of a
+            // frame the roll costs, and how often the surface rebuilds.
+            // Rebuilds far above the frame rate means work no frame ever
+            // showed.
+            match (fps, paint_ms, ups) {
+                (Some(f), Some(ms), Some(u)) => {
+                    format!("{f:.0} fps · roll {ms:.2}ms · {u:.0}/s")
+                }
+                (Some(f), Some(ms), None) => format!("{f:.0} fps · roll {ms:.2}ms"),
+                (Some(f), _, _) => format!("{f:.0} fps"),
                 _ => "— fps".to_string(),
             }
         }

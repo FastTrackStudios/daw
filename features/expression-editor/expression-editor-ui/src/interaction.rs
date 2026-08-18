@@ -1700,7 +1700,9 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             // it, which is the only zoom that does not lose your place.
             let factor = ((origin.1 - y) / 200.0).exp();
             ed.camera.units_per_px = (*base_units_per_px / factor).max(1e-6);
-            ed.camera.t0 = *anchor_t - (origin.0 - 0.0) * ed.camera.units_per_px;
+            // `t_at(x) = t0 + x * units_per_px`, solved for the t0 that
+            // puts `anchor_t` back under the press.
+            ed.camera.t0 = *anchor_t - origin.0 * ed.camera.units_per_px;
         }
         Drag::SelectTouched { .. } => touch_at(ed, drag, x, y),
         Drag::Paint { .. } => paint_at(ed, drag, x, y),

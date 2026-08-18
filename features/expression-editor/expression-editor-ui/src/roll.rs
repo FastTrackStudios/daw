@@ -167,7 +167,7 @@ pub fn Canvas(
     let widget = use_hook(|| {
         dioxus_native_dom::CustomWidgetAttr::new(roll_widget::RollWidget::new(
             slot.clone(),
-            frames,
+            frames.clone(),
         ))
     });
 
@@ -211,6 +211,7 @@ pub fn Canvas(
     // rebuilt at, and far cheaper: a `Scene` is a vector of draw
     // commands, where the markup had to be re-parsed into a usvg tree
     // before anything reached the screen.
+    frames.built();
     slot.put(paint::roll_scene(
         &ed,
         vp.w + canvas::GUTTER_W,

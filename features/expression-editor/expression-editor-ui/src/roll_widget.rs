@@ -86,6 +86,18 @@ pub struct FrameLog {
     /// frame budget blown with this at almost zero is being spent
     /// somewhere else entirely — the renderer, or the rest of the DOM.
     paints: Vec<f64>,
+    /// Intervals between *scene rebuilds*, which is once per dioxus
+    /// render of the roll.
+    ///
+    /// The third number the frame budget needs. Frames say how fast the
+    /// screen updates and `paints` says how much of that was the roll —
+    /// but a pan is driven by pointer events, and if those arrive faster
+    /// than frames do then every one of them is paying for a render, a
+    /// DOM update and a layout that no frame ever shows. That is
+    /// invisible in the other two and is exactly the shape of a drag
+    /// that stutters while an idle view is smooth.
+    builds: Vec<f64>,
+    last_build: Option<std::time::Instant>,
 }
 
 impl Frames {
@@ -110,6 +122,36 @@ impl Frames {
                 }
             }
         }
+    }
+
+    /// Record that the roll rebuilt its scene — one dioxus render.
+    pub fn built(&self) {
+        let Ok(mut log) = self.0.try_borrow_mut() else {
+            return;
+        };
+        let now = std::time::Instant::now();
+        if let Some(previous) = log.last_build.replace(now) {
+            let ms = now.duration_since(previous).as_secs_f64() * 1000.0;
+            if ms < 500.0 {
+                log.builds.push(ms);
+                if log.builds.len() > 60 {
+                    log.builds.remove(0);
+                }
+            }
+        }
+    }
+
+    /// Scene rebuilds per second over the recent window.
+    ///
+    /// Read against the frame rate: meaningfully higher means the
+    /// surface is re-rendering for events the screen never gets to show.
+    pub fn builds_per_second(&self) -> Option<f64> {
+        let log = self.0.try_borrow().ok()?;
+        if log.builds.is_empty() {
+            return None;
+        }
+        let mean = log.builds.iter().sum::<f64>() / log.builds.len() as f64;
+        (mean > 0.0).then(|| 1000.0 / mean)
     }
 
     /// Record how long the roll took to hand over its drawing.

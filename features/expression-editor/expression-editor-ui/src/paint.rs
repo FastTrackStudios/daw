@@ -275,6 +275,101 @@ fn label(
     text::draw(scene, &shaped, x, y, align, c, at);
 }
 
+/// The velocity / CC strip under the roll, as a scene.
+///
+/// Painted for the same reason the roll is, and it turned out to matter
+/// more: the strip drew **one svg `<rect>` per note**, so a project with
+/// two thousand notes put two thousand DOM nodes under the roll and
+/// Blitz restyled and re-laid-out every one of them on every camera
+/// move. That was most of the twelve milliseconds a pan cost at that
+/// note count — the drawing was never the problem, the *elements* were.
+pub fn strip_scene(ed: &Editor, w: f64, h: f64, labels: &mut Labeller) -> Scene {
+    let mut scene = Scene::new();
+    scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        color(theme::SURFACE_BAR),
+        None,
+        &Rect::new(0.0, 0.0, w, h),
+    );
+
+    // The gutter column, so the strip lines up with the roll.
+    scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        color(theme::GUTTER_BG),
+        None,
+        &Rect::new(0.0, 0.0, canvas::GUTTER_W, h),
+    );
+    label(
+        scene_mut(&mut scene),
+        labels,
+        ed.strip_lane.label(),
+        6.0,
+        14.0,
+        9.0,
+        text::Align::Left,
+        color(theme::TEXT_DIM),
+        Affine::IDENTITY,
+    );
+
+    let at = Affine::translate((canvas::GUTTER_W, 0.0));
+    let vp_w = ed.viewport.w;
+
+    let mut guides = Batch::default();
+    for (y, major) in canvas::strip_guides(h) {
+        guides.add(
+            color(if major { theme::GRID_BEAT } else { theme::GRID_SUB }),
+            &Line::new((0.0, y), (vp_w, y)),
+        );
+    }
+    guides.stroke(&mut scene, at, 1.0);
+
+    // One path per colour, rather than one command per note.
+    let mut stems = Batch::default();
+    let mut caps = Batch::default();
+    for s in canvas::stems(ed, h) {
+        stems.add(
+            with_alpha(color(s.color), if s.muted { 0.2 } else { 0.85 }),
+            &Rect::new(s.x, s.y, s.x + s.w, s.y + s.h.max(1.0)),
+        );
+        // A cap on the selected stems, so the ones a drag will actually
+        // move are obvious.
+        if s.selected {
+            caps.add(
+                color(theme::SELECTED),
+                &Rect::new(s.x - 1.0, s.y - 2.0, s.x + s.w + 1.0, s.y + 1.0),
+            );
+        }
+    }
+    stems.fill(&mut scene, at);
+    caps.fill(&mut scene, at);
+
+    let mut quiet = Batch::default();
+    let mut selected = Batch::default();
+    for c in canvas::strip_curves(ed, h) {
+        let path = line_of(&c.points);
+        if path.is_empty() {
+            continue;
+        }
+        if c.selected {
+            selected.add(color(c.color), &path);
+        } else {
+            quiet.add(with_alpha(color(c.color), 0.6), &path);
+        }
+    }
+    quiet.stroke(&mut scene, at, 1.5);
+    selected.stroke(&mut scene, at, 1.5);
+
+    scene
+}
+
+/// `label` takes `&mut Scene`; this is only here to keep the call above
+/// readable rather than reborrowing inline.
+fn scene_mut(scene: &mut Scene) -> &mut Scene {
+    scene
+}
+
 fn rows(scene: &mut Scene, ed: &Editor, at: Affine, w: f64) {
     let mut bands = Batch::default();
     let mut dividers = Batch::default();

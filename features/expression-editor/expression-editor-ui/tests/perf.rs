@@ -210,19 +210,42 @@ fn PanSurface() -> Element {
 #[test]
 #[ignore = "measurement"]
 fn what_a_pan_costs() {
-    let ed = big(5, 5120.0 - 236.0 - canvas::GUTTER_W, 1440.0 - 116.0 - canvas::RULER_H);
-    STAGED.with(|s| *s.borrow_mut() = Some(ed));
-    let doc = render(PanSurface).with_window_size(5120, 1440).build();
-    doc.drain();
-    doc.relayout();
-
-    let pan = doc.query(by_testid("pan")).immediately().expect("no pan button");
-    const N: u32 = 30;
-    let t = Instant::now();
-    for _ in 0..N {
-        pan.click();
+    for notes in [5usize, 500, 2000] {
+        let ed = big(notes, 5120.0 - 236.0 - canvas::GUTTER_W, 1440.0 - 116.0 - canvas::RULER_H);
+        STAGED.with(|s| *s.borrow_mut() = Some(ed));
+        let doc = render(PanSurface).with_window_size(5120, 1440).build();
         doc.drain();
         doc.relayout();
+
+        let pan = doc.query(by_testid("pan")).immediately().expect("no pan button");
+        const N: u32 = 30;
+        // Split, because the two halves have completely different fixes:
+        // `drain` is dioxus re-rendering every component that reads the
+        // editor and applying the DOM mutations, `relayout` is Blitz
+        // resolving style and layout for the whole document.
+        let (mut render_ms, mut layout_ms) = (0.0, 0.0);
+        let t = Instant::now();
+        for _ in 0..N {
+            pan.click();
+            let a = Instant::now();
+            doc.drain();
+            render_ms += a.elapsed().as_secs_f64() * 1000.0;
+            let b = Instant::now();
+            doc.relayout();
+            layout_ms += b.elapsed().as_secs_f64() * 1000.0;
+        }
+        let per = t.elapsed().as_secs_f64() * 1000.0 / N as f64;
+        println!(
+            "{notes:>5} notes:   render+DOM {:>6.2}ms   style+layout {:>6.2}ms",
+            render_ms / N as f64,
+            layout_ms / N as f64
+        );
+        // A frame at 120 fps is 8.3ms, and this is only the DOM half —
+        // paint and the GPU still have to happen inside it.
+        println!(
+            "{notes:>5} notes: pan (render + DOM + layout) {per:>6.2}ms  \
+             = {:.0} pans/s before a frame is missed",
+            1000.0 / per
+        );
     }
-    println!("pan (render + DOM update + layout): {:.2}ms", t.elapsed().as_secs_f64() * 1000.0 / N as f64);
 }
