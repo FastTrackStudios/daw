@@ -550,3 +550,233 @@ fn a_zoom_holds_the_point_it_was_started_on() {
         );
     }
 }
+
+// ── the razor as a tool ─────────────────────────────────────────────
+
+/// Arming the razor puts on the plain drag what `Ctrl` puts on a
+/// modified one.
+///
+/// The razor was reachable only through a modifier, which is fine for
+/// one cut and tiring for ten. As a tool it is the same gesture through
+/// the same code path — worth asserting, because two spellings of one
+/// action is exactly how the two drift apart.
+#[test]
+fn the_razor_tool_sweeps_an_area_on_a_plain_drag() {
+    let mut ed = four_notes();
+    ed.tool = expression_editor_core::Tool::Razor;
+    let (x0, y) = at(&ed, PPQ * 1.0);
+    let (x1, _) = at(&ed, PPQ * 3.0);
+
+    let mut d = interaction::pointer_down(&mut ed, x0, y, plain(), 0);
+    assert!(
+        matches!(d, Drag::RazorCreate { .. }),
+        "the razor tool did not claim the plain drag",
+    );
+    interaction::pointer_move(&mut ed, &mut d, x1, y, plain());
+    interaction::pointer_up(&mut ed, d, x1, y, plain());
+
+    assert_eq!(ed.razor.areas.len(), 1, "the sweep committed no area");
+    let a = ed.razor.areas[0];
+    assert!(
+        (a.t0 - PPQ).abs() < 1.0 && (a.t1 - PPQ * 3.0).abs() < 1.0,
+        "the area landed at {}..{} beats",
+        a.t0 / PPQ,
+        a.t1 / PPQ,
+    );
+}
+
+/// A razor drag that starts *on* a note cuts rather than picking it up.
+///
+/// The whole point of the tool is sweeping across material. If a drag
+/// beginning over a note moved the note instead, every cut would have to
+/// start in a gap — which on dense material is nowhere.
+#[test]
+fn the_razor_tool_cuts_across_notes_rather_than_moving_them() {
+    let mut ed = four_notes();
+    ed.tool = expression_editor_core::Tool::Razor;
+    let before = span(&ed, NoteId(2));
+
+    // Start the drag squarely inside note 2.
+    let (x0, y) = at(&ed, PPQ * 1.25);
+    let (x1, _) = at(&ed, PPQ * 3.25);
+    let mut d = interaction::pointer_down(&mut ed, x0, y, plain(), 0);
+    assert!(
+        matches!(d, Drag::RazorCreate { .. }),
+        "a drag starting on a note did not reach the razor",
+    );
+    interaction::pointer_move(&mut ed, &mut d, x1, y, plain());
+    interaction::pointer_up(&mut ed, d, x1, y, plain());
+
+    assert_eq!(
+        span(&ed, NoteId(2)),
+        before,
+        "the razor moved the note it started on",
+    );
+    assert_eq!(ed.razor.areas.len(), 1, "no area was swept");
+}
+
+/// The rectangle drawn during the sweep is the one that gets committed.
+///
+/// This is the bug the preview exists to prevent rather than to reveal:
+/// a razor used to appear only on release, so the surface could not be
+/// wrong about it — it simply said nothing. Now that it draws, the value
+/// it draws and the value it commits have to be the same one, or the
+/// preview becomes a lie that is worse than the silence it replaced.
+#[test]
+fn the_previewed_area_is_the_committed_area() {
+    let mut ed = four_notes();
+    ed.tool = expression_editor_core::Tool::Razor;
+    // Snapping on, so preview and commit have something to disagree
+    // about — with a free grid both readings land in the same place.
+    ed.grid.enabled = true;
+
+    let (x0, y) = at(&ed, PPQ * 1.1);
+    let (x1, _) = at(&ed, PPQ * 2.9);
+    let mut d = interaction::pointer_down(&mut ed, x0, y, plain(), 0);
+    interaction::pointer_move(&mut ed, &mut d, x1, y, plain());
+
+    let previewed = match d {
+        Drag::RazorCreate { pending, .. } => pending.expect("a sweep this wide has an area"),
+        _ => panic!("not a razor drag"),
+    };
+    interaction::pointer_up(&mut ed, d, x1, y, plain());
+
+    assert_eq!(
+        ed.razor.areas.as_slice(),
+        &[previewed],
+        "the committed area is not the one that was drawn",
+    );
+}
+
+/// A click is not a sweep.
+///
+/// A press and release in one spot used to commit a hairline razor:
+/// invisible, and still able to swallow the next operation that asked
+/// what areas were active.
+#[test]
+fn a_click_with_the_razor_leaves_no_area() {
+    let mut ed = four_notes();
+    ed.tool = expression_editor_core::Tool::Razor;
+    let (x, y) = at(&ed, PPQ * 1.5);
+
+    let mut d = interaction::pointer_down(&mut ed, x, y, plain(), 0);
+    // A pixel of tremor, which is what a real click has.
+    interaction::pointer_move(&mut ed, &mut d, x + 1.0, y, plain());
+    interaction::pointer_up(&mut ed, d, x + 1.0, y, plain());
+
+    assert!(
+        ed.razor.is_empty(),
+        "a click left {} area(s) behind",
+        ed.razor.areas.len(),
+    );
+}
+
+// ── handles work on the selection ───────────────────────────────────
+
+/// Two selected notes, each with a little pitch contour of its own.
+fn two_selected_with_contours() -> Editor {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    for (i, row) in [(0u64, 60), (1, 64)] {
+        let mut n = Note::new(NoteId(i + 1), PPQ * i as f64 * 2.0, PPQ * (i as f64 * 2.0 + 2.0), row);
+        // Different contours, so a gesture that flattens both onto one
+        // shared value cannot pass by looking like a shift.
+        for k in 0..32 {
+            let f = k as f64 / 31.0;
+            let t = n.start + (n.end - n.start) * f;
+            n.pitch.set(t, if i == 0 { f * 0.4 } else { -f * 0.2 });
+        }
+        doc.push(n);
+    }
+    let mut ed = Editor::new(doc, Viewport::new(1000.0, 480.0));
+    ed.mode = expression_editor_core::Mode::Vocals;
+    ed.reset_view();
+    ed.snap_pitch = false;
+    ed.selection.notes = vec![NoteId(1), NoteId(2)];
+    ed
+}
+
+fn sampled(ed: &Editor, id: NoteId) -> f64 {
+    let n = ed.doc.note(id).expect("note is live");
+    n.row as f64 + n.pitch.sample((n.start + n.end) * 0.5, 0.0)
+}
+
+/// Dragging a handle on one selected note moves every selected note.
+///
+/// The handles were the last gesture on this surface that ignored the
+/// selection: you could select a phrase, grab a handle to shape it, and
+/// shape exactly one note. Every other gesture — move, stretch, velocity
+/// — already worked on the selection, so this was the odd one out rather
+/// than a deliberate exception.
+#[test]
+fn a_handle_drag_moves_the_whole_selection() {
+    let mut ed = two_selected_with_contours();
+    let before = (sampled(&ed, NoteId(1)), sampled(&ed, NoteId(2)));
+
+    // Grab the fine-pitch handle on note 1 — whichever one the geometry
+    // layer actually put on screen, rather than a guessed rectangle.
+    let sets = expression_editor_ui::canvas::note_handles(&ed);
+    let set = sets
+        .iter()
+        .find(|s| s.id == NoteId(1))
+        .expect("the selected note has handles");
+    let r = set
+        .rects
+        .iter()
+        .find(|r| r.handle == expression_editor_core::handles::Handle::FinePitch)
+        .expect("a note this wide carries the fine-pitch handle");
+    let (x, y) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
+
+    let mut d = interaction::pointer_down(&mut ed, x, y, plain(), 0);
+    assert!(
+        matches!(d, Drag::Handle(_)),
+        "the press did not open a handle drag",
+    );
+    interaction::pointer_move(&mut ed, &mut d, x, y - 40.0, plain());
+    interaction::pointer_up(&mut ed, d, x, y - 40.0, plain());
+
+    let after = (sampled(&ed, NoteId(1)), sampled(&ed, NoteId(2)));
+    assert!(
+        (after.0 - before.0).abs() > 1e-6,
+        "the grabbed note did not move",
+    );
+    assert!(
+        (after.1 - before.1).abs() > 1e-6,
+        "the other selected note was left behind: {} -> {}",
+        before.1,
+        after.1,
+    );
+    // The same delta, not the same value: each note keeps what it was
+    // shaped to and rises from there.
+    assert!(
+        ((after.0 - before.0) - (after.1 - before.1)).abs() < 1e-6,
+        "the two notes moved by different amounts: {} vs {}",
+        after.0 - before.0,
+        after.1 - before.1,
+    );
+}
+
+/// An unselected note is not dragged along by a handle on another one.
+#[test]
+fn a_handle_drag_leaves_unselected_notes_alone() {
+    let mut ed = two_selected_with_contours();
+    ed.selection.notes = vec![NoteId(1)];
+    let before = sampled(&ed, NoteId(2));
+
+    let sets = expression_editor_ui::canvas::note_handles(&ed);
+    let set = sets.iter().find(|s| s.id == NoteId(1)).expect("handles");
+    let r = set
+        .rects
+        .iter()
+        .find(|r| r.handle == expression_editor_core::handles::Handle::FinePitch)
+        .expect("fine-pitch handle");
+    let (x, y) = (r.x + r.w * 0.5, r.y + r.h * 0.5);
+
+    let mut d = interaction::pointer_down(&mut ed, x, y, plain(), 0);
+    interaction::pointer_move(&mut ed, &mut d, x, y - 40.0, plain());
+    interaction::pointer_up(&mut ed, d, x, y - 40.0, plain());
+
+    assert!(
+        (sampled(&ed, NoteId(2)) - before).abs() < 1e-9,
+        "an unselected note followed the drag",
+    );
+}

@@ -25,6 +25,7 @@ fn tool_glyph(tool: Tool) -> &'static str {
         Tool::Eraser => "⌫",
         Tool::NoteDraw => "▤",
         Tool::NoteErase => "✕",
+        Tool::Razor => "⌗",
         Tool::Zoom => "⌕",
     }
 }
@@ -735,10 +736,18 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
                 if razors > 0 {
                     span { style: "color: {theme::RAZOR};", "razor {razors}" }
                 }
+                // Names the mark, not just the count.
+                //
+                // The roll flags these notes and this line explains
+                // them, and for a long time neither said so — you got a
+                // red something on a note and a red something in the
+                // corner and no reason to connect them. "Red bar" is the
+                // whole fix: it is the one word that turns two unrelated
+                // warnings into one.
                 if ambiguous > 0 {
                     span {
                         style: "color: {theme::ZONE};",
-                        "⚠ {ambiguous} share a channel — writes blocked"
+                        "⚠ red bar: {ambiguous} overlap on one MIDI channel — per-note expression can't be told apart"
                     }
                 }
                 span { "{count} selected" }

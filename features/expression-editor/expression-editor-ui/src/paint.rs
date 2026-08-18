@@ -35,6 +35,7 @@
 //! `<g transform=… clip-path=…>` did.
 
 use anyrender::{PaintScene, Scene};
+use expression_editor_core::razor::RazorArea;
 use expression_editor_core::{Dimension, Editor};
 use kurbo::{Affine, BezPath, Line, Point, Rect, Stroke};
 use peniko::{Color, Fill};
@@ -55,6 +56,13 @@ pub struct Overlay {
     pub marquee: Option<(f64, f64, f64, f64)>,
     /// An open pitch drawing, which owns the surface while it is up.
     pub draft: Option<canvas::DraftView>,
+    /// The razor area a sweep in progress would commit, already snapped.
+    ///
+    /// A razor used to appear only on release, so the most destructive
+    /// selection on the surface was the one you could not see before
+    /// committing to it. Drawn from the same resolved area the release
+    /// will add, so what is previewed is what lands.
+    pub razor: Option<RazorArea>,
     /// Where a string roll draws its bend flow (#161).
     pub flow: crate::guitar::BendFlow,
 }
@@ -217,7 +225,7 @@ pub fn roll_scene(
     lanes(&mut scene, ed, roll_at, vp.w);
     guides(&mut scene, ed, roll_at, vp.w, labels);
     audio(&mut scene, ed, roll_at);
-    razors(&mut scene, ed, roll_at);
+    razors(&mut scene, ed, roll_at, overlay.razor.as_ref());
     references(&mut scene, ed, roll_at);
     notes(&mut scene, ed, roll_at, labels);
     curves(&mut scene, ed, roll_at);
@@ -559,7 +567,7 @@ fn draft(scene: &mut Scene, overlay: &Overlay, at: Affine) {
     }
 }
 
-fn razors(scene: &mut Scene, ed: &Editor, at: Affine) {
+fn razors(scene: &mut Scene, ed: &Editor, at: Affine, pending: Option<&RazorArea>) {
     for r in canvas::razor_rects(ed) {
         scene.fill(
             Fill::NonZero,
@@ -569,6 +577,38 @@ fn razors(scene: &mut Scene, ed: &Editor, at: Affine) {
             &Rect::new(r.x, r.y, r.x + r.w, r.y + r.h),
         );
     }
+
+    // The sweep in progress. Same fill so there is no question about
+    // what it will become, plus a bright edge on the two sides that are
+    // still moving — a razor is a *cut*, and where its boundaries fall
+    // is the entire decision being made. Without the edges a snapped
+    // rectangle and an unsnapped one look identical until you release.
+    let Some(area) = pending else { return };
+    let r = canvas::razor_rect(ed, area);
+    let box_ = Rect::new(r.x, r.y, r.x + r.w, r.y + r.h);
+    scene.fill(
+        Fill::NonZero,
+        at,
+        with_alpha(color(theme::RAZOR), 0.22),
+        None,
+        &box_,
+    );
+    for x in [r.x, r.x + r.w] {
+        scene.stroke(
+            &stroke_of(1.5),
+            at,
+            with_alpha(color(theme::RAZOR), 0.95),
+            None,
+            &kurbo::Line::new((x, r.y), (x, r.y + r.h)),
+        );
+    }
+    scene.stroke(
+        &stroke_of(1.0),
+        at,
+        with_alpha(color(theme::RAZOR), 0.6),
+        None,
+        &box_,
+    );
 }
 
 fn references(scene: &mut Scene, ed: &Editor, at: Affine) {
@@ -619,6 +659,9 @@ fn notes(scene: &mut Scene, ed: &Editor, at: Affine, labels: &mut Labeller) {
     let mut centres = Batch::default();
     let mut outlines = Batch::default();
     let mut thick = Batch::default();
+    // Ambiguity bars. Their own batch because they are filled, not
+    // stroked, and because they must land on top of both outlines.
+    let mut warnings = Batch::default();
     let mut zones = Batch::default();
     let mut zones_active = Batch::default();
     // Labels are glyph runs and cannot be batched, so they are held back
@@ -659,19 +702,37 @@ fn notes(scene: &mut Scene, ed: &Editor, at: Affine, labels: &mut Labeller) {
                     zones.add(color(theme::ZONE), &line);
                 }
             }
-            let edge = color(if n.ambiguous {
-                theme::ZONE
-            } else if n.selected {
+            // The outline says one thing and one thing only: whether
+            // this note is selected.
+            //
+            // Ambiguity used to claim it too, and won — so selecting a
+            // red note appeared to do nothing, and on MPE material where
+            // most notes are flagged the selection was invisible
+            // wholesale. Two independent facts cannot share one channel;
+            // one of them has to lose, and the one you are actively
+            // changing must not be it.
+            let edge = color(if n.selected {
                 theme::SELECTED
             } else {
                 theme::BORDER_STRONG
             });
             // Two widths, so two batches: a stroke width belongs to the
             // command, not to the path.
-            if n.selected || n.ambiguous {
+            if n.selected {
                 thick.add(edge, &r);
             } else {
                 outlines.add(edge, &r);
+            }
+            // Ambiguity gets its own mark instead: a red bar along the
+            // top edge, which composes with any outline rather than
+            // replacing it. It stays legible on a note only a few pixels
+            // tall, which an inset stroke would not.
+            if n.ambiguous {
+                let bar = (n.h * 0.25).clamp(1.5, 3.0);
+                warnings.add(
+                    with_alpha(color(theme::ZONE), 0.95 * alpha),
+                    &Rect::new(n.x, n.y, n.x + n.w, n.y + bar),
+                );
             }
         }
 
@@ -722,6 +783,7 @@ fn notes(scene: &mut Scene, ed: &Editor, at: Affine, labels: &mut Labeller) {
     zones_active.stroke(scene, at, 2.0);
     outlines.stroke(scene, at, 1.0);
     thick.stroke(scene, at, 2.0);
+    warnings.fill(scene, at);
 
     for (s, x, y, size, c) in deferred {
         label(scene, labels, &s, x, y, size, text::Align::Left, c, at);

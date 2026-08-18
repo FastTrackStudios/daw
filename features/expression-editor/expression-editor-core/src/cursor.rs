@@ -342,6 +342,7 @@ impl Cursor {
             crate::Tool::Eraser => Cursor::Eraser,
             crate::Tool::NoteDraw => Cursor::Pencil,
             crate::Tool::NoteErase => Cursor::NoteEraser,
+            crate::Tool::Razor => Cursor::Razor,
             crate::Tool::Zoom => Cursor::Zoom,
         }
     }

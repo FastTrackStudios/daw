@@ -204,6 +204,15 @@ pub fn Canvas(
         _ => None,
     };
 
+    // The razor being swept, already snapped. Read from the drag rather
+    // than recomputed here: `resolve_razor` decided it on the last move
+    // and the release will commit that same value, so drawing anything
+    // else would be drawing a third opinion.
+    let razor = match &*drag.read() {
+        Drag::RazorCreate { pending, .. } => *pending,
+        _ => None,
+    };
+
     let ed = editor.read();
     let vp = ed.viewport;
     let cc_editing = ed.cc_edit;
@@ -234,6 +243,7 @@ pub fn Canvas(
         vp.h + canvas::RULER_H,
         &paint::Overlay {
             marquee,
+            razor,
             draft: draft.read().as_ref().map(|d| canvas::draft_view(&ed, d)),
             // Prototype (#161): read deep in the drawing and nothing
             // between here and there cares, so it arrives by context.

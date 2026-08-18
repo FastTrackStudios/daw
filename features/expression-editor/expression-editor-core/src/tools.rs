@@ -32,6 +32,16 @@ pub enum Tool {
     /// for the length of the hold; it is also a tool like any other, so
     /// it can be clicked and left on.
     Zoom,
+    /// Sweep out time × row areas to operate on.
+    ///
+    /// A razor selects a *region of the canvas* rather than a set of
+    /// notes: it says "these rows, this span", and what follows — carve,
+    /// delete, move contents, clear a lane — applies to whatever falls
+    /// inside, including the halves of notes that straddle an edge.
+    /// `Ctrl` reaches it from any tool; arming it puts the same thing on
+    /// the plain drag, which is what you want when cutting several areas
+    /// in a row.
+    Razor,
 }
 
 impl Tool {
@@ -66,16 +76,34 @@ impl Tool {
             // change, so a drag that started on a note must zoom rather
             // than move the note.
             Tool::Zoom => &[(C::PianoRoll, G::Drag), (C::Note, G::Drag)],
+            // Roll, notes, and note *edges*. A razor has to cut through
+            // material rather than pick it up, and an edge is the one
+            // place a sweep is most likely to start: on dense music
+            // every few pixels is somebody's edge, so leaving them to
+            // the map meant a cut that began a hair off resized a note
+            // instead.
+            //
+            // Deliberately NOT `RazorArea` or `RazorEdge`. An area you
+            // have already drawn keeps the map's gestures, so dragging
+            // its contents and resizing it still work while the tool is
+            // armed — claiming those would leave the tool unable to use
+            // its own output.
+            Tool::Razor => &[
+                (C::PianoRoll, G::Drag),
+                (C::Note, G::Drag),
+                (C::NoteEdge, G::Drag),
+            ],
         }
     }
 
-    pub const ALL: [Tool; 7] = [
+    pub const ALL: [Tool; 8] = [
         Tool::Select,
         Tool::Pen,
         Tool::Curve,
         Tool::Eraser,
         Tool::NoteDraw,
         Tool::NoteErase,
+        Tool::Razor,
         Tool::Zoom,
     ];
 
@@ -97,6 +125,7 @@ impl Tool {
             Tool::Eraser => "Eraser",
             Tool::NoteDraw => "Note Draw",
             Tool::NoteErase => "Note Erase",
+            Tool::Razor => "Razor",
             Tool::Zoom => "Zoom",
         }
     }

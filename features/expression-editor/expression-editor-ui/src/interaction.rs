@@ -183,6 +183,18 @@ pub enum Drag {
     RazorCreate {
         origin: (f64, f64),
         current: (f64, f64),
+        /// The area as it would be committed right now, snapped.
+        ///
+        /// Resolved on every move rather than recomputed at release, so
+        /// the rectangle the surface draws while you sweep and the one
+        /// that lands are the same object rather than two computations
+        /// that have to agree. They did not: the release snapped and
+        /// nothing was drawn until it happened, so the area appeared
+        /// somewhere other than where the drag had been.
+        ///
+        /// `None` until the sweep is big enough to mean anything, which
+        /// is also what keeps a click from leaving a zero-width razor.
+        pending: Option<RazorArea>,
     },
     /// Moving or copying an existing area's contents.
     RazorDrag {
@@ -253,8 +265,20 @@ pub enum Drag {
         sep: expression_editor_core::Separator,
         law: expression_editor_core::StretchLaw,
     },
-    /// One of the seven note handles.
-    Handle(Box<handles::HandleDrag>),
+    /// One of the seven note handles, on every note it applies to.
+    ///
+    /// The note actually grabbed is first; the rest of the selection
+    /// follows. Each carries its *own* captured base, so the gesture is
+    /// a relative change applied everywhere rather than one value copied
+    /// across — pull the pressure handle on one of six selected notes
+    /// and all six rise by the same amount from wherever each of them
+    /// was, which is the only reading that preserves what you shaped
+    /// earlier.
+    ///
+    /// One entry when nothing is selected, or when the grabbed note is
+    /// the only selected one, so the single-note case is not a special
+    /// case anywhere below.
+    Handle(Box<Vec<handles::HandleDrag>>),
     /// Dragging out a temporary note: a range inside one note that the
     /// handles will then address.
     TempNote {
@@ -455,6 +479,46 @@ pub fn pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16) ->
 /// `None` means "the map had nothing useful here" and the caller falls
 /// through to the tool-driven path, which still owns the expression
 /// tools (pen, curve, eraser).
+/// The razor area a sweep from `origin` to `current` currently means.
+///
+/// The one place that turns two pixel points into an area, so the
+/// rectangle drawn during the drag and the one committed on release
+/// cannot disagree — they are the same value, resolved once per move and
+/// carried on the drag.
+///
+/// `None` for a sweep too small to be deliberate. A click that leaves a
+/// hairline razor is worse than one that leaves nothing: it is invisible
+/// and it still swallows the next operation.
+fn resolve_razor(
+    ed: &Editor,
+    origin: (f64, f64),
+    current: (f64, f64),
+    mods: Mods,
+) -> Option<RazorArea> {
+    // In pixels, so the threshold means the same thing at every zoom.
+    // A time threshold would be unreachable when zoomed out and
+    // trivially exceeded when zoomed in.
+    if (current.0 - origin.0).abs() < 3.0 {
+        return None;
+    }
+    let t0 = ed.camera.t_at(origin.0);
+    let t1 = ed.camera.t_at(current.0);
+    let r0 = ed.camera.pitch_at(origin.1, ed.viewport).round() as i32;
+    let r1 = ed.camera.pitch_at(current.1, ed.viewport).round() as i32;
+    // Shift is the escape from the grid, matching every other snapped
+    // gesture on the surface.
+    let (t0, t1) = if ed.grid.enabled && !mods.shift {
+        (ed.snap_time(t0), ed.snap_time(t1))
+    } else {
+        (t0, t1)
+    };
+    let area = RazorArea::new(t0, t1, r0, r1);
+    // Snapping can collapse a short sweep onto one grid line. That is a
+    // real outcome of the gesture, not an error, but an empty area is
+    // still nothing worth committing or drawing.
+    (!area.is_empty()).then_some(area)
+}
+
 fn run_action(ed: &mut Editor, action: Action, x: f64, y: f64, mods: Mods) -> Option<Drag> {
     let t = ed.camera.t_at(x);
     let row = ed.camera.pitch_at(y, ed.viewport).round() as i32;
@@ -473,6 +537,7 @@ fn run_action(ed: &mut Editor, action: Action, x: f64, y: f64, mods: Mods) -> Op
         Action::RazorCreate => Some(Drag::RazorCreate {
             origin: (x, y),
             current: (x, y),
+            pending: None,
         }),
         Action::RazorMoveContents
         | Action::RazorMoveContentsNoSnap
@@ -507,6 +572,7 @@ fn run_action(ed: &mut Editor, action: Action, x: f64, y: f64, mods: Mods) -> Op
             Some(Drag::RazorCreate {
                 origin: (x, y),
                 current: (x, y),
+                pending: None,
             })
         }
         Action::RazorResizeArea | Action::RazorStretchContents => {
@@ -1015,9 +1081,44 @@ fn handle_press(ed: &mut Editor, x: f64, y: f64, mods: Mods, gesture: Gesture) -
     // Captured at press, not read live: releasing Shift mid-drag must
     // not change which spans a gesture has already started writing.
     let sibilants = ed.sibilant_scope != mods.shift;
-    let drag = handles::HandleDrag::begin_with(handle, note, scope, y, sibilants);
+    let mut drags = vec![handles::HandleDrag::begin_with(
+        handle, note, scope, y, sibilants,
+    )];
+
+    // The rest of the selection comes along.
+    //
+    // Grabbing a handle on one of six selected notes and having it move
+    // only that one makes the selection decorative: you would select the
+    // phrase, shape it, and find you had shaped a note. Every other
+    // gesture on this surface already works on the selection — moving,
+    // stretching, velocity — and the handles were the exception.
+    //
+    // Each follower captures its own base off its own note at the same
+    // pointer origin, so they all see the same delta and apply it to
+    // whatever they were. A note whose scope has no span to write (an
+    // amplitude drag over a note with no unvoiced material, say) is
+    // dropped here rather than fudged: it has nothing this gesture can
+    // change, and inventing one would be the surprise.
+    if ed.selection.contains(id) {
+        let followers: Vec<_> = ed
+            .selection
+            .notes
+            .iter()
+            .copied()
+            .filter(|other| *other != id)
+            .filter_map(|other| {
+                let n = ed.doc.note(other)?;
+                let scope = ed.scope_for(other);
+                scope
+                    .is_valid(n)
+                    .then(|| handles::HandleDrag::begin_with(handle, n, scope, y, sibilants))
+            })
+            .collect();
+        drags.extend(followers);
+    }
+
     ed.begin_gesture();
-    Some(Drag::Handle(Box::new(drag)))
+    Some(Drag::Handle(Box::new(drags)))
 }
 
 /// Add whatever the pointer is over to a touch-select sweep.
@@ -1374,6 +1475,13 @@ fn legacy_pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16)
             marquee: mods.alt,
             current: (x, y),
         },
+        // Same drag `Ctrl` produces from any other tool — one code path,
+        // so the tool cannot drift from the modifier that shares it.
+        Tool::Razor => Drag::RazorCreate {
+            origin: (x, y),
+            current: (x, y),
+            pending: None,
+        },
         Tool::Select => {
             if under.is_some() {
                 ed.begin_gesture();
@@ -1672,7 +1780,14 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
                 ed.apply_live(&Edit::DeleteNotes(vec![id]));
             }
         }
-        Drag::RazorCreate { current, .. } => *current = (x, y),
+        Drag::RazorCreate {
+            origin,
+            current,
+            pending,
+        } => {
+            *current = (x, y);
+            *pending = resolve_razor(ed, *origin, *current, mods);
+        }
         Drag::RazorDrag {
             area,
             origin,
@@ -1918,10 +2033,15 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
                 ed.apply_live(&e);
             }
         }
-        Drag::Handle(h) => {
+        Drag::Handle(hs) => {
             // Shift reverses the pitch snap, as everywhere else here.
             let snap = ed.snap_pitch != mods.shift;
-            ed.drag_handle(h, y, snap);
+            // Same `y` for every one of them: the gesture is a single
+            // delta, and each drag turns it into a change against its
+            // own captured base.
+            for h in hs.iter_mut() {
+                ed.drag_handle(h, y, snap);
+            }
         }
         Drag::TempNote {
             note,
@@ -2076,10 +2196,12 @@ pub fn pointer_up(ed: &mut Editor, drag: Drag, x: f64, y: f64, mods: Mods) -> Dr
         // both stay live so the shape buttons restyle the stroke that
         // was just drawn.
         live @ (Drag::Curve { .. } | Drag::CcLine { .. }) => live,
-        Drag::Handle(h) => {
+        Drag::Handle(hs) => {
             // Fold whole semitones back into the row, restoring the
             // invariant the pitch drag was allowed to break while it ran.
-            ed.end_handle_drag(&h);
+            for h in hs.iter() {
+                ed.end_handle_drag(h);
+            }
             Drag::None
         }
         Drag::TempNote {
@@ -2094,17 +2216,17 @@ pub fn pointer_up(ed: &mut Editor, drag: Drag, x: f64, y: f64, mods: Mods) -> Dr
             }
             Drag::None
         }
-        Drag::RazorCreate { origin, current } => {
-            let t0 = ed.camera.t_at(origin.0);
-            let t1 = ed.camera.t_at(current.0);
-            let r0 = ed.camera.pitch_at(origin.1, ed.viewport).round() as i32;
-            let r1 = ed.camera.pitch_at(current.1, ed.viewport).round() as i32;
-            let (t0, t1) = if ed.grid.enabled && !mods.shift {
-                (ed.snap_time(t0), ed.snap_time(t1))
-            } else {
-                (t0, t1)
-            };
-            ed.razor.add(RazorArea::new(t0, t1, r0, r1));
+        Drag::RazorCreate {
+            origin, pending, ..
+        } => {
+            // Prefer what was last drawn. Re-resolving here would let
+            // the committed area differ from the one on screen whenever
+            // release and the last move disagree about the modifiers —
+            // let go of Shift a frame early and the razor would snap out
+            // from under the rectangle you were looking at.
+            if let Some(area) = pending.or_else(|| resolve_razor(ed, origin, (x, y), mods)) {
+                ed.razor.add(area);
+            }
             Drag::None
         }
         Drag::Pen {
