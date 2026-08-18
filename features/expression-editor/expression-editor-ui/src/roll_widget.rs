@@ -78,6 +78,14 @@ pub struct Frames(Rc<RefCell<FrameLog>>);
 pub struct FrameLog {
     last: Option<std::time::Instant>,
     intervals: Vec<f64>,
+    /// How long the roll itself took, over the same window.
+    ///
+    /// Reported next to the rate because the two answer different
+    /// questions, and confusing them wastes days: the interval says how
+    /// fast frames arrive, and this says how much of that was us. A
+    /// frame budget blown with this at almost zero is being spent
+    /// somewhere else entirely — the renderer, or the rest of the DOM.
+    paints: Vec<f64>,
 }
 
 impl Frames {
@@ -104,6 +112,17 @@ impl Frames {
         }
     }
 
+    /// Record how long the roll took to hand over its drawing.
+    fn spent(&self, ms: f64) {
+        let Ok(mut log) = self.0.try_borrow_mut() else {
+            return;
+        };
+        log.paints.push(ms);
+        if log.paints.len() > 60 {
+            log.paints.remove(0);
+        }
+    }
+
     /// Frames per second over the recent window, once there are enough
     /// frames to divide by.
     pub fn fps(&self) -> Option<f64> {
@@ -113,6 +132,15 @@ impl Frames {
         }
         let mean = log.intervals.iter().sum::<f64>() / log.intervals.len() as f64;
         (mean > 0.0).then(|| 1000.0 / mean)
+    }
+
+    /// Milliseconds of the average frame spent in the roll.
+    pub fn paint_ms(&self) -> Option<f64> {
+        let log = self.0.try_borrow().ok()?;
+        if log.paints.is_empty() {
+            return None;
+        }
+        Some(log.paints.iter().sum::<f64>() / log.paints.len() as f64)
     }
 }
 
@@ -128,6 +156,35 @@ pub struct RollWidget {
 impl RollWidget {
     pub fn new(slot: SceneSlot, frames: Frames) -> Self {
         Self { slot, frames }
+    }
+}
+
+/// A widget that replays a slot and counts nothing.
+///
+/// The frame meter belongs to the roll: it answers "how fast is the
+/// music surface arriving?". A second widget on the same counter — the
+/// painted cursor, which repaints on every pointer move — would make
+/// that number report the mouse instead.
+pub struct SceneWidget {
+    slot: SceneSlot,
+}
+
+impl SceneWidget {
+    pub fn new(slot: SceneSlot) -> Self {
+        Self { slot }
+    }
+}
+
+impl blitz_dom::Widget for SceneWidget {
+    fn paint(
+        &mut self,
+        _ctx: &mut dyn anyrender::RenderContext,
+        _styles: &blitz_dom::node::ComputedStyles,
+        _width: u32,
+        _height: u32,
+        _scale: f64,
+    ) -> Scene {
+        self.slot.take_scene().unwrap_or_default()
     }
 }
 
@@ -147,6 +204,10 @@ impl blitz_dom::Widget for RollWidget {
         // for us. Reading them here and scaling the drawing would
         // reintroduce the very ratio that made the svg wrong.
         self.frames.tick();
-        self.slot.take_scene().unwrap_or_default()
+        let started = std::time::Instant::now();
+        let scene = self.slot.take_scene().unwrap_or_default();
+        self.frames
+            .spent(started.elapsed().as_secs_f64() * 1000.0);
+        scene
     }
 }

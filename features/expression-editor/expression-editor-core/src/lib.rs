@@ -29,6 +29,7 @@ pub mod camera;
 pub mod cc;
 pub mod chord;
 pub mod clipboard;
+pub mod cursor;
 pub mod doc;
 pub mod draft;
 pub mod edit;
@@ -53,6 +54,7 @@ pub mod zoom;
 pub use camera::{Bounds, Camera, Content, VerticalCamera, Viewport};
 pub use cc::{CcDisplay, CcLane, CcSet};
 pub use chord::Chord;
+pub use cursor::{Aim, Cursor};
 pub use doc::{Curve, CurveShape, ExpressionDoc, Dimension, Marker, Note, NoteId, Point, Target, TimeBase};
 pub use draft::PitchDraft;
 pub use edit::{Edit, History};
@@ -1133,7 +1135,7 @@ impl Editor {
         }
 
         if moved {
-            self.camera.constrain(self.bounds(), self.viewport);
+            self.settle_camera();
         }
         moved
     }
@@ -1194,7 +1196,7 @@ impl Editor {
         }
 
         self.camera = camera::blend(base, &influences);
-        self.camera.constrain(self.bounds(), self.viewport);
+        self.settle_camera();
     }
 
     /// Zoom out around the pointer. The reset magnet engages only in
@@ -1222,7 +1224,7 @@ impl Editor {
         }
 
         self.camera = camera::blend(base, &influences);
-        self.camera.constrain(self.bounds(), self.viewport);
+        self.settle_camera();
     }
 
     /// Zoom the time axis alone, about the pointer.
@@ -1235,7 +1237,7 @@ impl Editor {
     pub fn zoom_time_at(&mut self, mouse_x: f64, factor: f64) {
         let anchor_t = self.camera.t_at(mouse_x);
         self.camera.zoom_time_about(anchor_t, factor);
-        self.camera.constrain(self.bounds(), self.viewport);
+        self.settle_camera();
     }
 
     /// Zoom the pitch axis alone, about the pointer. See
@@ -1244,17 +1246,56 @@ impl Editor {
         let anchor_pitch = self.camera.pitch_at(mouse_y, self.viewport);
         self.camera
             .zoom_pitch_about(anchor_pitch, factor, self.viewport);
+        self.settle_camera();
+    }
+
+    /// Settle the camera after a move, and let the grid follow it.
+    ///
+    /// Every camera change ends here — there were eight `constrain`
+    /// calls and now there is one place they all go, which is what makes
+    /// "the grid follows the zoom" true rather than true in the seven
+    /// paths somebody remembered.
+    ///
+    /// The grid part is a no-op unless the user has asked for an
+    /// adaptive density, and usually a no-op even then: a division only
+    /// moves when the zoom crosses a power of two.
+    fn settle_camera(&mut self) {
         self.camera.constrain(self.bounds(), self.viewport);
+        let bar_px = self.units_per_bar() / self.camera.units_per_px;
+        self.grid.refit(bar_px);
+    }
+
+    /// Move the grid's ceiling, and refit to the view at once.
+    ///
+    /// Through the editor rather than on `Grid` directly, because
+    /// refitting needs the camera and the tempo map and `Grid` has
+    /// neither. A caller that reached past these would leave the readout
+    /// showing a division that is not the one being snapped to.
+    pub fn grid_coarser(&mut self) {
+        self.grid.coarser();
+        self.settle_camera();
+    }
+
+    pub fn grid_finer(&mut self) {
+        self.grid.finer();
+        self.settle_camera();
+    }
+
+    /// How tightly the grid packs its lines, or [`Density::Fixed`] to
+    /// stop it following the zoom at all.
+    pub fn set_grid_density(&mut self, density: adaptive_grid::Density) {
+        self.grid.adaptive.density = density;
+        self.settle_camera();
     }
 
     pub fn pan_px(&mut self, dx: f64, dy: f64) {
         self.camera.pan_px(dx, dy);
-        self.camera.constrain(self.bounds(), self.viewport);
+        self.settle_camera();
     }
 
     pub fn resize(&mut self, viewport: Viewport) {
         self.viewport = viewport;
-        self.camera.constrain(self.bounds(), self.viewport);
+        self.settle_camera();
     }
 
     /// Weighted pitch center of notes near `t` — what the vertical
@@ -1650,7 +1691,7 @@ impl Editor {
             view,
             self.smart_zoom,
         );
-        self.camera.constrain(self.bounds(), self.viewport);
+        self.settle_camera();
     }
 
     pub fn hit_test(&self, x: f64, y: f64) -> Hit {

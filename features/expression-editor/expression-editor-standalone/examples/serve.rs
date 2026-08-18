@@ -153,6 +153,20 @@ pub fn DevApp() -> Element {
     // edge into "your space changed" — the desktop equivalent of the
     // REAPER panel's dock callback.
     let window = dioxus_native::use_window();
+
+    // The size we already have, at mount. `SurfaceResized` fires when
+    // the size *changes*, so a window that opens at its final size and
+    // is never dragged may never report one — and the editor would keep
+    // the viewport its document was built with forever.
+    {
+        let window = window.clone();
+        use_hook(move || {
+            let scale = window.scale_factor();
+            let size = window.surface_size();
+            report_space(size.width as f64 / scale, size.height as f64 / scale);
+        });
+    }
+
     dioxus_native::use_window_event(move |event, _| {
         if let dioxus_native::winit::event::WindowEvent::SurfaceResized(size) = event {
             // Physical pixels from winit, CSS pixels for the editor.

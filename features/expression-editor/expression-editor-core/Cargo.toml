@@ -22,5 +22,9 @@ keyflow-proto = { workspace = true }
 # derives on the real types over DTOs, which would have duplicated every
 # shape and let a forgotten field stop persisting silently.
 facet = { workspace = true }
+# The grid that follows the zoom. No dependencies of its own, so it costs
+# the wasm build nothing, and shared with the arrange view so both agree
+# on what "wide" means.
+adaptive-grid = { workspace = true }
 
 [dev-dependencies]

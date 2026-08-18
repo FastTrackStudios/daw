@@ -14,6 +14,9 @@ expression-editor-tools.workspace = true
 # Wasm-clean (serde + tracing only), so this does not cost the web build.
 input.workspace = true
 expression-editor-core = { workspace = true }
+# The grid that follows the zoom — named directly because the status bar
+# offers its densities, not only because the core re-exports the type.
+adaptive-grid = { workspace = true }
 level-dsp.workspace = true
 # The canonical FTS palette — every colour below comes from here.
 daw-theme = { workspace = true }

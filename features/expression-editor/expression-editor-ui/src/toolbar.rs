@@ -67,6 +67,13 @@ fn Seg(
     title: String,
     #[props(default = false)] accent: bool,
     #[props(default)] color: Option<String>,
+    /// A handle for tests, on the button itself.
+    ///
+    /// It has to be here rather than on whatever the caller puts inside:
+    /// the button is the element with the click handler, and a testid on
+    /// a plain child names a node the harness cannot dispatch to
+    /// ("Expected element to have a Dioxus ID").
+    #[props(default)] testid: Option<String>,
     onclick: EventHandler<MouseEvent>,
     children: Element,
 ) -> Element {
@@ -95,6 +102,7 @@ fn Seg(
                     line-height: 1; cursor: pointer; user-select: none; \
                     white-space: nowrap;",
             title: "{title}",
+            "data-testid": testid,
             onclick: move |e| onclick.call(e),
             {children}
         }
@@ -558,7 +566,32 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
     let razors = ed.razor.areas.len();
     let mouse_preset = ed.mouse.name;
     let (vp_w, vp_h) = (ed.viewport.w, ed.viewport.h);
+    let density = ed.grid.adaptive.density;
+    let adaptive_on = ed.grid.adaptive.is_adaptive();
+    let coarsened = ed.grid.is_coarsened();
+    // The setting, spelled out, so the readout can show what is in use
+    // while the tooltip says what was asked for — the two differ exactly
+    // when the zoom is holding the grid back.
+    let grid_title = if coarsened {
+        format!(
+            "Grid 1/{:.0} — held at 1/{:.0} by the zoom",
+            1.0 / ed.grid.division,
+            1.0 / ed.grid.effective(),
+        )
+    } else {
+        "Grid division".to_string()
+    };
     drop(ed);
+
+    let density_short = match density {
+        adaptive_grid::Density::Widest => "WIDE+",
+        adaptive_grid::Density::Wide => "WIDE",
+        adaptive_grid::Density::Medium => "MED",
+        adaptive_grid::Density::Narrow => "NARR",
+        adaptive_grid::Density::Narrowest => "NARR-",
+        adaptive_grid::Density::Custom(_) => "CUST",
+        adaptive_grid::Density::Fixed => "AUTO",
+    };
 
     rsx! {
         div {
@@ -584,24 +617,53 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
                 Seg {
                     active: false,
                     title: "Coarser (1)".to_string(),
-                    onclick: move |_| editor.write().grid.coarser(),
+                    onclick: move |_| editor.write().grid_coarser(),
                     "−"
                 }
                 Seg {
                     active: false,
-                    title: "Grid division".to_string(),
+                    title: grid_title,
                     onclick: move |_| {},
                     span {
-                        style: "min-width: 38px; font-family: ui-monospace, monospace; \
-                                color: {theme::TEXT};",
+                        "data-testid": "grid-division",
+                        // Dimmed while the zoom is holding it coarser
+                        // than the setting, so the number always reads as
+                        // what notes will actually snap to — and it is
+                        // visible that the difference is the zoom's doing
+                        // rather than the setting having changed.
+                        style: format!(
+                            "min-width: 38px; font-family: ui-monospace, monospace; color: {};",
+                            if coarsened { theme::GOLD } else { theme::TEXT },
+                        ),
                         "{grid_label}"
                     }
                 }
                 Seg {
                     active: false,
                     title: "Finer (2)".to_string(),
-                    onclick: move |_| editor.write().grid.finer(),
+                    onclick: move |_| editor.write().grid_finer(),
                     "+"
+                }
+                // Adaptive: the setting becomes a ceiling, and the zoom
+                // coarsens away from it. Cycles through the densities
+                // rather than being a plain checkbox, because "how much
+                // room to leave" is the second half of the decision and
+                // hiding it in a menu makes it undiscoverable.
+                Seg {
+                    active: adaptive_on,
+                    testid: "grid-adaptive".to_string(),
+                    title: format!(
+                        "Adaptive grid — {} (the division above is the finest it will use)",
+                        density.label()
+                    ),
+                    onclick: move |_| {
+                        let next = next_density(editor.read().grid.adaptive.density);
+                        editor.write().set_grid_density(next);
+                    },
+                    span {
+                        style: "font-size: 9px;",
+                        if adaptive_on { "{density_short}" } else { "AUTO" }
+                    }
                 }
                 Seg {
                     active: triplet,
@@ -709,6 +771,23 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
     }
 }
 
+/// Off, then coarsest to finest, then off again.
+///
+/// A cycle rather than a menu because there are only six states and the
+/// interesting move is "a bit more/less room", which a menu makes into
+/// two clicks and a decision.
+fn next_density(current: adaptive_grid::Density) -> adaptive_grid::Density {
+    use adaptive_grid::Density as D;
+    match current {
+        D::Fixed => D::Widest,
+        D::Widest => D::Wide,
+        D::Wide => D::Medium,
+        D::Medium => D::Narrow,
+        D::Narrow => D::Narrowest,
+        D::Narrowest | D::Custom(_) => D::Fixed,
+    }
+}
+
 /// The frame rate, top right.
 ///
 /// Two things had to be true before this could report anything.
@@ -757,7 +836,14 @@ fn Fps(editor: Signal<Editor>) -> Element {
     // `try_consume_context` rather than `use_context`: the panels are
     // also mounted outside `ExpressionEditor` by their own tests, where
     // there is no roll and so no frame counter to find.
-    let fps = try_consume_context::<crate::roll_widget::Frames>().and_then(|f| f.fps());
+    let frames = try_consume_context::<crate::roll_widget::Frames>();
+    let fps = frames.as_ref().and_then(|f| f.fps());
+    // How much of that frame was the roll. Shown beside the rate because
+    // the two answer different questions: a blown budget with this at
+    // almost nothing is being spent in the renderer or the rest of the
+    // DOM, and knowing which is the difference between a day of
+    // profiling and a one-line fix.
+    let paint_ms = frames.as_ref().and_then(|f| f.paint_ms());
 
     // Quiet while it is healthy, and only asks for attention when it is
     // not: dim above a screen refresh, gold where a drag starts to feel
@@ -773,14 +859,15 @@ fn Fps(editor: Signal<Editor>) -> Element {
     rsx! {
         div {
             "data-testid": "fps",
-            title: "Frames painted per second, averaged over the last 60",
+            title: "Frames painted per second, and how much of a frame the roll itself takes",
             style: format!(
                 "min-width: 46px; text-align: right; font-size: 10px; \
                  font-variant-numeric: tabular-nums; color: {color};",
             ),
-            match fps {
-                Some(f) => format!("{f:.0} fps"),
-                None => "— fps".to_string(),
+            match (fps, paint_ms) {
+                (Some(f), Some(ms)) => format!("{f:.0} fps · roll {ms:.2}ms"),
+                (Some(f), None) => format!("{f:.0} fps"),
+                _ => "— fps".to_string(),
             }
         }
     }

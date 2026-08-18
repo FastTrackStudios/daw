@@ -12,6 +12,27 @@ use expression_editor_core::{Editor, RefColor};
 
 use crate::theme;
 
+/// A polyline, in pixels.
+///
+/// Numbers, not the `"x,y x,y "` string these used to be. That string
+/// was an svg `points` attribute, and once the roll was painted rather
+/// than emitted the painter had to parse it straight back — 577 KB of
+/// text formatted and re-read *per frame* on a wide display, which was
+/// half the cost of building a frame.
+pub type Points = Vec<(f64, f64)>;
+
+/// Format a polyline as an svg `points` attribute.
+///
+/// For the surfaces that are still svg — the lane strip. The roll does
+/// not go near this.
+pub fn points_attr(points: &[(f64, f64)]) -> String {
+    let mut s = String::with_capacity(points.len() * 12);
+    for (x, y) in points {
+        s.push_str(&format!("{x:.1},{y:.1} "));
+    }
+    s
+}
+
 /// A piano-roll background row.
 pub struct Row {
     pub row: i32,
@@ -721,7 +742,7 @@ pub fn note_ribbon(ed: &Editor, n: &Note) -> Option<String> {
 pub struct CurvePath {
     pub note: NoteId,
     pub dimension: Dimension,
-    pub points: String,
+    pub points: Points,
     pub color: &'static str,
     pub active: bool,
     pub selected: bool,
@@ -759,7 +780,7 @@ pub fn curve_paths(ed: &Editor) -> Vec<CurvePath> {
             // A curve is in semitones; a row is only a semitone in pitch
             // space. See `RowSpace::semitones_per_row`.
             let spr = ed.row_space.semitones_per_row();
-            let mut s = String::new();
+            let mut s: Points = Vec::new();
             let mut prev_voiced = true;
             for p in curve.points() {
                 if break_unvoiced && is_unvoiced(ed, p.t) {
@@ -785,7 +806,7 @@ pub fn curve_paths(ed: &Editor) -> Vec<CurvePath> {
                     });
                 }
                 prev_voiced = true;
-                s.push_str(&format!("{x:.1},{y:.1} "));
+                s.push((x, y));
             }
             if s.is_empty() {
                 continue;
@@ -1161,10 +1182,10 @@ pub fn strip_curves(ed: &Editor, h: f64) -> Vec<CurvePath> {
         .iter()
         .filter(|n| n.end >= t0 && n.start <= t1 && !n.curve(dimension).is_empty())
         .map(|n| {
-            let mut s = String::new();
+            let mut s: Points = Vec::new();
             for p in n.curve(dimension).points() {
                 let y = h * (1.0 - ((p.value - lo) / (hi - lo)).clamp(0.0, 1.0));
-                s.push_str(&format!("{:.1},{y:.1} ", ed.camera.x(p.t)));
+                s.push((ed.camera.x(p.t), y));
             }
             CurvePath {
                 note: n.id,

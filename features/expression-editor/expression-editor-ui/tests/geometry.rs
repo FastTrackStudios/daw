@@ -80,6 +80,22 @@ fn Surface() -> Element {
                 },
                 "scroll"
             }
+            // The host reporting a bigger window. Driven from inside a
+            // component because `available_space` writes a
+            // `GlobalSignal`, which panics outside the dioxus runtime —
+            // which is also why the runners report from a hook and from
+            // `use_window_event`, both of which run inside it.
+            button {
+                "data-testid": "grow",
+                style: "position: absolute; top: 0; left: 60px; z-index: 10; height: 12px;",
+                onclick: move |_| {
+                    expression_editor_ui::available_space(
+                        WINDOW.0 as f64 + 300.0,
+                        WINDOW.1 as f64 + 200.0,
+                    )
+                },
+                "grow"
+            }
             ExpressionEditor { editor }
         }
     }
@@ -319,6 +335,52 @@ fn scrolling_does_not_change_either_box() {
     );
 }
 
+/// Told it has more room, the editor takes it.
+///
+/// The bug: the roll stayed the size its document was built at however
+/// large the window got. `available_space` was only ever called from a
+/// winit `SurfaceResized` handler, and that fires when the size
+/// *changes* — a window that opens at its final size and is never
+/// dragged may never send one, so the editor was never told anything at
+/// all and `AVAILABLE` stayed `None` for the life of the process.
+///
+/// The runners now also report at mount. This pins the half that lives
+/// in this crate: given a report, the roll follows it.
+#[test]
+fn the_roll_follows_the_space_it_is_given() {
+    let doc = mounted();
+    let before = size_of(&doc, "roll");
+
+    doc.query(by_testid("grow"))
+        .immediately()
+        .expect("no grow button")
+        .click();
+    doc.drain();
+    doc.relayout();
+
+    let after = size_of(&doc, "roll");
+    assert!(
+        after.0 > before.0 + 250.0 && after.1 > before.1 + 150.0,
+        "told it had 300x200 more room, the roll went from {before:?} to {after:?}"
+    );
+
+    // It took *exactly* the room it was given, which is the claim worth
+    // making — the roll is the reported space less the chrome, and a
+    // roll that merely grew "a bit" would mean the subtraction was
+    // guessing.
+    assert!(
+        (after.0 - before.0 - 300.0).abs() < 1.0 && (after.1 - before.1 - 200.0).abs() < 1.0,
+        "given 300x200 more, the roll took {:?}",
+        (after.0 - before.0, after.1 - before.1)
+    );
+
+    // Note there is deliberately no claim about the *cell* here. The
+    // harness's window is fixed at `WINDOW`, so telling the editor it has
+    // more room than that is a lie the layout cannot follow — the roll
+    // correctly outgrows its cell and is clipped. That the two agree when
+    // the report is honest is `the_roll_exactly_fills_its_cell`.
+}
+
 /// The frame meter counts painted frames, and reports them.
 ///
 /// Two separate failures are pinned here, because the readout sat at
@@ -368,5 +430,52 @@ fn the_frame_meter_counts_painted_frames() {
     assert!(
         !got.contains('—'),
         "three painted frames and the meter still reports nothing: {got:?}"
+    );
+}
+
+/// The status bar shows the grid actually in use, and offers adaptive.
+///
+/// The readout is the point of the control: with an adaptive grid the
+/// setting is a *ceiling*, so the number on screen is the one notes will
+/// snap to, which is not the one that was set whenever the zoom is
+/// holding it back.
+#[test]
+fn the_status_bar_carries_the_grid_and_its_adaptive_setting() {
+    let doc = mounted();
+    let read = |id: &str| {
+        doc.query(by_testid(id))
+            .immediately()
+            .unwrap_or_else(|e| panic!("no {id}: {e:?}"))
+            .inner_html()
+    };
+    // The testid is on the button, so its inner html is the label's
+    // markup rather than the bare word.
+    assert!(
+        read("grid-adaptive").contains("AUTO"),
+        "adaptive should start off, readout is {:?}",
+        read("grid-adaptive")
+    );
+    let fixed = read("grid-division");
+    assert!(fixed.starts_with("1/"), "grid readout is {fixed:?}");
+
+    // Turn it on: the widest density, which at this zoom must coarsen
+    // the grid rather than leave it alone.
+    doc.query(by_testid("grid-adaptive"))
+        .immediately()
+        .expect("no adaptive toggle")
+        .click();
+    doc.drain();
+
+    assert!(
+        read("grid-adaptive").contains("WIDE+"),
+        "one click should reach the widest density, readout is {:?}",
+        read("grid-adaptive")
+    );
+    let adaptive = read("grid-division");
+    let denom = |s: &str| s.trim_start_matches("1/").trim_end_matches('T').parse::<f64>().unwrap();
+    assert!(
+        denom(&adaptive) <= denom(&fixed),
+        "the widest adaptive grid should be no finer than the fixed one: \
+         {adaptive} vs {fixed}"
     );
 }

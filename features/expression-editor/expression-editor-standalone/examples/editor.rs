@@ -33,17 +33,39 @@ use expression_editor_standalone::{App, Args, Runner, stage};
 #[component]
 fn WindowedApp() -> Element {
     let window = dioxus_native::use_window();
+
+    // Report the size we already have, at mount.
+    //
+    // Not redundant with the event below: `SurfaceResized` fires when
+    // the size *changes*, and on a window that opens at its final size
+    // and is never dragged it may not fire at all. Without this the
+    // editor never heard how much room it had, so it kept the viewport
+    // its document was built with and the roll stayed the same size no
+    // matter how big the window was — the bug this pair fixes.
+    {
+        let window = window.clone();
+        use_hook(move || report(&*window, window.surface_size()));
+    }
+
     dioxus_native::use_window_event(move |event, _| {
         if let dioxus_native::winit::event::WindowEvent::SurfaceResized(size) = event {
-            // Physical pixels from winit, CSS pixels for the editor.
-            let scale = window.scale_factor();
-            expression_editor_ui::available_space(
-                size.width as f64 / scale,
-                size.height as f64 / scale,
-            );
+            report(&*window, *size);
         }
     });
     rsx! { App {} }
+}
+
+/// Hand the editor the window, in the units it works in.
+///
+/// winit reports physical pixels; the editor lays out in CSS pixels, so
+/// the scale factor comes off here and nothing downstream has to know
+/// the display's density.
+fn report(window: &dyn dioxus_native::winit::window::Window, size: dioxus_native::PhysicalSize<u32>) {
+    let scale = window.scale_factor();
+    expression_editor_ui::available_space(
+        size.width as f64 / scale,
+        size.height as f64 / scale,
+    );
 }
 
 fn main() {

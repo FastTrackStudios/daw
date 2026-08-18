@@ -248,8 +248,11 @@ async fn a_ctrl_drag_writes_the_active_dimension_and_only_that_one()
     let y0 = oy + expression_editor_ui::canvas::RULER_H + ih * 0.6;
     let (x1, y1) = (x0 + iw * 0.8, y0 - ih * 0.25);
 
+    // `drain` mid-gesture, `pump` once at the end — pumping waits, and a
+    // move that renders nothing waits the full second. See
+    // `DocumentTester::drain`.
     tester.pointer_down_mods(x0, y0, Modifiers::CONTROL);
-    let _ = tester.pump().await;
+    tester.drain();
     for i in 1..=20 {
         let t = i as f64 / 20.0;
         tester.pointer_move_mods(
@@ -258,7 +261,7 @@ async fn a_ctrl_drag_writes_the_active_dimension_and_only_that_one()
             true,
             Modifiers::CONTROL,
         );
-        let _ = tester.pump().await;
+        tester.drain();
     }
     tester.pointer_up_mods(x1, y1, Modifiers::CONTROL);
     let _ = tester.pump().await;

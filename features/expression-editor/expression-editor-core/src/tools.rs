@@ -353,25 +353,58 @@ pub fn clamp_gesture(span: (f64, f64), start_t: f64, t0: f64, t1: f64) -> (f64, 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Grid {
     /// Division as a fraction of a whole note (0.25 = quarter).
+    ///
+    /// **What the user asked for, which is the *finest* the grid ever
+    /// gets.** When the grid is adaptive this is a ceiling rather than
+    /// the value in use: zooming out coarsens away from it and zooming
+    /// in returns to it, but nothing goes past it. [`Grid::effective`]
+    /// is what is actually being snapped to.
     pub division: f64,
+    /// What the zoom coarsened the division to, if anything.
+    ///
+    /// Kept separate from `division` rather than overwriting it, because
+    /// a setting the zoom can quietly rewrite is not a setting — the
+    /// user could never get back to 1/16 once a zoom had moved them to
+    /// 1/4, and the control would stop meaning anything.
+    fitted: Option<f64>,
     pub triplet: bool,
     pub enabled: bool,
+    /// Whether — and how tightly — the division follows the zoom.
+    ///
+    /// Off by default, so a grid stays exactly where it was put until
+    /// the user asks for otherwise. `triplet` stays a separate flag
+    /// precisely so this can scale the division by powers of two without
+    /// ever straightening a triplet grid.
+    pub adaptive: adaptive_grid::Adaptive,
 }
 
 impl Default for Grid {
     fn default() -> Self {
         Self {
             division: 1.0 / 16.0,
+            fitted: None,
             triplet: false,
             enabled: true,
+            adaptive: adaptive_grid::Adaptive::default(),
         }
     }
 }
 
 impl Grid {
+    /// The division actually in use — the setting, or what the zoom
+    /// coarsened it to.
+    ///
+    /// Everything that *acts* on the grid goes through here: the step,
+    /// the snap, the readout. `division` alone is the user's ceiling and
+    /// snapping to it while the screen showed something coarser would be
+    /// the grid lying about where notes will land.
+    pub fn effective(&self) -> f64 {
+        self.fitted.unwrap_or(self.division)
+    }
+
     /// Grid step in document units.
     pub fn step(&self, units_per_beat: f64) -> f64 {
-        let beats = self.division * 4.0;
+        let beats = self.effective() * 4.0;
         let beats = if self.triplet {
             beats * 2.0 / 3.0
         } else {
@@ -391,9 +424,38 @@ impl Grid {
         origin + ((t - origin) / step).round() * step
     }
 
+    /// Follow the zoom, given how wide one bar is on screen.
+    ///
+    /// Returns whether the division moved, so a caller can tell a real
+    /// change from the usual no-op — this runs on every camera change,
+    /// and almost all of them leave the grid exactly where it was.
+    pub fn refit(&mut self, bar_px: f64) -> bool {
+        let next = self.adaptive.fit(self.division, bar_px);
+        // Compared as a ratio rather than a difference: divisions span
+        // four orders of magnitude, so an absolute epsilon is meaningless
+        // at one end and everything at the other.
+        let same = match (next, self.fitted) {
+            (Some(a), Some(b)) => (a / b - 1.0).abs() < 1e-9,
+            (None, None) => true,
+            _ => false,
+        };
+        if same {
+            return false;
+        }
+        self.fitted = next;
+        true
+    }
+
+    /// Whether the zoom is currently holding the grid coarser than the
+    /// setting — which is what the readout shows the user.
+    pub fn is_coarsened(&self) -> bool {
+        self.fitted
+            .is_some_and(|f| (f / self.division - 1.0).abs() > 1e-9)
+    }
+
     /// `1/16` / `1/16T`, for the fixed-width toolbar readout.
     pub fn label(&self) -> String {
-        let denom = (1.0 / self.division).round() as i64;
+        let denom = (1.0 / self.effective()).round() as i64;
         if self.triplet {
             format!("1/{denom}T")
         } else {
@@ -401,11 +463,17 @@ impl Grid {
         }
     }
 
+    /// Both of these move the *setting*, and drop whatever the zoom had
+    /// fitted — a new ceiling makes the old fit meaningless, and leaving
+    /// it would show the user their change doing nothing until they next
+    /// moved the view. `Editor::grid_coarser` refits straight after.
     pub fn coarser(&mut self) {
         self.division = (self.division * 2.0).min(1.0);
+        self.fitted = None;
     }
 
     pub fn finer(&mut self) {
         self.division = (self.division / 2.0).max(1.0 / 128.0);
+        self.fitted = None;
     }
 }

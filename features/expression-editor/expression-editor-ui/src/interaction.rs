@@ -55,13 +55,55 @@ pub enum Drag {
         base_rows: Vec<i32>,
         applied: i32,
     },
-    /// Note Draw / Select: two-axis note movement, both axes fluid
-    /// through the same drag.
+    /// Note Draw / Select: note movement, on whichever axes [`Axis`]
+    /// allows.
     MoveNotes {
         notes: Vec<NoteId>,
         origin: (f64, f64),
         applied_rows: i32,
         applied_time: f64,
+        axis: Axis,
+    },
+    /// Dragging a note edge scales the whole selection — lengths for
+    /// [`Action::StretchNotes`], positions for
+    /// [`Action::StretchNotePositions`].
+    ///
+    /// Captures the notes as they were at press and rewrites from that
+    /// capture every move, for the reason every other gesture here does:
+    /// a factor applied sixty times is a factor of sixty.
+    Stretch {
+        /// `(id, start, end)` as captured.
+        base: Vec<(NoteId, f64, f64)>,
+        /// The fixed end — the opposite edge from the one grabbed.
+        pivot: f64,
+        /// Where the grabbed edge was, so the factor is a ratio of
+        /// distances from the pivot rather than of raw pixels.
+        origin_t: f64,
+        /// Positions rather than lengths: arpeggiate.
+        positions: bool,
+    },
+    /// Dragging an area's edge. `stretch` pulls the contents with it.
+    RazorEdge {
+        index: usize,
+        /// Which edge was grabbed.
+        start_edge: bool,
+        stretch: bool,
+    },
+    /// Anchored zoom: vertical drag scales the view about the press.
+    Zoom {
+        origin: (f64, f64),
+        /// Units per pixel at press, so the drag is a ratio against a
+        /// fixed base rather than a compounding series.
+        base_units_per_px: f64,
+        /// The time under the press, which stays under it throughout.
+        anchor_t: f64,
+    },
+    /// Selecting whatever the pointer sweeps over, with no rectangle.
+    SelectTouched {
+        /// Flip what is swept rather than adding to it.
+        toggle: bool,
+        /// Notes this sweep has already decided on.
+        seen: std::collections::HashSet<NoteId>,
     },
     /// Alt-drag: scale and invert expression about the effective
     /// center.
@@ -93,6 +135,9 @@ pub enum Drag {
         copy: bool,
         applied_t: f64,
         applied_rows: i32,
+        /// Move the rectangle and leave the notes where they are.
+        area_only: bool,
+        axis: Axis,
     },
     /// Painting notes along a swept path.
     Paint {
@@ -177,6 +222,53 @@ pub enum Drag {
         fine: bool,
         applied: f64,
     },
+}
+
+/// Which axes a move gesture is allowed to travel on.
+///
+/// The map distinguishes four move actions and, until this existed, all
+/// four did the same thing — which meant Shift on a note claimed to lock
+/// an axis and did not, and the Riffer preset's primary gesture
+/// (`MoveNoteVertically`, its plain note drag) moved in time as well.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Axis {
+    #[default]
+    Both,
+    Horizontal,
+    Vertical,
+    /// Free until the drag commits, then locked to whichever axis it
+    /// travelled furthest along first. REAPER's Shift-drag, and the
+    /// reason it is not simply "the larger delta each frame": a gesture
+    /// that re-decides every frame flickers between axes at the corner.
+    Commit(Option<bool>),
+}
+
+impl Axis {
+    /// Resolve against a drag delta, committing if this is the first
+    /// movement worth deciding on. Returns `(horizontal, vertical)`.
+    fn allows(&mut self, dx: f64, dy: f64) -> (bool, bool) {
+        match self {
+            Axis::Both => (true, true),
+            Axis::Horizontal => (true, false),
+            Axis::Vertical => (false, true),
+            Axis::Commit(decided) => {
+                if decided.is_none() {
+                    // A threshold, not a first-pixel decision: the first
+                    // pixel of a drag is noise, and committing on it
+                    // locks half of them to the wrong axis.
+                    const DEAD_PX: f64 = 4.0;
+                    if dx.abs().max(dy.abs()) >= DEAD_PX {
+                        *decided = Some(dx.abs() >= dy.abs());
+                    }
+                }
+                match decided {
+                    Some(true) => (true, false),
+                    Some(false) => (false, true),
+                    None => (false, false),
+                }
+            }
+        }
+    }
 }
 
 impl Drag {
@@ -295,7 +387,7 @@ pub fn pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16) ->
     let context = context_at(ed, x, y);
     let action = ed.mouse.resolve_for(context, gesture, mods, ed.tool);
     if action != Action::None
-        && let Some(drag) = run_action(ed, action, context, x, y, mods) {
+        && let Some(drag) = run_action(ed, action, x, y, mods) {
             return drag;
         }
     legacy_pointer_down(ed, x, y, mods, button)
@@ -306,14 +398,7 @@ pub fn pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16) ->
 /// `None` means "the map had nothing useful here" and the caller falls
 /// through to the tool-driven path, which still owns the expression
 /// tools (pen, curve, eraser).
-fn run_action(
-    ed: &mut Editor,
-    action: Action,
-    context: Context,
-    x: f64,
-    y: f64,
-    mods: Mods,
-) -> Option<Drag> {
+fn run_action(ed: &mut Editor, action: Action, x: f64, y: f64, mods: Mods) -> Option<Drag> {
     let t = ed.camera.t_at(x);
     let row = ed.camera.pitch_at(y, ed.viewport).round() as i32;
     let under = match ed.hit_test(x, y) {
@@ -332,7 +417,12 @@ fn run_action(
             origin: (x, y),
             current: (x, y),
         }),
-        Action::RazorMoveContents | Action::RazorMoveContentsNoSnap | Action::RazorCopyContents => {
+        Action::RazorMoveContents
+        | Action::RazorMoveContentsNoSnap
+        | Action::RazorCopyContents
+        | Action::RazorMoveAreaOnly
+        | Action::RazorMoveVertically
+        | Action::RazorMoveHorizontally => {
             let (index, area) = ed.razor.at(t, row)?;
             Some(Drag::RazorDrag {
                 area,
@@ -341,6 +431,34 @@ fn run_action(
                 copy: action == Action::RazorCopyContents,
                 applied_t: 0.0,
                 applied_rows: 0,
+                // Moving the rectangle without its contents is what
+                // makes the razor a *selection* you can reposition, and
+                // it was the one razor gesture the map bound and nothing
+                // performed.
+                area_only: action == Action::RazorMoveAreaOnly,
+                axis: match action {
+                    Action::RazorMoveVertically => Axis::Vertical,
+                    Action::RazorMoveHorizontally => Axis::Horizontal,
+                    _ => Axis::Both,
+                },
+            })
+        }
+        Action::RazorAddArea => {
+            // Adds to the set rather than replacing it: the drag that
+            // follows is an ordinary create, and `RazorSet::add` merges
+            // it in.
+            Some(Drag::RazorCreate {
+                origin: (x, y),
+                current: (x, y),
+            })
+        }
+        Action::RazorResizeArea | Action::RazorStretchContents => {
+            let (index, area) = ed.razor.at(t, row)?;
+            let start_edge = (t - area.t0).abs() <= (t - area.t1).abs();
+            Some(Drag::RazorEdge {
+                index,
+                start_edge,
+                stretch: action == Action::RazorStretchContents,
             })
         }
         Action::RazorRemoveArea => {
@@ -452,18 +570,37 @@ fn run_action(
                 origin: (x, y),
                 applied_rows: 0,
                 applied_time: 0.0,
+                axis: Axis::Both,
             })
         }
-        Action::MoveNote | Action::MoveNoteNoSnap | Action::MoveNoteOneAxis => {
+        Action::MoveNote
+        | Action::MoveNoteNoSnap
+        | Action::MoveNoteOneAxis
+        | Action::MoveNoteHorizontally
+        | Action::MoveNoteVertically
+        | Action::MoveNoteIgnoringSelection => {
             let id = under?;
-            if !ed.selection.contains(id) {
-                ed.selection.set_single(id);
-            }
+            // The whole point of `MoveNoteIgnoringSelection`: leave the
+            // selection alone and move only what was grabbed.
+            let notes = if action == Action::MoveNoteIgnoringSelection {
+                vec![id]
+            } else {
+                if !ed.selection.contains(id) {
+                    ed.selection.set_single(id);
+                }
+                ed.selection.notes.clone()
+            };
             Some(Drag::MoveNotes {
-                notes: ed.selection.notes.clone(),
+                notes,
                 origin: (x, y),
                 applied_rows: 0,
                 applied_time: 0.0,
+                axis: match action {
+                    Action::MoveNoteHorizontally => Axis::Horizontal,
+                    Action::MoveNoteVertically => Axis::Vertical,
+                    Action::MoveNoteOneAxis => Axis::Commit(None),
+                    _ => Axis::Both,
+                },
             })
         }
         Action::MoveNoteEdge | Action::MoveNoteEdgeNoSnap => {
@@ -478,8 +615,97 @@ fn run_action(
                 original,
             })
         }
+        // Both stretches grab an end and scale the whole selection about
+        // the opposite one — lengths, or positions for the arpeggiate
+        // variant. The pivot is the far edge of the *selection*, not of
+        // the note grabbed: stretching a phrase about the middle of one
+        // of its notes is not a gesture anyone wants.
+        Action::StretchNotes | Action::StretchNotePositions => {
+            let Hit::NoteEdge { id, start_edge } = ed.hit_test(x, y) else {
+                return None;
+            };
+            if !ed.selection.contains(id) {
+                ed.selection.set_single(id);
+            }
+            let base: Vec<(NoteId, f64, f64)> = ed
+                .selection
+                .notes
+                .iter()
+                .filter_map(|&n| ed.doc.note(n).map(|note| (n, note.start, note.end)))
+                .collect();
+            if base.is_empty() {
+                return None;
+            }
+            let pivot = if start_edge {
+                base.iter().map(|b| b.2).fold(f64::MIN, f64::max)
+            } else {
+                base.iter().map(|b| b.1).fold(f64::MAX, f64::min)
+            };
+            // A grab exactly on the pivot has no distance to form a
+            // ratio from, and would divide by zero on the first move.
+            if (t - pivot).abs() < 1e-6 {
+                return None;
+            }
+            Some(Drag::Stretch {
+                base,
+                pivot,
+                origin_t: t,
+                positions: action == Action::StretchNotePositions,
+            })
+        }
         Action::InsertNote | Action::InsertNoteNoSnap | Action::InsertNoteDragToExtend => {
             Some(begin_new_note(ed, x, y, mods))
+        }
+        Action::EraseNotes => {
+            // The sweeping eraser: delete what is under the press, then
+            // keep deleting whatever the drag crosses.
+            if let Some(id) = under {
+                ed.apply_live(&Edit::DeleteNotes(vec![id]));
+            }
+            Some(Drag::NoteErase)
+        }
+        Action::SetNoteChannelHigher | Action::SetNoteChannelLower => {
+            let notes = tools::gesture_targets(&ed.selection, under);
+            if notes.is_empty() {
+                return None;
+            }
+            ed.apply_live(&Edit::NudgeChannel {
+                notes,
+                delta: if action == Action::SetNoteChannelHigher { 1 } else { -1 },
+            });
+            Some(Drag::None)
+        }
+        Action::SelectTouched | Action::ToggleSelectTouched => {
+            let toggle = action == Action::ToggleSelectTouched;
+            let mut drag = Drag::SelectTouched {
+                toggle,
+                seen: Default::default(),
+            };
+            // The note under the press counts as touched; a sweep that
+            // ignored its own starting point would be surprising.
+            touch_at(ed, &mut drag, x, y);
+            Some(drag)
+        }
+        Action::SelectAllInMeasure => {
+            ed.selection.notes = ed.notes_in_measure(t);
+            Some(Drag::None)
+        }
+        Action::EditLyric => {
+            // The inspector owns the text field; this arms it on the
+            // note that was double-clicked.
+            let id = under?;
+            ed.selection.set_single(id);
+            ed.editing_lyric = Some(id);
+            Some(Drag::None)
+        }
+        Action::ZoomAnchored => Some(Drag::Zoom {
+            origin: (x, y),
+            base_units_per_px: ed.camera.units_per_px,
+            anchor_t: t,
+        }),
+        Action::Audition => {
+            audition(ed, x, y);
+            Some(Drag::None)
         }
         Action::PaintNotes | Action::PaintNotesNoSnap => {
             let snap = action == Action::PaintNotes;
@@ -566,13 +792,34 @@ fn run_action(
 
         Action::ContextMenu => Some(Drag::ContextMenu { x, y, under, t }),
 
-        // Expression tools and anything unmapped stay with the
-        // tool-driven path.
+        // Expression tools stay with the tool-driven path: `None` here
+        // is the deliberate hand-off, not a gap.
         Action::ActiveTool | Action::PenOverride => None,
-        _ => {
-            let _ = context;
-            None
-        }
+
+        // ── deliberately not routed ──────────────────────────────────
+        //
+        // Listed one by one rather than swept up by a `_` arm, and that
+        // is the point of this block. The wildcard that used to sit here
+        // meant a binding could name an action nothing performed and
+        // nobody would hear about it — ten of them had, including
+        // `StretchNotes` on Shift+edge and the Riffer preset's *primary*
+        // note drag, all of them quietly doing whatever the legacy path
+        // did instead. With the arms explicit, a new `Action` cannot be
+        // added without deciding this question, and an existing one
+        // cannot be dropped by accident.
+        Action::None => None,
+        // Fall through to the tool path, which owns freehand insertion
+        // and already reads the same modifiers.
+        Action::InsertNoteDragToExtendNoSnap
+        | Action::InsertNoteDragToMove
+        | Action::InsertNoteDragToEditVelocity
+        | Action::PaintRowOfNotes => None,
+        // Handled by `legacy_pointer_down`'s Shift/Alt expression path,
+        // which owns the dimension-scaling gestures.
+        Action::ScaleExpression | Action::TransposeSnapped => None,
+        // Guitar/bass badges: the string roll owns these, and routing
+        // them here would edit a note that has no string to cycle.
+        Action::CycleArticulation | Action::CycleString => None,
     }
 }
 
@@ -714,6 +961,70 @@ fn handle_press(ed: &mut Editor, x: f64, y: f64, mods: Mods, gesture: Gesture) -
     let drag = handles::HandleDrag::begin_with(handle, note, scope, y, sibilants);
     ed.begin_gesture();
     Some(Drag::Handle(Box::new(drag)))
+}
+
+/// Add whatever the pointer is over to a touch-select sweep.
+///
+/// The rectangle-free selection gesture: run the pointer through a run
+/// of notes and they are selected, which beats aiming a marquee at a
+/// dense passage. Idempotent per note, so the same note crossed twice by
+/// a wandering sweep is not toggled back off.
+fn touch_at(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64) {
+    let Drag::SelectTouched { toggle, seen } = drag else {
+        return;
+    };
+    let Hit::Note { id, .. } = ed.hit_test(x, y) else {
+        return;
+    };
+    // Each note is decided once per sweep, not once per frame: the
+    // pointer rests on one note for many moves, and a per-frame toggle
+    // would flicker it on and off for as long as you hovered.
+    if !seen.insert(id) {
+        return;
+    }
+    if *toggle {
+        ed.selection.toggle(id);
+    } else {
+        ed.selection.add(id);
+    }
+}
+
+/// Sound the note under the pointer without editing it.
+///
+/// Routed through a host hook rather than played here, for the same
+/// reason [`expression_editor_core::mouse::set_host_overlay`] exists:
+/// this crate has no synth, no output device and no business acquiring
+/// one, and the three hosts that embed the surface each already have
+/// somewhere for a note to go. With no hook registered the gesture is a
+/// no-op — which is what it was before, only now it is a *stated* no-op
+/// with a place for the sound to arrive.
+fn audition(ed: &Editor, x: f64, y: f64) {
+    let (row, velocity) = match ed.hit_test(x, y) {
+        Hit::Note { id, .. } | Hit::NoteEdge { id, .. } => match ed.doc.note(id) {
+            Some(n) => (n.row, n.velocity),
+            None => return,
+        },
+        // Off a note — the key gutter, or empty roll — sounds the row
+        // itself at a nominal level.
+        _ => (
+            ed.camera.pitch_at(y, ed.viewport).round() as i32,
+            0.63,
+        ),
+    };
+    if let Some(sink) = AUDITION.get() {
+        sink(row, velocity);
+    }
+}
+
+/// Where an audition goes, when the host has somewhere to put it.
+///
+/// `(row, velocity)`. First caller wins, matching the mouse-map overlay
+/// hook, so a test harness cannot be trampled by a late host.
+static AUDITION: std::sync::OnceLock<fn(i32, f64)> = std::sync::OnceLock::new();
+
+/// Register the audition sink.
+pub fn set_audition_sink(f: fn(i32, f64)) {
+    let _ = AUDITION.set(f);
 }
 
 /// The mean value a controller holds over `[t0, t1]`.
@@ -977,6 +1288,7 @@ fn legacy_pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16)
                     origin: (x, y),
                     applied_rows: 0,
                     applied_time: 0.0,
+                    axis: Axis::Both,
                 }
             } else {
                 if !mods.shift {
@@ -1022,6 +1334,7 @@ fn legacy_pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16)
                     origin: (x, y),
                     applied_rows: 0,
                     applied_time: 0.0,
+                    axis: Axis::Both,
                 }
             } else {
                 begin_new_note(ed, x, y, mods)
@@ -1140,10 +1453,19 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             origin,
             applied_rows,
             applied_time,
+            axis,
         } => {
-            let rows = (ed.camera.pitch_at(y, ed.viewport)
-                - ed.camera.pitch_at(origin.1, ed.viewport))
-            .round() as i32;
+            let (free_x, free_y) = axis.allows(x - origin.0, y - origin.1);
+            // A locked axis holds at whatever it had already applied
+            // rather than snapping back: `Axis::Commit` decides *during*
+            // the drag, and undoing the first few pixels of movement at
+            // the moment it commits is a visible jump.
+            let rows = if free_y {
+                (ed.camera.pitch_at(y, ed.viewport) - ed.camera.pitch_at(origin.1, ed.viewport))
+                    .round() as i32
+            } else {
+                *applied_rows
+            };
             if rows != *applied_rows {
                 ed.apply_live(&Edit::Transpose {
                     notes: notes.clone(),
@@ -1153,7 +1475,11 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             }
             // Horizontal movement preserves the note's grid offset
             // rather than re-snapping it to the grid.
-            let raw = (x - origin.0) * ed.camera.units_per_px;
+            let raw = if free_x {
+                (x - origin.0) * ed.camera.units_per_px
+            } else {
+                *applied_time
+            };
             let delta = if ed.grid.enabled && !mods.shift {
                 let step = ed.grid.step(ed.units_per_beat());
                 (raw / step).round() * step
@@ -1256,24 +1582,36 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             applied_t,
             applied_rows,
             index,
+            area_only,
+            axis,
         } => {
-            let raw = (x - origin.0) * ed.camera.units_per_px;
+            let (free_x, free_y) = axis.allows(x - origin.0, y - origin.1);
+            let raw = if free_x {
+                (x - origin.0) * ed.camera.units_per_px
+            } else {
+                0.0
+            };
             let dt = if ed.grid.enabled && !mods.shift {
                 let step = ed.grid.step(ed.units_per_beat());
                 (raw / step).round() * step
             } else {
                 raw
             };
-            let rows = (ed.camera.pitch_at(y, ed.viewport)
-                - ed.camera.pitch_at(origin.1, ed.viewport))
-            .round() as i32;
+            let rows = if free_y {
+                (ed.camera.pitch_at(y, ed.viewport) - ed.camera.pitch_at(origin.1, ed.viewport))
+                    .round() as i32
+            } else {
+                0
+            };
             if (dt - *applied_t).abs() < 1e-9 && rows == *applied_rows {
                 return;
             }
             // Re-run from the captured area each frame rather than
             // accumulating deltas: a razor move slices, and slicing
             // repeatedly would shred the material.
-            expression_editor_core::razor::move_contents(&mut ed.doc, *area, dt, rows, *copy);
+            if !*area_only {
+                expression_editor_core::razor::move_contents(&mut ed.doc, *area, dt, rows, *copy);
+            }
             *applied_t = dt;
             *applied_rows = rows;
             let moved = area.translated(dt, rows);
@@ -1281,6 +1619,90 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
                 *slot = moved;
             }
         }
+        Drag::RazorEdge {
+            index,
+            start_edge,
+            stretch,
+        } => {
+            let Some(&area) = ed.razor.areas.get(*index) else {
+                return;
+            };
+            let raw = ed.camera.t_at(x);
+            let t = if ed.grid.enabled && !mods.shift {
+                ed.snap_time(raw)
+            } else {
+                raw
+            };
+            // The dragged edge may not cross the fixed one; an inverted
+            // area is not a smaller area, it is a broken one.
+            let next = if *start_edge {
+                RazorArea::new(t.min(area.t1 - 1.0), area.t1, area.row_lo, area.row_hi)
+            } else {
+                RazorArea::new(area.t0, t.max(area.t0 + 1.0), area.row_lo, area.row_hi)
+            };
+            if *stretch {
+                expression_editor_core::razor::stretch_contents(
+                    &mut ed.doc,
+                    area,
+                    next.t0,
+                    next.t1,
+                );
+            }
+            if let Some(slot) = ed.razor.areas.get_mut(*index) {
+                *slot = next;
+            }
+        }
+        Drag::Stretch {
+            base,
+            pivot,
+            origin_t,
+            positions,
+        } => {
+            let raw = ed.camera.t_at(x);
+            let t = if ed.grid.enabled && !mods.shift {
+                ed.snap_time(raw)
+            } else {
+                raw
+            };
+            // A ratio of distances from the pivot: dragging the grabbed
+            // edge twice as far from it doubles everything.
+            let factor = (t - *pivot) / (*origin_t - *pivot);
+            if !factor.is_finite() || factor.abs() < 1e-6 {
+                return;
+            }
+            for &(id, start, end) in base.iter() {
+                let (s, e) = if *positions {
+                    // Positions scale, lengths do not — that is what
+                    // makes it arpeggiate rather than time-stretch.
+                    let s = *pivot + (start - *pivot) * factor;
+                    (s, s + (end - start))
+                } else {
+                    (
+                        *pivot + (start - *pivot) * factor,
+                        *pivot + (end - *pivot) * factor,
+                    )
+                };
+                let (lo, hi) = if s <= e { (s, e) } else { (e, s) };
+                ed.apply_live(&Edit::Resize {
+                    note: id,
+                    start: lo,
+                    end: hi.max(lo + 1.0),
+                });
+            }
+        }
+        Drag::Zoom {
+            origin,
+            base_units_per_px,
+            anchor_t,
+        } => {
+            // Vertical drag, exponential, anchored on the press: the
+            // time under the pointer when the gesture opened stays under
+            // it, which is the only zoom that does not lose your place.
+            let factor = ((origin.1 - y) / 200.0).exp();
+            ed.camera.units_per_px = (*base_units_per_px / factor).max(1e-6);
+            ed.camera.t0 = *anchor_t - (origin.0 - 0.0) * ed.camera.units_per_px;
+        }
+        Drag::SelectTouched { .. } => touch_at(ed, drag, x, y),
         Drag::Paint { .. } => paint_at(ed, drag, x, y),
         Drag::DraftAnchor { .. } => {}
         Drag::Separator { sep, law } => {

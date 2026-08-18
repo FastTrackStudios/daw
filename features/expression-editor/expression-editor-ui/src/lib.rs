@@ -25,6 +25,7 @@ pub mod canvas;
 pub mod demo;
 pub mod drawer;
 pub mod arp_panel;
+pub mod cursor;
 pub mod curve_editor;
 pub mod drag;
 pub mod envelopes;
@@ -147,18 +148,51 @@ pub fn ExpressionEditor(
     let draft = use_signal(|| initial_draft.clone());
     let mut pending = use_signal(|| None::<menu_ui::Pending>);
 
-    // The roll's box, computed here because this is the only component
+    // Follow the space the host reports.
+    //
+    // Here rather than in the canvas because this is the only component
     // that knows the whole chrome: the inspector's state is a signal it
-    // owns, and the lane strip's height is a document property. Handing
-    // the answer down is what makes the geometry single-sourced — the
-    // canvas used to read the host's report itself and subtract a
-    // constant that knew about neither.
-    let want = {
-        let ed = editor.read();
-        sizing::AVAILABLE().map(|(w, h)| {
+    // owns, and the lane strip's height is a document property.
+    //
+    // An effect that does its own reading, *not* one closing over a
+    // value computed in render. `use_effect` re-runs when a signal read
+    // inside it changes; a plain value captured from the enclosing
+    // render is not a signal, so an effect built that way runs once at
+    // mount and is frozen for the life of the component. That is exactly
+    // what happened here — the roll kept the viewport its document was
+    // built with however large the window got, because the effect was
+    // still holding the first render's answer.
+    //
+    // Writing `editor` from an effect that also reads it terminates:
+    // the write only happens when the two differ by a pixel or more, so
+    // the re-run it provokes finds them equal and stops.
+    use_effect(move || {
+        let Some((w, h)) = sizing::AVAILABLE() else {
+            return;
+        };
+        // Decided under a *read*, and the guard dropped before writing.
+        //
+        // Taking a write guard notifies this signal's subscribers whether
+        // or not anything is mutated, and this effect is one of them —
+        // so `if let Ok(mut ed) = editor.try_write() && ed.viewport != want`
+        // re-triggers itself forever, because the guard is taken before
+        // the condition is ever tested. It hung every test that mounts
+        // the editor. Read first, decide, then write only if there is
+        // something to write.
+        let want = {
+            let ed = editor.read();
             sizing::viewport_within(w, h, sizing::chrome_of(&ed, inspector_open()))
-        })
-    };
+        };
+        let stale = {
+            let ed = editor.read();
+            (ed.viewport.w - want.w).abs() >= 1.0 || (ed.viewport.h - want.h).abs() >= 1.0
+        };
+        if stale
+            && let Ok(mut ed) = editor.try_write()
+        {
+            ed.resize(want);
+        }
+    });
 
     // Menu items the core could not finish become UI: Properties simply
     // opens the inspector, which is where the note's fields already
@@ -188,7 +222,7 @@ pub fn ExpressionEditor(
                     if editor.read().stacked {
                         stack::StackView { editor }
                     } else {
-                        Canvas { editor, drag, drawer, multi, menu_state, pending, draft, want }
+                        Canvas { editor, drag, drawer, multi, menu_state, pending, draft }
                         LaneStrip { editor }
                     }
                 }

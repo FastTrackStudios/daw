@@ -4621,3 +4621,78 @@ fn a_band_split_cannot_be_pushed_past_its_neighbour() {
         after.splits
     );
 }
+
+// ── adaptive grid ────────────────────────────────────────────────────
+
+/// The grid follows the zoom, through the editor rather than the maths.
+///
+/// `libs/adaptive-grid` has its own tests for the arithmetic. What this
+/// pins is the wiring: that a camera move actually reaches the grid, in
+/// every path that moves a camera.
+#[test]
+fn an_adaptive_grid_coarsens_as_the_view_zooms_out() {
+    let mut ed = grid_editor();
+    ed.grid.adaptive.density = adaptive_grid::Density::Medium;
+
+    // Fit the whole take, then keep zooming out.
+    ed.reset_view();
+    let zoomed_in = ed.grid.effective();
+    for _ in 0..8 {
+        ed.zoom_time_at(ed.viewport.w * 0.5, 0.5);
+    }
+    let zoomed_out = ed.grid.effective();
+    assert!(
+        zoomed_out > zoomed_in,
+        "zooming out left the grid at 1/{:.0}, from 1/{:.0}",
+        1.0 / zoomed_out,
+        1.0 / zoomed_in
+    );
+}
+
+/// And a fixed grid stays exactly where it was put.
+#[test]
+fn a_fixed_grid_ignores_the_zoom() {
+    let mut ed = grid_editor();
+    let before = ed.grid.effective();
+    for _ in 0..8 {
+        ed.zoom_time_at(ed.viewport.w * 0.5, 0.5);
+    }
+    assert_eq!(ed.grid.effective(), before, "a fixed grid moved");
+}
+
+/// A triplet grid stays a triplet grid across a zoom.
+///
+/// The reason `triplet` is its own flag: the division is only ever
+/// scaled by powers of two, so the third can never be rounded away.
+#[test]
+fn an_adaptive_grid_keeps_its_triplets() {
+    let mut ed = grid_editor();
+    ed.grid.adaptive.density = adaptive_grid::Density::Medium;
+    ed.grid.triplet = true;
+    ed.grid.division = 1.0 / 16.0;
+    for _ in 0..6 {
+        ed.zoom_time_at(ed.viewport.w * 0.5, 0.5);
+    }
+    assert!(ed.grid.triplet, "the triplet flag was lost");
+    let ratio = (ed.grid.effective() / (1.0 / 16.0)).log2();
+    assert!(
+        (ratio - ratio.round()).abs() < 1e-9,
+        "the division left the powers of two: 1/{:.3}",
+        1.0 / ed.grid.effective()
+    );
+}
+
+fn grid_editor() -> Editor {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: 960.0 }, 0.0, 960.0 * 64.0);
+    for i in 0..8u64 {
+        doc.push(Note::new(
+            NoteId(i + 1),
+            960.0 * i as f64,
+            960.0 * i as f64 + 480.0,
+            60 + i as i32,
+        ));
+    }
+    let mut ed = Editor::new(doc, Viewport::new(1000.0, 500.0));
+    ed.reset_view();
+    ed
+}

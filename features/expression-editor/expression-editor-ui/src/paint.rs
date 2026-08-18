@@ -91,15 +91,32 @@ fn points_of(s: &str) -> Vec<Point> {
 }
 
 fn polyline(s: &str) -> BezPath {
+    path_of(points_of(s).into_iter(), false)
+}
+
+/// A polyline straight from the numbers, with no text in between.
+fn path_of(points: impl Iterator<Item = Point>, close: bool) -> BezPath {
     let mut path = BezPath::new();
-    for (i, p) in points_of(s).into_iter().enumerate() {
+    for (i, p) in points.enumerate() {
         if i == 0 {
             path.move_to(p);
         } else {
             path.line_to(p);
         }
     }
+    if close && !path.is_empty() {
+        path.close_path();
+    }
     path
+}
+
+/// The geometry layer's polyline type, as a path.
+fn line_of(points: &[(f64, f64)]) -> BezPath {
+    path_of(points.iter().map(|&(x, y)| Point::new(x, y)), false)
+}
+
+fn area_of(points: &[(f64, f64)]) -> BezPath {
+    path_of(points.iter().map(|&(x, y)| Point::new(x, y)), true)
 }
 
 fn polygon(s: &str) -> BezPath {
@@ -112,6 +129,55 @@ fn polygon(s: &str) -> BezPath {
 
 fn stroke_of(width: f64) -> Stroke {
     Stroke::new(width)
+}
+
+/// Shapes that share a paint, gathered into one path.
+///
+/// A roll of two thousand notes emitted about ten thousand draw
+/// commands, one per rectangle, line and glyph run — and each command
+/// allocates a path. That was six of the seven milliseconds a frame
+/// cost, and it is work that buys nothing: the notes share a dozen
+/// pitch-class colours between them, the rows share two, the gridlines
+/// two.
+///
+/// Gathering by paint collapses those thousands of commands into a
+/// handful. It is also what the renderer wants — one large path is far
+/// cheaper for Vello to process than hundreds of small ones.
+///
+/// Ordering within a batch is lost, which is why a batch only ever
+/// covers shapes that sit at the same depth: every row, or every note
+/// body. Anything drawn *over* something else goes in a later batch.
+#[derive(Default)]
+struct Batch {
+    // A `Vec` rather than a map: there are only ever a handful of
+    // distinct paints, so a linear scan beats hashing a colour.
+    entries: Vec<(Color, BezPath)>,
+}
+
+impl Batch {
+    fn add(&mut self, color: Color, shape: &impl kurbo::Shape) {
+        let path = match self.entries.iter_mut().find(|(c, _)| *c == color) {
+            Some((_, path)) => path,
+            None => {
+                self.entries.push((color, BezPath::new()));
+                &mut self.entries.last_mut().expect("just pushed").1
+            }
+        };
+        path.extend(shape.path_elements(0.1));
+    }
+
+    fn fill(self, scene: &mut Scene, at: Affine) {
+        for (color, path) in self.entries {
+            scene.fill(Fill::NonZero, at, color, None, &path);
+        }
+    }
+
+    fn stroke(self, scene: &mut Scene, at: Affine, width: f64) {
+        let stroke = stroke_of(width);
+        for (color, path) in self.entries {
+            scene.stroke(&stroke, at, color, None, &path);
+        }
+    }
 }
 
 /// Draw the roll into a scene sized `w` x `h` in CSS pixels.
@@ -210,39 +276,27 @@ fn label(
 }
 
 fn rows(scene: &mut Scene, ed: &Editor, at: Affine, w: f64) {
+    let mut bands = Batch::default();
+    let mut dividers = Batch::default();
     for r in canvas::rows(ed) {
-        scene.fill(
-            Fill::NonZero,
-            at,
-            color(r.fill),
-            None,
-            &Rect::new(0.0, r.y, w, r.y + r.h),
-        );
+        bands.add(color(r.fill), &Rect::new(0.0, r.y, w, r.y + r.h));
         // One divider per group rather than per row: evenly-ruled lanes
         // give the eye nothing to steer by.
         if r.starts_group {
-            scene.stroke(
-                &stroke_of(1.0),
-                at,
-                color(theme::PANEL_BORDER),
-                None,
-                &Line::new((0.0, r.y), (w, r.y)),
-            );
+            dividers.add(color(theme::PANEL_BORDER), &Line::new((0.0, r.y), (w, r.y)));
         }
     }
+    bands.fill(scene, at);
+    dividers.stroke(scene, at, 1.0);
 }
 
 fn grid(scene: &mut Scene, ed: &Editor, at: Affine, h: f64) {
+    let mut lines = Batch::default();
     for g in canvas::grid_lines(ed) {
         let c = if g.beat { theme::GRID_BEAT } else { theme::GRID_SUB };
-        scene.stroke(
-            &stroke_of(1.0),
-            at,
-            color(c),
-            None,
-            &Line::new((g.x, 0.0), (g.x, h)),
-        );
+        lines.add(color(c), &Line::new((g.x, 0.0), (g.x, h)));
     }
+    lines.stroke(scene, at, 1.0);
 }
 
 fn lanes(scene: &mut Scene, ed: &Editor, at: Affine, w: f64) {
@@ -465,6 +519,20 @@ fn notes(scene: &mut Scene, ed: &Editor, at: Affine, labels: &mut Labeller) {
     // notes would compete with the curve for the same pixels.
     let dim = if ed.cc_editing() { ed.cc_display.note_dim } else { 1.0 };
 
+    // Gathered by paint and emitted once each, rather than three
+    // commands per note. Depth is preserved because each batch is a
+    // layer: every body, then every outline over them.
+    let mut bodies = Batch::default();
+    let mut ribbons = Batch::default();
+    let mut centres = Batch::default();
+    let mut outlines = Batch::default();
+    let mut thick = Batch::default();
+    let mut zones = Batch::default();
+    let mut zones_active = Batch::default();
+    // Labels are glyph runs and cannot be batched, so they are held back
+    // and drawn after the bodies they sit on.
+    let mut deferred: Vec<(String, f64, f64, f32, Color)> = Vec::new();
+
     for n in canvas::note_rects(ed) {
         let alpha = n.opacity * dim;
         let fill = with_alpha(color(n.fill), alpha);
@@ -472,54 +540,47 @@ fn notes(scene: &mut Scene, ed: &Editor, at: Affine, labels: &mut Labeller) {
         // A mode that draws sung blobs or struck heads draws those
         // *instead* of the bar, in that order of precedence.
         if let Some(blob) = &n.blob {
-            scene.fill(Fill::NonZero, at, fill, None, &polygon(blob));
+            bodies.add(fill, &polygon(blob));
             if let Some(cy) = n.blob_center {
-                scene.stroke(
-                    &stroke_of(1.0),
-                    at,
+                centres.add(
                     with_alpha(color(theme::TEXT), 0.5 * alpha),
-                    None,
                     &Line::new((n.x, cy), (n.x + n.w, cy)),
                 );
             }
         } else if let Some(head) = &n.head {
-            scene.fill(Fill::NonZero, at, fill, None, &polygon(head));
+            bodies.add(fill, &polygon(head));
         } else {
             let r = Rect::new(n.x, n.y, n.x + n.w, n.y + n.h);
-            scene.fill(Fill::NonZero, at, fill, None, &r);
+            bodies.add(fill, &r);
             if let Some(ribbon) = &n.ribbon {
-                scene.fill(
-                    Fill::NonZero,
-                    at,
+                ribbons.add(
                     with_alpha(color(theme::SELECTED), 0.18 * alpha),
-                    None,
                     &polygon(ribbon),
                 );
             }
             // Zones, and which one a write would land on.
-            for (x0, x1, active) in &n.zones {
-                scene.stroke(
-                    &stroke_of(if *active { 2.0 } else { 1.0 }),
-                    at,
-                    color(if *active { theme::ACCENT } else { theme::ZONE }),
-                    None,
-                    &Line::new((*x0, n.y), (*x0, n.y + n.h)),
-                );
-                let _ = x1;
-            }
-            scene.stroke(
-                &stroke_of(if n.selected { 2.0 } else { 1.0 }),
-                at,
-                color(if n.ambiguous {
-                    theme::ZONE
-                } else if n.selected {
-                    theme::SELECTED
+            for (x0, _x1, active) in &n.zones {
+                let line = Line::new((*x0, n.y), (*x0, n.y + n.h));
+                if *active {
+                    zones_active.add(color(theme::ACCENT), &line);
                 } else {
-                    theme::BORDER_STRONG
-                }),
-                None,
-                &r,
-            );
+                    zones.add(color(theme::ZONE), &line);
+                }
+            }
+            let edge = color(if n.ambiguous {
+                theme::ZONE
+            } else if n.selected {
+                theme::SELECTED
+            } else {
+                theme::BORDER_STRONG
+            });
+            // Two widths, so two batches: a stroke width belongs to the
+            // command, not to the path.
+            if n.selected || n.ambiguous {
+                thick.add(edge, &r);
+            } else {
+                outlines.add(edge, &r);
+            }
         }
 
         // What the body prints — note name, fret number, or lyric.
@@ -532,36 +593,58 @@ fn notes(scene: &mut Scene, ed: &Editor, at: Affine, labels: &mut Labeller) {
         // shaper here has only the regular face. At the seven pixels a
         // dense roll gives a note, a mid-grey regular is illegible where
         // a dark-grey semibold was fine.
-        if let Some(text_) = &n.label {
-            label(
-                scene,
-                labels,
-                text_,
+        //
+        // Only where the body can actually hold it. A ten-pixel label on
+        // a four-pixel note is a smear rather than a name, and on a
+        // dense roll that smear was also the single largest thing in the
+        // frame — one glyph run per note, thousands of them, none of
+        // them readable.
+        if let Some(text_) = &n.label
+            && n.h >= LABEL_MIN_H
+            && n.w >= LABEL_MIN_W
+        {
+            deferred.push((
+                text_.clone(),
                 n.x + 5.0,
                 n.y + n.h * 0.5 + 3.5,
                 10.0,
-                text::Align::Left,
                 with_alpha(Color::BLACK, alpha),
-                at,
-            );
+            ));
         }
         if let Some(badge) = n.badge {
-            label(
-                scene,
-                labels,
-                badge,
+            deferred.push((
+                badge.to_string(),
                 n.x,
                 n.y - 3.0,
                 8.0,
-                text::Align::Left,
                 with_alpha(color(theme::TEXT_DIM), alpha),
-                at,
-            );
+            ));
         }
+    }
+
+    // Bodies, then what sits on them, then the outlines over both.
+    bodies.fill(scene, at);
+    ribbons.fill(scene, at);
+    centres.stroke(scene, at, 1.0);
+    zones.stroke(scene, at, 1.0);
+    zones_active.stroke(scene, at, 2.0);
+    outlines.stroke(scene, at, 1.0);
+    thick.stroke(scene, at, 2.0);
+
+    for (s, x, y, size, c) in deferred {
+        label(scene, labels, &s, x, y, size, text::Align::Left, c, at);
     }
 
     handles(scene, ed, at);
 }
+
+/// The smallest note body worth printing a name on.
+///
+/// Below this the glyphs overlap the rows above and below and read as
+/// noise, so the name is simply not drawn — which is both what it looked
+/// like it was doing anyway and, on a dense roll, most of the frame.
+const LABEL_MIN_H: f64 = 9.0;
+const LABEL_MIN_W: f64 = 18.0;
 
 fn handles(scene: &mut Scene, ed: &Editor, at: Affine) {
     for set in canvas::note_handles(ed) {
@@ -602,19 +685,24 @@ fn handles(scene: &mut Scene, ed: &Editor, at: Affine) {
 }
 
 fn curves(scene: &mut Scene, ed: &Editor, at: Affine) {
+    // Two widths, so two batches. Every curve of a given colour and
+    // weight becomes one path — a pitch track per note is a thousand
+    // strokes otherwise.
+    let mut quiet = Batch::default();
+    let mut active = Batch::default();
     for c in canvas::curve_paths(ed) {
-        let path = polyline(&c.points);
+        let path = line_of(&c.points);
         if path.is_empty() {
             continue;
         }
-        scene.stroke(
-            &stroke_of(if c.active { 2.5 } else { 1.5 }),
-            at,
-            color(c.color),
-            None,
-            &path,
-        );
+        if c.active {
+            active.add(color(c.color), &path);
+        } else {
+            quiet.add(color(c.color), &path);
+        }
     }
+    quiet.stroke(scene, at, 1.5);
+    active.stroke(scene, at, 2.5);
 }
 
 fn controllers(
@@ -678,29 +766,38 @@ fn playhead(scene: &mut Scene, ed: &Editor, at: Affine, h: f64) {
 
 fn keyboard(scene: &mut Scene, ed: &Editor, h: f64, labels: &mut Labeller) {
     let at = Affine::translate((0.0, canvas::RULER_H));
-    scene.fill(
-        Fill::NonZero,
-        Affine::IDENTITY,
-        color(theme::SURFACE_BAR),
-        None,
-        &Rect::new(0.0, 0.0, canvas::GUTTER_W, h),
-    );
-    for k in canvas::keyboard(ed) {
-        let r = Rect::new(0.0, k.y, canvas::GUTTER_W, k.y + k.h);
-        scene.fill(
-            Fill::NonZero,
-            at,
+
+    // The keyboard occupies exactly the band the note area does.
+    //
+    // It used to be painted over the element's full height while the
+    // rows only covered `vp.h`, so whenever those two disagreed the
+    // piano ran on past the last row and left the note area beside it
+    // blank. They are the same rows — `canvas::rows` and
+    // `canvas::keyboard` iterate the same span — so any difference on
+    // screen was the painting, not the geometry.
+    //
+    // Clipped as well as sized, so the half row at the top and bottom is
+    // cut the way the rows themselves are.
+    let band = Rect::new(0.0, 0.0, canvas::GUTTER_W, ed.viewport.h);
+    scene.push_clip_layer(at, &band);
+    scene.fill(Fill::NonZero, at, color(theme::SURFACE_BAR), None, &band);
+    let keys = canvas::keyboard(ed);
+    let mut faces = Batch::default();
+    let mut edges = Batch::default();
+    for k in &keys {
+        faces.add(
             color(if k.black { theme::KEY_BLACK } else { theme::KEY_WHITE }),
-            None,
-            &r,
+            &Rect::new(0.0, k.y, canvas::GUTTER_W, k.y + k.h),
         );
-        scene.stroke(
-            &stroke_of(0.5),
-            at,
+        edges.add(
             with_alpha(color(theme::PANEL_BORDER), 0.8),
-            None,
             &Line::new((0.0, k.y), (canvas::GUTTER_W, k.y)),
         );
+    }
+    faces.fill(scene, at);
+    edges.stroke(scene, at, 0.5);
+
+    for k in &keys {
         // Only C rows are labelled, so the gutter stays readable when
         // the rows get short — and only when the row can hold the text.
         if let Some(name) = &k.label
@@ -735,7 +832,11 @@ fn keyboard(scene: &mut Scene, ed: &Editor, h: f64, labels: &mut Labeller) {
             at,
         );
     }
-    // The gutter's right edge, which is also the roll's left edge.
+    scene.pop_layer();
+
+    // The gutter's right edge, which is also the roll's left edge. Drawn
+    // over the whole element, ruler included, because it separates two
+    // columns rather than bounding the keys.
     scene.stroke(
         &stroke_of(1.0),
         Affine::IDENTITY,

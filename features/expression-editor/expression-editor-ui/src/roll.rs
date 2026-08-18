@@ -26,14 +26,16 @@ use dioxus::prelude::*;
 use dioxus_elements::input_data::MouseButton;
 use expression_editor_core::memagic;
 use expression_editor_core::tools::Mods;
-use expression_editor_core::{Editor, Viewport};
+use expression_editor_core::Editor;
 use input::InputCommand;
 use keyboard_types::Modifiers;
 
 use crate::interaction::{self, Drag};
 use crate::menu_ui::{self, ContextMenu};
 use crate::multitool_ui::{self, MultiTool};
-use crate::{canvas, drawer, drawer::ModDrawer, keys, paint, roll_widget, scroll, text, theme};
+use crate::{
+    canvas, cursor, drawer, drawer::ModDrawer, keys, paint, roll_widget, scroll, text, theme,
+};
 use crate::{draw_hint_of, BendFlow};
 /// Pointer coordinates in **roll** space — element coordinates minus
 /// the keyboard gutter and timeline ruler.
@@ -118,17 +120,6 @@ pub fn Canvas(
     menu_state: Signal<ContextMenu>,
     pending: Signal<Option<menu_ui::Pending>>,
     draft: Signal<Option<expression_editor_core::PitchDraft>>,
-    /// The box the roll has been given, computed by the editor root from
-    /// the host's reported space less all of its chrome. `None` until a
-    /// host has said how much room there is, which leaves the viewport
-    /// the document was built with.
-    ///
-    /// A prop rather than something read from `AVAILABLE` here, because
-    /// the terms that decide it — the inspector's width, the lane
-    /// strip's height — are owned up there. Subtracting a constant from
-    /// the window down here is what made the roll an inspector too wide.
-    #[props(default)]
-    want: Option<Viewport>,
 ) -> Element {
     let mut multi = multi;
     let mut editor = editor;
@@ -144,24 +135,21 @@ pub fn Canvas(
     // where that is. `None` until the pointer has been over the canvas.
     let mut hover = use_signal(|| None::<(f64, f64)>);
 
+    // Modifiers as of the last pointer or key event.
+    //
+    // Tracked separately from `hover` because holding Alt has to change
+    // the painted cursor *without* the pointer moving — the whole point
+    // of the glyph is that it previews the gesture, and a preview that
+    // waits for a wiggle before admitting Alt is bound to Copy is not
+    // one.
+    let mut hover_mods = use_signal(Mods::default);
+
     // What can follow the keys typed so far. Empty means no sequence is
     // live, which is the overlay's cue to stay hidden.
     let mut which_key = use_signal(Vec::<keys::Continuation>::new);
 
-    // Take the box the root worked out for us.
-    //
-    // An effect, not a poll and not an element measurement: it runs when
-    // `want` changes and never touches the document, so there is no
-    // relayout per tick and nothing to re-enter mid-dispatch. See
-    // `crate::sizing` for why measuring directly is not on the table.
-    use_effect(move || {
-        let Some(want) = want else { return };
-        if let Ok(mut ed) = editor.try_write()
-            && ((ed.viewport.w - want.w).abs() >= 1.0 || (ed.viewport.h - want.h).abs() >= 1.0)
-        {
-            ed.resize(want);
-        }
-    });
+    // The viewport is followed by `ExpressionEditor`, which is the only
+    // component that knows the whole chrome. See the effect there.
 
     // Where each render leaves the drawing for the renderer to pick up.
     let slot = use_hook(roll_widget::SceneSlot::new);
@@ -268,6 +256,10 @@ pub fn Canvas(
             onkeydown: move |e: KeyboardEvent| {
                 let key = e.key().to_string();
                 let m = mods_of(e.modifiers());
+                // Pressing a modifier is itself a keydown, so this is
+                // what makes the painted cursor answer to Alt and Ctrl
+                // with the pointer sitting still.
+                hover_mods.set(m);
 
                 // The shared keymap gets first refusal, so which-key
                 // sequences resolve before any hardcoded binding. `z`
@@ -425,6 +417,7 @@ pub fn Canvas(
                 }
             },
             onkeyup: move |e: KeyboardEvent| {
+                hover_mods.set(mods_of(e.modifiers()));
                 // `R` is momentary: references drop back the instant it
                 // is released, so it can never be left on by accident.
                 match e.key().to_string().as_str() {
@@ -465,7 +458,11 @@ pub fn Canvas(
                 style: "position: absolute; left: 0; top: 0; display: block; \
                         width: {vp.w + canvas::GUTTER_W:.0}px; \
                         height: {vp.h + canvas::RULER_H:.0}px; \
-                        touch-action: none; user-select: none; cursor: crosshair;",
+                        // The OS cursor is hidden because `crate::cursor`
+                        // paints the real one: CSS has no `[`, no `]`,
+                        // no pencil and no razor, and Blitz supports no
+                        // `cursor: url(…)` to supply them.
+                        touch-action: none; user-select: none; cursor: none;",
                 onpointerdown: move |e: PointerEvent| {
                     let raw = e.data().element_coordinates();
                     // Resolve against a snapshot: the read guard must
@@ -530,6 +527,7 @@ pub fn Canvas(
                     // Recorded before the drag guard: the anchor has to
                     // follow the pointer whether or not a drag is live.
                     hover.set(Some(local(&e)));
+                    hover_mods.set(mods_of(e.modifiers()));
                     if !drag.read().is_active() {
                         return;
                     }
@@ -562,6 +560,13 @@ pub fn Canvas(
                     let next = interaction::pointer_up(&mut editor.write(), d, x, y, m);
                     drag.set(next);
                 },
+                onpointerleave: move |_| {
+                    // The painted cursor is only correct while the
+                    // pointer is over the roll. Left set, it would be
+                    // stranded at the last position the pointer had
+                    // *and* the OS cursor would be visible next to it.
+                    hover.set(None);
+                },
                 onwheel: move |e: WheelEvent| {
                     let delta = e.delta().strip_units();
                     let m = mods_of(e.modifiers());
@@ -592,6 +597,19 @@ pub fn Canvas(
                         div { "{scroll::hint()}" }
                     }
                 }
+            }
+
+            // The painted pointer. Above the roll and below the modal
+            // overlays, which have their own (real) cursors — and its
+            // own component, so a pointer move repaints one 48px box
+            // instead of rebuilding the whole roll scene. See
+            // `crate::cursor`.
+            cursor::CursorLayer {
+                editor,
+                hover,
+                mods: hover_mods,
+                drag,
+                locked,
             }
 
             multitool_ui::MultiToolOverlay { editor, tool: multi }

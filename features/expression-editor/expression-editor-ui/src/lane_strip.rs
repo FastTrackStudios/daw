@@ -171,7 +171,11 @@ pub fn LaneStrip(editor: Signal<Editor>) -> Element {
                     for (i, c) in curves.iter().enumerate() {
                         polyline {
                             key: "sc{i}",
-                            points: "{c.points}",
+                            // Still svg here, so the numbers are
+                            // formatted for it at the one place that
+                            // needs text. The roll paints instead, and
+                            // does not go near this.
+                            points: canvas::points_attr(&c.points),
                             fill: "none",
                             stroke: c.color,
                             stroke_width: "1.5",

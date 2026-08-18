@@ -148,8 +148,11 @@ async fn a_plain_drag_does_the_mode_s_own_thing() -> dioxus_test::Result<()> {
         let x1 = ox + w as f64 - 4.0;
         let y1 = oy + h as f64 - 4.0;
 
+        // `drain` mid-gesture, `pump` once at the end — pumping waits,
+        // and a move that renders nothing waits the full second. See
+        // `DocumentTester::drain`.
         tester.pointer_down_mods(x0, y0, Modifiers::empty());
-        let _ = tester.pump().await;
+        tester.drain();
         for i in 1..=5 {
             let t = i as f64 / 5.0;
             tester.pointer_move_mods(
@@ -158,7 +161,7 @@ async fn a_plain_drag_does_the_mode_s_own_thing() -> dioxus_test::Result<()> {
                 true,
                 Modifiers::empty(),
             );
-            let _ = tester.pump().await;
+            tester.drain();
         }
         tester.pointer_up_mods(x1, y1, Modifiers::empty());
         let _ = tester.pump().await;

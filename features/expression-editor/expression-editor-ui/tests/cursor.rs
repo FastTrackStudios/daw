@@ -1,0 +1,238 @@
+//! The painted cursor: what it resolves to, and that it reaches screen.
+//!
+//! Two halves, deliberately. [`cursor_at`] is geometry — "is the pointer
+//! on the end of that note?" — and is tested directly against a camera,
+//! because a DOM test cannot say *why* a glyph was wrong. The mount
+//! tests then pin the things only a real DOM can answer: that the layer
+//! exists, that it moves, and that it is transparent to the pointer.
+//!
+//! The last one is the whole risk of drawing your own cursor. A layer
+//! that sits under the mouse and eats its events replaces every gesture
+//! on the surface with nothing, and it would look exactly like a cursor
+//! that works.
+
+use dioxus::prelude::*;
+use dioxus_test::{by_testid, render};
+use expression_editor_core::cursor::Cursor;
+use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
+use expression_editor_core::tools::Mods;
+use expression_editor_core::{Editor, Mode, MouseMap, Tool, Viewport};
+use expression_editor_ui::cursor::cursor_at;
+use expression_editor_ui::ExpressionEditor;
+
+const PPQ: f64 = 960.0;
+
+const NOTE_START: f64 = PPQ;
+const NOTE_END: f64 = PPQ * 2.0;
+const NOTE_ROW: i32 = 60;
+
+/// One note in the middle of a four-beat window, so both of its ends are
+/// comfortably on screen with empty roll either side.
+fn one_note() -> Editor {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 4.0);
+    doc.push(Note::new(NoteId(1), NOTE_START, NOTE_END, NOTE_ROW));
+    let mut ed = Editor::new(doc, Viewport::new(900.0, 480.0));
+    ed.reset_view();
+    ed
+}
+
+fn plain() -> Mods {
+    Mods::default()
+}
+
+fn alt() -> Mods {
+    Mods {
+        alt: true,
+        ..Mods::default()
+    }
+}
+
+/// Roll-local coordinates of a point on the note.
+fn at(ed: &Editor, t: f64) -> (f64, f64) {
+    (ed.camera.x(t), ed.camera.y(NOTE_ROW as f64, ed.viewport))
+}
+
+#[test]
+fn the_ends_of_a_note_are_brackets() {
+    let ed = one_note();
+    let (x0, y) = at(&ed, NOTE_START);
+    let (x1, _) = at(&ed, NOTE_END);
+    assert_eq!(cursor_at(&ed, x0, y, plain(), false), Cursor::EdgeLeft);
+    assert_eq!(cursor_at(&ed, x1, y, plain(), false), Cursor::EdgeRight);
+}
+
+#[test]
+fn the_body_of_a_note_moves_and_the_roll_selects() {
+    let ed = one_note();
+    let (x, y) = at(&ed, (NOTE_START + NOTE_END) * 0.5);
+    assert_eq!(cursor_at(&ed, x, y, plain(), false), Cursor::Move);
+
+    // Well clear of the note, and clear of its edge tolerance.
+    let (empty_x, _) = at(&ed, PPQ * 3.5);
+    assert_eq!(
+        cursor_at(&ed, empty_x, y, plain(), false),
+        Cursor::Crosshair,
+    );
+}
+
+/// The bracket has to flip *within* one note, which is the case a test
+/// that only ever looks at one end cannot see.
+#[test]
+fn the_bracket_flips_across_the_note() {
+    let ed = one_note();
+    let (x0, y) = at(&ed, NOTE_START);
+    let (x1, _) = at(&ed, NOTE_END);
+    assert_ne!(
+        cursor_at(&ed, x0, y, plain(), false),
+        cursor_at(&ed, x1, y, plain(), false),
+    );
+}
+
+#[test]
+fn modifiers_are_previewed_without_moving() {
+    let ed = one_note();
+    let (x, y) = at(&ed, (NOTE_START + NOTE_END) * 0.5);
+    // Same pixel, different held key, different answer — which is what
+    // makes it a preview of the gesture rather than a readout of where
+    // the mouse is.
+    assert_eq!(cursor_at(&ed, x, y, plain(), false), Cursor::Move);
+    assert_eq!(cursor_at(&ed, x, y, alt(), false), Cursor::Copy);
+}
+
+#[test]
+fn the_armed_tool_shows_through() {
+    let mut ed = one_note();
+    let (x, y) = at(&ed, PPQ * 3.5);
+    assert_eq!(cursor_at(&ed, x, y, plain(), false), Cursor::Crosshair);
+    ed.tool = Tool::Pen;
+    assert_eq!(cursor_at(&ed, x, y, plain(), false), Cursor::Pencil);
+    ed.tool = Tool::NoteErase;
+    assert_eq!(cursor_at(&ed, x, y, plain(), false), Cursor::NoteEraser);
+}
+
+/// The mode preset reaches the cursor through the map, with neither
+/// knowing about the other.
+#[test]
+fn a_drum_roll_shows_a_brush() {
+    let mut ed = one_note();
+    ed.mouse = MouseMap::drums();
+    let (x, y) = at(&ed, PPQ * 3.5);
+    assert_eq!(cursor_at(&ed, x, y, plain(), false), Cursor::Brush);
+}
+
+/// A handle is drawn in front of the note and pressed before it, so it
+/// has to be resolved before it too.
+#[test]
+fn handles_take_the_cursor_where_a_mode_has_them() {
+    let mut ed = one_note();
+    ed.mode = Mode::Vocals;
+    assert!(ed.mode.has_handles());
+    let (x, y) = at(&ed, (NOTE_START + NOTE_END) * 0.5);
+    // The strip above the note body is fine pitch, which is a handle and
+    // not the note underneath.
+    let above = y - expression_editor_core::handles::STRIP_H * 0.5;
+    let glyph = cursor_at(&ed, x, above, plain(), false);
+    assert!(
+        matches!(glyph, Cursor::Handle(_)),
+        "the strip above a note resolved to {glyph:?}, not a handle",
+    );
+}
+
+/// While the drawer holds a target, editing is blocked — and the cursor
+/// has to say so before the click that does nothing.
+#[test]
+fn a_locked_surface_says_so() {
+    let ed = one_note();
+    let (x, y) = at(&ed, (NOTE_START + NOTE_END) * 0.5);
+    assert_eq!(cursor_at(&ed, x, y, plain(), true), Cursor::Forbidden);
+}
+
+/// Navigation survives the lock: only *editing* is blocked, and a cursor
+/// that forbade panning would be describing a restriction that is not
+/// there.
+#[test]
+fn a_locked_surface_still_pans() {
+    let ed = one_note();
+    let (x, y) = at(&ed, PPQ * 3.5);
+    let pan = Mods {
+        shift: true,
+        ctrl: true,
+        alt: false,
+    };
+    assert_eq!(cursor_at(&ed, x, y, pan, true), Cursor::Hand);
+}
+
+// ── on the real DOM ─────────────────────────────────────────────────
+
+#[component]
+fn Surface() -> Element {
+    let editor = use_signal(one_note);
+    use_hook(|| expression_editor_ui::available_space(1000.0, 620.0));
+    rsx! { ExpressionEditor { editor } }
+}
+
+/// Nothing is drawn until the pointer arrives — a glyph parked at the
+/// origin on mount is a second cursor on screen.
+#[tokio::test]
+async fn there_is_no_cursor_before_the_pointer_arrives() -> dioxus_test::Result<()> {
+    let tester = render(Surface).with_window_size(1000, 620).build();
+    tester.query(by_testid("roll")).immediately()?;
+    assert!(
+        tester.query(by_testid("cursor")).immediately().is_err(),
+        "a cursor was painted before the pointer had been over the roll",
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_cursor_appears_and_follows_the_pointer() -> dioxus_test::Result<()> {
+    let tester = render(Surface).with_window_size(1000, 620).build();
+    let roll = tester.query(by_testid("roll")).immediately()?;
+    let (ox, oy) = roll.document_origin();
+    let (w, h) = roll.size();
+
+    tester.pointer_move(ox + w as f64 * 0.3, oy + h as f64 * 0.5, false);
+    tester.drain();
+    let first = tester.query(by_testid("cursor")).immediately()?;
+    let (x0, y0) = first.document_origin();
+
+    tester.pointer_move(ox + w as f64 * 0.6, oy + h as f64 * 0.7, false);
+    tester.drain();
+    let second = tester.query(by_testid("cursor")).immediately()?;
+    let (x1, y1) = second.document_origin();
+
+    assert!(
+        (x1 - x0).abs() > 1.0 && (y1 - y0).abs() > 1.0,
+        "the cursor did not follow the pointer: ({x0}, {y0}) -> ({x1}, {y1})",
+    );
+    Ok(())
+}
+
+/// The one that matters. A cursor layer that is not transparent to the
+/// pointer silently disables the entire surface, and every glyph would
+/// still look right while it did.
+#[tokio::test]
+async fn the_cursor_layer_does_not_swallow_gestures() -> dioxus_test::Result<()> {
+    let tester = render(Surface).with_window_size(1000, 620).build();
+    let roll = tester.query(by_testid("roll")).immediately()?;
+    let (ox, oy) = roll.document_origin();
+    let (w, h) = roll.size();
+    let y = oy + h as f64 * 0.5;
+
+    // Move first, so the layer is mounted and sitting under the pointer
+    // for the press that follows — which is precisely the arrangement
+    // that would eat it.
+    tester.pointer_move(ox + w as f64 * 0.2, y, false);
+    tester.drain();
+    tester.query(by_testid("cursor")).immediately()?;
+
+    tester.pointer_down(ox + w as f64 * 0.2, y);
+    tester.drain();
+    for i in 1..=4 {
+        tester.pointer_move(ox + w as f64 * (0.2 + 0.1 * i as f64), y - i as f64 * 3.0, true);
+        tester.drain();
+    }
+    tester.pointer_up(ox + w as f64 * 0.6, y - 12.0);
+    let _ = tester.pump().await;
+    Ok(())
+}

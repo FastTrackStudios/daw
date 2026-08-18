@@ -236,12 +236,16 @@ async fn a_sweep_paints_hits_across_the_kit() -> dioxus_test::Result<()> {
     let y0 = oy + expression_editor_ui::canvas::RULER_H + 6.0;
     let (x1, y1) = (ox + w as f64 - 6.0, oy + h as f64 - 6.0);
 
+    // `drain` mid-gesture, `pump` once at the end. Pumping waits for
+    // work, so a pointer move that renders nothing blocks for the full
+    // one-second timeout — twenty of them turned this sweep into twenty
+    // seconds of waiting. See `DocumentTester::drain`.
     tester.pointer_down_mods(x0, y0, Modifiers::empty());
-    let _ = tester.pump().await;
+    tester.drain();
     for i in 1..=20 {
         let t = i as f64 / 20.0;
         tester.pointer_move_mods(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, true, Modifiers::empty());
-        let _ = tester.pump().await;
+        tester.drain();
     }
     tester.pointer_up_mods(x1, y1, Modifiers::empty());
     let _ = tester.pump().await;
