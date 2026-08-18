@@ -300,6 +300,15 @@ pub fn Canvas(
                 // what makes the painted cursor answer to Alt and Ctrl
                 // with the pointer sitting still.
                 hover_mods.set(m);
+                // The toolbar lights up the tool the modifiers would
+                // use, so it has to hear about them. Written only when
+                // it actually changes: `Signal::write` notifies whether
+                // or not the value differs, and a keydown that renotified
+                // every subscriber would repaint the whole surface per
+                // key.
+                if editor.read().held_mods != m {
+                    editor.write().held_mods = m;
+                }
 
                 // The shared keymap gets first refusal, so which-key
                 // sequences resolve before any hardcoded binding. `z`
@@ -465,6 +474,19 @@ pub fn Canvas(
                     e.prevent_default();
                     return;
                 }
+                // Abandon a sweep in progress rather than clearing the
+                // areas behind it.
+                //
+                // Escape reads as "not that" — and while you are still
+                // dragging, the thing you mean is the rectangle under
+                // the pointer, not the set you drew earlier. Dropping
+                // the drag leaves nothing committed, because the area
+                // only lands on release.
+                if key == "Escape" && matches!(&*drag.read(), Drag::RazorCreate { .. }) {
+                    drag.set(Drag::None);
+                    e.prevent_default();
+                    return;
+                }
                 if locked {
                     return;
                 }
@@ -474,7 +496,13 @@ pub fn Canvas(
                 }
             },
             onkeyup: move |e: KeyboardEvent| {
-                hover_mods.set(mods_of(e.modifiers()));
+                let m = mods_of(e.modifiers());
+                hover_mods.set(m);
+                // Releasing Ctrl has to put the razor highlight back as
+                // surely as pressing it lit one.
+                if editor.read().held_mods != m {
+                    editor.write().held_mods = m;
+                }
                 // The processor has to hear about the release, or it
                 // goes on believing the key is held and OS auto-repeat
                 // walks the sequence tree on its own. See `keys::release`.
@@ -635,7 +663,11 @@ pub fn Canvas(
                     // Recorded before the drag guard: the anchor has to
                     // follow the pointer whether or not a drag is live.
                     hover.set(Some(local(&e)));
-                    hover_mods.set(mods_of(e.modifiers()));
+                    let m = mods_of(e.modifiers());
+                    hover_mods.set(m);
+                    if editor.read().held_mods != m {
+                        editor.write().held_mods = m;
+                    }
                     if !drag.read().is_active() {
                         return;
                     }

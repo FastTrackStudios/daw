@@ -780,3 +780,123 @@ fn a_handle_drag_leaves_unselected_notes_alone() {
         "an unselected note followed the drag",
     );
 }
+
+// ── dragging a razor's contents ─────────────────────────────────────
+
+/// A drag is many moves, and the result must match the one move it adds
+/// up to.
+///
+/// This is the bug that made razor dragging unusable. Moving a razor's
+/// contents *carves* — it splits notes at the area boundaries and clears
+/// the ground it lands on — so it cannot be re-run against a document it
+/// has already carved. It was: every frame re-split the original
+/// rectangle, which by then held whatever had drifted into it rather
+/// than the material that started there. The notes that moved first
+/// stopped moving, notes that were never selected got dragged along, and
+/// the take came apart.
+///
+/// One long step and forty small ones now agree, which is the property a
+/// live drag needs and the one that was missing.
+#[test]
+fn dragging_a_razor_in_many_steps_lands_where_one_step_would() {
+    let one_step = {
+        let mut ed = four_notes();
+        ed.razor
+            .add(RazorArea::new(0.0, PPQ * 1.5, ROW - 1, ROW + 1));
+        // The middle of the area, not its edge: a press near a boundary
+        // is `Context::RazorEdge` and resizes instead, which is a
+        // different gesture and would leave this testing nothing.
+        let (x0, y) = at(&ed, PPQ * 0.75);
+        let (x1, _) = at(&ed, PPQ * 4.75);
+        ed.mouse.set(
+            Context::RazorArea,
+            Gesture::Drag,
+            ModKey::NONE,
+            Action::RazorMoveContents,
+        );
+        let mut d = interaction::pointer_down(&mut ed, x0, y, plain(), 0);
+        assert!(matches!(d, Drag::RazorDrag { .. }), "not a razor move");
+        interaction::pointer_move(&mut ed, &mut d, x1, y, plain());
+        interaction::pointer_up(&mut ed, d, x1, y, plain());
+        ed
+    };
+
+    let many_steps = {
+        let mut ed = four_notes();
+        ed.razor
+            .add(RazorArea::new(0.0, PPQ * 1.5, ROW - 1, ROW + 1));
+        let (x0, y) = at(&ed, PPQ * 0.75);
+        let (x1, _) = at(&ed, PPQ * 4.75);
+        ed.mouse.set(
+            Context::RazorArea,
+            Gesture::Drag,
+            ModKey::NONE,
+            Action::RazorMoveContents,
+        );
+        let mut d = interaction::pointer_down(&mut ed, x0, y, plain(), 0);
+        assert!(matches!(d, Drag::RazorDrag { .. }), "not a razor move");
+        // Forty frames of a real drag, which is where the damage
+        // accumulated.
+        for i in 1..=40 {
+            let t = i as f64 / 40.0;
+            interaction::pointer_move(&mut ed, &mut d, x0 + (x1 - x0) * t, y, plain());
+        }
+        interaction::pointer_up(&mut ed, d, x1, y, plain());
+        ed
+    };
+
+    let describe = |ed: &Editor| {
+        let mut v: Vec<(i64, i64, i32)> = ed
+            .doc
+            .notes
+            .iter()
+            .map(|n| (n.start.round() as i64, n.end.round() as i64, n.row))
+            .collect();
+        v.sort_unstable();
+        v
+    };
+
+    assert_eq!(
+        describe(&many_steps),
+        describe(&one_step),
+        "a smooth drag and a single jump disagreed — the drag was \
+         accumulating carves",
+    );
+    // And it did not shred: the same number of notes as a single move
+    // produces, not a pile of fragments.
+    assert!(
+        many_steps.doc.notes.len() <= four_notes().doc.notes.len() + 1,
+        "the drag left {} notes behind, from {}",
+        many_steps.doc.notes.len(),
+        four_notes().doc.notes.len(),
+    );
+}
+
+/// Reverting to recompute must not eat the undo step.
+#[test]
+fn a_razor_drag_is_still_one_undo() {
+    let mut ed = four_notes();
+    let before: Vec<_> = ed.doc.notes.iter().map(|n| (n.start, n.row)).collect();
+    ed.razor
+        .add(RazorArea::new(0.0, PPQ * 1.5, ROW - 1, ROW + 1));
+    ed.mouse.set(
+        Context::RazorArea,
+        Gesture::Drag,
+        ModKey::NONE,
+        Action::RazorMoveContents,
+    );
+
+    let (x0, y) = at(&ed, PPQ * 0.75);
+    let (x1, _) = at(&ed, PPQ * 4.75);
+    let mut d = interaction::pointer_down(&mut ed, x0, y, plain(), 0);
+    assert!(matches!(d, Drag::RazorDrag { .. }), "not a razor move");
+    for i in 1..=10 {
+        let t = i as f64 / 10.0;
+        interaction::pointer_move(&mut ed, &mut d, x0 + (x1 - x0) * t, y, plain());
+    }
+    interaction::pointer_up(&mut ed, d, x1, y, plain());
+
+    assert!(ed.undo(), "the drag opened no undo step");
+    let after: Vec<_> = ed.doc.notes.iter().map(|n| (n.start, n.row)).collect();
+    assert_eq!(after, before, "one undo did not put the material back");
+}

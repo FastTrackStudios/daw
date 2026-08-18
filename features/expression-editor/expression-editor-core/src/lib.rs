@@ -170,6 +170,18 @@ pub struct Editor {
     /// than a toggle, because it is used to *check* something mid-edit
     /// and a mode you can forget you are in is worse than a held key.
     pub refs_to_front: bool,
+    /// The modifiers currently held down.
+    ///
+    /// Here rather than in a component signal because the *toolbar*
+    /// needs them: holding Ctrl means the next drag razors, and the
+    /// surface should say so before you commit to it — the same promise
+    /// the painted cursor already makes, which the tool buttons were not
+    /// keeping. Only the surface writes this; everything else reads it.
+    ///
+    /// It changes what the toolbar *shows*, never what a gesture does.
+    /// The map already resolves modifiers on its own, and a second
+    /// authority for the same question is how the two start disagreeing.
+    pub held_mods: Mods,
     /// Whether the coarse pitch handle snaps to the tuning. Shift
     /// reverses it per-gesture, as everywhere else on this surface.
     pub snap_pitch: bool,
@@ -228,6 +240,7 @@ impl Editor {
             // and silently outranked the enum's own default, so changing
             // that default changed nothing anyone could see.
             tool: Tool::default(),
+            held_mods: Mods::default(),
             dimension: Dimension::Pitch,
             overlays: Vec::new(),
             selection: Selection::default(),
@@ -786,6 +799,28 @@ impl Editor {
     /// otherwise. Resolving it here rather than at each call site is
     /// what makes temporary notes free: every handle already takes a
     /// scope, so nothing else has to know the feature exists.
+    /// The tool the toolbar should light up right now.
+    ///
+    /// The armed tool, unless the modifiers currently held would make
+    /// the next drag do something else — hold Ctrl and the razor lights
+    /// up, hold Alt and note-draw does, exactly as holding `z` lights up
+    /// zoom. The difference is that `z` really does arm the tool and
+    /// these do not: the map resolves modifiers by itself, so this only
+    /// reports what the map would say.
+    ///
+    /// Asked of the map rather than of a modifier table, so a rebound
+    /// gesture relights the right button with nothing else to change.
+    pub fn shown_tool(&self) -> Tool {
+        self.mouse
+            .resolve(
+                mouse::Context::PianoRoll,
+                mouse::Gesture::Drag,
+                self.held_mods,
+            )
+            .tool_preview()
+            .unwrap_or(self.tool)
+    }
+
     pub fn scope_for(&self, note: NoteId) -> handles::Scope {
         match self.temp_note {
             Some((id, t0, t1)) if id == note => handles::Scope::Range { t0, t1 },
@@ -1030,6 +1065,32 @@ impl Editor {
     /// gesture already opened with [`Editor::begin_gesture`].
     pub fn apply_live(&mut self, edit: &Edit) -> bool {
         edit.apply(&mut self.doc)
+    }
+
+    /// Put the document back to how the open gesture found it.
+    ///
+    /// For destructive drags, which cannot be expressed as a delta.
+    /// Moving a razor's contents *carves* — it splits notes at the area
+    /// boundaries and clears the ground it lands on — so re-running it
+    /// against a document it has already carved does not redo the move,
+    /// it cuts a second time in a place the material has since left.
+    /// Frame by frame that shreds the take: the notes that moved first
+    /// stop moving, notes that were never in the area get dragged along,
+    /// and everything ends up in pieces.
+    ///
+    /// A delta-based drag has no such problem, which is why nothing else
+    /// here needs this. The answer for the ones that do is to recompute
+    /// from the gesture's own starting point every frame — which costs
+    /// nothing to remember, because [`Editor::begin_gesture`] already
+    /// snapshotted it for undo.
+    ///
+    /// Undo is untouched: the snapshot is cloned, not consumed.
+    pub fn revert_gesture(&mut self) -> bool {
+        let Some(base) = self.history.gesture_base() else {
+            return false;
+        };
+        self.doc = base.clone();
+        true
     }
 
     pub fn undo(&mut self) -> bool {

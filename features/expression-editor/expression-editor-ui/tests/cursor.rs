@@ -209,6 +209,26 @@ fn Surface() -> Element {
     rsx! { ExpressionEditor { editor } }
 }
 
+thread_local! {
+    /// The editor the next [`Staged`] mounts on.
+    ///
+    /// `render` takes a bare `fn() -> Element`, so a case under test
+    /// cannot arrive as a prop. Same hand-off `tools.rs` uses.
+    static STAGED: std::cell::RefCell<Option<Editor>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn stage(ed: Editor) {
+    STAGED.with(|s| *s.borrow_mut() = Some(ed));
+}
+
+#[component]
+fn Staged() -> Element {
+    let editor = use_signal(|| STAGED.with(|s| s.borrow_mut().take()).unwrap_or_else(one_note));
+    use_hook(|| expression_editor_ui::available_space(1000.0, 620.0));
+    rsx! { ExpressionEditor { editor } }
+}
+
 /// Nothing is *drawn* until the pointer arrives — a glyph parked at the
 /// origin on mount is a second cursor on screen.
 ///
@@ -480,3 +500,99 @@ async fn auto_repeat_does_not_walk_the_zoom_tree() -> dioxus_test::Result<()> {
     Ok(())
 }
 
+
+// ── the toolbar previews the modifiers ──────────────────────────────
+
+/// Holding Ctrl lights the razor; letting go puts it back.
+///
+/// The painted cursor has always previewed the modifier — the surface
+/// tells you what a drag will do before you commit to it. The tool
+/// buttons, which are the one control that *names* those verbs, said
+/// nothing, so the two halves of the same promise disagreed.
+#[tokio::test]
+async fn holding_ctrl_lights_up_the_razor() -> dioxus_test::Result<()> {
+    use dioxus_test::keyboard_types::{Key, Modifiers};
+
+    let tester = render(Surface).with_window_size(1000, 620).build();
+    tester.query(by_testid("roll")).immediately()?;
+    focused(&tester)?;
+
+    assert!(
+        tool_is_active(&tester, "select") && !tool_is_active(&tester, "razor"),
+        "the surface did not start on Select",
+    );
+
+    tester.key_down(Key::Control, Modifiers::CONTROL);
+    tester.drain();
+    assert!(
+        tool_is_active(&tester, "razor"),
+        "holding Ctrl did not light the razor",
+    );
+
+    tester.key_up(Key::Control, Modifiers::empty());
+    tester.drain();
+    assert!(
+        !tool_is_active(&tester, "razor") && tool_is_active(&tester, "select"),
+        "releasing Ctrl left the razor lit",
+    );
+    Ok(())
+}
+
+/// And Alt lights note-draw, which is what Alt+drag inserts with.
+#[tokio::test]
+async fn holding_alt_lights_up_note_draw() -> dioxus_test::Result<()> {
+    use dioxus_test::keyboard_types::{Key, Modifiers};
+
+    let tester = render(Surface).with_window_size(1000, 620).build();
+    tester.query(by_testid("roll")).immediately()?;
+    focused(&tester)?;
+
+    tester.key_down(Key::Alt, Modifiers::ALT);
+    tester.drain();
+    assert!(
+        tool_is_active(&tester, "notedraw"),
+        "holding Alt did not light note-draw",
+    );
+
+    tester.key_up(Key::Alt, Modifiers::empty());
+    tester.drain();
+    assert!(
+        !tool_is_active(&tester, "notedraw"),
+        "releasing Alt left note-draw lit",
+    );
+    Ok(())
+}
+
+/// The preview follows the *map*, not a modifier table.
+///
+/// Rebind Ctrl+drag and the highlight has to follow, for the same reason
+/// the cursor does: a second authority on "what do these modifiers mean"
+/// is one that will eventually disagree with the first, and a highlight
+/// that disagrees is worse than none — it is a claim.
+#[tokio::test]
+async fn rebinding_ctrl_moves_the_highlight_with_it() -> dioxus_test::Result<()> {
+    use dioxus_test::keyboard_types::{Key, Modifiers};
+    use expression_editor_core::mouse::{Action, Context, Gesture, ModKey};
+
+    let mut ed = one_note();
+    // Ctrl now draws instead of razoring. Nothing in the toolbar knows.
+    ed.mouse
+        .set(Context::PianoRoll, Gesture::Drag, ModKey::CTRL, Action::PenOverride);
+    stage(ed);
+
+    let tester = render(Staged).with_window_size(1000, 620).build();
+    tester.query(by_testid("roll")).immediately()?;
+    focused(&tester)?;
+
+    tester.key_down(Key::Control, Modifiers::CONTROL);
+    tester.drain();
+    assert!(
+        tool_is_active(&tester, "pen"),
+        "the highlight did not follow the rebound gesture",
+    );
+    assert!(
+        !tool_is_active(&tester, "razor"),
+        "the highlight still showed the old binding",
+    );
+    Ok(())
+}

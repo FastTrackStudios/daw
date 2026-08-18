@@ -145,6 +145,15 @@ pub enum Drag {
         /// Which edge was grabbed.
         start_edge: bool,
         stretch: bool,
+        /// The area as it was at press.
+        ///
+        /// Not read back from the set each frame, because this drag
+        /// rewrites that entry as it goes — so the set holds the *last*
+        /// frame's rectangle, and a stretch recomputed from the
+        /// gesture's start needs the rectangle the material still
+        /// matches. The fixed end also has to stay put: taking it from a
+        /// rewritten entry let rounding walk it a fraction per frame.
+        base: RazorArea,
     },
     /// Anchored zoom: vertical drag scales the view about the press.
     Zoom {
@@ -582,6 +591,7 @@ fn run_action(ed: &mut Editor, action: Action, x: f64, y: f64, mods: Mods) -> Op
                 index,
                 start_edge,
                 stretch: action == Action::RazorStretchContents,
+                base: area,
             })
         }
         Action::RazorRemoveArea => {
@@ -1819,10 +1829,24 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             if (dt - *applied_t).abs() < 1e-9 && rows == *applied_rows {
                 return;
             }
-            // Re-run from the captured area each frame rather than
-            // accumulating deltas: a razor move slices, and slicing
-            // repeatedly would shred the material.
+            // Re-run from the document as the gesture found it.
+            //
+            // The area was already captured at press, and this always
+            // claimed to re-run from it — but it re-ran against a
+            // document its own previous frame had already carved. So
+            // frame two split the *original* rectangle again, in a place
+            // the material had since moved out of: the notes that moved
+            // first stopped moving, notes that were never in the area
+            // got dragged along, and the take came apart in pieces.
+            //
+            // Reverting first makes the claim true. A razor move is
+            // destructive — it splits at the boundaries and clears the
+            // ground it lands on — so it cannot be expressed as a delta
+            // against the last frame; it has to be recomputed from a
+            // fixed starting point. We own the document, so that is
+            // simply the snapshot `begin_gesture` already took.
             if !*area_only {
+                ed.revert_gesture();
                 expression_editor_core::razor::move_contents(&mut ed.doc, *area, dt, rows, *copy);
             }
             *applied_t = dt;
@@ -1836,10 +1860,9 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             index,
             start_edge,
             stretch,
+            base,
         } => {
-            let Some(&area) = ed.razor.areas.get(*index) else {
-                return;
-            };
+            let area = *base;
             let raw = ed.camera.t_at(x);
             let t = if ed.grid.enabled && !mods.shift {
                 ed.snap_time(raw)
@@ -1854,6 +1877,11 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
                 RazorArea::new(area.t0, t.max(area.t0 + 1.0), area.row_lo, area.row_hi)
             };
             if *stretch {
+                // Same reason as the move above: `stretch_contents`
+                // carves, so re-running it against an already-stretched
+                // document compounds the scaling and re-splits material
+                // that has moved. Recompute from the gesture's start.
+                ed.revert_gesture();
                 expression_editor_core::razor::stretch_contents(
                     &mut ed.doc,
                     area,
@@ -2515,6 +2543,28 @@ pub fn wheel(ed: &mut Editor, x: f64, y: f64, dx: f64, dy: f64, mods: Mods) {
 pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
     let mouse_t = ed.camera.t_at(ed.viewport.w * 0.5);
     match (key, mods.ctrl, mods.shift) {
+        // Escape backs out of the most specific thing first.
+        //
+        // Razor areas before the note selection, because a razor is the
+        // narrower and the more dangerous of the two: it is a standing
+        // instruction that the next carve, delete or lane-clear will use,
+        // and it survived every other way of changing your mind. There
+        // was no way to put it down at all short of drawing over it.
+        //
+        // Returning `false` when there is nothing to clear matters —
+        // Escape has other owners upstream (the draft, the drawer, the
+        // multitool) and this must not swallow the key from them.
+        ("Escape", _, _) => {
+            if !ed.razor.is_empty() {
+                ed.razor.clear();
+                true
+            } else if !ed.selection.is_empty() {
+                ed.selection.clear();
+                true
+            } else {
+                false
+            }
+        }
         ("z", true, false) => ed.undo(),
         ("z", true, true) | ("y", true, _) => ed.redo(),
         ("a", true, _) => {

@@ -180,6 +180,57 @@ pub enum Action {
 }
 
 impl Action {
+    /// The tool this action *is*, for the toolbar to light up.
+    ///
+    /// Holding Ctrl means the next drag razors, and the surface should
+    /// say so before you commit to it. The painted cursor already makes
+    /// that promise; the tool buttons did not, so the one place that
+    /// names the verbs of the surface stayed silent about the modifier
+    /// that had just changed them.
+    ///
+    /// Keyed on the resolved [`Action`], never on the modifiers, for the
+    /// reason [`crate::cursor`] gives at length: rebind `Ctrl+drag` and
+    /// the highlight follows on its own. A modifier table here would be
+    /// a second authority on the same question, and the day it fell out
+    /// of step the toolbar would start lying — which is worse than the
+    /// silence it replaced, because a highlight is a claim.
+    ///
+    /// `None` where no armed tool means the same thing: a marquee is
+    /// Select, which is already the resting state, and there is no tool
+    /// for "move this note".
+    pub fn tool_preview(&self) -> Option<crate::Tool> {
+        use crate::Tool;
+        Some(match self {
+            Action::RazorCreate
+            | Action::RazorAddArea
+            | Action::RazorMoveContents
+            | Action::RazorMoveContentsNoSnap
+            | Action::RazorCopyContents
+            | Action::RazorMoveAreaOnly
+            | Action::RazorMoveVertically
+            | Action::RazorMoveHorizontally
+            | Action::RazorStretchContents
+            | Action::RazorResizeArea
+            | Action::RazorDeleteContents
+            | Action::RazorRemoveArea
+            | Action::RazorClearAll => Tool::Razor,
+
+            Action::InsertNote
+            | Action::InsertNoteNoSnap
+            | Action::InsertNoteDragToExtend
+            | Action::InsertNoteDragToExtendNoSnap
+            | Action::InsertNoteDragToMove
+            | Action::InsertNoteDragToEditVelocity
+            | Action::PaintNotes
+            | Action::PaintNotesNoSnap => Tool::NoteDraw,
+
+            Action::PenOverride => Tool::Pen,
+            Action::ZoomAnchored => Tool::Zoom,
+
+            _ => return None,
+        })
+    }
+
     /// Actions that must snapshot history before the drag starts, so
     /// the whole gesture collapses into one undo step.
     pub fn is_edit(&self) -> bool {

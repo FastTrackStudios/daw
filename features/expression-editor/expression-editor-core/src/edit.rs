@@ -1092,6 +1092,17 @@ impl History {
         self.push_snapshot(doc.clone());
     }
 
+    /// The document as the open gesture found it.
+    ///
+    /// [`begin_gesture`](Self::begin_gesture) already clones the whole
+    /// document so the gesture can be undone in one step; this hands
+    /// that same snapshot back so a *destructive* drag can recompute
+    /// from it every frame instead of accumulating damage. Nothing is
+    /// popped — undo is unaffected.
+    pub fn gesture_base(&self) -> Option<&ExpressionDoc> {
+        self.past.last()
+    }
+
     fn push_snapshot(&mut self, snapshot: ExpressionDoc) {
         self.past.push(snapshot);
         if self.past.len() > self.limit {

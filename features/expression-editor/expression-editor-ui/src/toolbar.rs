@@ -132,7 +132,11 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
     let mut drawer = drawer;
 
     let ed = editor.read();
-    let tool = ed.tool;
+    // What the modifiers say, falling back to what is armed. Holding
+    // Ctrl lights the razor and Alt lights note-draw, the same way
+    // holding `z` lights zoom — the surface's other previews all promise
+    // this and the tool buttons were the ones staying quiet.
+    let tool = ed.shown_tool();
     let dimension = ed.dimension;
     let overlays = ed.overlays.clone();
     let shape = ed.shape;
