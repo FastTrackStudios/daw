@@ -550,6 +550,20 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
     let strip_on = ed.lane_strip_h > 0.0;
     let count = ed.selection.notes.len();
     let ambiguous = ed.doc.notes.iter().filter(|n| n.ambiguous).count();
+    // The sticky razor modes, as the letters that set them.
+    let razor_modes = {
+        use expression_editor_core::razor::RazorAxis;
+        let mut s = String::new();
+        if ed.razor_insert {
+            s.push_str(" I");
+        }
+        match ed.razor_axis {
+            Some(RazorAxis::Horizontal) => s.push_str(" H"),
+            Some(RazorAxis::Vertical) => s.push_str(" L"),
+            None => {}
+        }
+        s
+    };
     let razors = ed.razor.areas.len();
     let mouse_preset = ed.mouse.name;
     let density = ed.grid.adaptive.density;
@@ -737,8 +751,17 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
                 style: "margin-left: auto; display: flex; align-items: center; gap: 12px; \
                         font-family: ui-monospace, monospace; flex: 0 0 auto;",
                 ChordBox { editor }
+                // The razor's own state, spelled out.
+                //
+                // `I`, `H` and `L` are sticky, and sticky state that
+                // nothing displays is the mode you forget you are in.
+                // The area count alone did not say why the next drag was
+                // about to behave differently from the last one.
                 if razors > 0 {
-                    span { style: "color: {theme::RAZOR};", "razor {razors}" }
+                    span {
+                        style: "color: {theme::RAZOR};",
+                        "razor {razors}{razor_modes}"
+                    }
                 }
                 // Names the mark, not just the count.
                 //

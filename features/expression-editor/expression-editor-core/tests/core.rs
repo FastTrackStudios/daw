@@ -2080,7 +2080,7 @@ fn deleting_an_area_leaves_a_hole_and_keeps_the_rest() {
 fn moving_an_area_carries_its_contents_and_clears_the_destination() {
     let mut doc = held_doc();
     let area = RazorArea::new(PPQ * 2.0, PPQ * 3.0, 60, 60);
-    assert!(razor::move_contents(&mut doc, area, PPQ * 4.0, 0, false));
+    assert!(razor::move_contents(&mut doc, area, PPQ * 4.0, 0, false, false));
 
     // The moved piece landed at 6..7.
     assert!(
@@ -2102,7 +2102,7 @@ fn moving_an_area_carries_its_contents_and_clears_the_destination() {
 fn copying_an_area_leaves_the_original_in_place() {
     let mut doc = held_doc();
     let area = RazorArea::new(PPQ * 2.0, PPQ * 3.0, 60, 60);
-    assert!(razor::move_contents(&mut doc, area, PPQ * 4.0, 0, true));
+    assert!(razor::move_contents(&mut doc, area, PPQ * 4.0, 0, true, false));
 
     assert!(
         doc.notes
@@ -2123,7 +2123,7 @@ fn a_nudge_does_not_delete_its_own_source() {
     let mut doc = held_doc();
     let area = RazorArea::new(PPQ * 2.0, PPQ * 4.0, 60, 60);
     // Destination overlaps the source — the classic way to lose data.
-    assert!(razor::move_contents(&mut doc, area, PPQ * 0.5, 0, false));
+    assert!(razor::move_contents(&mut doc, area, PPQ * 0.5, 0, false, false));
     assert!(
         doc.notes
             .iter()
@@ -2136,7 +2136,7 @@ fn a_nudge_does_not_delete_its_own_source() {
 fn moving_an_area_vertically_transposes_its_contents() {
     let mut doc = held_doc();
     let area = RazorArea::new(PPQ * 2.0, PPQ * 3.0, 60, 60);
-    razor::move_contents(&mut doc, area, 0.0, 5, false);
+    razor::move_contents(&mut doc, area, 0.0, 5, false, false);
     assert!(doc.notes.iter().any(|n| n.row == 65));
 }
 

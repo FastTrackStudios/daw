@@ -9,7 +9,7 @@ use expression_editor_core::edit::Edit;
 use expression_editor_core::handles::{self, Handle};
 use expression_editor_core::menu::Command;
 use expression_editor_core::mouse::{Action, Context, Gesture};
-use expression_editor_core::razor::RazorArea;
+use expression_editor_core::razor::{RazorArea, RazorAxis};
 use expression_editor_core::tools::{self, Hit, Mods};
 use expression_editor_core::zoom::ZoomModes;
 use expression_editor_core::{Editor, Mode, Shape, Tool};
@@ -1671,7 +1671,19 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             applied_time,
             axis,
         } => {
-            let (free_x, free_y) = axis.allows(x - origin.0, y - origin.1);
+            // The gesture's own axis, narrowed by a standing lock.
+            //
+            // `H`/`L` are sticky modes rather than modifiers, so they
+            // have to be applied here rather than at the press: turning
+            // one on mid-drag should take effect on the drag you are
+            // already making, which is the whole reason to prefer a mode
+            // over a chord.
+            let (mut free_x, mut free_y) = axis.allows(x - origin.0, y - origin.1);
+            match ed.razor_axis {
+                Some(RazorAxis::Horizontal) => free_y = false,
+                Some(RazorAxis::Vertical) => free_x = false,
+                None => {}
+            }
             // A locked axis holds at whatever it had already applied
             // rather than snapping back: `Axis::Commit` decides *during*
             // the drag, and undoing the first few pixels of movement at
@@ -1847,7 +1859,15 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             // simply the snapshot `begin_gesture` already took.
             if !*area_only {
                 ed.revert_gesture();
-                expression_editor_core::razor::move_contents(&mut ed.doc, *area, dt, rows, *copy);
+                let insert = ed.razor_insert;
+                expression_editor_core::razor::move_contents(
+                    &mut ed.doc,
+                    *area,
+                    dt,
+                    rows,
+                    *copy,
+                    insert,
+                );
             }
             *applied_t = dt;
             *applied_rows = rows;
@@ -2540,7 +2560,72 @@ pub fn wheel(ed: &mut Editor, x: f64, y: f64, dx: f64, dy: f64, mods: Mods) {
 /// Space is deliberately absent: transport belongs to the host, and a
 /// global Space intercept that outlives a crash would leave the DAW's
 /// keyboard locked.
+/// The razor's own verbs, live only while the razor tool is armed.
+///
+/// Arming the razor *is* the mode. The reference — MRE, see
+/// `spec/midi-editor.md` — is a modal ReaScript you enter and leave with
+/// Escape, and its verbs are bare letters. Bare letters are tool
+/// shortcuts here, so they can only mean razor verbs while the razor is
+/// the tool you are holding.
+///
+/// That is also what makes the mode safe rather than a trap: it is
+/// visible in the toolbar, it is the thing you clicked, and Escape
+/// leaves it. Nothing in this table is reachable by accident from
+/// Select.
+///
+/// `None` means "not a razor verb" and falls through to the ordinary
+/// keys, so undo, the transport and the view controls all still work
+/// while cutting. Only the letters listed here are taken.
+///
+/// The same verbs have an always-available spelling under the `k`
+/// which-key prefix, which lists itself in the overlay. This table is
+/// for when your hand is already on the razor.
+fn razor_mode_key(ed: &mut Editor, key: &str, mods: Mods) -> Option<bool> {
+    use expression_editor_core::razor::RazorAxis;
+
+    if ed.tool != Tool::Razor || ed.razor.is_empty() {
+        return None;
+    }
+    Some(match (key, mods.ctrl) {
+        // Retrograde. Ctrl keeps the rhythm and reverses only the
+        // pitches, which is MRE's split and a different musical idea:
+        // one rewrites the phrase, the other reharmonises the groove
+        // that already works.
+        ("r", false) => ed.razor_reverse(),
+        ("r", true) => ed.razor_reverse_pitches(),
+        ("v", _) => ed.razor_invert(),
+        ("x", _) => ed.razor_delete_contents(),
+        ("d", _) => ed.razor_duplicate(),
+        ("s", _) => ed.razor_select_contents(),
+        ("u", _) => ed.razor_unselect_contents(),
+        ("f", _) => ed.razor_full_lane(),
+        // The sticky modes. Pressing the one already on turns it off, so
+        // every one of them is its own way out.
+        ("i", _) => {
+            ed.razor_insert = !ed.razor_insert;
+            true
+        }
+        ("h", _) => {
+            ed.razor_axis =
+                (ed.razor_axis != Some(RazorAxis::Horizontal)).then_some(RazorAxis::Horizontal);
+            true
+        }
+        ("l", _) => {
+            ed.razor_axis =
+                (ed.razor_axis != Some(RazorAxis::Vertical)).then_some(RazorAxis::Vertical);
+            true
+        }
+        _ => return None,
+    })
+}
+
 pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
+    // Razor mode gets first refusal, because its verbs are bare letters
+    // that are tool shortcuts everywhere else.
+    if let Some(handled) = razor_mode_key(ed, key, mods) {
+        return handled;
+    }
+
     let mouse_t = ed.camera.t_at(ed.viewport.w * 0.5);
     match (key, mods.ctrl, mods.shift) {
         // Escape backs out of the most specific thing first.
@@ -2557,6 +2642,21 @@ pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
         ("Escape", _, _) => {
             if !ed.razor.is_empty() {
                 ed.razor.clear();
+                true
+            } else if ed.tool == Tool::Razor {
+                // Nothing left to cut, so the second Escape leaves the
+                // mode — MRE's "Escape exits the script". Two presses
+                // rather than one because dropping the areas and putting
+                // the tool down are separate intentions, and the common
+                // one is "not that rectangle, let me draw another".
+                //
+                // The sticky modes go with it. They are scoped to the
+                // razor, and leaving them armed for a session you come
+                // back to hours later is exactly the mode-you-forgot-you
+                // -were-in problem the momentary keys elsewhere avoid.
+                ed.razor_insert = false;
+                ed.razor_axis = None;
+                ed.tool = Tool::Select;
                 true
             } else if !ed.selection.is_empty() {
                 ed.selection.clear();
@@ -2625,6 +2725,9 @@ pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
         ("d", false, _) => set_tool(ed, Tool::NoteDraw),
         ("e", false, _) => set_tool(ed, Tool::NoteErase),
         ("p", false, _) => set_tool(ed, Tool::Pen),
+        // `x` for the razor: `r` is the momentary reference key and `k`
+        // is the razor which-key prefix, so neither was available.
+        ("x", false, _) => set_tool(ed, Tool::Razor),
         ("1", false, _) => {
             ed.grid.coarser();
             true
@@ -2671,6 +2774,52 @@ pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
                     notes,
                     seed: 0x5EED,
                 })
+        }
+        // ── nudging a razor ──────────────────────────────────────────
+        //
+        // The arrows, which is what the Reaper-Tools razor scripts bind:
+        // move by grid, move by measure, move by one track. Same shape
+        // here, with rows standing in for tracks.
+        //
+        // Guarded on there *being* a razor rather than on a mode, so
+        // there is nothing to enter and nothing to get stuck in. The
+        // areas on screen are the mode.
+        //
+        // Shift resizes instead of moving: it changes what the rectangle
+        // covers without touching the material, which is what you want
+        // when a sweep came out a grid line short. Ctrl works in
+        // measures.
+        (arrow @ ("ArrowLeft" | "ArrowRight"), ctrl, shift) if !ed.razor.is_empty() => {
+            let step = if ctrl {
+                ed.units_per_bar()
+            } else {
+                ed.grid.step(ed.units_per_beat())
+            };
+            let dt = if arrow == "ArrowLeft" { -step } else { step };
+            if shift {
+                ed.razor_resize(dt)
+            } else {
+                ed.razor_nudge(dt, 0)
+            }
+        }
+        (arrow @ ("ArrowUp" | "ArrowDown"), _, shift) if !ed.razor.is_empty() => {
+            let drows = if arrow == "ArrowUp" { 1 } else { -1 };
+            if shift {
+                ed.razor_resize_rows(drows)
+            } else {
+                ed.razor_nudge(0.0, drows)
+            }
+        }
+
+        // A razor outranks the selection, as it does for Escape.
+        //
+        // The rectangle is the more specific statement of the two, and
+        // it is the one you just drew — deleting the notes selected
+        // before you reached for the razor is never what was meant. It
+        // also carves, so this deletes exactly the rectangle rather than
+        // whole notes that happen to poke into it.
+        ("Delete", _, _) | ("Backspace", _, _) if !ed.razor.is_empty() => {
+            !drag.is_active() && ed.razor_delete_contents()
         }
         ("Delete", _, _) | ("Backspace", _, _) => {
             let notes = ed.selection.notes.clone();

@@ -38,7 +38,19 @@
       "z n": "view.memagic.fit_notes",
       "z c": "view.memagic.center",
       "z t": "view.memagic.top",
-      "z b": "view.memagic.bottom"
+      "z b": "view.memagic.bottom",
+      "k r": "razor.reverse",
+      "k v": "razor.invert",
+      "k x": "razor.delete",
+      "k d": "razor.duplicate",
+      "k s": "razor.select",
+      "k u": "razor.unselect",
+      "k f": "razor.full_lane",
+      "k p": "razor.split",
+      "k c": "razor.clear_lane",
+      "k q": "razor.clear",
+      "k 2": "razor.double",
+      "k h": "razor.halve"
     }
   },
   "keymap_context": {

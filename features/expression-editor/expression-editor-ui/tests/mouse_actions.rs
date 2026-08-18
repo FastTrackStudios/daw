@@ -900,3 +900,219 @@ fn a_razor_drag_is_still_one_undo() {
     let after: Vec<_> = ed.doc.notes.iter().map(|n| (n.start, n.row)).collect();
     assert_eq!(after, before, "one undo did not put the material back");
 }
+
+// ── razor mode ──────────────────────────────────────────────────────
+//
+// The verb table from MRE's `MRE_CMD.pdf` (see `spec/midi-editor.md`).
+// Driven through `key_down`, because the claim is that the *keys* reach
+// them — the operations themselves are `razor::`'s and tested there.
+
+/// A razor over the first two notes, with the tool armed.
+fn razor_mode(area_end: f64) -> Editor {
+    let mut ed = four_notes();
+    ed.tool = expression_editor_core::Tool::Razor;
+    ed.razor.add(RazorArea::new(0.0, area_end, ROW - 2, ROW + 2));
+    ed
+}
+
+fn press(ed: &mut Editor, key: &str) -> bool {
+    interaction::key_down(ed, &Drag::None, key, plain())
+}
+
+fn press_ctrl(ed: &mut Editor, key: &str) -> bool {
+    let mods = Mods {
+        ctrl: true,
+        ..Default::default()
+    };
+    interaction::key_down(ed, &Drag::None, key, mods)
+}
+
+fn starts(ed: &Editor) -> Vec<i64> {
+    let mut v: Vec<i64> = ed.doc.notes.iter().map(|n| n.start.round() as i64).collect();
+    v.sort_unstable();
+    v
+}
+
+/// `R` retrogrades; `Ctrl+R` reverses the pitches and keeps the rhythm.
+///
+/// MRE's split, and the one that makes them two commands rather than
+/// one: retrograde rewrites the phrase, `Ctrl+R` reharmonises a groove
+/// that already works.
+#[test]
+fn r_retrogrades_and_ctrl_r_keeps_the_rhythm() {
+    // Two notes at different pitches, both *inside* the area — the
+    // rectangle is ROW-2..ROW+2, and a note outside it is not material
+    // either of these operates on.
+    let mut ed = razor_mode(PPQ * 2.0);
+    ed.doc.notes[1].row = ROW + 2;
+    let rhythm = starts(&ed);
+    let rows_before: Vec<i32> = ed.doc.notes.iter().map(|n| n.row).collect();
+
+    assert!(press_ctrl(&mut ed, "r"), "Ctrl+R did nothing");
+    assert_eq!(starts(&ed), rhythm, "Ctrl+R moved something in time");
+    let rows_after: Vec<i32> = ed.doc.notes.iter().map(|n| n.row).collect();
+    assert_ne!(rows_after, rows_before, "Ctrl+R left the pitches alone");
+
+    // Plain R is the one that moves material in time.
+    let mut ed = razor_mode(PPQ * 2.0);
+    assert!(press(&mut ed, "r"), "R did nothing");
+    assert_ne!(starts(&ed), rhythm, "R left the rhythm untouched");
+}
+
+/// `V` inverts about the material's own centre, so twice is identity.
+#[test]
+fn v_inverts_and_inverting_twice_is_where_you_started() {
+    let mut ed = razor_mode(PPQ * 2.0);
+    ed.doc.notes[1].row = ROW + 2;
+    let before: Vec<i32> = ed.doc.notes.iter().map(|n| n.row).collect();
+
+    assert!(press(&mut ed, "v"), "V did nothing");
+    let once: Vec<i32> = ed.doc.notes.iter().map(|n| n.row).collect();
+    assert_ne!(once, before, "V did not move any pitch");
+
+    assert!(press(&mut ed, "v"));
+    let twice: Vec<i32> = ed.doc.notes.iter().map(|n| n.row).collect();
+    assert_eq!(twice, before, "inverting twice did not come back");
+}
+
+/// `X` deletes the contents, `S` selects them, `U` puts them back out.
+#[test]
+fn x_deletes_and_s_and_u_move_the_selection() {
+    let mut ed = razor_mode(PPQ * 2.0);
+    assert!(press(&mut ed, "s"), "S selected nothing");
+    assert!(!ed.selection.is_empty(), "S left the selection empty");
+    assert!(
+        !ed.razor.is_empty(),
+        "S dropped the areas — selecting is a step towards another \
+         razor operation, not a way of finishing with it",
+    );
+
+    assert!(press(&mut ed, "u"), "U did nothing");
+    assert!(ed.selection.is_empty(), "U left notes selected");
+
+    let before = ed.doc.notes.len();
+    assert!(press(&mut ed, "x"), "X deleted nothing");
+    assert!(ed.doc.notes.len() < before, "X left every note in place");
+    assert!(!ed.razor.is_empty(), "X dropped the areas");
+}
+
+/// `F` makes the area full-range, so it stops being about pitch.
+#[test]
+fn f_makes_the_area_cover_every_row() {
+    let mut ed = razor_mode(PPQ * 2.0);
+    assert!(press(&mut ed, "f"), "F did nothing");
+    let a = ed.razor.areas[0];
+    assert_eq!((a.row_lo, a.row_hi), (0, 127), "F did not go full-range");
+}
+
+/// The sticky modes toggle, and each key is its own way out.
+#[test]
+fn the_sticky_modes_toggle_off_again() {
+    use expression_editor_core::razor::RazorAxis;
+    let mut ed = razor_mode(PPQ * 2.0);
+
+    press(&mut ed, "i");
+    assert!(ed.razor_insert, "I did not arm insert mode");
+    press(&mut ed, "i");
+    assert!(!ed.razor_insert, "I did not turn itself off");
+
+    press(&mut ed, "h");
+    assert_eq!(ed.razor_axis, Some(RazorAxis::Horizontal));
+    // Mutually exclusive: L replaces H rather than joining it.
+    press(&mut ed, "l");
+    assert_eq!(ed.razor_axis, Some(RazorAxis::Vertical));
+    press(&mut ed, "l");
+    assert_eq!(ed.razor_axis, None, "L did not turn itself off");
+}
+
+/// Razor mode takes only its own letters.
+///
+/// A mode that swallowed every key would cost you undo the moment you
+/// picked up the razor. Only the verbs are claimed.
+#[test]
+fn razor_mode_leaves_the_ordinary_keys_alone() {
+    let mut ed = razor_mode(PPQ * 2.0);
+    let before = ed.doc.notes.len();
+    press(&mut ed, "x");
+    assert!(ed.doc.notes.len() < before);
+
+    // Undo is not a razor verb, and still works.
+    assert!(press_ctrl(&mut ed, "z"), "Ctrl+Z was swallowed by razor mode");
+    assert_eq!(ed.doc.notes.len(), before, "undo did not restore the notes");
+}
+
+/// And the letters mean tools again once the razor is put down.
+#[test]
+fn the_verbs_are_only_live_while_the_razor_is() {
+    let mut ed = four_notes();
+    ed.tool = expression_editor_core::Tool::Razor;
+    // Armed, but nothing drawn: there is nothing for a verb to act on,
+    // so the letters go back to being tool shortcuts.
+    press(&mut ed, "s");
+    assert_eq!(
+        ed.tool,
+        expression_editor_core::Tool::Select,
+        "`s` did not fall through to the Select shortcut",
+    );
+}
+
+/// Escape backs out one step at a time: areas first, then the mode.
+#[test]
+fn escape_drops_the_areas_then_the_mode() {
+    let mut ed = razor_mode(PPQ * 2.0);
+    ed.razor_insert = true;
+
+    assert!(press(&mut ed, "Escape"), "the first Escape did nothing");
+    assert!(ed.razor.is_empty(), "the first Escape kept the areas");
+    assert_eq!(
+        ed.tool,
+        expression_editor_core::Tool::Razor,
+        "the first Escape also left the mode — that is two intentions",
+    );
+
+    assert!(press(&mut ed, "Escape"), "the second Escape did nothing");
+    assert_eq!(ed.tool, expression_editor_core::Tool::Select);
+    assert!(!ed.razor_insert, "the sticky mode outlived the razor");
+}
+
+/// Delete acts on the razor, not on whatever was selected before it.
+#[test]
+fn delete_takes_the_razor_over_the_selection() {
+    let mut ed = razor_mode(PPQ * 2.0);
+    // A note outside the area is selected, as it would be if you had
+    // been working normally and then reached for the razor.
+    ed.selection.notes = vec![NoteId(4)];
+    let outside = span(&ed, NoteId(4));
+
+    assert!(press(&mut ed, "Delete"), "Delete did nothing");
+    assert_eq!(
+        maybe_span(&ed, NoteId(4)),
+        Some(outside),
+        "Delete took the selection instead of the razor",
+    );
+}
+
+/// The arrows nudge the areas, and Shift resizes instead.
+#[test]
+fn the_arrows_move_and_resize_the_areas() {
+    let mut ed = razor_mode(PPQ * 2.0);
+    ed.grid.enabled = true;
+    let before = ed.razor.areas[0];
+
+    press(&mut ed, "ArrowRight");
+    let moved = ed.razor.areas[0];
+    assert!(moved.t0 > before.t0, "Right did not move the area");
+    assert!(
+        (moved.width() - before.width()).abs() < 1.0,
+        "a move changed the area's width",
+    );
+
+    let mods = Mods {
+        shift: true,
+        ..Default::default()
+    };
+    interaction::key_down(&mut ed, &Drag::None, "ArrowRight", mods);
+    let resized = ed.razor.areas[0];
+    assert!(resized.width() > moved.width(), "Shift+Right did not resize");
+    assert_eq!(resized.t0, moved.t0, "a resize moved the area's start");
+}

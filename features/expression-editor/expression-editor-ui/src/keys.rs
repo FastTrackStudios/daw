@@ -293,6 +293,19 @@ pub fn label_for(action: &str) -> String {
 
 /// Action id fragment to overlay label.
 const LABELS: &[(&str, &str)] = &[
+    ("razor.reverse", "Retrograde"),
+    ("razor.invert", "Invert pitches"),
+    ("razor.delete", "Delete contents"),
+    ("razor.duplicate", "Duplicate"),
+    ("razor.split", "Split at edges"),
+    ("razor.unselect", "Unselect contents"),
+    ("razor.select", "Select contents"),
+    ("razor.full_lane", "Full lane"),
+    // Before `razor.clear`, which is a prefix of it.
+    ("razor.clear_lane", "Clear this lane"),
+    ("razor.clear", "Drop the areas"),
+    ("razor.double", "Double the length"),
+    ("razor.halve", "Halve the length"),
     ("view.memagic.fit_item", "Fit item"),
     ("view.memagic.fit_notes", "Fit notes in view"),
     ("view.memagic.center", "Centre on notes"),
@@ -338,6 +351,18 @@ pub fn is_pending() -> bool {
 /// silently: a binding naming something absent here is dead, which the
 /// test below catches.
 pub const ACTIONS: &[&str] = &[
+    "razor.reverse",
+    "razor.invert",
+    "razor.delete",
+    "razor.duplicate",
+    "razor.split",
+    "razor.select",
+    "razor.unselect",
+    "razor.full_lane",
+    "razor.clear_lane",
+    "razor.clear",
+    "razor.double",
+    "razor.halve",
     "view.memagic",
     "view.memagic.fit_item",
     "view.memagic.fit_notes",
@@ -360,6 +385,28 @@ pub fn dispatch(
     anchor: memagic::Anchor,
 ) -> bool {
     use memagic::{Horizontal, Modes, Scope, Vertical};
+
+    // The razor verbs, which are not view changes and so never reach
+    // the MeMagic table below.
+    match action {
+        "razor.reverse" => return ed.razor_reverse(),
+        "razor.invert" => return ed.razor_invert(),
+        "razor.delete" => return ed.razor_delete_contents(),
+        "razor.duplicate" => return ed.razor_duplicate(),
+        "razor.split" => return ed.razor_split(),
+        "razor.select" => return ed.razor_select_contents(),
+        "razor.unselect" => return ed.razor_unselect_contents(),
+        "razor.full_lane" => return ed.razor_full_lane(),
+        "razor.clear_lane" => return ed.razor_clear_lane(),
+        "razor.double" => return ed.razor_scale(2.0),
+        "razor.halve" => return ed.razor_scale(0.5),
+        "razor.clear" => {
+            let had = !ed.razor.is_empty();
+            ed.razor.clear();
+            return had;
+        }
+        _ => {}
+    }
 
     let cfg = memagic::Config::default();
     let modes = match action {

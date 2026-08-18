@@ -39,6 +39,40 @@ Razor-edit behaviours are decoded in-tree too
 (`behaviors/razor_edit.rs`) — 17 drag, 9 click, plus edge behaviours.
 Modelled in `razor.rs`.
 
+### Source 1b — MIDI Razor Edits (sockmonkey72)
+
+REAPER has no razor edits *in the MIDI editor*; the reference for what
+they should mean there is Jeremy Bernstein's `sockmonkey72_MIDIRazorEdits`
+([ReaPack index](https://raw.githubusercontent.com/jeremybernstein/ReaScripts/main/index.xml),
+`MIDI Editor/RazorEdits/`). Its `MRE_CMD.pdf` is the command reference,
+and this is that table — read as a **specification**, not vendored. The
+script is a modal ReaScript that you enter and leave; here the mode is
+simply having the razor tool armed.
+
+| key | MRE | here |
+|---|---|---|
+| `R` | retrograde contents | ✅ |
+| `Ctrl+R` | retrograde values only (keep the rhythm) | ✅ |
+| `S` | select contents | ✅ |
+| `U` | unselect contents | ✅ |
+| `V` | invert contents | ✅ (about the area's own pitch centre) |
+| `X` | delete contents | ✅ |
+| `D` | duplicate contents (move area) | ✅ |
+| `F` | make area → full-lane area | ✅ (full pitch range) |
+| `I` | insert mode — do not delete the target area | ✅ |
+| `H` / `L` | horizontal / vertical lock, mutually exclusive | ✅ |
+| `Delete` | delete areas + contents | ✅ (keeps the areas — see below) |
+| `Escape` | exit the script | ✅ (drop areas, back to Select) |
+| `C` | toggle note-area ↔ CC-area span | ✗ — our lanes are a view of the same notes, so an area already spans both |
+| `W` | "widget" mode | ✗ — CC-lane-specific UI with no counterpart here |
+
+Two deliberate departures. `Delete` keeps the areas rather than removing
+them, because the commonest follow-up is putting something else in the
+same region and clearing them makes that two gestures. And MRE's
+"preserving leading/trailing notes" drag variants are not modifier
+combinations here: `I` is a sticky mode instead, because a four-modifier
+chord is not a thing anyone reaches for mid-edit.
+
 The property that makes a razor different from a marquee: an area
 **slices** notes at its edges rather than selecting whole ones.
 Dragging a razor over the middle of a held note takes the middle of that
