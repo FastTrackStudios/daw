@@ -152,10 +152,6 @@ pub fn resolve(key: &str, mods: Mods) -> Vec<InputCommand> {
         proc.process(event, &ActionContext::new())
     });
 
-    // See `release`: no key-up event reaches this surface, so the press
-    // is reported as released the moment it is handled.
-    release(key, mods);
-
     // Mirror the processor's sequence state so the overlay can walk to
     // it. Extended while a prefix is live, cleared the moment it is not.
     let pending = is_pending();
@@ -173,20 +169,18 @@ pub fn resolve(key: &str, mods: Mods) -> Vec<InputCommand> {
 
 /// Tell the processor a key came back up.
 ///
-/// Called immediately after each keydown rather than from a real key-up
-/// event, because this dioxus/blitz build exposes `onkeydown` on
-/// elements and no `onkeyup`.
+/// Call this from a real `onkeyup`, and only from there. It used to be
+/// called at the end of every [`resolve`] instead — a fake release on
+/// the theory that this dioxus/blitz build had no key-up event. It has
+/// one, and faking it was what made holding `z` spasm: the processor
+/// tracks held keys precisely so OS auto-repeat cannot re-enter a
+/// sequence, and a surface that reports every press as instantly
+/// released turns that suppression off. Forty repeats a second then
+/// walked the zoom tree over and over.
 ///
-/// It is not optional. The processor tracks held keys to suppress OS
-/// auto-repeat inside a sequence — its own comment names `z z` as the
-/// leaf it must not match while `z` is held — so a surface that never
-/// reports a release leaves every key held forever and every same-key
-/// sequence silently stops working.
-///
-/// The cost of faking it: auto-repeat suppression and hold-to-keep-prefix
-/// are both off here, so holding a prefix re-enters it. Losing `z z`
-/// entirely is worse. Move this to a real `onkeyup` if the renderer ever
-/// grows one.
+/// Holding a prefix is a *state*, which is what makes spring-loading
+/// possible: `z` down opens the tree and arms the tool, `z` up closes
+/// it. Neither half works if the processor thinks the key is already up.
 pub fn release(key: &str, mods: Mods) {
     let chord = KeyChord::new(
         key_code(key),
@@ -428,10 +422,17 @@ mod tests {
         let first = resolve("z", plain());
         assert!(actions(&first).is_empty(), "z alone fired something");
         assert!(is_pending(), "z should leave a sequence half-typed");
+        release("z", plain());
 
-        let second = resolve("z", plain());
+        // `z x`, not `z z`. A sequence whose second key repeats its own
+        // prefix cannot survive being *held*: the OS repeats the key,
+        // and the leaf fires without anyone pressing it twice. Holding
+        // `z` is now the zoom tool, so `z` had to stop being its own
+        // continuation.
+        let second = resolve("x", plain());
         assert_eq!(actions(&second), vec!["view.memagic"]);
         assert!(!is_pending(), "the sequence should be finished");
+        release("x", plain());
     }
 
     #[test]
@@ -443,8 +444,13 @@ mod tests {
             ("t", "view.memagic.top"),
             ("b", "view.memagic.bottom"),
         ] {
+            // Press and release each key, the way the surface does.
+            // `resolve` no longer fakes the release for you — the
+            // processor has to be able to tell a hold from a press.
             resolve("z", plain());
+            release("z", plain());
             let got = actions(&resolve(second, plain()));
+            release(second, plain());
             assert_eq!(got, vec![want.to_string()], "z {second}");
         }
     }

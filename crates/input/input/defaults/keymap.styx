@@ -33,7 +33,7 @@
       "y": "operator:yank"
     },
     "editor": {
-      "z z": "view.memagic",
+      "z x": "view.memagic",
       "z i": "view.memagic.fit_item",
       "z n": "view.memagic.fit_notes",
       "z c": "view.memagic.center",

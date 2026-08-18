@@ -148,13 +148,21 @@ pub fn Canvas(
     // live, which is the overlay's cue to stay hidden.
     let mut which_key = use_signal(Vec::<keys::Continuation>::new);
 
-    // The tool to go back to when `z` is released, if the hold was used.
+    // The tool to go back to when `z` is released.
     //
-    // `Some` means a spring-loaded zoom is live. It also means the hold
-    // has been *used* — it is only set once a drag actually starts, so a
-    // tap that never drags leaves it `None` and the which-key tree
-    // survives for its second key.
+    // `Some` means a spring-loaded zoom is live. It is set the moment
+    // `z` goes down — the toolbar reads `ed.tool`, so arming late meant
+    // holding `z` looked like nothing was happening.
     let mut spring_from = use_signal(|| None::<expression_editor_core::Tool>);
+
+    // Whether the hold got *used*, which is a separate question from
+    // whether it is live now that arming happens on the way down.
+    //
+    // A drag sets it, a key press does not, and the release reads it to
+    // decide whether the which-key tree is finished or still waiting for
+    // its second key. That is what keeps `z`-as-prefix and `z`-as-tool
+    // from having to be told apart by a timer.
+    let mut spring_used = use_signal(|| false);
 
     // The viewport is followed by `ExpressionEditor`, which is the only
     // component that knows the whole chrome. See the effect there.
@@ -309,6 +317,23 @@ pub fn Canvas(
                 // A half-typed sequence owns the key too: `z` on its way
                 // to `z i` must not also fire the tool shortcut.
                 which_key.set(keys::continuations());
+
+                // Arm the zoom tool the instant `z` goes down, not at
+                // the first drag. The toolbar reads `ed.tool`, so this
+                // is what makes holding `z` *look* like what it is —
+                // waiting for the drag to arm it left the button dark
+                // while the surface was already in zoom mode.
+                //
+                // Tap and hold stay one idea: this only arms, and the
+                // key-up decides. A tap arms and disarms without you
+                // seeing it, and leaves the tree open for `z i`.
+                if keys::zoom_prefix_held() && spring_from.read().is_none() {
+                    let previous = editor.read().tool;
+                    if previous != expression_editor_core::Tool::Zoom {
+                        spring_from.set(Some(previous));
+                        editor.write().tool = expression_editor_core::Tool::Zoom;
+                    }
+                }
                 if ran || keys::is_pending() {
                     e.prevent_default();
                     return;
@@ -440,25 +465,33 @@ pub fn Canvas(
             },
             onkeyup: move |e: KeyboardEvent| {
                 hover_mods.set(mods_of(e.modifiers()));
+                // The processor has to hear about the release, or it
+                // goes on believing the key is held and OS auto-repeat
+                // walks the sequence tree on its own. See `keys::release`.
+                keys::release(&e.key().to_string(), mods_of(e.modifiers()));
                 // `R` is momentary: references drop back the instant it
                 // is released, so it can never be left on by accident.
                 match e.key().to_string().as_str() {
                     "r" => editor.write().refs_to_front = false,
                     "m" => editor.write().reference_to_front = false,
-                    // Releasing `z` puts the tool back — but only if the
-                    // hold was *used*. Tap it and the zoom tree stays
-                    // open for its second key (`z i`); hold it and drag
-                    // and you are back where you were the moment you let
-                    // go.
+                    // Releasing `z` always puts the tool back — it was
+                    // armed on the way down, so the spring is loaded
+                    // whether or not you did anything with it.
                     //
-                    // No timer decides which. The gesture does: a drag
-                    // marks the hold used, a key press does not, and
-                    // release just asks which happened. Hold-versus-tap
-                    // by timeout is where this pattern usually goes
-                    // wrong — it makes a slow tap into a hold.
+                    // What the release still has to decide is the
+                    // *tree*: a hold that got used is finished, and a
+                    // tap is only half a sequence. So a drag closes the
+                    // overlay and a bare tap leaves it open for `z i`.
+                    //
+                    // No timer decides which. The gesture does — which
+                    // is the point. Hold-versus-tap by timeout is where
+                    // this pattern usually goes wrong: it turns a slow
+                    // tap into a hold.
                     "z" => {
                         if let Some(previous) = spring_from.take() {
                             editor.write().tool = previous;
+                        }
+                        if spring_used.take() {
                             which_key.set(Vec::new());
                             keys::cancel();
                         }
@@ -537,16 +570,12 @@ pub fn Canvas(
                     }
                     let (x, y) = local(&e);
                     let m = mods_of(e.modifiers());
-                    // A drag while the zoom prefix is held is the tool,
-                    // not the start of a key sequence. Arming here — at
-                    // the press rather than at the key — is what lets a
-                    // tap still mean `z i`.
-                    if keys::zoom_prefix_held() && spring_from.read().is_none() {
-                        let previous = editor.read().tool;
-                        if previous != expression_editor_core::Tool::Zoom {
-                            spring_from.set(Some(previous));
-                            editor.write().tool = expression_editor_core::Tool::Zoom;
-                        }
+                    // A drag while the zoom prefix is held spends the
+                    // hold. The tool is already armed (see the keydown),
+                    // so all this does is tell the release that the
+                    // sequence is over and must not wait for `z i`.
+                    if keys::zoom_prefix_held() && spring_from.read().is_some() {
+                        spring_used.set(true);
                     }
                     // The lock stops you *editing*, not looking.
                     //

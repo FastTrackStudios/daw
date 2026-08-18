@@ -104,6 +104,10 @@ fn Seg(
                     white-space: nowrap;",
             title: "{title}",
             "data-testid": testid,
+            // The highlight is a background colour, and a test that
+            // asserts on one is really asserting on the theme. This
+            // says the same thing in a form that survives a repaint.
+            "data-active": "{active}",
             onclick: move |e| onclick.call(e),
             {children}
         }
@@ -193,6 +197,12 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
                 for t in Tool::ALL {
                     Seg {
                         key: "{t:?}",
+                        // `format!` rather than an rsx literal: rsx
+                        // interpolates `"tool-{t:?}"` only when it is
+                        // the whole value, and `.to_lowercase()` on the
+                        // end makes it an ordinary method call on an
+                        // ordinary string — which shipped the braces.
+                        testid: format!("tool-{t:?}").to_lowercase(),
                         active: tool == t,
                         accent: true,
                         title: t.label().to_string(),

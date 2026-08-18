@@ -369,3 +369,114 @@ async fn the_renderer_paints_the_cursor_widget() -> dioxus_test::Result<()> {
     );
     Ok(())
 }
+
+// ── the spring-loaded zoom key ───────────────────────────────────────
+//
+// `z` is one key wearing two hats: tap it and it is a which-key prefix
+// waiting for a target (`z i`, `z n`), hold it and it is the zoom tool
+// for as long as you hold it. Both of these went wrong in ways only a
+// held-key test can see, so they are pinned here.
+
+/// Focus the surface that owns the key handlers, and hand back the roll.
+fn focused(tester: &dioxus_test::DocumentTester) -> dioxus_test::Result<()> {
+    tester.query(by_testid("canvas-cell")).immediately()?.focus();
+    Ok(())
+}
+
+fn tool_is_active(tester: &dioxus_test::DocumentTester, tool: &str) -> bool {
+    tester
+        .query(by_testid(&format!("tool-{tool}")))
+        .immediately()
+        .ok()
+        .and_then(|el| el.attribute("data-active"))
+        .as_deref()
+        == Some("true")
+}
+
+/// Holding `z` arms the zoom tool *visibly*, and releasing it hands the
+/// surface back.
+///
+/// Arming used to wait for the first drag, on the theory that a tap must
+/// stay a prefix. It does — but the toolbar reads the armed tool, so
+/// waiting meant holding `z` looked like nothing had happened, and you
+/// could not tell a live zoom hold from a dead one.
+#[tokio::test]
+async fn holding_z_lights_up_the_zoom_tool() -> dioxus_test::Result<()> {
+    use dioxus_test::keyboard_types::{Key, Modifiers};
+
+    let tester = render(Surface).with_window_size(1000, 620).build();
+    tester.query(by_testid("roll")).immediately()?;
+    focused(&tester)?;
+
+    assert!(
+        !tool_is_active(&tester, "zoom"),
+        "the zoom tool was armed before anything was pressed",
+    );
+
+    tester.key_down(Key::Character("z".into()), Modifiers::empty());
+    tester.drain();
+    assert!(
+        tool_is_active(&tester, "zoom"),
+        "holding z did not arm the zoom tool",
+    );
+
+    tester.key_up(Key::Character("z".into()), Modifiers::empty());
+    tester.drain();
+    assert!(
+        !tool_is_active(&tester, "zoom"),
+        "the zoom tool stayed armed after z came back up",
+    );
+    Ok(())
+}
+
+/// OS auto-repeat is not a second press.
+///
+/// Holding a key makes the OS resend `keydown` dozens of times a second.
+/// The sequence resolver counts presses, so those repeats used to walk
+/// the zoom tree over and over — the surface visibly spasmed, and the
+/// `z z` binding fired without anyone pressing `z` twice. Two things fix
+/// it and both are load-bearing: the repeat flag is ignored here, and
+/// the processor is told about the *real* release rather than a fake one
+/// issued at keydown.
+#[tokio::test]
+async fn auto_repeat_does_not_walk_the_zoom_tree() -> dioxus_test::Result<()> {
+    use dioxus_test::keyboard_types::{Key, Modifiers};
+
+    let tester = render(Surface).with_window_size(1000, 620).build();
+    tester.query(by_testid("roll")).immediately()?;
+    focused(&tester)?;
+
+    let before = {
+        let el = tester.query(by_testid("roll")).immediately()?;
+        el.size()
+    };
+
+    tester.key_down(Key::Character("z".into()), Modifiers::empty());
+    tester.drain();
+    for _ in 0..40 {
+        tester.key_repeat(Key::Character("z".into()), Modifiers::empty());
+        tester.drain();
+    }
+
+    // Still exactly one thing held, still the zoom tool, still nothing
+    // fired: forty repeats must be indistinguishable from the one press
+    // that caused them.
+    assert!(
+        tool_is_active(&tester, "zoom"),
+        "the zoom tool was lost somewhere in the repeats",
+    );
+
+    tester.key_up(Key::Character("z".into()), Modifiers::empty());
+    tester.drain();
+    assert!(
+        !tool_is_active(&tester, "zoom"),
+        "one release did not undo the hold, so a repeat had armed it again",
+    );
+    let after = tester.query(by_testid("roll")).immediately()?.size();
+    assert_eq!(
+        before, after,
+        "the repeats zoomed the view — a held prefix fired its own binding",
+    );
+    Ok(())
+}
+
