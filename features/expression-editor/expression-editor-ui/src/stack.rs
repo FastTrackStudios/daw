@@ -25,6 +25,7 @@ use expression_editor_core::tracks::StackRow;
 use expression_editor_core::{Editor, Mode, Viewport};
 
 use dioxus::prelude::*;
+use dioxus_elements::input_data::MouseButton;
 
 use crate::{canvas, theme};
 
@@ -377,6 +378,8 @@ const MIN_LANE: f32 = 22.0;
 #[component]
 pub fn StackView(editor: Signal<Editor>) -> Element {
     let mut editor = editor;
+    // Where a middle-drag pan last was.
+    let mut panning = use_signal(|| None::<(f64, f64)>);
     let ed = editor.read();
     let vp = ed.viewport;
     let lanes = lanes(&ed, ACTIVE_BOOST, ed.lane_floor().max(MIN_LANE));
@@ -400,8 +403,30 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
                     }
                 });
             },
+            onpointermove: move |e: PointerEvent| {
+                let Some((lx, ly)) = panning() else { return };
+                let c = e.data().element_coordinates();
+                let mut ed = editor.write();
+                // Time on the shared camera, and the stack's own scroll
+                // for vertical — the tracks are stacked in a list, not
+                // laid out on a pitch axis.
+                ed.pan_px(c.x - lx, 0.0);
+                ed.stack_scroll = (ed.stack_scroll - (c.y - ly)).max(0.0);
+                drop(ed);
+                panning.set(Some((c.x, c.y)));
+            },
+            onpointerup: move |_| panning.set(None),
+            onpointerleave: move |_| panning.set(None),
             onpointerdown: move |e: PointerEvent| {
                 let c = e.data().element_coordinates();
+                // Middle-drag pans, the same as it does on the roll. The
+                // stack is the view with the *most* to scroll — every
+                // track at once — and it was the one view with no way to
+                // move around at all.
+                if matches!(e.trigger_button(), Some(MouseButton::Auxiliary)) {
+                    panning.set(Some((c.x, c.y)));
+                    return;
+                }
                 let y = c.y - canvas::RULER_H + editor.read().stack_scroll;
                 // Resolve against a snapshot: the read guard has to be
                 // gone before the write below.

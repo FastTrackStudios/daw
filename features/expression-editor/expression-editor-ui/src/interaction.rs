@@ -1176,6 +1176,21 @@ fn paint_at(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64) {
     ed.apply_live(&Edit::AddNote(Box::new(note)));
 }
 
+/// The view gestures every surface owes the user, whatever it is showing.
+///
+/// Middle-drag pans. It is not a piano-roll feature — it is how you get
+/// around — and a surface that ignored it left the user stuck with the
+/// scrollbar-less view they happened to be looking at. The roll honoured
+/// it and the stack and the strip did not, which is the sort of gap
+/// nobody reports as a bug because it reads as "that view is just like
+/// that".
+///
+/// Returns the drag to run, or `None` if this press is not a view
+/// gesture and the surface should handle it itself.
+pub fn view_press(button: u16, x: f64, y: f64) -> Option<Drag> {
+    (button == 1).then_some(Drag::Pan { last: (x, y) })
+}
+
 /// The tool-driven path, for expression tools the map defers to.
 fn legacy_pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16) -> Drag {
     // Right-drag pans regardless of tool.

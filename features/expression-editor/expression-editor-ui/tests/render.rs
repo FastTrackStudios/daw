@@ -81,7 +81,7 @@ fn the_editor_renders_its_toolbar_canvas_and_status_bar() {
 
 #[test]
 fn the_top_bar_follows_the_mode() {
-    use expression_editor_core::{Mode, ModeFamily};
+    use expression_editor_core::Mode;
 
     let mut mpe = demo_editor(false, false);
     mpe.set_mode(Mode::Mpe);

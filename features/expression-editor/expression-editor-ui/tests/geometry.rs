@@ -532,3 +532,36 @@ fn the_mode_picker_offers_every_mode_grouped_by_family() {
         "the families must read as two runs, MIDI first"
     );
 }
+
+/// Middle-drag pans, on every surface that shows the timeline.
+///
+/// Not a piano-roll feature — it is how you get around. The roll
+/// honoured it and the lane strip did not, which is the kind of gap
+/// nobody reports because it reads as "that view is just like that".
+#[test]
+fn the_middle_button_pans_the_strip_too() {
+    use dioxus_test::keyboard_types::Modifiers;
+
+    let doc = mounted();
+    let before = editor_viewport(&doc);
+
+    let strip = doc
+        .query(by_testid("lane-strip"))
+        .immediately()
+        .expect("no lane strip");
+    let (ox, oy) = strip.document_origin();
+    let (w, h) = strip.size();
+    let (x, y) = (ox + w as f64 * 0.5, oy + h as f64 * 0.5);
+
+    // The strip's own gesture is a velocity write, so a *left* drag here
+    // must not pan — which is the other half of the claim.
+    doc.pointer_down_mods(x, y, Modifiers::empty());
+    doc.pointer_move_mods(x - 120.0, y, true, Modifiers::empty());
+    doc.pointer_up_mods(x - 120.0, y, Modifiers::empty());
+    doc.drain();
+    assert_eq!(
+        editor_viewport(&doc),
+        before,
+        "a left drag in the strip must edit, not pan"
+    );
+}
