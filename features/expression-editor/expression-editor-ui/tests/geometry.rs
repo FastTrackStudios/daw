@@ -180,7 +180,6 @@ fn measure_the_chrome() {
         "roll",
         "toolbar",
         "track-switcher",
-        "chord-box",
         "lane-strip",
         "status-bar",
         "inspector",
@@ -214,10 +213,7 @@ fn the_chrome_is_the_size_its_constants_claim() {
             .1
     };
 
-    let rows = [
-        ("toolbar", "chord-box", sizing::TOOLBAR_H),
-        ("chord-box", "canvas-cell", sizing::CHORD_H),
-    ];
+    let rows = [("toolbar", "canvas-cell", sizing::TOOLBAR_H)];
     for (id, next, want) in rows {
         let got = top_of(next) - top_of(id);
         assert!(

@@ -213,7 +213,6 @@ pub fn ExpressionEditor(
                     color: {theme::TEXT}; font-family: system-ui, sans-serif;",
             toolbar::Toolbar { editor, drag, drawer }
             switcher::TrackSwitcher { editor }
-            toolbar::ChordBox { editor }
             div {
                 style: "display: flex; flex: 1 1 auto; min-height: 0;",
                 div {

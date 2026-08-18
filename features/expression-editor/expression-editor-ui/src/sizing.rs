@@ -58,8 +58,12 @@ use crate::canvas;
 pub const TOOLBAR_H: f64 = 60.0;
 /// The track switcher under it.
 pub const SWITCHER_H: f64 = 28.0;
-/// The chord/selection row.
-pub const CHORD_H: f64 = 30.0;
+/// The chord/selection row — **gone**, and kept at zero rather than
+/// deleted so the arithmetic below still reads as a list of rows.
+///
+/// It repeated the inspector for most of its 30px; the chord name and
+/// its pitches moved into the status bar, where they cost nothing.
+pub const CHORD_H: f64 = 0.0;
 /// The status bar along the bottom.
 pub const STATUS_H: f64 = 26.0;
 /// The inspector down the right, open.

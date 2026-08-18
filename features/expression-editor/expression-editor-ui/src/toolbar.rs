@@ -510,42 +510,36 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
 /// selected — so it says something useful while you navigate rather
 /// than going blank the moment you deselect.
 ///
-/// The blend sliders live here rather than in the status bar because
-/// they act on *the selection*, which is exactly what this row is
-/// about; the status bar is for session-wide settings.
+/// **In the status bar, not a row of its own.** It had a full 30px band
+/// under the toolbar, and spent most of it repeating the inspector: the
+/// note name, channel, zone count, vibrato and drift it showed on the
+/// right are the inspector's NOTE and PITCH SHAPE sections verbatim. The
+/// chord *name* and its member pitches are the only things here the
+/// inspector cannot say, and they fit beside "3 selected" — so the roll
+/// gets the row back and no fact has two homes.
 #[component]
 pub fn ChordBox(editor: Signal<Editor>) -> Element {
     let ed = editor.read();
-    let single = ed.selection.notes.first().copied();
-    let analysis = single.and_then(|id| ed.doc.note(id)).map(|n| {
-        let ups = ed.doc.time_base.units_per_second(ed.bpm);
-        let d = expression_editor_core::blob::decompose(&n.pitch, n.start, n.end, 64, ups, 0.0);
-        (
-            expression_editor_core::tuning::note_name(n.row),
-            n.channel,
-            n.zone_count(),
-            d.modulation_depth(),
-            d.drift_extent(),
-        )
-    });
     let pitches = ed.chord_pitches();
     let name = ed.current_chord().map(|c| chord::name(&c));
     let note_names: Vec<String> = pitches
         .iter()
         .map(|&p| expression_editor_core::tuning::note_name(p))
         .collect();
-    let from_selection = !ed.selection.notes.is_empty();
     drop(ed);
+
+    // Nothing to analyse, nothing to show. In its own row this had to
+    // draw *something* or leave a visibly empty band; in the status bar
+    // it can simply not be there.
+    if pitches.is_empty() {
+        return rsx! {};
+    }
 
     rsx! {
         div {
             "data-testid": "chord-box",
-            style: "display: flex; flex: 0 0 auto; align-items: center; gap: 10px; \
-                    box-sizing: border-box; height: {crate::sizing::CHORD_H}px; \
-                    padding: 0 10px; \
-                    background: {theme::SURFACE_BAR}; \
-                    border-bottom: 1px solid {theme::PANEL_BORDER}; \
-                    font-family: system-ui, sans-serif; overflow: hidden;",
+            style: "display: flex; align-items: center; gap: 6px; flex: 0 0 auto; \
+                    overflow: hidden; font-family: system-ui, sans-serif;",
 
             span {
                 style: "font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; \
@@ -554,51 +548,28 @@ pub fn ChordBox(editor: Signal<Editor>) -> Element {
             }
             if let Some(name) = name {
                 span {
-                    style: "font-size: 15px; font-weight: 600; color: {theme::GOLD}; \
-                            min-width: 88px; flex: 0 0 auto;",
+                    style: "font-size: 12px; font-weight: 600; color: {theme::GOLD}; \
+                            flex: 0 0 auto;",
                     "{name}"
                 }
             } else {
                 span {
-                    style: "font-size: 12px; color: {theme::TEXT_FAINT}; min-width: 88px; flex: 0 0 auto;",
-                    if pitches.len() == 1 { "single note" } else { "—" }
+                    style: "font-size: 10px; color: {theme::TEXT_FAINT}; flex: 0 0 auto;",
+                    "single note"
                 }
             }
             // The constituent notes, so a surprising name can be checked
             // against what is actually sounding.
             div {
-                style: "display: flex; gap: 4px; align-items: center; overflow: hidden;",
+                style: "display: flex; gap: 3px; align-items: center; overflow: hidden;",
                 for (i, n) in note_names.iter().enumerate() {
                     span {
                         key: "cn{i}",
-                        style: "font-size: 10px; font-family: ui-monospace, monospace; \
+                        style: "font-size: 9px; font-family: ui-monospace, monospace; \
                                 color: {theme::TEXT}; background: {theme::CONTROL}; \
                                 border: 1px solid {theme::PANEL_BORDER}; \
-                                border-radius: 3px; padding: 1px 5px; flex: 0 0 auto;",
+                                border-radius: 3px; padding: 0 4px; flex: 0 0 auto;",
                         "{n}"
-                    }
-                }
-            }
-            div {
-                style: "margin-left: auto; display: flex; align-items: center; gap: 10px; \
-                        flex: 0 0 auto; font-family: ui-monospace, monospace; \
-                        font-size: 10px; color: {theme::TEXT_DIM};",
-
-                if let Some((name, channel, zones, vibrato, drift)) = analysis {
-                    span { style: "color: {theme::TEXT};", "{name}" }
-                    if let Some(ch) = channel {
-                        span { "ch {ch}" }
-                    }
-                    if zones > 1 {
-                        span { style: "color: {theme::ZONE};", "{zones} zones" }
-                    }
-                    span { "vib {vibrato * 100.0:.0}¢" }
-                    span { "drift {drift * 100.0:+.0}¢" }
-                    // The blend sliders and technique controls live
-                    // in the inspector; this row keeps the readouts.
-                } else {
-                    span { style: "font-size: 9px;",
-                        if from_selection { "from selection" } else { "at playhead" }
                     }
                 }
             }
@@ -810,6 +781,7 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
             div {
                 style: "margin-left: auto; display: flex; align-items: center; gap: 12px; \
                         font-family: ui-monospace, monospace; flex: 0 0 auto;",
+                ChordBox { editor }
                 if razors > 0 {
                     span { style: "color: {theme::RAZOR};", "razor {razors}" }
                 }
