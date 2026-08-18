@@ -228,12 +228,15 @@ fn every_note_has_its_own_channel_so_expression_is_attributable() {
 // ── on the real surface ──────────────────────────────────────────────
 
 #[tokio::test]
-async fn a_ctrl_drag_writes_the_active_dimension_and_only_that_one()
+async fn a_pen_stroke_writes_the_active_dimension_and_only_that_one()
 -> dioxus_test::Result<()> {
-    // Ctrl+drag is the pen override. What it writes must land in the
-    // dimension the toolbar has active — a stroke that also moved pitch
-    // while you were shaping timbre is the failure this catches.
+    // What the pen writes must land in the dimension the toolbar has
+    // active — a stroke that also moved pitch while you were shaping
+    // timbre is the failure this catches. (Ctrl used to be the pen
+    // override; under the FTS map Ctrl is the razor, so the pen is
+    // reached by arming the tool.)
     let mut ed = mpe_editor();
+    ed.tool = Tool::Pen;
     ed.dimension = Dimension::Timbre;
     ed.selection.notes = ed.doc.notes.iter().map(|n| n.id).collect();
     stage(ed);
@@ -251,7 +254,7 @@ async fn a_ctrl_drag_writes_the_active_dimension_and_only_that_one()
     // `drain` mid-gesture, `pump` once at the end — pumping waits, and a
     // move that renders nothing waits the full second. See
     // `DocumentTester::drain`.
-    tester.pointer_down_mods(x0, y0, Modifiers::CONTROL);
+    tester.pointer_down_mods(x0, y0, Modifiers::empty());
     tester.drain();
     for i in 1..=20 {
         let t = i as f64 / 20.0;
@@ -259,11 +262,11 @@ async fn a_ctrl_drag_writes_the_active_dimension_and_only_that_one()
             x0 + (x1 - x0) * t,
             y0 + (y1 - y0) * t,
             true,
-            Modifiers::CONTROL,
+            Modifiers::empty(),
         );
         tester.drain();
     }
-    tester.pointer_up_mods(x1, y1, Modifiers::CONTROL);
+    tester.pointer_up_mods(x1, y1, Modifiers::empty());
     let _ = tester.pump().await;
 
     let html = tester.query(by_testid("readout")).immediately()?.inner_html();

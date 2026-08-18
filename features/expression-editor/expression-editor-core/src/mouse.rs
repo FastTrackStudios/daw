@@ -657,9 +657,12 @@ impl MouseMap {
             // Select.
             b(C::PianoRoll, G::Drag, N, Action::MarqueeSelect),
             b(C::PianoRoll, G::Drag, S, Action::MarqueeAdd),
-            // Create. Alt alone inserts; Shift lets the same drag set the
-            // length, which is the difference between placing a note and
-            // drawing one.
+            // Create. Alt alone places a note of the current grid length
+            // and lets you carry it; Shift sizes it instead. The two are
+            // phases of one gesture rather than separate bindings — hold
+            // Shift part way through and the note pins where it is so you
+            // can pull out its length, let go and you are carrying it
+            // again at that length.
             b(C::PianoRoll, G::Drag, AL, Action::InsertNote),
             b(C::PianoRoll, G::Drag, SA, Action::InsertNoteDragToExtend),
             b(C::PianoRoll, G::Drag, CA, Action::InsertNoteNoSnap),

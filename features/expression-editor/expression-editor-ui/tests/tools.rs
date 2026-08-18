@@ -106,12 +106,23 @@ fn Surface() -> Element {
         .iter()
         .map(|n| n.curve(Dimension::Pitch).len())
         .sum();
+    // The most recently added note's length, in whole grid cells. The
+    // insert gesture's two phases differ in exactly this, and a length
+    // in document units would make the assertion a magic number.
+    let step = ed.grid.step(ed.units_per_beat());
+    let cells = ed
+        .doc
+        .notes
+        .last()
+        .map(|n| ((n.end - n.start) / step).round() as usize)
+        .unwrap_or(0);
     let readout = format!(
-        "notes={} sel={} points={} undo={} tool={:?} dim={:?}",
+        "notes={} sel={} points={} undo={} cells={cells} razors={} tool={:?} dim={:?}",
         ed.doc.notes.len(),
         ed.selection.notes.len(),
         points,
         ed.can_undo() as u8,
+        ed.razor.areas.len(),
         ed.tool,
         ed.dimension,
     );
@@ -152,6 +163,7 @@ enum Mod {
     Shift,
     Alt,
     Ctrl,
+    ShiftAlt,
 }
 
 impl Mod {
@@ -161,6 +173,7 @@ impl Mod {
             Mod::Shift => Modifiers::SHIFT,
             Mod::Alt => Modifiers::ALT,
             Mod::Ctrl => Modifiers::CONTROL,
+            Mod::ShiftAlt => Modifiers::SHIFT | Modifiers::ALT,
         }
     }
 }
@@ -378,17 +391,34 @@ async fn alt_drag_paints_notes() -> dioxus_test::Result<()> {
     Ok(())
 }
 
+/// Ctrl is the razor, and nothing else.
+///
+/// It was the pen's modifier, in two places at once — the map said so
+/// *and* `legacy_pointer_down` forced `Tool::Pen` whenever Ctrl was
+/// down, which would have outranked the binding and drawn a curve where
+/// the map promised a razor.
+///
+/// Razor is a *selection* of time, so this asserts what it selects and
+/// that it left the material alone: a gesture that cut a span and also
+/// wrote curve points would be doing two jobs.
 #[tokio::test]
-async fn ctrl_drag_is_the_pen() -> dioxus_test::Result<()> {
-    // PenOverride: freehand into the active dimension from any tool.
+async fn ctrl_drag_is_the_razor() -> dioxus_test::Result<()> {
     let mut before = editor_with_notes(Tool::Select, Mode::Mpe);
     before.selection.notes = before.doc.notes.iter().map(|n| n.id).collect();
     before.dimension = Dimension::Pitch;
+    let notes = before.doc.notes.len();
+
     let html = drag(before, (0.05, 0.6), (0.9, 0.35), Mod::Ctrl).await?;
     assert!(
-        field(&html, "points") > 0,
-        "ctrl-drag wrote no curve points: {html}"
+        field(&html, "razors") > 0,
+        "ctrl-drag cut no razor area: {html}"
     );
+    assert_eq!(
+        field(&html, "points"),
+        0,
+        "and must not also draw a curve: {html}"
+    );
+    assert_eq!(field(&html, "notes"), notes, "nor change the notes: {html}");
     Ok(())
 }
 
@@ -509,5 +539,52 @@ async fn select_still_marquees_because_it_claims_nothing() -> dioxus_test::Resul
     let html = drag(before, (0.02, 0.05), (0.98, 0.95), Mod::None).await?;
     assert!(field(&html, "sel") > 0, "{html}");
     assert_eq!(field(&html, "notes"), notes, "{html}");
+    Ok(())
+}
+
+// ── inserting a note ─────────────────────────────────────────────────
+
+/// Alt places a note one grid cell long, and the drag carries it.
+///
+/// Not a zero-width note you must drag out before it is a note at all:
+/// the common case is "put an eighth here", and that should be a click's
+/// worth of work with the drag reserved for saying *where*.
+#[tokio::test]
+async fn alt_places_a_note_of_the_grid_length_and_carries_it() -> dioxus_test::Result<()> {
+    let mut before = editor_with_notes(Tool::Select, Mode::Midi);
+    before.grid.enabled = true;
+    before.grid.division = 1.0 / 8.0;
+    let step = before.grid.step(before.units_per_beat());
+    let notes = before.doc.notes.len();
+
+    let html = drag(before, (0.1, 0.7), (0.6, 0.3), Mod::Alt).await?;
+    assert_eq!(field(&html, "notes"), notes + 1, "Alt+drag must insert one note");
+    assert_eq!(
+        field(&html, "cells"),
+        1,
+        "a placed note stays one grid cell however far it is carried: {html}"
+    );
+    let _ = step;
+    Ok(())
+}
+
+/// And Shift mid-gesture sizes it instead of moving it.
+///
+/// The phases are switchable while the button is down — that is the
+/// whole design — so this drags with Shift held from the start, which is
+/// the same code path a mid-drag grab of Shift lands in.
+#[tokio::test]
+async fn alt_shift_sizes_the_note_instead_of_moving_it() -> dioxus_test::Result<()> {
+    let mut before = editor_with_notes(Tool::Select, Mode::Midi);
+    before.grid.enabled = true;
+    before.grid.division = 1.0 / 8.0;
+    let notes = before.doc.notes.len();
+
+    let html = drag(before, (0.1, 0.5), (0.8, 0.5), Mod::ShiftAlt).await?;
+    assert_eq!(field(&html, "notes"), notes + 1, "still inserts exactly one");
+    assert!(
+        field(&html, "cells") > 1,
+        "a sized note should be longer than the cell it started as: {html}"
+    );
     Ok(())
 }

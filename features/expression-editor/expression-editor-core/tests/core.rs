@@ -2954,7 +2954,10 @@ fn switching_modes_is_reversible() {
     ed.set_mode(Mode::Mpe);
     assert!(matches!(ed.row_space, RowSpace::Pitch));
     assert_eq!(ed.overlays, vec![Dimension::Pitch]);
-    assert_eq!(ed.mouse.name, "REAPER-like");
+    // Back to the default map, which is FTS. The claim is reversibility,
+    // not which map: leaving Guitar must undo Guitar's preset rather
+    // than leaving the riffer bindings behind.
+    assert_eq!(ed.mouse.name, "FTS");
 }
 
 // ── clipboard and the context menu ───────────────────────────────────
@@ -4696,3 +4699,4 @@ fn grid_editor() -> Editor {
     ed.reset_view();
     ed
 }
+

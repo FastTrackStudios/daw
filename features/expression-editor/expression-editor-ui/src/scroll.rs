@@ -161,24 +161,45 @@ mod tests {
         );
     }
 
+    /// The editor scrolls with the shared scheme, and zooms on its own.
+    ///
+    /// `Alt+Scroll` zoomed here until `Alt` became "create". A modifier
+    /// that means one thing on a drag and another on a wheel is no more
+    /// derivable than one that changes meaning with the key held beside
+    /// it — so the editor's table keeps the scrolling half of the shared
+    /// scheme and drops the zooming half, which moved to held `Z`.
+    ///
+    /// The arrange view's `normal` table is untouched: it has no `Z`
+    /// tool and no `Alt`-creates rule, so nothing there needs to move.
     #[test]
-    fn the_editor_resolves_the_shared_scheme() {
+    fn the_editor_scrolls_with_the_shared_scheme() {
         assert_eq!(
             act(0.0, 10.0, mods(false, false, false)).as_deref(),
             Some("view.vscroll")
         );
         assert_eq!(
-            act(0.0, 10.0, mods(false, true, false)).as_deref(),
-            Some("view.zoom_v")
+            act(0.0, 10.0, mods(false, false, true)).as_deref(),
+            Some("view.hscroll")
         );
-        assert_eq!(
-            act(0.0, 10.0, mods(false, true, true)).as_deref(),
-            Some("view.zoom_h")
-        );
-        assert_eq!(
-            act(0.0, 10.0, mods(true, true, false)).as_deref(),
-            Some("view.zoom_both")
-        );
+    }
+
+    /// And `Alt` is not a zoom here any more, in any combination.
+    ///
+    /// The bug this pins is the one that was reported: holding Option to
+    /// insert a note and scrolling zoomed the view instead.
+    #[test]
+    fn alt_no_longer_zooms_the_editor() {
+        for m in [
+            mods(false, true, false),
+            mods(false, true, true),
+            mods(true, true, false),
+        ] {
+            assert_eq!(
+                act(0.0, 10.0, m),
+                None,
+                "Alt is the create modifier now, not a zoom: {m:?}"
+            );
+        }
     }
 
     #[test]
@@ -193,7 +214,6 @@ mod tests {
     fn the_hint_describes_the_bindings_rather_than_a_fixed_string() {
         let h = hint();
         assert!(h.contains("shift scrolls sideways"), "{h}");
-        assert!(h.contains("alt zooms pitch"), "{h}");
         // The failure this catches is the old one: a hint that says the
         // plain wheel zooms when the config says it scrolls.
         assert!(!h.contains("scroll zooms"), "stale hint: {h}");

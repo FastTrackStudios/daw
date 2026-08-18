@@ -262,11 +262,12 @@ pub fn DevApp() -> Element {
                         ),
                         for (i, entry) in entries().into_iter().enumerate() {
                         div {
-                            // The key belongs on the outermost node of the
-                            // loop body, and the caption below is
-                            // conditional — so the group wraps in a div
-                            // rather than the key sitting on the button.
-                            key: "{entry.arg}",
+                            // Keyed by *kind and* arg. The args are not
+                            // unique across kinds — `drums` and `guitar`
+                            // are both a job and a fixture — and a
+                            // duplicate key is not a warning here, it is
+                            // `invalid key` and a dead window.
+                            key: "{entry.kind.label()}:{entry.arg}",
                             // A caption whenever the kind changes, so the
                             // jobs read as a group rather than as the
                             // first ten of a long list.

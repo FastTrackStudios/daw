@@ -20,6 +20,32 @@ pub enum Drag {
     #[default]
     None,
     /// Right-drag or ctrl+shift-drag.
+    /// A freshly inserted note, still under the pointer.
+    ///
+    /// One gesture with two phases, switchable *while it runs*: without
+    /// Shift you are moving the note, with Shift you are sizing it. Alt
+    /// alone therefore places a note of the current grid length and lets
+    /// you carry it to where it belongs; Alt+Shift starts you sizing it
+    /// instead.
+    ///
+    /// The switch is the point. Insert, carry it into place, hold Shift
+    /// to pin it there and pull out its length, release Shift and carry
+    /// it again at that new length — without lifting the button or
+    /// making a second gesture of it.
+    ///
+    /// `anchor` and `base` are re-taken every time the phase changes,
+    /// which is what stops the note jumping when it does: each phase
+    /// measures from where the pointer was when *it* began, not from
+    /// where the whole gesture began.
+    InsertNote {
+        note: NoteId,
+        /// The pointer position when the current phase began.
+        anchor: (f64, f64),
+        /// The note's span when the current phase began.
+        base: (f64, f64),
+        /// Whether the current phase is sizing rather than moving.
+        sizing: bool,
+    },
     /// The zoom *tool*'s drag.
     ///
     /// Distinct from [`Drag::Zoom`], which is REAPER's anchored zoom on
@@ -1315,8 +1341,14 @@ fn legacy_pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16)
         }
     }
 
-    // Ctrl-drag is a temporary off-grid Pen from any tool.
-    let tool = if mods.ctrl { Tool::Pen } else { ed.tool };
+    // The armed tool, and only the armed tool.
+    //
+    // `Ctrl` used to force the Pen here regardless of the map, from a
+    // time when it was the pen's modifier. Under the FTS map `Ctrl` is
+    // the razor, and a hardcoded override would have quietly outranked
+    // the binding — the map would say razor and the surface would draw.
+    // The Pen is a tool; arming it is how you reach it.
+    let tool = ed.tool;
 
     match tool {
         // A view tool, so it never touches the document and never opens
@@ -1429,10 +1461,14 @@ fn begin_new_note(ed: &mut Editor, x: f64, y: f64, mods: Mods) -> Drag {
         seed: id.0,
     });
     ed.selection.set_single(id);
-    Drag::Resize {
+    Drag::InsertNote {
         note: id,
-        start_edge: false,
-        original: (start, end),
+        anchor: (x, y),
+        base: (start, end),
+        // Shift starts you sizing; without it you are placing. Either
+        // way the other phase is one modifier away for the rest of the
+        // gesture.
+        sizing: mods.shift,
     }
 }
 
@@ -1786,6 +1822,62 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
                 - (origin.1 - ed.viewport.h * 0.5) / ed.camera.vertical.px_per_row;
             let (bounds, vp) = (ed.bounds(), ed.viewport);
             ed.camera.constrain(bounds, vp);
+        }
+        Drag::InsertNote {
+            note,
+            anchor,
+            base,
+            sizing,
+        } => {
+            // A phase change re-takes the anchor and the span, so the
+            // note carries on from where it is rather than snapping to
+            // wherever the gesture started. Without this, grabbing Shift
+            // half way through would teleport the note by however far
+            // you had already moved it.
+            if mods.shift != *sizing {
+                if let Some(n) = ed.doc.note(*note) {
+                    *base = (n.start, n.end);
+                }
+                *anchor = (x, y);
+                *sizing = mods.shift;
+            }
+
+            let dt = ed.camera.t_at(x) - ed.camera.t_at(anchor.0);
+            if *sizing {
+                // Pinned where it is; the drag is its length. A note
+                // cannot be dragged shorter than nothing, and one that
+                // inverted would read as a note starting after it ends.
+                let end = ed.snap_time(base.1 + dt);
+                let end = end.max(base.0 + ed.grid.step(ed.units_per_beat()) * 0.25);
+                ed.apply_live(&Edit::Resize {
+                    note: *note,
+                    start: base.0,
+                    end,
+                });
+            } else {
+                // Carrying it. The length is whatever the last sizing
+                // phase left, so a note that has been pulled out stays
+                // pulled out while you find its home.
+                let len = base.1 - base.0;
+                let start = ed.snap_time(base.0 + dt);
+                let row = ed.camera.pitch_at(y, ed.viewport).round() as i32;
+                ed.apply_live(&Edit::Resize {
+                    note: *note,
+                    start,
+                    end: start + len,
+                });
+                // Pitch as a transpose from where the note currently is,
+                // because that is the edit the document has — there is no
+                // "set the row" and inventing one would give the same
+                // move two spellings.
+                let now = ed.doc.note(*note).map(|n| n.row).unwrap_or(row);
+                if row != now {
+                    ed.apply_live(&Edit::Transpose {
+                        notes: vec![*note],
+                        semitones: row.clamp(0, 127) - now,
+                    });
+                }
+            }
         }
         Drag::SelectTouched { .. } => touch_at(ed, drag, x, y),
         Drag::Paint { .. } => paint_at(ed, drag, x, y),
@@ -2202,6 +2294,26 @@ const ZOOM_DIVISOR: f64 = 3.0;
 /// The binding resolves the gesture; the delta still supplies direction
 /// and amount, because the binding table drops it.
 pub fn wheel(ed: &mut Editor, x: f64, y: f64, dx: f64, dy: f64, mods: Mods) {
+    // `Z` is the zoom key, for the wheel as much as for the drag.
+    //
+    // Alt used to zoom here, which made Alt mean "create" on a drag and
+    // "zoom" on a wheel — the exact overloading the FTS map exists to
+    // remove. A modifier meaning two things depending on which *device*
+    // you moved is no more derivable than one meaning two things
+    // depending on which other key is held.
+    //
+    // The wheel zooms both axes together and the tool zooms them
+    // separately, which is the right division of labour: a wheel is a
+    // quick uniform zoom, a drag is the one where you aim.
+    if crate::keys::zoom_prefix_held() {
+        let travel = if dx.abs() > dy.abs() { dx } else { dy };
+        let factor = (travel.abs() / ZOOM_DIVISOR).exp();
+        let factor = if travel < 0.0 { factor } else { 1.0 / factor };
+        ed.zoom_time_at(x, factor);
+        ed.zoom_pitch_at(y, factor);
+        return;
+    }
+
     let Some(action) = crate::scroll::action_for(dx, dy, mods) else {
         // Deliberately nothing. An unbound gesture that still moved the
         // view is how the editor drifted away from the DAW's scheme in

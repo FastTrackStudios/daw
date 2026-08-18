@@ -261,7 +261,11 @@ impl Mode {
             Mode::Drums => MouseMap::drums(),
             Mode::Guitar => MouseMap::riffer(),
             Mode::Vocals => MouseMap::lyrics(),
-            _ => MouseMap::reaper_like(),
+            // FTS, not REAPER-like — the same change of default that
+            // `MouseMap::default` made. A mode switch used to hand the
+            // REAPER map back, so the new scheme lasted exactly until
+            // the user picked a mode.
+            _ => MouseMap::fts(),
         }
     }
 }

@@ -136,11 +136,21 @@ mod surface_tests {
             .map(|a| a.0)
     }
 
-    /// The scheme every surface shares, and the one REAPER already uses:
-    /// plain wheel scrolls, Shift goes sideways, Alt zooms.
+    /// The scheme every surface shares: plain wheel scrolls, Shift goes
+    /// sideways, Alt zooms — REAPER's own.
+    ///
+    /// `normal` only. The expression editor's table deliberately keeps
+    /// the scrolling half and drops the zooming half: `Alt` there is the
+    /// modifier that *creates a note*, and a key meaning one thing on a
+    /// drag and another on a wheel is exactly the overloading that
+    /// surface's map exists to remove. Its zoom moved to a held `Z`.
+    ///
+    /// A surface may add to the shared scheme and may decline part of
+    /// it; what it must not do is *redefine* a gesture to mean something
+    /// else, which is what would put the two surfaces in conflict.
     #[test]
     fn the_shared_scheme_is_the_reaper_scheme() {
-        for surface in ["normal", "editor"] {
+        for surface in ["normal"] {
             assert_eq!(
                 resolve(surface, 0.0, 10.0, mods(false, false, false)).as_deref(),
                 Some("view.vscroll"),

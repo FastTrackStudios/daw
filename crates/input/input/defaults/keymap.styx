@@ -112,9 +112,6 @@
       "ScrollY": "view.vscroll",
       "ScrollX": "view.hscroll",
       "Shift+Scroll": "view.hscroll",
-      "Alt+Scroll": "view.zoom_v",
-      "Alt+Shift+Scroll": "view.zoom_h",
-      "Ctrl+Alt+Scroll": "view.zoom_both",
       "Ctrl+Shift+Scroll": "edit.nudge_time"
     }
   }

@@ -263,6 +263,19 @@ pub fn Canvas(
             "data-testid": "canvas-cell",
             tabindex: "0",
             onkeydown: move |e: KeyboardEvent| {
+                // A held key is one press.
+                //
+                // The OS repeats `keydown` while a key is down, and the
+                // sequence resolver counts presses — so holding `z` typed
+                // `z z z…` and fired the `z z` binding without the user
+                // ever pressing it twice. Every held-key behaviour here
+                // depends on this: the spring-loaded zoom tool is a
+                // *hold*, and a hold that re-enters the keymap forty
+                // times a second is not one.
+                if e.is_auto_repeating() {
+                    e.prevent_default();
+                    return;
+                }
                 let key = e.key().to_string();
                 let m = mods_of(e.modifiers());
                 // Pressing a modifier is itself a keydown, so this is
