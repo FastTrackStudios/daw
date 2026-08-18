@@ -483,3 +483,70 @@ fn anchored_zoom_keeps_the_time_under_the_pointer() {
         ed.camera.t_at(x) / PPQ,
     );
 }
+
+// ── the zoom tool ───────────────────────────────────────────────────
+
+/// The point you grabbed stays under the pointer, wherever you grabbed.
+///
+/// A zoom that reframes about a fixed point is only honest if the fixed
+/// point is the one you chose. This got written as
+/// `centre = anchor - (y - h/2)/ppr` where the camera reads
+/// `slot = centre + (h/2 - y)/ppr` — the same expression negated, so it
+/// was exact at the vertical centre and wrong in proportion to the
+/// distance from it. Every test that grabbed mid-height passed, and the
+/// surface lurched for anyone who grabbed near an edge.
+///
+/// So this asserts at three heights, and the two off-centre ones are the
+/// whole point.
+#[test]
+fn a_zoom_holds_the_point_it_was_started_on() {
+    for grab in [0.2, 0.5, 0.85] {
+        let mut ed = four_notes();
+        ed.tool = expression_editor_core::Tool::Zoom;
+        // A keyboard's worth of rows on screen, rather than the single
+        // row `reset_view` fits this fixture to. The bug scales with
+        // pixels-per-row: at the fixture's default zoom one row is most
+        // of the window and the error lands inside a row, which is a
+        // test that only just notices. This is the geometry a user has.
+        ed.camera.vertical.px_per_row = 10.0;
+        ed.camera.vertical.center = ROW as f64;
+        let (x, h) = (400.0, ed.viewport.h);
+        let y = h * grab;
+
+        let want_t = ed.camera.t_at(x);
+        let want_row = ed.camera.pitch_at(y, ed.viewport);
+
+        // Up and to the right: zoom in on both axes at once, so neither
+        // can be right by accident of the other not having moved.
+        let mut d = interaction::pointer_down(&mut ed, x, y, plain(), 0);
+        assert!(
+            matches!(d, Drag::ZoomTool { .. }),
+            "the zoom tool did not claim the drag at height {grab}",
+        );
+        interaction::pointer_move(&mut ed, &mut d, x + 120.0, y - 90.0, plain());
+
+        let got_t = ed.camera.t_at(x);
+        let got_row = ed.camera.pitch_at(y, ed.viewport);
+        let row_tol = 0.5;
+
+        assert!(
+            (got_row - want_row).abs() < row_tol,
+            "grabbing at {grab} of the height moved the row under the \
+             pointer by {:.2} rows (wanted {want_row:.2}, got {got_row:.2})",
+            got_row - want_row,
+        );
+        assert!(
+            (got_t - want_t).abs() < ed.camera.units_per_px,
+            "grabbing at {grab} of the height moved the time under the \
+             pointer by {:.2} units",
+            got_t - want_t,
+        );
+
+        // And it did zoom — an anchor that holds because nothing
+        // happened would pass everything above.
+        assert!(
+            ed.camera.vertical.px_per_row > 10.0,
+            "the drag never zoomed in vertically at height {grab}",
+        );
+    }
+}

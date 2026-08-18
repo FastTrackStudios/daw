@@ -63,8 +63,15 @@ pub enum Drag {
         base_units_per_px: f64,
         base_px_per_row: f64,
         /// What was under the press, and stays under it.
+        ///
+        /// The vertical half is a *slot*, not a model row. Rows are what
+        /// the document numbers and the fold can collapse several of
+        /// them onto one slot; slots are what the camera actually
+        /// measures in. Keeping a row here meant the restore below
+        /// silently compared the two, which is only harmless when the
+        /// fold is empty.
         anchor_t: f64,
-        anchor_row: f64,
+        anchor_slot: f64,
         /// Alt: sweep a rectangle and zoom into it on release, rather
         /// than zooming continuously as you drag.
         marquee: bool,
@@ -1359,7 +1366,11 @@ fn legacy_pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16)
             base_units_per_px: ed.camera.units_per_px,
             base_px_per_row: ed.camera.vertical.px_per_row,
             anchor_t: ed.camera.t_at(x),
-            anchor_row: ed.camera.pitch_at(y, ed.viewport),
+            // The slot under the press, read straight off the camera.
+            // `pitch_at` would send it through the fold and back, and
+            // the round trip is not the identity.
+            anchor_slot: ed.camera.vertical.center
+                + (ed.viewport.h * 0.5 - y) / ed.camera.vertical.px_per_row,
             marquee: mods.alt,
             current: (x, y),
         },
@@ -1796,7 +1807,7 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             base_units_per_px,
             base_px_per_row,
             anchor_t,
-            anchor_row,
+            anchor_slot,
             marquee,
             current,
         } => {
@@ -1817,9 +1828,20 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             ed.camera.units_per_px = (*base_units_per_px / (dx / gain).exp()).max(1e-9);
             ed.camera.vertical.px_per_row = (*base_px_per_row * (dy / gain).exp()).max(1e-6);
             // Put what was under the press back under it, on both axes.
+            //
+            // Both lines invert the camera's own mapping, so they have
+            // to match it exactly. `t_at(x) = t0 + x·upp`, so
+            // `t0 = anchor - x·upp`. Vertically the camera reads
+            // `slot = centre + (h/2 - y)/ppr`, so the inverse is
+            // `centre = anchor - (h/2 - y)/ppr` — note the sign. It used
+            // to be written `- (y - h/2)/ppr`, which is the same
+            // expression negated: correct at the vertical centre, where
+            // the term is zero, and increasingly wrong towards either
+            // edge. That is why a zoom begun mid-height behaved and one
+            // begun near the top or bottom lurched before it zoomed.
             ed.camera.t0 = *anchor_t - origin.0 * ed.camera.units_per_px;
-            ed.camera.vertical.center = *anchor_row
-                - (origin.1 - ed.viewport.h * 0.5) / ed.camera.vertical.px_per_row;
+            ed.camera.vertical.center = *anchor_slot
+                - (ed.viewport.h * 0.5 - origin.1) / ed.camera.vertical.px_per_row;
             let (bounds, vp) = (ed.bounds(), ed.viewport);
             ed.camera.constrain(bounds, vp);
         }
