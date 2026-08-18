@@ -54,8 +54,12 @@ use crate::canvas;
 // content — or, as the toolbar's wrapping once did, on the window's
 // *width* — would make that subtraction a guess.
 
-/// The tool bar.
-pub const TOOLBAR_H: f64 = 60.0;
+/// The tool bar — one row.
+///
+/// It was 60 for two rows: the modes on top, the verbs underneath. The
+/// modes moved into the panel down the right, where they cost width we
+/// already had instead of height the roll never has enough of.
+pub const TOOLBAR_H: f64 = 30.0;
 /// The track switcher under it.
 pub const SWITCHER_H: f64 = 28.0;
 /// The chord/selection row — **gone**, and kept at zero rather than

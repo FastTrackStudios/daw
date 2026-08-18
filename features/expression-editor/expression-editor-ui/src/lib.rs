@@ -36,6 +36,7 @@ pub mod keys;
 pub mod interaction;
 pub mod lane_strip;
 pub mod menu_ui;
+pub mod mode_picker;
 pub mod multitool_ui;
 pub mod paint;
 pub mod quantize_panel;

@@ -11,7 +11,7 @@
 
 use dioxus::prelude::*;
 use expression_editor_core::doc::Dimension;
-use expression_editor_core::{chord, Editor, ModeFamily, Shape, StripLane, Tool};
+use expression_editor_core::{chord, Editor, Shape, StripLane, Tool};
 
 use crate::drawer::ModDrawer;
 use crate::interaction::{self, Drag};
@@ -141,24 +141,19 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
     rsx! {
         div {
             "data-testid": "toolbar",
-            // A fixed height that scrolls, not a wrapping one that grows.
+            // One row, and a fixed height that scrolls rather than wraps.
             //
-            // **Two rows, on purpose.**
+            // A wrapping bar's height is a function of the window
+            // *width*, and the roll is sized by subtracting this bar — so
+            // a narrow window silently stole a row from the music. It was
+            // briefly two rows, because pinning the height with `nowrap`
+            // meant the `margin-left: auto` group had no free space to be
+            // pushed into and fell off the right edge, taking undo, Mod,
+            // Zoom, Fit and the frame meter with it.
             //
-            // It used to be one row that wrapped, which made its height a
-            // function of the window *width* — a narrow window silently
-            // stole a row from the roll, and the roll is sized by
-            // subtracting this bar. Pinning the height with `nowrap`
-            // fixed that and broke something worse: with no free space
-            // left, the `margin-left: auto` group stopped being pushed
-            // anywhere and simply fell off the right edge, taking undo,
-            // redo, Mod, Zoom, Fit and the frame meter with it. Controls
-            // you cannot see are worse than a bar that moves.
-            //
-            // Two fixed rows keep the height constant *and* everything
-            // reachable, and the split is meaningful rather than
-            // wherever the text happened to run out: what you are editing
-            // on top, how you are editing it underneath.
+            // With the modes moved to the panel there is only one row of
+            // material left, and the group after the verbs is pinned
+            // rather than pushed, so neither failure is reachable.
             //
             // `border-box`, so the constant is the bar's *total* height.
             style: "display: flex; flex-direction: column; flex: 0 0 auto; \
@@ -167,99 +162,10 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
                     border-bottom: 1px solid {theme::PANEL_BORDER}; \
                     font-family: system-ui, sans-serif;",
 
-            // ── what you are editing ─────────────────────────────────
-            div {
-                style: "display: flex; flex: 0 0 auto; align-items: center; \
-                        gap: 5px; height: 29px; padding: 0 8px; \
-                        overflow-x: auto; overflow-y: hidden;",
-
-            // The mode leads: everything after it is conditional on
-            // what the editor currently is.
-            //
-            // One segment per family, so the switcher reads as "which
-            // kind of material is this" before "which surface" — the
-            // MIDI-shaped modes on the left, the two analysed-audio
-            // ones on the right.
-            for (i, family) in ModeFamily::ALL.into_iter().enumerate() {
-                // Separator *between* groups, not after each: a
-                // trailing divider would collide with the fixed one
-                // below and read as a double rule.
-                if i > 0 {
-                    {divider()}
-                }
-                Segment {
-                    for m in family.modes().iter().copied() {
-                        Seg {
-                            key: "m{m:?}",
-                            active: mode == m,
-                            accent: true,
-                            title: format!("{} mode ({} family)", m.label(), family.label()),
-                            onclick: move |_| editor.write().set_mode(m),
-                            span {
-                                style: "display: flex; align-items: center; gap: 5px;",
-                                svg {
-                                    view_box: "0 0 16 16",
-                                    style: "width: 13px; height: 13px; flex: 0 0 auto;",
-                                    path {
-                                        d: theme::mode_icon(m),
-                                        fill: "none",
-                                        stroke: "currentColor",
-                                        stroke_width: "1.3",
-                                        stroke_linecap: "round",
-                                        stroke_linejoin: "round",
-                                    }
-                                }
-                                "{m.label()}"
-                            }
-                        }
-                    }
-                }
-            }
-
-            {divider()}
-
-            // Stack toggle. Next to the mode buttons because it answers
-            // the same question from the other side: those pick how one
-            // track is drawn, this shows every track drawn its own way.
-            // Hidden with one track, where a stack of one is just the
-            // roll with less room.
-            if editor.read().tracks.len() > 1 {
-                Segment {
-                    Seg {
-                        active: stacked,
-                        accent: true,
-                        title: "Show every track on one timeline".to_string(),
-                        onclick: move |_| {
-                            let now = editor.read().stacked;
-                            editor.write().stacked = !now;
-                        },
-                        // Icon only. The toolbar is already full at the
-                        // width a plugin window gets, and this is a view
-                        // toggle rather than something you hunt for by
-                        // name.
-                        svg {
-                            view_box: "0 0 16 16",
-                            style: "width: 13px; height: 13px; flex: 0 0 auto;",
-                            path {
-                                // Three stacked lanes.
-                                d: "M2 4h12 M2 8h12 M2 12h12",
-                                fill: "none",
-                                stroke: "currentColor",
-                                stroke_width: "1.3",
-                                stroke_linecap: "round",
-                            }
-                        }
-                    }
-                }
-
-                {divider()}
-            }
-            }
-
             // ── how you are editing it ───────────────────────────────
             div {
                 style: "display: flex; flex: 0 0 auto; align-items: center; \
-                        gap: 5px; height: 29px; padding: 0 8px; \
+                        gap: 5px; height: 100%; padding: 0 8px; \
                         overflow: hidden;",
 
             // The verbs scroll; the group after them does not.
@@ -436,6 +342,39 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
             div {
                 style: "flex: 0 0 auto; display: flex; align-items: center; gap: 5px; \
                         padding-left: 6px;",
+
+                // Stack: every track on one timeline. It sat beside the
+                // mode buttons, which was right when those were here —
+                // it answers the same question from the other side. With
+                // the modes moved to the panel it belongs with the other
+                // view toggles instead, because that is what it is.
+                // Hidden with one track, where a stack of one is the roll
+                // with less room.
+                if editor.read().tracks.len() > 1 {
+                    Segment {
+                        Seg {
+                            active: stacked,
+                            accent: true,
+                            title: "Show every track on one timeline".to_string(),
+                            onclick: move |_| {
+                                let now = editor.read().stacked;
+                                editor.write().stacked = !now;
+                            },
+                            svg {
+                                view_box: "0 0 16 16",
+                                style: "width: 13px; height: 13px; flex: 0 0 auto;",
+                                path {
+                                    // Three stacked lanes.
+                                    d: "M2 4h12 M2 8h12 M2 12h12",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "1.3",
+                                    stroke_linecap: "round",
+                                }
+                            }
+                        }
+                    }
+                }
                 Segment {
                     Seg {
                         active: false,

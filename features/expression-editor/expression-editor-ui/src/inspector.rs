@@ -151,6 +151,15 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
                 }
             }
 
+            // ── which surface ────────────────────────────────────────
+            //
+            // First, because it is the widest-scoped thing in the panel:
+            // everything below is about the selection, this is about the
+            // whole editor. It was a row across the top of the window
+            // until the roll needed the height more than the modes
+            // needed the prominence.
+            crate::mode_picker::ModePicker { editor }
+
             // ── selection ────────────────────────────────────────────
             if let Some(n) = note.clone() {
                 {section("Note")}

@@ -194,25 +194,48 @@ fn a_non_equal_tuning_is_visibly_flagged() {
     );
 }
 
+/// A Q split adds structure to the drawing, and says so in the panel.
+///
+/// Asserted against the scene rather than the markup: the roll is
+/// painted, so its zone dividers are draw commands and there is no
+/// coloured element in the DOM left to count. The panel half is what
+/// survives in the html, and between them they cover the claim — the
+/// split is visible, and its count is legible.
 #[test]
-fn zone_structure_draws_in_red() {
-    let plain = render(demo_editor(false, false));
-    let zoned = render(demo_editor(false, true));
-    let count = |h: &str| h.matches(expression_editor_ui::theme::ZONE).count();
+fn zone_structure_is_drawn_and_reported() {
+    use expression_editor_ui::paint;
+
+    let mut labels = expression_editor_ui::text::Labeller::new();
+    let mut commands = |ed| {
+        paint::roll_scene(&ed, 900.0, 480.0, &paint::Overlay::default(), &mut labels)
+            .commands
+            .len()
+    };
+    let plain = commands(demo_editor(false, false));
+    let zoned = commands(demo_editor(false, true));
     assert!(
-        count(&zoned) > count(&plain),
-        "a Q split must add visible red structure"
+        zoned > plain,
+        "a Q split must add structure to the drawing: {zoned} commands vs {plain}"
     );
+
+    let html = render(demo_editor(false, true));
+    assert!(html.contains("Q zones"), "the panel must report the split");
 }
 
+/// The selected note's analysis reaches the screen — in the panel.
+///
+/// It used to be read off the chord row, which repeated the inspector
+/// and cost the roll 30px for the privilege. The row is gone; these are
+/// the inspector's own labels, which is now the single place any of it
+/// is said.
 #[test]
-fn the_status_bar_reports_the_selected_notes_analysis() {
+fn the_selected_notes_analysis_is_reported() {
     let html = render(demo_editor(false, false));
-    assert!(html.contains("1 selected"));
-    assert!(html.contains("vib"), "the vibrato readout");
-    assert!(html.contains("drift"), "the drift readout");
+    assert!(html.contains("1 selected"), "the status bar's count");
+    assert!(html.contains("Vibrato"), "the vibrato readout");
+    assert!(html.contains("Drift"), "the drift readout");
     assert!(html.contains("Robot"), "the flatten button");
-    assert!(html.contains("ch 3"), "the MPE member channel");
+    assert!(html.contains("Channel"), "the MPE member channel");
 }
 
 #[test]
