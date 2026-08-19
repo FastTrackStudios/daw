@@ -50,6 +50,62 @@ pub fn take_staged_host() -> Option<SharedDrumHost> {
     STAGED_HOST.lock().unwrap().take()
 }
 
+/// The lane a gesture named, as its first visible member's track index.
+fn lane_track(ed: &Editor, lane: &str) -> Option<usize> {
+    use expression_editor_core::kit::LaneRole;
+    let role = LaneRole::ALL.into_iter().find(|r| r.label() == lane)?;
+    ed.tracks
+        .role_members(role)
+        .iter()
+        .filter_map(|g| ed.tracks.index_of_guid(g))
+        .find(|&i| ed.tracks.track(i).is_some_and(|t| !t.hidden))
+}
+
+/// Draw a hand-added hit: a slice note in the lane's document, from the
+/// refined onset to the next hit. The daw is untouched — this is the
+/// hit *list* changing, which is all the spec allows before a drag or
+/// Apply. r[impl drums.manual.add-remove]
+fn add_hit_note(editor: &mut Signal<Editor>, lane: &str, at: f64) {
+    let mut ed = editor.write();
+    let Some(track) = lane_track(&ed, lane) else {
+        return;
+    };
+    // The active document is the only writable one; selecting the hit's
+    // lane is what a click there does anyway.
+    ed.switch_track(track);
+    let ups = ed.doc.time_base.units_per_second(ed.bpm);
+    let start = at * ups;
+    let end = ed
+        .doc
+        .notes
+        .iter()
+        .map(|n| n.start)
+        .filter(|&s| s > start + 1e-6)
+        .fold(ed.doc.end, f64::min);
+    let id = expression_editor_core::doc::NoteId(
+        ed.doc.notes.iter().map(|n| n.id.0).max().unwrap_or(0) + 1,
+    );
+    let mut note = expression_editor_core::Note::new(id, start, end.max(start + 1.0), 1);
+    // A hand-placed hit is intent — full weight, like the host's list.
+    note.velocity = 1.0;
+    note.weight = 1.0;
+    ed.doc.push(note);
+}
+
+/// Erase a hit's slice note from the lane's document.
+/// r[impl drums.manual.add-remove]
+fn remove_hit_note(editor: &mut Signal<Editor>, lane: &str, hit: f64) {
+    let mut ed = editor.write();
+    let Some(track) = lane_track(&ed, lane) else {
+        return;
+    };
+    ed.switch_track(track);
+    let ups = ed.doc.time_base.units_per_second(ed.bpm);
+    let target = hit * ups;
+    let tol = 0.015 * ups;
+    ed.doc.notes.retain(|n| (n.start - target).abs() > tol);
+}
+
 /// An empty document, for the case where nothing was staged.
 ///
 /// Better than panicking: a window that opens empty is diagnosable, and
@@ -66,7 +122,7 @@ fn fallback() -> Editor {
 /// not exist yet would make this runner a second app to maintain.
 #[component]
 pub fn App() -> Element {
-    let editor = use_signal(|| take_staged().unwrap_or_else(fallback));
+    let mut editor = use_signal(|| take_staged().unwrap_or_else(fallback));
     let host = use_signal(take_staged_host);
     // The panel's data channel: bins and previews recomputed by the
     // host on every control change. Empty without a host — the panel
@@ -92,17 +148,50 @@ pub fn App() -> Element {
             },
         )
     });
+    // The hand gestures, all four, through one dispatcher — they share
+    // a host, a group and an undo discipline, so they share a handler.
     // r[impl drums.manual.slip]
-    let on_slip = host.read().clone().map(|h| {
-        EventHandler::new(move |(hit, next, delta): (f64, f64, f64)| {
-            let next = if next.is_finite() { next } else { h.take_secs };
-            let cfg = expression_editor_audio::quantize::SplitConfig {
-                leading_pad_secs: 0.005,
-                crossfade_secs: 0.005,
-            };
-            match h.slip(hit, next, delta, cfg) {
-                Ok(done) => tracing::info!(pieces = done.pieces, "slipped hit"),
-                Err(e) => tracing::warn!(error = ?e, "slip refused"),
+    // r[impl drums.manual.stretch]
+    // r[impl drums.manual.add-remove]
+    let on_hit = host.read().clone().map(|h| {
+        EventHandler::new(move |g: expression_editor_ui::stack::HitGesture| {
+            use expression_editor_ui::stack::HitGesture as G;
+            match g {
+                G::Slip { hit, next, delta } => {
+                    let next = if next.is_finite() { next } else { h.take_secs };
+                    let cfg = expression_editor_audio::quantize::SplitConfig {
+                        leading_pad_secs: 0.005,
+                        crossfade_secs: 0.005,
+                    };
+                    match h.slip(hit, next, delta, cfg) {
+                        Ok(done) => tracing::info!(pieces = done.pieces, "slipped hit"),
+                        Err(e) => tracing::warn!(error = ?e, "slip refused"),
+                    }
+                }
+                G::Stretch {
+                    hit,
+                    prev,
+                    next,
+                    delta,
+                    both,
+                } => {
+                    let prev = if prev.is_finite() { prev } else { 0.0 };
+                    let next = if next.is_finite() { next } else { h.take_secs };
+                    match h.stretch(hit, prev, next, delta, both) {
+                        Ok(done) => tracing::info!(items = done.items, "stretched hit"),
+                        Err(e) => tracing::warn!(error = ?e, "stretch refused"),
+                    }
+                }
+                G::Add { lane, at } => {
+                    let landed = h.add_hit(at, 0.05);
+                    tracing::info!(%lane, at, landed, "added hit");
+                    add_hit_note(&mut editor, &lane, landed);
+                }
+                G::Remove { lane, hit } => {
+                    h.remove_hit(hit);
+                    tracing::info!(%lane, hit, "removed hit");
+                    remove_hit_note(&mut editor, &lane, hit);
+                }
             }
         })
     });
@@ -128,7 +217,7 @@ pub fn App() -> Element {
                 quantize_previews: previews(),
                 on_quantize_change: on_change,
                 on_quantize_apply: on_apply,
-                on_slip,
+                on_hit,
             }
         }
     }

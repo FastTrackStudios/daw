@@ -153,11 +153,13 @@ pub fn ExpressionEditor(
     /// the daw write never happens in this crate.
     #[props(default)]
     on_quantize_apply: Option<EventHandler<quantize_panel::QuantizePanel>>,
-    /// Called when a slip drag on a role lane's hit is released:
-    /// `(hit_secs, next_hit_secs, delta_secs)`. Same contract as
-    /// [`stack::StackView`]'s prop of the same name.
+    /// Called when a hand edit leaves the stacked view — a slip or
+    /// stretch drag, a nudge, a hit added or removed. Same contract as
+    /// [`stack::StackView`]'s prop of the same name; the write mode and
+    /// nudge step are threaded from the quantize panel here, so the
+    /// host only ever sees finished gestures.
     #[props(default)]
-    on_slip: Option<EventHandler<(f64, f64, f64)>>,
+    on_hit: Option<EventHandler<stack::HitGesture>>,
     /// Anything the host wants at the top of the inspector.
     ///
     /// A slot, so a host can put its own controls inside the editor's
@@ -274,7 +276,17 @@ pub fn ExpressionEditor(
                     style: "display: flex; flex-direction: column; flex: 1 1 auto; \
                             min-width: 0; min-height: 0;",
                     if editor.read().stacked {
-                        stack::StackView { editor, on_slip }
+                        // The hand gestures follow the panel's write
+                        // mode and grid, so a drag and the Apply button
+                        // cannot mean different edits.
+                        stack::StackView {
+                            editor,
+                            on_hit,
+                            warp: quantize.read().mode == quantize_panel::WriteMode::Warp,
+                            grid_secs: quantize
+                                .read()
+                                .grid_in(60.0 / editor.read().bpm.max(1.0)),
+                        }
                     } else {
                         Canvas { editor, drag, drawer, multi, menu_state, pending, draft }
                         LaneStrip { editor }

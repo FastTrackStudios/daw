@@ -27,6 +27,7 @@ use expression_editor_core::{Editor, Mode};
 
 use dioxus::prelude::*;
 use dioxus_elements::input_data::MouseButton;
+use keyboard_types::{Key, Modifiers};
 
 use crate::{canvas, theme};
 
@@ -103,25 +104,80 @@ pub struct LaneNote {
     pub flam: bool,
 }
 
-/// One slip drag: which hit is being slid, and where the pointer is.
+/// One hand edit leaving the stack, in seconds — the host decides what
+/// it means on the daw. `Slip` cuts and slides (SPLIT), `Stretch`
+/// writes a marker map (WARP); `Add`/`Remove` edit the hit list only.
+///
+/// One enum rather than one callback per gesture, because every arm
+/// shares a fate: they land on the *group*, as one undo step, through
+/// the drum host — and a host that takes one takes them all.
+#[derive(Clone, Debug, PartialEq)]
+pub enum HitGesture {
+    /// r[impl drums.manual.slip]
+    Slip {
+        hit: f64,
+        /// `f64::INFINITY` when the hit is the lane's last — the host
+        /// clamps to its take length.
+        next: f64,
+        delta: f64,
+    },
+    /// r[impl drums.manual.stretch]
+    Stretch {
+        hit: f64,
+        /// `f64::NEG_INFINITY` when the hit is the lane's first.
+        prev: f64,
+        next: f64,
+        delta: f64,
+        /// The BothStretch law: pin the take's ends, not the
+        /// neighbours.
+        both: bool,
+    },
+    /// r[impl drums.manual.add-remove]
+    Add { lane: String, at: f64 },
+    /// r[impl drums.manual.add-remove]
+    Remove { lane: String, hit: f64 },
+}
+
+/// One slip/stretch drag: which hit is being slid, and where the
+/// pointer is.
 ///
 /// Everything the release needs is captured at the press, so a lane
 /// re-layout mid-drag cannot re-target the gesture.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct SlipDrag {
     /// The dragged hit's onset, seconds.
     hit_secs: f64,
+    /// The previous hit's onset — `f64::NEG_INFINITY` for the first.
+    prev_secs: f64,
     /// The next hit's onset, seconds — `f64::INFINITY` for the last.
     next_secs: f64,
+    /// The lane the hit lives in, by its drawn name (`"Kick"`).
+    lane_name: String,
     /// Where the press landed, element x.
     x0: f64,
     /// Where the pointer is now, element x.
     x: f64,
+    /// Shift as of the last pointer event — the BothStretch law.
+    shift: bool,
     /// The hit line's own x at the press (gutter-relative), so the
     /// ghost draws on the line rather than under the finger.
     hit_x: f64,
     /// The lane's strip, for the ghost lines (y from the lane group's
     /// origin).
+    lane_y: f64,
+    lane_h: f64,
+}
+
+/// The selected hit — the unit of keyboard editing. Selection follows
+/// the *time*, not a note index: a nudge moves the audio under the
+/// drawing, and the next nudge must move from where the hit now is.
+// r[impl drums.manual.nudge]
+#[derive(Clone, Debug)]
+struct SelectedHit {
+    lane_name: String,
+    hit_secs: f64,
+    prev_secs: f64,
+    next_secs: f64,
     lane_y: f64,
     lane_h: f64,
 }
@@ -631,35 +687,121 @@ const MIN_LANE: f32 = 22.0;
 #[component]
 pub fn StackView(
     editor: Signal<Editor>,
-    /// Called when a slip drag on a role lane's hit is released:
-    /// `(hit_secs, next_hit_secs, delta_secs)`. `next_hit_secs` is
-    /// `f64::INFINITY` when the dragged hit is the lane's last — the
-    /// host clamps to its take length. `None` disables the gesture.
+    /// Called when a hand edit leaves the stack — a slip or stretch
+    /// drag released, a nudge key, a hit added or thrown out. `None`
+    /// disables all of them: without a writer the gestures would lie.
     // r[impl drums.manual.slip]
     #[props(default)]
-    on_slip: Option<EventHandler<(f64, f64, f64)>>,
+    on_hit: Option<EventHandler<HitGesture>>,
+    /// Whether a drag/nudge stretches (WARP) instead of slipping
+    /// (SPLIT) — the quantize panel's write mode, threaded down so the
+    /// hand gesture and the Apply button agree about what an edit is.
+    // r[impl drums.manual.stretch]
+    #[props(default)]
+    warp: bool,
+    /// One grid division in seconds — the nudge step, and what a
+    /// double-clicked hit snaps to. `<= 0` disables nudge and snap.
+    // r[impl drums.manual.nudge]
+    #[props(default)]
+    grid_secs: f64,
 ) -> Element {
     let mut editor = editor;
     // Where a middle-drag pan last was.
     let mut panning = use_signal(|| None::<(f64, f64)>);
-    // An in-flight slip drag on a role lane's hit.
+    // An in-flight slip/stretch drag on a role lane's hit.
     let mut slipping = use_signal(|| None::<SlipDrag>);
+    // The selected hit, if any — what the keys act on.
+    let mut selected = use_signal(|| None::<SelectedHit>);
+    // The previous press, for double-click detection: no dblclick
+    // event reaches this renderer, so two presses within the window
+    // and the pick radius are the gesture.
+    let mut last_press = use_signal(|| None::<(std::time::Instant, f64, f64)>);
     let ed = editor.read();
     let vp = ed.viewport;
     let lanes = lanes(&ed, ACTIVE_BOOST, ed.lane_floor().max(MIN_LANE));
     let ticks = canvas::ruler(&ed);
-    let px_per_sec = view_span_secs(&ed)
+    let (view0, px_per_sec) = view_span_secs(&ed)
         .map(|(v0, v1)| {
             if (v1 - v0).abs() < 1e-9 {
-                0.0
+                (v0, 0.0)
             } else {
-                vp.w / (v1 - v0)
+                (v0, vp.w / (v1 - v0))
             }
         })
-        .unwrap_or(0.0);
+        .unwrap_or((0.0, 0.0));
     drop(ed);
 
+    // One place turns a released drag (or a synthetic delta from a key)
+    // into the outgoing gesture, so the drag, the nudge and the snap
+    // cannot disagree about what an edit is in each write mode.
+    let emit_move = {
+        let on_hit = on_hit;
+        move |s: &SelectedHit, delta: f64, both: bool| {
+            let Some(h) = &on_hit else { return };
+            let g = if warp {
+                // r[impl drums.manual.stretch]
+                HitGesture::Stretch {
+                    hit: s.hit_secs,
+                    prev: s.prev_secs,
+                    next: s.next_secs,
+                    delta,
+                    both,
+                }
+            } else {
+                // r[impl drums.manual.slip]
+                HitGesture::Slip {
+                    hit: s.hit_secs,
+                    next: s.next_secs,
+                    delta,
+                }
+            };
+            h.call(g);
+        }
+    };
+
     rsx! {
+        div {
+            // Focusable so the nudge keys have somewhere to land; the
+            // roll's canvas cell does the same. Keys are bound here,
+            // locally — the stacked view's bindings must not leak into
+            // the roll's keymap.
+            style: "display: block; width: 100%; height: 100%; outline: none;",
+            tabindex: "0",
+            "data-testid": "stack-cell",
+            onkeydown: move |e: KeyboardEvent| {
+                if e.is_auto_repeating() {
+                    return;
+                }
+                let Some(sel) = selected() else { return };
+                let shift = e.modifiers().contains(Modifiers::SHIFT);
+                match e.key() {
+                    // r[impl drums.manual.nudge]
+                    Key::ArrowLeft | Key::ArrowRight if on_hit.is_some() => {
+                        // The division with Shift for the fine step:
+                        // 1 ms, the sample-accurate trim.
+                        let step = if shift { 0.001 } else { grid_secs };
+                        if step <= 0.0 {
+                            return;
+                        }
+                        let delta = if e.key() == Key::ArrowLeft { -step } else { step };
+                        emit_move(&sel, delta, false);
+                        let mut sel = sel;
+                        sel.hit_secs += delta;
+                        selected.set(Some(sel));
+                    }
+                    // r[impl drums.manual.add-remove]
+                    Key::Delete | Key::Backspace => {
+                        if let Some(h) = &on_hit {
+                            h.call(HitGesture::Remove {
+                                lane: sel.lane_name.clone(),
+                                hit: sel.hit_secs,
+                            });
+                        }
+                        selected.set(None);
+                    }
+                    _ => {}
+                }
+            },
         svg {
             style: "display: block; width: 100%; height: 100%; \
                     touch-action: none; user-select: none; cursor: pointer;",
@@ -684,6 +826,7 @@ pub fn StackView(
             onpointermove: move |e: PointerEvent| {
                 if let Some(mut s) = slipping() {
                     s.x = e.data().element_coordinates().x;
+                    s.shift = e.data().modifiers().contains(Modifiers::SHIFT);
                     slipping.set(Some(s));
                     return;
                 }
@@ -701,19 +844,31 @@ pub fn StackView(
             onpointerup: move |_| {
                 if let Some(s) = slipping() {
                     slipping.set(None);
-                    // r[impl drums.manual.slip]
                     let delta = if px_per_sec > 0.0 {
                         (s.x - s.x0) / px_per_sec
                     } else {
                         0.0
                     };
+                    let sel = SelectedHit {
+                        lane_name: s.lane_name.clone(),
+                        hit_secs: s.hit_secs,
+                        prev_secs: s.prev_secs,
+                        next_secs: s.next_secs,
+                        lane_y: s.lane_y,
+                        lane_h: s.lane_h,
+                    };
                     // A press that never travelled is a click, not a
-                    // slip — half a millisecond is below anything a
-                    // hand meant.
-                    if delta.abs() > 0.0005
-                        && let Some(h) = &on_slip
-                    {
-                        h.call((s.hit_secs, s.next_secs, delta));
+                    // drag — it *selects* the hit. Half a millisecond
+                    // is below anything a hand meant.
+                    if delta.abs() > 0.0005 {
+                        // r[impl drums.manual.slip]
+                        // r[impl drums.manual.stretch]
+                        emit_move(&sel, delta, s.shift);
+                        let mut sel = sel;
+                        sel.hit_secs += delta;
+                        selected.set(Some(sel));
+                    } else {
+                        selected.set(Some(sel));
                     }
                     return;
                 }
@@ -734,16 +889,26 @@ pub fn StackView(
                     return;
                 }
                 // A press near a role lane's hit line picks the hit up
-                // for a slip instead of switching lanes. Only where a
-                // host is listening — without a writer the gesture
-                // would be a lie.
+                // for a slip/stretch instead of switching lanes. Only
+                // where a host is listening — without a writer the
+                // gesture would be a lie.
                 // r[impl drums.manual.slip]
-                if on_slip.is_some() {
+                if on_hit.is_some() {
                     let ed = editor.read();
                     let views = self::lanes(&ed, ACTIVE_BOOST, ed.lane_floor().max(MIN_LANE));
                     drop(ed);
                     let ly = c.y - canvas::RULER_H;
                     let lx = c.x - canvas::GUTTER_W;
+                    let mods = e.data().modifiers();
+                    // Two presses inside the window and the pick radius
+                    // are a double click.
+                    let now = std::time::Instant::now();
+                    let double = last_press().is_some_and(|(t0, px, py)| {
+                        now.duration_since(t0).as_millis() < 400
+                            && (c.x - px).abs() <= SLIP_PICK_PX
+                            && (c.y - py).abs() <= SLIP_PICK_PX
+                    });
+                    last_press.set(Some((now, c.x, c.y)));
                     let picked = views
                         .iter()
                         .filter(|l| l.is_role && ly >= l.y && ly < l.y + l.h)
@@ -759,19 +924,68 @@ pub fn StackView(
                                 .map(|m| m.at_secs)
                                 .filter(|&t| t > n.at_secs + 1e-9)
                                 .fold(f64::INFINITY, f64::min);
+                            let prev = l
+                                .notes
+                                .iter()
+                                .map(|m| m.at_secs)
+                                .filter(|&t| t < n.at_secs - 1e-9)
+                                .fold(f64::NEG_INFINITY, f64::max);
                             SlipDrag {
                                 hit_secs: n.at_secs,
+                                prev_secs: prev,
                                 next_secs: next,
+                                lane_name: l.name.clone(),
                                 x0: c.x,
                                 x: c.x,
+                                shift: mods.contains(Modifiers::SHIFT),
                                 hit_x: n.x,
                                 lane_y: l.y,
                                 lane_h: l.h,
                             }
                         });
-                    if picked.is_some() {
-                        slipping.set(picked);
+                    if let Some(s) = picked {
+                        let sel = SelectedHit {
+                            lane_name: s.lane_name.clone(),
+                            hit_secs: s.hit_secs,
+                            prev_secs: s.prev_secs,
+                            next_secs: s.next_secs,
+                            lane_y: s.lane_y,
+                            lane_h: s.lane_h,
+                        };
+                        // Double-click snaps the hit to its nearest
+                        // division — the fastest way to fix one hit
+                        // without opening the panel.
+                        // r[impl drums.manual.nudge]
+                        if double && grid_secs > 0.0 {
+                            let target = (s.hit_secs / grid_secs).round() * grid_secs;
+                            let delta = target - s.hit_secs;
+                            if delta.abs() > 1e-9 {
+                                emit_move(&sel, delta, false);
+                            }
+                            let mut sel = sel;
+                            sel.hit_secs = target;
+                            selected.set(Some(sel));
+                            return;
+                        }
+                        slipping.set(Some(s));
                         return;
+                    }
+                    // Alt+click on empty role-lane audio adds a hit
+                    // where the click meant — the host refines it to
+                    // the nearest attack. The hit list changes; the daw
+                    // does not, until a drag or Apply.
+                    // r[impl drums.manual.add-remove]
+                    if mods.contains(Modifiers::ALT) && px_per_sec > 0.0 {
+                        let lane = views
+                            .iter()
+                            .find(|l| l.is_role && ly >= l.y && ly < l.y + l.h);
+                        if let (Some(l), Some(h)) = (lane, &on_hit) {
+                            h.call(HitGesture::Add {
+                                lane: l.name.clone(),
+                                at: view0 + lx / px_per_sec,
+                            });
+                            return;
+                        }
                     }
                 }
                 let y = c.y - canvas::RULER_H + editor.read().stack_scroll;
@@ -963,10 +1177,39 @@ pub fn StackView(
                 }
             }
 
-            // The slip drag's ghost: the hit's origin stays dim while
-            // the dragged line follows the pointer, so the gesture
-            // reads as "this hit is moving there".
+            // The selected hit — the unit of keyboard editing — marked
+            // with a bracket at the lane's top edge so it reads against
+            // the hit line without hiding it.
+            // r[impl drums.manual.nudge]
+            if let Some(sel) = selected() {
+                if px_per_sec > 0.0 {
+                    g {
+                        transform: "translate({canvas::GUTTER_W}, {canvas::RULER_H})",
+                        {
+                            let x = (sel.hit_secs - view0) * px_per_sec;
+                            rsx! {
+                                line {
+                                    x1: "{x:.1}", x2: "{x:.1}",
+                                    y1: "{sel.lane_y:.1}", y2: "{sel.lane_y + sel.lane_h:.1}",
+                                    stroke: theme::ACCENT, stroke_width: 1,
+                                    opacity: "0.8",
+                                }
+                                rect {
+                                    x: "{x - 3.0:.1}", y: "{sel.lane_y:.1}",
+                                    width: 6, height: 4,
+                                    fill: theme::ACCENT,
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // The drag's ghost: the hit's origin stays dim while the
+            // dragged line follows the pointer, so the gesture reads as
+            // "this hit is moving there".
             // r[impl drums.manual.slip]
+            // r[impl drums.manual.stretch]
             if let Some(s) = slipping() {
                 g {
                     transform: "translate({canvas::GUTTER_W}, {canvas::RULER_H})",
@@ -983,6 +1226,7 @@ pub fn StackView(
                     }
                 }
             }
+        }
         }
     }
 }
