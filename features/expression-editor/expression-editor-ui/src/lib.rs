@@ -153,6 +153,11 @@ pub fn ExpressionEditor(
     /// the daw write never happens in this crate.
     #[props(default)]
     on_quantize_apply: Option<EventHandler<quantize_panel::QuantizePanel>>,
+    /// Called when a slip drag on a role lane's hit is released:
+    /// `(hit_secs, next_hit_secs, delta_secs)`. Same contract as
+    /// [`stack::StackView`]'s prop of the same name.
+    #[props(default)]
+    on_slip: Option<EventHandler<(f64, f64, f64)>>,
     /// Anything the host wants at the top of the inspector.
     ///
     /// A slot, so a host can put its own controls inside the editor's
@@ -269,7 +274,7 @@ pub fn ExpressionEditor(
                     style: "display: flex; flex-direction: column; flex: 1 1 auto; \
                             min-width: 0; min-height: 0;",
                     if editor.read().stacked {
-                        stack::StackView { editor }
+                        stack::StackView { editor, on_slip }
                     } else {
                         Canvas { editor, drag, drawer, multi, menu_state, pending, draft }
                         LaneStrip { editor }

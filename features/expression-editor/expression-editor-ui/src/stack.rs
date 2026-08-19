@@ -55,6 +55,9 @@ pub struct LaneView {
     pub dividers: Vec<f64>,
     /// Labels down the left edge, paired with their y.
     pub labels: Vec<(f64, String)>,
+    /// Whether this lane is a folded role lane (kick, snare, toms,
+    /// other) — the lanes whose hits take the slip drag.
+    pub is_role: bool,
     /// The summed waveform of a role lane (kick, snare, other), as
     /// mirrored polygon points — the same shape
     /// [`canvas::take_waveform`] builds for the roll. `None` when the
@@ -83,6 +86,9 @@ pub struct LaneNote {
     pub w: f64,
     pub y: f64,
     pub h: f64,
+    /// Onset in seconds, for gestures that leave the pixel domain —
+    /// the slip drag hands the host times, not x coordinates.
+    pub at_secs: f64,
     pub fill: String,
     /// Slices and drum hits draw as triangles; everything else as bars.
     pub triangle: bool,
@@ -96,6 +102,32 @@ pub struct LaneNote {
     /// you actually played.
     pub flam: bool,
 }
+
+/// One slip drag: which hit is being slid, and where the pointer is.
+///
+/// Everything the release needs is captured at the press, so a lane
+/// re-layout mid-drag cannot re-target the gesture.
+#[derive(Clone, Copy, Debug)]
+struct SlipDrag {
+    /// The dragged hit's onset, seconds.
+    hit_secs: f64,
+    /// The next hit's onset, seconds — `f64::INFINITY` for the last.
+    next_secs: f64,
+    /// Where the press landed, element x.
+    x0: f64,
+    /// Where the pointer is now, element x.
+    x: f64,
+    /// The hit line's own x at the press (gutter-relative), so the
+    /// ghost draws on the line rather than under the finger.
+    hit_x: f64,
+    /// The lane's strip, for the ghost lines (y from the lane group's
+    /// origin).
+    lane_y: f64,
+    lane_h: f64,
+}
+
+/// How close to a hit line a press must land to pick it up, px.
+const SLIP_PICK_PX: f64 = 6.0;
 
 /// Vertical padding inside a lane, in pixels, top and bottom.
 const LANE_PAD: f64 = 3.0;
@@ -303,6 +335,7 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
         labels,
         two_handed_row,
         split,
+        is_role: role.is_some(),
         waveform,
         sub_lanes,
     })
@@ -392,11 +425,13 @@ fn lane_note(
         format!("{base}80")
     };
 
+    let ups = doc.time_base.units_per_second(ed.bpm);
     LaneNote {
         x: x0,
         w,
         y: y_of(n.row as f64 + 1.0),
         h: (row_h * 0.9).max(1.0),
+        at_secs: if ups.abs() < 1e-9 { 0.0 } else { n.start / ups },
         fill,
         grace: n.grace_of.is_some(),
         flam: doc.is_flam(n.id),
@@ -594,14 +629,34 @@ const MIN_LANE: f32 = 22.0;
 /// two — and it means the one gesture the stack does take is the one
 /// that gets you out of it.
 #[component]
-pub fn StackView(editor: Signal<Editor>) -> Element {
+pub fn StackView(
+    editor: Signal<Editor>,
+    /// Called when a slip drag on a role lane's hit is released:
+    /// `(hit_secs, next_hit_secs, delta_secs)`. `next_hit_secs` is
+    /// `f64::INFINITY` when the dragged hit is the lane's last — the
+    /// host clamps to its take length. `None` disables the gesture.
+    // r[impl drums.manual.slip]
+    #[props(default)]
+    on_slip: Option<EventHandler<(f64, f64, f64)>>,
+) -> Element {
     let mut editor = editor;
     // Where a middle-drag pan last was.
     let mut panning = use_signal(|| None::<(f64, f64)>);
+    // An in-flight slip drag on a role lane's hit.
+    let mut slipping = use_signal(|| None::<SlipDrag>);
     let ed = editor.read();
     let vp = ed.viewport;
     let lanes = lanes(&ed, ACTIVE_BOOST, ed.lane_floor().max(MIN_LANE));
     let ticks = canvas::ruler(&ed);
+    let px_per_sec = view_span_secs(&ed)
+        .map(|(v0, v1)| {
+            if (v1 - v0).abs() < 1e-9 {
+                0.0
+            } else {
+                vp.w / (v1 - v0)
+            }
+        })
+        .unwrap_or(0.0);
     drop(ed);
 
     rsx! {
@@ -627,6 +682,11 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
             // fix was to make the shared answer right rather than to
             // keep a second one.
             onpointermove: move |e: PointerEvent| {
+                if let Some(mut s) = slipping() {
+                    s.x = e.data().element_coordinates().x;
+                    slipping.set(Some(s));
+                    return;
+                }
                 let Some((lx, ly)) = panning() else { return };
                 let c = e.data().element_coordinates();
                 let mut ed = editor.write();
@@ -638,8 +698,31 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
                 drop(ed);
                 panning.set(Some((c.x, c.y)));
             },
-            onpointerup: move |_| panning.set(None),
-            onpointerleave: move |_| panning.set(None),
+            onpointerup: move |_| {
+                if let Some(s) = slipping() {
+                    slipping.set(None);
+                    // r[impl drums.manual.slip]
+                    let delta = if px_per_sec > 0.0 {
+                        (s.x - s.x0) / px_per_sec
+                    } else {
+                        0.0
+                    };
+                    // A press that never travelled is a click, not a
+                    // slip — half a millisecond is below anything a
+                    // hand meant.
+                    if delta.abs() > 0.0005
+                        && let Some(h) = &on_slip
+                    {
+                        h.call((s.hit_secs, s.next_secs, delta));
+                    }
+                    return;
+                }
+                panning.set(None);
+            },
+            onpointerleave: move |_| {
+                slipping.set(None);
+                panning.set(None);
+            },
             onpointerdown: move |e: PointerEvent| {
                 let c = e.data().element_coordinates();
                 // Middle-drag pans, the same as it does on the roll. The
@@ -649,6 +732,47 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
                 if matches!(e.trigger_button(), Some(MouseButton::Auxiliary)) {
                     panning.set(Some((c.x, c.y)));
                     return;
+                }
+                // A press near a role lane's hit line picks the hit up
+                // for a slip instead of switching lanes. Only where a
+                // host is listening — without a writer the gesture
+                // would be a lie.
+                // r[impl drums.manual.slip]
+                if on_slip.is_some() {
+                    let ed = editor.read();
+                    let views = self::lanes(&ed, ACTIVE_BOOST, ed.lane_floor().max(MIN_LANE));
+                    drop(ed);
+                    let ly = c.y - canvas::RULER_H;
+                    let lx = c.x - canvas::GUTTER_W;
+                    let picked = views
+                        .iter()
+                        .filter(|l| l.is_role && ly >= l.y && ly < l.y + l.h)
+                        .flat_map(|l| l.notes.iter().map(move |n| (l, n)))
+                        .filter(|(_, n)| (n.x - lx).abs() <= SLIP_PICK_PX)
+                        .min_by(|(_, a), (_, b)| {
+                            (a.x - lx).abs().total_cmp(&(b.x - lx).abs())
+                        })
+                        .map(|(l, n)| {
+                            let next = l
+                                .notes
+                                .iter()
+                                .map(|m| m.at_secs)
+                                .filter(|&t| t > n.at_secs + 1e-9)
+                                .fold(f64::INFINITY, f64::min);
+                            SlipDrag {
+                                hit_secs: n.at_secs,
+                                next_secs: next,
+                                x0: c.x,
+                                x: c.x,
+                                hit_x: n.x,
+                                lane_y: l.y,
+                                lane_h: l.h,
+                            }
+                        });
+                    if picked.is_some() {
+                        slipping.set(picked);
+                        return;
+                    }
                 }
                 let y = c.y - canvas::RULER_H + editor.read().stack_scroll;
                 // Resolve against a snapshot: the read guard has to be
@@ -835,6 +959,27 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
                                 if lane.split { "L|R" } else { "L+R" }
                             }
                         }
+                    }
+                }
+            }
+
+            // The slip drag's ghost: the hit's origin stays dim while
+            // the dragged line follows the pointer, so the gesture
+            // reads as "this hit is moving there".
+            // r[impl drums.manual.slip]
+            if let Some(s) = slipping() {
+                g {
+                    transform: "translate({canvas::GUTTER_W}, {canvas::RULER_H})",
+                    line {
+                        x1: "{s.hit_x:.1}", x2: "{s.hit_x:.1}",
+                        y1: "{s.lane_y:.1}", y2: "{s.lane_y + s.lane_h:.1}",
+                        stroke: theme::TEXT_DIM, stroke_width: 1,
+                        opacity: "0.5",
+                    }
+                    line {
+                        x1: "{s.hit_x + (s.x - s.x0):.1}", x2: "{s.hit_x + (s.x - s.x0):.1}",
+                        y1: "{s.lane_y:.1}", y2: "{s.lane_y + s.lane_h:.1}",
+                        stroke: theme::ACCENT, stroke_width: 2,
                     }
                 }
             }
