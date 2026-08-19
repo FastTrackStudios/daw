@@ -85,7 +85,17 @@ pub(crate) fn mix_item_into_bus(
             None => static_pitch_mult,
         };
 
-        let source_time = item.start_offset_seconds + item_time * item.play_rate * pitch_mult;
+        // r[impl drums.open.playback-warped]
+        // Take playback time → source time through the take's stretch
+        // markers (the same map the accessor and peaks use), falling
+        // back to offset + rate when the take is unwarped. Pitch
+        // scales the played position either way.
+        let played = item_time * item.play_rate * pitch_mult;
+        let source_time =
+            match daw_proto::StretchMarker::source_position_at(&item.stretch_markers, played) {
+                Some(s) => s,
+                None => item.start_offset_seconds + played,
+            };
         if source_time < 0.0 {
             continue;
         }

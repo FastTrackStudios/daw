@@ -203,6 +203,9 @@ pub(crate) struct ItemSnapshot {
     pub(crate) take_volume: f64,
     pub(crate) play_rate: f64,
     pub(crate) start_offset_seconds: f64,
+    /// The active take's stretch markers, sorted by position. Empty =
+    /// unwarped (offset + rate only).
+    pub(crate) stretch_markers: Vec<daw_proto::StretchMarker>,
     /// REAPER `CHANMODE` on the active take (0 = normal stereo).
     pub(crate) channel_mode: u32,
     /// Take pitch in semitones (added to envelope-driven pitch).
@@ -436,6 +439,10 @@ fn snapshot_track(
             let audio = take_guid_opt
                 .as_ref()
                 .and_then(|tg| p.audio_sources.get(tg).cloned());
+            let stretch_markers = take_guid_opt
+                .as_ref()
+                .and_then(|tg| p.stretch_markers.get(tg).cloned())
+                .unwrap_or_default();
             let (take_volume, play_rate, start_offset, take_pitch, channel_mode) = p
                 .takes
                 .get(ig)
@@ -643,6 +650,7 @@ fn snapshot_track(
                     play_rate
                 },
                 start_offset_seconds: start_offset,
+                stretch_markers,
                 channel_mode,
                 take_pitch_semitones: take_pitch,
                 take_volume_env,

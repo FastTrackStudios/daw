@@ -46,8 +46,27 @@ fn the_kit_session_opens_with_media() {
         .expect("Kick/In track");
     let items = Items::get_items(&daw, ctx.clone(), TrackRef::Guid(kick_in.guid.clone()));
     assert!(!items.is_empty(), "Kick/In has items");
+
+    // Fixed item lanes: `LANENAME 1 2 3` + `LANESOLO 4` — three comp
+    // lanes, lane 2 is the one that plays. Items carry their lane from
+    // `YPOS`, and the playing lane has audio on it.
+    assert_eq!(kick_in.lane_count, 3, "Kick/In has three fixed lanes");
+    assert_eq!(kick_in.lane_play_mask, 0b100, "lane 2 plays");
+    let playing: Vec<_> = items
+        .iter()
+        .filter(|i| {
+            i.fixed_lane
+                .is_some_and(|l| kick_in.lane_play_mask & (1 << l) != 0)
+        })
+        .collect();
+    assert!(!playing.is_empty(), "items on the playing lane");
+    assert!(
+        items.iter().any(|i| i.fixed_lane == Some(0)),
+        "items on the non-playing lane 0 are kept, just not played"
+    );
+
     let mut any_peaks = false;
-    for item in &items {
+    for item in &playing {
         let peaks = daw.take_peaks(
             ctx.clone(),
             ItemRef::Guid(item.guid.clone()),
