@@ -17,7 +17,7 @@ expression-editor-ui = { workspace = true }
 expression-editor-guitarpro = { workspace = true }
 # `standalone-rpp` = the standalone backend + the `.rpp` loader + source
 # decoding, which is what makes an audio take analysable with no DAW.
-daw = { workspace = true, features = ["standalone-rpp"] }
+daw = { workspace = true, features = ["standalone-rpp", "standalone-save"] }
 dioxus = { workspace = true }
 tracing = { workspace = true }
 

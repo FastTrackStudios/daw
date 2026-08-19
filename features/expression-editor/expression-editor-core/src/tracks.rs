@@ -972,6 +972,28 @@ impl Workspace {
         ))
     }
 
+    /// Replace a parked track's document with a fresh analysis.
+    ///
+    /// For hosts that re-read audio after an edit landed on the daw —
+    /// the drawing must follow the writes or the lane shows where the
+    /// hits *were*. History is reset: the old undo steps describe a
+    /// document that no longer exists underneath them. Refuses the
+    /// active slot — that document lives on the editor, and writing the
+    /// stale copy here would be exactly what [`Workspace::doc_of`]
+    /// exists to prevent; callers go through `Editor::reload_track_doc`.
+    pub fn reload_doc(&mut self, guid: &str, doc: ExpressionDoc) -> bool {
+        let Some(i) = self.index_of_guid(guid) else {
+            return false;
+        };
+        if i == self.active {
+            return false;
+        }
+        let t = &mut self.tracks[i];
+        t.doc = doc;
+        t.history = History::new(HISTORY_LIMIT);
+        true
+    }
+
     /// Rename without disturbing anything else.
     pub fn rename(&mut self, i: usize, name: impl Into<String>) -> bool {
         match self.tracks.get_mut(i) {

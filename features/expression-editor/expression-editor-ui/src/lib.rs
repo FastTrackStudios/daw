@@ -160,6 +160,10 @@ pub fn ExpressionEditor(
     /// host only ever sees finished gestures.
     #[props(default)]
     on_hit: Option<EventHandler<stack::HitGesture>>,
+    /// Save, when the host has somewhere to save to. Shown as a
+    /// toolbar button only when present.
+    #[props(default)]
+    on_save: Option<EventHandler<()>>,
     /// Anything the host wants at the top of the inspector.
     ///
     /// A slot, so a host can put its own controls inside the editor's
@@ -268,7 +272,7 @@ pub fn ExpressionEditor(
                     width: 100%; height: 100%; \
                     min-height: 0; overflow: hidden; background: {theme::BG}; \
                     color: {theme::TEXT}; font-family: system-ui, sans-serif;",
-            toolbar::Toolbar { editor, drag, drawer, quantize_open }
+            toolbar::Toolbar { editor, drag, drawer, quantize_open, on_save }
             switcher::TrackSwitcher { editor }
             div {
                 style: "display: flex; flex: 1 1 auto; min-height: 0;",

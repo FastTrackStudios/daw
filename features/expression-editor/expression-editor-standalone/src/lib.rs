@@ -908,11 +908,73 @@ fn edit_item(
     (seen, best)
 }
 
+/// Compose one track's *playing* audio into a single timeline buffer —
+/// every playing-lane audio item read through the accessor and placed
+/// at its position, out to `take_secs`. This is what a lane draws
+/// after an edit landed on the daw: the split pieces where they now
+/// sit, not where the take was when it loaded.
+pub(crate) fn track_timeline(
+    daw: &Standalone,
+    ctx: &ProjectContext,
+    track: &daw::service::Track,
+    take_secs: f64,
+    sample_rate: f64,
+) -> Vec<f64> {
+    let mut out = vec![0.0f64; (take_secs * sample_rate).ceil().max(0.0) as usize];
+    let items = Items::get_items(
+        daw,
+        ctx.clone(),
+        daw::service::TrackRef::Guid(track.guid.clone()),
+    );
+    let mut placed: Vec<_> = items
+        .into_iter()
+        .filter(|item| {
+            if track.lane_count > 0
+                && let Some(lane) = item.fixed_lane
+                && (lane >= 64 || track.lane_play_mask & (1u64 << lane) == 0)
+            {
+                return false;
+            }
+            Takes::get_active_take(daw, ctx.clone(), ItemRef::Guid(item.guid.clone()))
+                .is_some_and(|t| t.source_type == daw::service::SourceType::Audio)
+        })
+        .collect();
+    // Ascending position: a later piece's attack overwrites the
+    // previous piece's crossfade tail, which is what detection needs.
+    placed.sort_by(|a, b| a.position.as_seconds().total_cmp(&b.position.as_seconds()));
+    for item in placed {
+        let Some((samples, rate)) =
+            read_take_mono(daw, ctx, &item.guid, item.length.as_seconds(), item.volume)
+        else {
+            continue;
+        };
+        let at = (item.position.as_seconds() * sample_rate).round().max(0.0) as usize;
+        if (rate - sample_rate).abs() < 1e-6 {
+            for (i, s) in samples.iter().enumerate() {
+                if at + i < out.len() {
+                    out[at + i] = *s;
+                }
+            }
+        } else {
+            // Rates differing inside one kit is unusual; nearest-
+            // neighbour is fine for drawing and detection.
+            let n = (samples.len() as f64 * sample_rate / rate) as usize;
+            for i in 0..n {
+                let src = (i as f64 * rate / sample_rate) as usize;
+                if at + i < out.len() && src < samples.len() {
+                    out[at + i] = samples[src];
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Pull one take's audio through the accessor, chunked, mono, at the
 /// source rate — the same read [`AudioSession::load`] does, capped at
 /// the item length. Returns `(samples, sample_rate)`.
 // r[impl drums.open.runner]
-fn read_take_mono(
+pub(crate) fn read_take_mono(
     daw: &Standalone,
     ctx: &ProjectContext,
     item_guid: &str,
@@ -991,7 +1053,10 @@ fn read_take_mono(
 /// price is that it measures no centroid, so every hit lands in the
 /// middle band rather than being sorted by brightness.
 // r[impl drums.open.runner]
-fn percussion_doc(samples: &[f64], sample_rate: f64) -> expression_editor_core::ExpressionDoc {
+pub(crate) fn percussion_doc(
+    samples: &[f64],
+    sample_rate: f64,
+) -> expression_editor_core::ExpressionDoc {
     use expression_editor_audio::{DetectConfig, transients};
     use expression_editor_core::rows::SliceBands;
     use expression_editor_core::{ExpressionDoc, Note, NoteId, RowSpace, TimeBase};

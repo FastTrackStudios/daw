@@ -770,6 +770,24 @@ impl Editor {
         }
     }
 
+    /// Replace one track's document with a fresh analysis, wherever it
+    /// lives — the parked slot, or the live editor when the track is
+    /// active. See [`tracks::Workspace::reload_doc`] for why history
+    /// resets.
+    pub fn reload_track_doc(&mut self, guid: &str, doc: doc::ExpressionDoc) -> bool {
+        if self
+            .tracks
+            .track(self.tracks.active())
+            .is_some_and(|t| t.guid == guid)
+        {
+            self.doc = doc;
+            self.history = History::new(tracks::HISTORY_LIMIT);
+            self.selection.clear();
+            return true;
+        }
+        self.tracks.reload_doc(guid, doc)
+    }
+
     pub fn switch_track(&mut self, i: usize) -> bool {
         // Validate before moving anything out of the editor, so a
         // rejected switch cannot leave `doc` and `history` stranded.

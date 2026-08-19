@@ -106,6 +106,17 @@ fn remove_hit_note(editor: &mut Signal<Editor>, lane: &str, hit: f64) {
     ed.doc.notes.retain(|n| (n.start - target).abs() > tol);
 }
 
+/// After an edit lands on the daw, re-read the kit and swap every
+/// member's document, so the lanes draw the audio where it now is —
+/// the drawing must follow the writes or it shows where hits *were*.
+fn refresh_docs(editor: &mut Signal<Editor>, host: &crate::drum_host::SharedDrumHost) {
+    let docs = host.refresh();
+    let mut ed = editor.write();
+    for (guid, doc) in docs {
+        ed.reload_track_doc(&guid, doc);
+    }
+}
+
 /// An empty document, for the case where nothing was staged.
 ///
 /// Better than panicking: a window that opens empty is diagnosable, and
@@ -142,7 +153,8 @@ pub fn App() -> Element {
         EventHandler::new(
             move |p: expression_editor_ui::QuantizePanel| match h.apply(&p) {
                 Ok(done) => {
-                    tracing::info!(pieces = done.pieces, items = done.items, "quantized kit")
+                    tracing::info!(pieces = done.pieces, items = done.items, "quantized kit");
+                    refresh_docs(&mut editor, &h);
                 }
                 Err(e) => tracing::warn!(error = ?e, "quantize refused"),
             },
@@ -153,6 +165,13 @@ pub fn App() -> Element {
     // r[impl drums.manual.slip]
     // r[impl drums.manual.stretch]
     // r[impl drums.manual.add-remove]
+    // r[impl drums.save.new-file]
+    let on_save = host.read().clone().map(|h| {
+        EventHandler::new(move |_| match h.save() {
+            Ok(path) => tracing::info!(path = %path.display(), "saved as a new .rpp"),
+            Err(e) => tracing::warn!(error = %e, "save failed"),
+        })
+    });
     let on_hit = host.read().clone().map(|h| {
         EventHandler::new(move |g: expression_editor_ui::stack::HitGesture| {
             use expression_editor_ui::stack::HitGesture as G;
@@ -164,7 +183,10 @@ pub fn App() -> Element {
                         crossfade_secs: 0.005,
                     };
                     match h.slip(hit, next, delta, cfg) {
-                        Ok(done) => tracing::info!(pieces = done.pieces, "slipped hit"),
+                        Ok(done) => {
+                            tracing::info!(pieces = done.pieces, "slipped hit");
+                            refresh_docs(&mut editor, &h);
+                        }
                         Err(e) => tracing::warn!(error = ?e, "slip refused"),
                     }
                 }
@@ -178,7 +200,10 @@ pub fn App() -> Element {
                     let prev = if prev.is_finite() { prev } else { 0.0 };
                     let next = if next.is_finite() { next } else { h.take_secs };
                     match h.stretch(hit, prev, next, delta, both) {
-                        Ok(done) => tracing::info!(items = done.items, "stretched hit"),
+                        Ok(done) => {
+                            tracing::info!(items = done.items, "stretched hit");
+                            refresh_docs(&mut editor, &h);
+                        }
                         Err(e) => tracing::warn!(error = ?e, "stretch refused"),
                     }
                 }
@@ -218,6 +243,7 @@ pub fn App() -> Element {
                 on_quantize_change: on_change,
                 on_quantize_apply: on_apply,
                 on_hit,
+                on_save,
             }
         }
     }

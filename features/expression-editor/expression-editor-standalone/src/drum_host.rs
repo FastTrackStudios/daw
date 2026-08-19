@@ -54,6 +54,11 @@ pub struct DrumHost {
     daw: Standalone,
     ctx: ProjectContext,
     lanes: Vec<HostLane>,
+    /// The trigger lanes' summed signal, parallel to `lanes`. Behind a
+    /// lock because [`DrumHost::refresh`] recomputes it after an edit
+    /// lands — detection must run on the audio as it *is*, not as it
+    /// loaded. `Arc` so a detect in flight keeps its snapshot.
+    sums: Mutex<Vec<Option<Arc<Vec<f64>>>>>,
     manual: Mutex<ManualHits>,
     pub sample_rate: f64,
     /// The group's shared take length, seconds — the longest edit item.
@@ -67,15 +72,20 @@ impl DrumHost {
     pub fn new(
         daw: Standalone,
         ctx: ProjectContext,
-        lanes: Vec<HostLane>,
+        mut lanes: Vec<HostLane>,
         sample_rate: f64,
         take_secs: f64,
         beat_secs: f64,
     ) -> Self {
+        let sums = lanes
+            .iter_mut()
+            .map(|l| l.summed.take().map(Arc::new))
+            .collect();
         Self {
             daw,
             ctx,
             lanes,
+            sums: Mutex::new(sums),
             manual: Mutex::new(ManualHits::default()),
             sample_rate,
             take_secs,
@@ -114,12 +124,13 @@ impl DrumHost {
         }
     }
 
-    fn trigger_lanes(&self) -> Vec<Vec<&[f64]>> {
-        self.lanes
-            .iter()
-            .filter_map(|l| l.summed.as_deref())
-            .map(|s| vec![s])
-            .collect()
+    /// Snapshot of the trigger lanes' sums — `Arc`s, so a detect keeps
+    /// reading the audio it started with even across a refresh.
+    fn trigger_sums(&self) -> Vec<Arc<Vec<f64>>> {
+        self.sums
+            .lock()
+            .map(|s| s.iter().flatten().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Detect + plan for the panel's current settings: the histogram
@@ -135,11 +146,10 @@ impl DrumHost {
     /// the hand overlay applied: removed hits suppressed, added hits in.
     // r[impl drums.manual.add-remove]
     pub fn hits(&self, panel: &QuantizePanel) -> Vec<Transient> {
-        let detected = panel_bridge::detect_group(
-            &self.trigger_lanes(),
-            self.sample_rate,
-            &Self::detect_of(panel),
-        );
+        let sums = self.trigger_sums();
+        let lanes: Vec<Vec<&[f64]>> = sums.iter().map(|s| vec![s.as_slice()]).collect();
+        let detected =
+            panel_bridge::detect_group(&lanes, self.sample_rate, &Self::detect_of(panel));
         let Ok(m) = self.manual.lock() else {
             return detected;
         };
@@ -174,10 +184,9 @@ impl DrumHost {
     /// nothing reaches the daw until a drag or Apply.
     // r[impl drums.manual.add-remove]
     pub fn add_hit(&self, at: f64, window_secs: f64) -> f64 {
-        let refined = self
-            .lanes
+        let sums = self.trigger_sums();
+        let refined = sums
             .iter()
-            .filter_map(|l| l.summed.as_deref())
             .map(|s| refine_onset(s, self.sample_rate, at, window_secs))
             .fold(None::<f64>, |best, t| match best {
                 // The refinement nearest the click wins across lanes.
@@ -293,6 +302,83 @@ impl DrumHost {
     /// One undo step back — the whole last gesture.
     pub fn undo(&self) -> bool {
         self.daw.undo(self.ctx.clone())
+    }
+
+    /// Re-read the kit from the daw after an edit landed, and hand back
+    /// a fresh document per member track so the lanes draw the audio
+    /// where it now *is* — split pieces, slid spans and all. Also
+    /// recomputes the trigger lanes' sums, so the next detect and the
+    /// next Alt+click see the edited audio too.
+    ///
+    /// Returns `(track_guid, doc)` pairs; the caller pushes them into
+    /// the editor with `Editor::reload_track_doc`.
+    pub fn refresh(&self) -> Vec<(String, expression_editor_core::ExpressionDoc)> {
+        use daw::service::{Items, Tracks};
+        let mut docs = Vec::new();
+        let mut new_sums: Vec<Option<Arc<Vec<f64>>>> = Vec::with_capacity(self.lanes.len());
+        for lane in &self.lanes {
+            // Member tracks, from the lanes' anchor items (piece 0 of a
+            // split keeps the original item guid, so this stays valid
+            // across edits).
+            let mut track_guids: Vec<String> = Vec::new();
+            for item in &lane.items {
+                if let Some(info) = self.daw.get_item(self.ctx.clone(), item.clone())
+                    && !track_guids.contains(&info.track_guid)
+                {
+                    track_guids.push(info.track_guid);
+                }
+            }
+            let mut lane_sum: Option<Vec<f64>> = None;
+            let mut members = 0usize;
+            for guid in &track_guids {
+                let Some(track) = Tracks::all(&self.daw, self.ctx.clone())
+                    .into_iter()
+                    .find(|t| &t.guid == guid)
+                else {
+                    continue;
+                };
+                let samples = crate::track_timeline(
+                    &self.daw,
+                    &self.ctx,
+                    &track,
+                    self.take_secs,
+                    self.sample_rate,
+                );
+                if lane.role.is_detection_source() {
+                    let sum = lane_sum.get_or_insert_with(|| vec![0.0; samples.len()]);
+                    for (o, v) in sum.iter_mut().zip(samples.iter()) {
+                        *o += v;
+                    }
+                    members += 1;
+                }
+                docs.push((
+                    guid.clone(),
+                    crate::percussion_doc(&samples, self.sample_rate),
+                ));
+            }
+            new_sums.push(lane_sum.map(|mut sum| {
+                let scale = 1.0 / members.max(1) as f64;
+                for v in &mut sum {
+                    *v *= scale;
+                }
+                Arc::new(sum)
+            }));
+        }
+        if let Ok(mut sums) = self.sums.lock() {
+            *sums = new_sums;
+        }
+        docs
+    }
+
+    /// Save the project as a **new** `.rpp` beside its original —
+    /// `<stem>.fts-edit.rpp` — never over it. Returns the path written.
+    // r[impl drums.save.new-file]
+    pub fn save(&self) -> Result<std::path::PathBuf, String> {
+        let guid = match &self.ctx {
+            ProjectContext::Project(g) => g.clone(),
+            ProjectContext::Current => return Err("host has no project guid".into()),
+        };
+        daw::standalone::save::save_project_as(&self.daw, &guid)
     }
 }
 
