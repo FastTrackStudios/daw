@@ -102,6 +102,10 @@ pub struct LaneNote {
     /// full size and only badged; conflating them would shrink the note
     /// you actually played.
     pub flam: bool,
+    /// Draw as a full-height trigger line with a small onset flag —
+    /// how a role lane marks a hit on its waveform. Off everywhere
+    /// else, where the note body is the content.
+    pub hit_line: bool,
 }
 
 /// One hand edit leaving the stack, in seconds — the host decides what
@@ -343,6 +347,19 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
         }
     }
 
+    // In a role lane the audio is the content and a hit is a *marker*
+    // on it: full-height trigger lines with a small onset flag, the way
+    // a drum editor draws them — not band-height wedges, which at this
+    // lane height bury the waveform they annotate.
+    // r[impl drums.lanes.hits]
+    if role.is_some() {
+        for n in &mut notes {
+            n.hit_line = true;
+            n.y = y0;
+            n.h = h;
+        }
+    }
+
     // Guides span whatever the camera is actually showing, which is not
     // necessarily the content range any more — an edit can push content
     // past the edge, and the lane deliberately does not chase it.
@@ -495,6 +512,7 @@ fn lane_note(
             space.note_shape(),
             expression_editor_core::rows::NoteShape::Triangle
         ) || mode.draws_slices(),
+        hit_line: false,
     }
 }
 
@@ -1097,7 +1115,20 @@ pub fn StackView(
                                     let gh = if n.grace { n.h * 0.62 } else { n.h };
                                     let gy = n.y + (n.h - gh) / 2.0;
                                     rsx! {
-                                        if n.triangle {
+                                        if n.hit_line {
+                                            // r[impl drums.lanes.hits]
+                                            line {
+                                                x1: "{n.x:.1}", y1: "{gy:.1}",
+                                                x2: "{n.x:.1}", y2: "{gy + gh:.1}",
+                                                stroke: "{n.fill}",
+                                                stroke_width: "1.5",
+                                                opacity: "0.9",
+                                            }
+                                            polygon {
+                                                points: "{n.x:.1},{gy:.1} {n.x + n.w.min(9.0):.1},{gy + 5.0:.1} {n.x:.1},{gy + 10.0:.1}",
+                                                fill: "{n.fill}",
+                                            }
+                                        } else if n.triangle {
                                             polygon {
                                                 points: "{n.x:.1},{gy:.1} {n.x + n.w:.1},{gy + gh / 2.0:.1} {n.x:.1},{gy + gh:.1}",
                                                 fill: "{n.fill}",
