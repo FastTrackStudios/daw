@@ -17,7 +17,6 @@ facet = { workspace = true }
 # re-exported from `live_midi` as this crate's live-MIDI message type. Consumed
 # through the `midicore` facade (never midicore-proto directly).
 midicore = { workspace = true, default-features = false }
-actions-proto = { workspace = true }
 # architect — provides `#[architect::rpc]`. Enabling the `vox` feature
 # wires the macro's emission through to the workspace's vox stack.
 architect = { workspace = true, features = ["vox"] }

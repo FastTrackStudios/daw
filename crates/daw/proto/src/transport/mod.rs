@@ -7,7 +7,6 @@
 //! `daw_proto::transport::Transport`; trait:
 //! `daw_proto::Transport`).
 
-pub mod actions;
 pub mod error;
 pub mod event;
 // `service` is `pub mod` so the trait can be reached as
@@ -17,7 +16,6 @@ pub mod service;
 #[allow(clippy::module_inception)]
 pub mod transport;
 
-pub use actions::fts_transport_actions;
 pub use error::TransportError;
 pub use event::{PositionTick, TransportEvent, TransportStreamEvent, TransportSubscription};
 pub use transport::{
