@@ -39,6 +39,7 @@
       "z c": "view.memagic.center",
       "z t": "view.memagic.top",
       "z b": "view.memagic.bottom",
+      "z r": "view.reset",
       "k r": "razor.reverse",
       "k v": "razor.invert",
       "k x": "razor.delete",

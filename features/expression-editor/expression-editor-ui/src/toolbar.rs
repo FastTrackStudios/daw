@@ -570,6 +570,8 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
     let density = ed.grid.adaptive.density;
     let adaptive_on = ed.grid.adaptive.is_adaptive();
     let coarsened = ed.grid.is_coarsened();
+    // What was asked for, as opposed to what the zoom is allowing.
+    let ceiling_label = format!("1/{:.0}", 1.0 / ed.grid.division);
     // The setting, spelled out, so the readout can show what is in use
     // while the tooltip says what was asked for — the two differ exactly
     // when the zoom is holding the grid back.
@@ -637,6 +639,26 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
                             if coarsened { theme::GOLD } else { theme::TEXT },
                         ),
                         "{grid_label}"
+                    }
+                    // The ceiling, spelled out beside it while the zoom
+                    // is holding the grid back.
+                    //
+                    // This used to live only in the `title`, and Blitz
+                    // draws no tooltips — so the one moment the readout
+                    // is not the setting was also the one moment nothing
+                    // said so, and the number looked like it had changed
+                    // itself. Two numbers is the whole explanation:
+                    // what you get, and what you asked for.
+                    if coarsened {
+                        span {
+                            "data-testid": "grid-ceiling",
+                            style: format!(
+                                "font-family: ui-monospace, monospace; font-size: 9px; \
+                                 color: {}; margin-left: 3px;",
+                                theme::TEXT_DIM,
+                            ),
+                            "≤{ceiling_label}"
+                        }
                     }
                 }
                 Seg {

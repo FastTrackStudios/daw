@@ -1567,7 +1567,16 @@ impl Editor {
     /// The grid part is a no-op unless the user has asked for an
     /// adaptive density, and usually a no-op even then: a division only
     /// moves when the zoom crosses a power of two.
-    fn settle_camera(&mut self) {
+    ///
+    /// **Public, and the required ending for any direct camera write.**
+    /// It was private, which made the promise above impossible to keep:
+    /// the interactive zooms live in `expression-editor-ui`, where they
+    /// set `camera.units_per_px` by hand, and the one function that would
+    /// have refitted the grid afterwards was not reachable from there. So
+    /// the grid followed the wheel and not the zoom *tool* — which, since
+    /// `z` became the tool, is most zooming. Anything that assigns to
+    /// `camera` ends here.
+    pub fn settle_camera(&mut self) {
         self.camera.constrain(self.bounds(), self.viewport);
         let bar_px = self.units_per_bar() / self.camera.units_per_px;
         self.grid.refit(bar_px);

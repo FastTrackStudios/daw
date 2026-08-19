@@ -337,6 +337,7 @@ const LABELS: &[(&str, &str)] = &[
     ("razor.clear", "Drop the areas"),
     ("razor.double", "Double the length"),
     ("razor.halve", "Halve the length"),
+    ("view.reset", "Reset the view"),
     ("view.memagic.fit_item", "Fit item"),
     ("view.memagic.fit_notes", "Fit notes in view"),
     ("view.memagic.center", "Centre on notes"),
@@ -402,6 +403,7 @@ pub fn is_pending() -> bool {
 /// silently: a binding naming something absent here is dead, which the
 /// test below catches.
 pub const ACTIONS: &[&str] = &[
+    "view.reset",
     "velocity.ramp_up",
     "velocity.ramp_down",
     "velocity.ramp_up_smooth",
@@ -460,6 +462,10 @@ pub fn dispatch(
         "razor.clear_lane" => return ed.razor_clear_lane(),
         "razor.double" => return ed.razor_scale(2.0),
         "razor.halve" => return ed.razor_scale(0.5),
+        "view.reset" => {
+            ed.reset_view();
+            return true;
+        }
         "razor.clear" => {
             let had = !ed.razor.is_empty();
             ed.razor.clear();

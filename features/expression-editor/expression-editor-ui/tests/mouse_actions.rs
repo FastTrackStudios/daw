@@ -1428,3 +1428,71 @@ fn the_velocity_tool_claims_a_note_drag() {
         "the velocity tool did not claim a drag on a note",
     );
 }
+
+// ── the adaptive grid follows the zoom tool ─────────────────────────
+
+/// Zooming with the *tool* coarsens the adaptive grid, as the wheel does.
+///
+/// The grid follows the camera through `Editor::settle_camera`, which
+/// exists so that every camera move ends in one place. It was private —
+/// and the interactive zooms live in this crate, where they set
+/// `units_per_px` by hand. So the wheel refitted the grid and the zoom
+/// tool did not, which since `z` became a tool is most zooming: the
+/// readout went on claiming 1/16 while the view crossed two octaves of
+/// scale.
+#[test]
+fn the_zoom_tool_moves_the_adaptive_grid() {
+    use adaptive_grid::Density;
+
+    let mut ed = four_notes();
+    ed.tool = expression_editor_core::Tool::Zoom;
+    ed.grid.enabled = true;
+    ed.grid.division = 1.0 / 32.0;
+    ed.set_grid_density(Density::Medium);
+
+    let (x, y) = (400.0, ed.viewport.h * 0.5);
+    let fine = ed.grid.effective();
+
+    // Drag left: zoom *out* in time, which is what coarsens a grid.
+    let mut d = interaction::pointer_down(&mut ed, x, y, plain(), 0);
+    interaction::pointer_move(&mut ed, &mut d, x - 380.0, y, plain());
+    interaction::pointer_up(&mut ed, d, x - 380.0, y, plain());
+
+    let coarse = ed.grid.effective();
+    assert!(
+        coarse > fine,
+        "zooming out with the tool left the grid at 1/{:.0} — it never \
+         refitted",
+        1.0 / coarse,
+    );
+    assert!(
+        ed.grid.is_coarsened(),
+        "the readout would not show the grid as held by the zoom",
+    );
+    // And the label follows, since that is what the user actually reads.
+    assert_eq!(
+        ed.grid.label(),
+        format!("1/{:.0}", 1.0 / coarse),
+        "the readout and the snap disagree",
+    );
+}
+
+/// A fixed grid stays put, however far the tool zooms.
+#[test]
+fn the_zoom_tool_leaves_a_fixed_grid_alone() {
+    use adaptive_grid::Density;
+
+    let mut ed = four_notes();
+    ed.tool = expression_editor_core::Tool::Zoom;
+    ed.grid.enabled = true;
+    ed.grid.division = 1.0 / 16.0;
+    ed.set_grid_density(Density::Fixed);
+    let before = ed.grid.effective();
+
+    let (x, y) = (400.0, ed.viewport.h * 0.5);
+    let mut d = interaction::pointer_down(&mut ed, x, y, plain(), 0);
+    interaction::pointer_move(&mut ed, &mut d, x - 380.0, y, plain());
+    interaction::pointer_up(&mut ed, d, x - 380.0, y, plain());
+
+    assert_eq!(ed.grid.effective(), before, "a fixed grid followed the zoom");
+}

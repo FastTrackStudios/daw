@@ -1997,6 +1997,9 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             // `t_at(x) = t0 + x * units_per_px`, solved for the t0 that
             // puts `anchor_t` back under the press.
             ed.camera.t0 = *anchor_t - origin.0 * ed.camera.units_per_px;
+            // The required ending for a direct camera write: constrain,
+            // and let the adaptive grid follow the new zoom.
+            ed.settle_camera();
         }
         Drag::ZoomTool {
             origin,
@@ -2038,8 +2041,13 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             ed.camera.t0 = *anchor_t - origin.0 * ed.camera.units_per_px;
             ed.camera.vertical.center = *anchor_slot
                 - (ed.viewport.h * 0.5 - origin.1) / ed.camera.vertical.px_per_row;
-            let (bounds, vp) = (ed.bounds(), ed.viewport);
-            ed.camera.constrain(bounds, vp);
+            // `settle_camera`, not `camera.constrain` — the difference
+            // is the grid. Constraining alone left the adaptive division
+            // frozen at whatever the view was before the drag, so the
+            // readout said 1/16 while the notes snapped to something
+            // else, and the whole feature looked broken from the one
+            // tool most likely to be used to trigger it.
+            ed.settle_camera();
         }
         Drag::InsertNote {
             note,
@@ -2738,10 +2746,11 @@ pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
             ed.selection.notes = ed.doc.notes.iter().map(|n| n.id).collect();
             true
         }
-        ("v", false, _) => {
-            ed.reset_view();
-            true
-        }
+        // Plain `v` used to reset the view. It cannot any more: `v` is
+        // the velocity prefix, so the sequence resolver takes it and
+        // this arm was never reached — a binding that had quietly
+        // stopped existing. Reset moved to `z r`, in the tree that is
+        // already about the view.
         // Contextual zoom. One key, and the pointer region picks the
         // behaviour — the MeMagic idea.
         // Contextual zoom. Shift widens the intent: plain F hugs the
