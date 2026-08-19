@@ -176,6 +176,13 @@ fn populate_tracks(
             p.transport.tempo = Tempo::from_bpm(env.default_tempo.max(1.0));
             let (num, denom) = env.default_time_signature;
             p.transport.time_signature = TimeSignature::new(num.max(1) as u32, denom.max(1) as u32);
+        } else if let Some((bpm, num, denom, _)) = project.properties.tempo {
+            // No tempo envelope: the header `TEMPO <bpm> <num> <denom>`
+            // is the project's one tempo, and everything that converts
+            // time — the grid, the ruler, quantize targets — reads it
+            // from here. r[impl drums.group.tempo]
+            p.transport.tempo = Tempo::from_bpm((bpm.max(1)) as f64);
+            p.transport.time_signature = TimeSignature::new(num.max(1) as u32, denom.max(1) as u32);
         }
 
         // Master section: `MASTER_VOLUME vol pan …` + `MASTERMUTESOLO`.
