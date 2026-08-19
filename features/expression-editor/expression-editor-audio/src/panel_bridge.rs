@@ -175,12 +175,21 @@ pub fn preview(
     target: &PanelTarget,
 ) -> (Vec<Transient>, Plan, Vec<HitPreview>) {
     let hits = detect_group(trigger_lanes, sample_rate, detect);
-    let mut p = plan(&hits, quantize_config(target));
+    let (p, previews) = preview_hits(&hits, target);
+    (hits, p, previews)
+}
+
+/// Plan + preview over a hit list the caller already holds — the same
+/// pass as [`preview`], split out so a host that overlays hand-added or
+/// hand-removed hits (r[drums.manual.add-remove]) plans over the list
+/// the user actually sees.
+pub fn preview_hits(hits: &[Transient], target: &PanelTarget) -> (Plan, Vec<HitPreview>) {
+    let mut p = plan(hits, quantize_config(target));
     // The same swing pass the panel's own preview runs — one body, in
     // the tools crate, so the two can never disagree.
     tools::swing(&mut p.0, quantize_config(target).into(), target.swing);
     let previews = hit_previews(&p);
-    (hits, p, previews)
+    (p, previews)
 }
 
 #[cfg(test)]

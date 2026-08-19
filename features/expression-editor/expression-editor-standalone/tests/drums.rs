@@ -341,3 +341,85 @@ fn the_hosts_slip_slides_every_mic_and_one_undo_restores() {
         assert_eq!(pieces_on(daw, &ctx, item), before[i], "mic {i} restored");
     }
 }
+
+// r[verify drums.manual.stretch]
+#[test]
+fn the_hosts_stretch_writes_one_marker_map_to_every_mic_and_one_undo_restores() {
+    use daw::service::{ProjectContext, StretchMarkers, TakeRef};
+    let runner = open_kit("stretch");
+    let host = runner.host.as_ref().expect("host");
+    let daw = runner.daw.as_ref().expect("backend");
+    let ctx = ProjectContext::Current;
+    let items = host.group();
+
+    // Drag the middle click (0.4 s) 30 ms later between its neighbours.
+    let done = host
+        .stretch(0.4, 0.1, 0.7, 0.030, false)
+        .expect("stretched");
+    assert_eq!(done.items, 3, "every mic warped");
+    assert!(done.pieces > 0, "markers were written");
+
+    let markers_of = |item: &daw::service::ItemRef| {
+        daw.get_stretch_markers(ctx.clone(), item.clone(), TakeRef::Active)
+    };
+    let first = markers_of(&items[0]);
+    assert!(!first.is_empty(), "the map exists");
+    for item in &items[1..] {
+        assert_eq!(markers_of(item), first, "identical maps on every mic");
+    }
+    // The dragged hit is heard 30 ms later: some marker plays 0.4 s of
+    // source at 0.43 s of take time.
+    assert!(
+        first
+            .iter()
+            .any(|m| (m.source_position - 0.4).abs() < 0.01 && (m.position - 0.43).abs() < 0.01),
+        "the hit's marker moved: {first:?}"
+    );
+
+    assert!(host.undo(), "one undo step");
+    for item in &items {
+        assert!(markers_of(item).is_empty(), "markers gone after undo");
+    }
+}
+
+// r[verify drums.manual.add-remove]
+#[test]
+fn hand_added_and_removed_hits_shape_the_list_but_not_the_daw() {
+    use daw::service::ProjectContext;
+    let runner = open_kit("manual");
+    let host = runner.host.as_ref().expect("host");
+    let daw = runner.daw.as_ref().expect("backend");
+    let ctx = ProjectContext::Current;
+    let items = host.group();
+    let before: Vec<_> = items.iter().map(|i| pieces_on(daw, &ctx, i)).collect();
+
+    let panel = expression_editor_ui::QuantizePanel::default();
+    let detected = host.hits(&panel).len();
+    assert!(detected >= 3, "the fixture's clicks were found");
+
+    // A hand-placed hit near silence at 0.55 s refines to wherever the
+    // sum rises most — the fixture is silent there, so it stays put.
+    let landed = host.add_hit(0.55, 0.02);
+    assert!(
+        (landed - 0.55).abs() <= 0.02,
+        "refined nearby, got {landed}"
+    );
+    assert_eq!(host.hits(&panel).len(), detected + 1, "the list grew");
+
+    // Throwing out a detected hit suppresses it across re-detection.
+    host.remove_hit(0.4);
+    let now = host.hits(&panel);
+    assert_eq!(now.len(), detected, "one added, one removed");
+    assert!(
+        !now.iter().any(|t| (t.at - 0.4).abs() < 0.015),
+        "the removed hit stays gone"
+    );
+    // Un-adding the hand hit brings the count back down.
+    host.remove_hit(landed);
+    assert_eq!(host.hits(&panel).len(), detected - 1);
+
+    // And none of it touched the daw.
+    for (i, item) in items.iter().enumerate() {
+        assert_eq!(pieces_on(daw, &ctx, item), before[i], "mic {i} untouched");
+    }
+}
