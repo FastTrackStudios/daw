@@ -12,6 +12,8 @@
 use expression_editor_tools::event::Timed;
 use expression_editor_tools::quantize::{Plan, QuantizeConfig, plan};
 
+pub use expression_editor_tools::quantize::{HitPreview, hit_previews, swing};
+
 /// How the quantize is written.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum WriteMode {
@@ -46,8 +48,205 @@ impl Group {
     }
 }
 
+/// The detector's controls, as the panel holds them.
+///
+/// Plain values, not `expression_editor_audio::DetectConfig`: this crate
+/// does not depend on the audio crate, so the panel holds what the
+/// sliders say and the host's bridge (`expression_editor_audio::
+/// panel_bridge`) turns them into engine types. Defaults mirror the
+/// engine's own.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DetectSettings {
+    /// Absolute floor on the detector's fast envelope, dBFS.
+    pub threshold_db: f64,
+    /// `0.0..=1.0`. Higher keeps softer hits.
+    pub sensitivity: f64,
+    /// How struck a sound must be, in dB. Advanced.
+    pub crest_db: f64,
+    /// High-pass corner in Hz ahead of detection only, or `None`.
+    pub high_pass_hz: Option<f64>,
+    /// Low-pass corner in Hz ahead of detection only, or `None`.
+    pub low_pass_hz: Option<f64>,
+    /// Linear make-up gain after the filters.
+    pub gain: f64,
+    /// Shortest gap between two hits, seconds. Advanced.
+    pub retrigger_secs: f64,
+    /// Fixed shift on every detected hit, seconds. Advanced.
+    pub time_offset_secs: f64,
+}
+
+impl Default for DetectSettings {
+    fn default() -> Self {
+        Self {
+            threshold_db: -60.0,
+            sensitivity: 0.5,
+            crest_db: 3.0,
+            high_pass_hz: None,
+            low_pass_hz: None,
+            gain: 1.0,
+            retrigger_secs: 0.050,
+            time_offset_secs: 0.0,
+        }
+    }
+}
+
+/// A named detector filter block.
+///
+/// One pick instead of four sliders: dialling a kick in is choosing
+/// "where the kick lives", and that is a preset, not a tweak.
+// r[impl drums.quantize.filter-presets]
+#[derive(Clone, Debug, PartialEq)]
+pub struct FilterPreset {
+    pub name: String,
+    pub high_pass_hz: Option<f64>,
+    pub low_pass_hz: Option<f64>,
+    /// Make-up gain for what the band-limiting took.
+    pub gain: f64,
+}
+
+impl FilterPreset {
+    /// The presets that ship: where each drum lives, plus flat.
+    pub fn builtins() -> Vec<FilterPreset> {
+        vec![
+            FilterPreset {
+                name: "Full kit".into(),
+                high_pass_hz: None,
+                low_pass_hz: None,
+                gain: 1.0,
+            },
+            FilterPreset {
+                name: "Kick".into(),
+                high_pass_hz: Some(30.0),
+                low_pass_hz: Some(800.0),
+                gain: 1.5,
+            },
+            FilterPreset {
+                name: "Snare".into(),
+                high_pass_hz: Some(120.0),
+                low_pass_hz: Some(5_000.0),
+                gain: 1.5,
+            },
+            FilterPreset {
+                name: "Toms".into(),
+                high_pass_hz: Some(60.0),
+                low_pass_hz: Some(2_000.0),
+                gain: 1.5,
+            },
+        ]
+    }
+}
+
+/// The grid divisions the target section offers, 1/4 to 1/64.
+// r[impl drums.quantize.grid-options]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GridDivision {
+    Quarter,
+    Eighth,
+    Sixteenth,
+    ThirtySecond,
+    SixtyFourth,
+}
+
+impl GridDivision {
+    pub const ALL: [GridDivision; 5] = [
+        GridDivision::Quarter,
+        GridDivision::Eighth,
+        GridDivision::Sixteenth,
+        GridDivision::ThirtySecond,
+        GridDivision::SixtyFourth,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            GridDivision::Quarter => "1/4",
+            GridDivision::Eighth => "1/8",
+            GridDivision::Sixteenth => "1/16",
+            GridDivision::ThirtySecond => "1/32",
+            GridDivision::SixtyFourth => "1/64",
+        }
+    }
+
+    /// Length in beats (a quarter note is one beat).
+    pub fn beats(self) -> f64 {
+        match self {
+            GridDivision::Quarter => 1.0,
+            GridDivision::Eighth => 0.5,
+            GridDivision::Sixteenth => 0.25,
+            GridDivision::ThirtySecond => 0.125,
+            GridDivision::SixtyFourth => 0.0625,
+        }
+    }
+}
+
+/// Straight, triplet or dotted — the multiplier on the division.
+// r[impl drums.quantize.grid-options]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum GridFeel {
+    #[default]
+    Straight,
+    Triplet,
+    Dotted,
+}
+
+impl GridFeel {
+    pub const ALL: [GridFeel; 3] = [GridFeel::Straight, GridFeel::Triplet, GridFeel::Dotted];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            GridFeel::Straight => "straight",
+            GridFeel::Triplet => "triplet",
+            GridFeel::Dotted => "dotted",
+        }
+    }
+
+    pub fn factor(self) -> f64 {
+        match self {
+            GridFeel::Straight => 1.0,
+            GridFeel::Triplet => 2.0 / 3.0,
+            GridFeel::Dotted => 1.5,
+        }
+    }
+}
+
+/// Per-slider "my default" values, keyed by the slider's name.
+///
+/// Right-click stores, Alt-click resets — the affordance Perfect Timing
+/// ships, because a drum editor re-dials the same kit for every song.
+/// Plain data (`Vec<(String, f64)>`) so a host can serialize it with the
+/// rest of its settings.
+///
+/// TODO: the editor has no settings persistence seam yet — hosts hold
+/// this in memory today and should write it wherever their settings land
+/// once one exists.
+// r[impl drums.quantize.slider-defaults]
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SliderDefaults {
+    stored: Vec<(String, f64)>,
+}
+
+impl SliderDefaults {
+    /// Right-click → store `value` as the default for `name`.
+    pub fn store(&mut self, name: &str, value: f64) {
+        match self.stored.iter_mut().find(|(n, _)| n == name) {
+            Some((_, v)) => *v = value,
+            None => self.stored.push((name.to_string(), value)),
+        }
+    }
+
+    /// The stored default for `name`, when there is one.
+    pub fn get(&self, name: &str) -> Option<f64> {
+        self.stored.iter().find(|(n, _)| n == name).map(|&(_, v)| v)
+    }
+
+    /// Alt-click → what the slider resets to: the user's stored default,
+    /// or the built-in one when nothing was stored.
+    pub fn reset_value(&self, name: &str, built_in: f64) -> f64 {
+        self.get(name).unwrap_or(built_in)
+    }
+}
+
 /// Everything the panel holds.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct QuantizePanel {
     pub config: QuantizeConfig,
     pub mode: WriteMode,
@@ -57,6 +256,95 @@ pub struct QuantizePanel {
     /// Crossfade length at each join. SPLIT only.
     pub crossfade: f64,
     pub group: Group,
+    /// The detector's controls. The host bridge turns these into a
+    /// `DetectConfig`.
+    pub detect: DetectSettings,
+    /// The advanced disclosure in the Detect section.
+    pub advanced: bool,
+    /// Grid division and feel. `config.grid` is derived from these via
+    /// [`QuantizePanel::grid_in`] whenever the host knows the beat
+    /// length; a host without a tempo map can still set `config.grid`
+    /// directly.
+    pub division: GridDivision,
+    pub feel: GridFeel,
+    /// Swing on the off-beat divisions, `0.0..=1.0`.
+    pub swing: f64,
+    /// Whether each division scans a window (`config.tolerance =
+    /// Some(..)`) or every hit snaps to its nearest division.
+    pub grid_scan: bool,
+    /// The window half-width used while `grid_scan` is on, kept even
+    /// while it is off so toggling does not forget the dialled value.
+    pub tolerance: f64,
+    /// Filter presets: the built-ins plus whatever the user saved.
+    pub presets: Vec<FilterPreset>,
+    /// Which preset the Detect combo shows.
+    pub preset: usize,
+    /// Per-slider stored defaults.
+    pub defaults: SliderDefaults,
+}
+
+impl Default for QuantizePanel {
+    fn default() -> Self {
+        let config = QuantizeConfig::default();
+        Self {
+            config,
+            mode: WriteMode::default(),
+            pad: 0.007,
+            crossfade: 0.007,
+            group: Group::default(),
+            detect: DetectSettings::default(),
+            advanced: false,
+            division: GridDivision::Sixteenth,
+            feel: GridFeel::Straight,
+            swing: 0.0,
+            grid_scan: config.tolerance.is_some(),
+            tolerance: config.tolerance.unwrap_or(0.05),
+            presets: FilterPreset::builtins(),
+            preset: 0,
+            defaults: SliderDefaults::default(),
+        }
+    }
+}
+
+impl QuantizePanel {
+    /// The grid length in the events' unit, given one beat's length in
+    /// that unit — seconds per quarter for audio, PPQ for MIDI.
+    // r[impl drums.quantize.grid-options]
+    pub fn grid_in(&self, beat_len: f64) -> f64 {
+        beat_len * self.division.beats() * self.feel.factor()
+    }
+
+    /// Keep `config` in step with the target controls. Called by the
+    /// view after every change; hosts that set `config.grid` from a
+    /// tempo map call [`QuantizePanel::grid_in`] themselves.
+    pub fn sync_config(&mut self) {
+        self.config.tolerance = self.grid_scan.then_some(self.tolerance);
+    }
+
+    /// Apply the selected filter preset to the detect settings.
+    // r[impl drums.quantize.filter-presets]
+    pub fn apply_preset(&mut self, index: usize) {
+        let Some(p) = self.presets.get(index) else {
+            return;
+        };
+        self.detect.high_pass_hz = p.high_pass_hz;
+        self.detect.low_pass_hz = p.low_pass_hz;
+        self.detect.gain = p.gain;
+        self.preset = index;
+    }
+
+    /// Save the current filter block as a named user preset and select
+    /// it.
+    // r[impl drums.quantize.filter-presets]
+    pub fn save_preset(&mut self, name: impl Into<String>) {
+        self.presets.push(FilterPreset {
+            name: name.into(),
+            high_pass_hz: self.detect.high_pass_hz,
+            low_pass_hz: self.detect.low_pass_hz,
+            gain: self.detect.gain,
+        });
+        self.preset = self.presets.len() - 1;
+    }
 }
 
 /// A vertical line over the waveform: where a hit is, and where it goes.
@@ -94,7 +382,10 @@ pub fn preview<E: Timed>(
     width: f64,
     span: (f64, f64),
 ) -> (Plan, Preview) {
-    let p = plan(events, panel.config);
+    let mut p = plan(events, panel.config);
+    // Swing is target placement only — a pass over the plan, so the
+    // planner itself never knows the grid is swung.
+    swing(&mut p, panel.config, panel.swing);
     let view = lay_out(&p, width, span, panel.config);
     (p, view)
 }

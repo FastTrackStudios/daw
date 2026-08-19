@@ -21,27 +21,25 @@
 use dioxus::prelude::*;
 use expression_editor_core::{Dimension, Editor};
 
-pub mod canvas;
-pub mod demo;
-pub mod drawer;
 pub mod arp_panel;
+pub mod canvas;
 pub mod cursor;
 pub mod curve_editor;
+pub mod demo;
 pub mod drag;
+pub mod drawer;
 pub mod envelopes;
-pub mod velocity_panel;
-pub mod velocity_ramp;
-pub mod velocity_sink;
 pub mod guitar;
 pub mod inspector;
-pub mod keys;
 pub mod interaction;
+pub mod keys;
 pub mod lane_strip;
 pub mod menu_ui;
 pub mod mode_picker;
 pub mod multitool_ui;
 pub mod paint;
 pub mod quantize_panel;
+pub mod quantize_panel_view;
 pub mod roll;
 /// The renderer seam. Native only — everything above it is portable.
 #[cfg(not(target_arch = "wasm32"))]
@@ -53,12 +51,15 @@ pub mod switcher;
 pub mod text;
 pub mod theme;
 pub mod toolbar;
+pub mod velocity_panel;
+pub mod velocity_ramp;
+pub mod velocity_sink;
 pub mod widgets;
 pub mod workflow;
 
 pub use drawer::ModDrawer;
-pub use guitar::BendFlow;
 pub use expression_editor_core as core;
+pub use guitar::BendFlow;
 pub use interaction::Drag;
 pub use lane_strip::LaneStrip;
 pub use menu_ui::ContextMenu;
@@ -67,7 +68,7 @@ pub use roll::Canvas;
 // Re-exported from `sizing` rather than moved, because these are the
 // crate's public contract with a host: `available_space` is how a window
 // or a REAPER dock tells the editor how much room it has.
-pub use sizing::{available_space, current_viewport, viewport_in, AVAILABLE, CHROME_HEIGHT};
+pub use sizing::{AVAILABLE, CHROME_HEIGHT, available_space, current_viewport, viewport_in};
 
 /// The empty-roll hint line, derived from the live mouse map: which
 /// modifier+drag on open canvas inserts or paints a note.
@@ -136,6 +137,22 @@ pub fn ExpressionEditor(
     /// Ignored outside `RowSpace::Strings`.
     #[props(default)]
     bend_flow: Option<BendFlow>,
+    /// Histogram bins for the quantize panel, computed by the host's
+    /// detect pass (`expression_editor_audio::panel_bridge`).
+    #[props(default)]
+    quantize_bins: Vec<quantize_panel::Bin>,
+    /// Per-hit from→to moves from the host's current quantize plan.
+    #[props(default)]
+    quantize_previews: Vec<quantize_panel::HitPreview>,
+    /// Called on every quantize control change so the host re-detects
+    /// and re-plans immediately. `None` leaves the panel purely visual.
+    #[props(default)]
+    on_quantize_change: Option<EventHandler<quantize_panel::QuantizePanel>>,
+    /// Called when the quantize panel's Apply is pressed. The host
+    /// writes the plan through the group rule in one undo step —
+    /// the daw write never happens in this crate.
+    #[props(default)]
+    on_quantize_apply: Option<EventHandler<quantize_panel::QuantizePanel>>,
     /// Anything the host wants at the top of the inspector.
     ///
     /// A slot, so a host can put its own controls inside the editor's
@@ -160,6 +177,12 @@ pub fn ExpressionEditor(
     let menu_state = use_signal(ContextMenu::default);
     let draft = use_signal(|| initial_draft.clone());
     let mut pending = use_signal(|| None::<menu_ui::Pending>);
+    // The quantize drawer: its state, and whether it is open. Owned here
+    // because the toolbar toggles it and the panel is a sibling of the
+    // canvas — the ModDrawer arrangement, for the same reason.
+    // r[impl drums.quantize.panel]
+    let quantize = use_signal(quantize_panel::QuantizePanel::default);
+    let quantize_open = use_signal(|| false);
 
     // The velocity panel's visibility, and the sink it shapes.
     //
@@ -211,9 +234,7 @@ pub fn ExpressionEditor(
             let ed = editor.read();
             (ed.viewport.w - want.w).abs() >= 1.0 || (ed.viewport.h - want.h).abs() >= 1.0
         };
-        if stale
-            && let Ok(mut ed) = editor.try_write()
-        {
+        if stale && let Ok(mut ed) = editor.try_write() {
             ed.resize(want);
         }
     });
@@ -240,7 +261,7 @@ pub fn ExpressionEditor(
                     width: 100%; height: 100%; \
                     min-height: 0; overflow: hidden; background: {theme::BG}; \
                     color: {theme::TEXT}; font-family: system-ui, sans-serif;",
-            toolbar::Toolbar { editor, drag, drawer }
+            toolbar::Toolbar { editor, drag, drawer, quantize_open }
             switcher::TrackSwitcher { editor }
             div {
                 style: "display: flex; flex: 1 1 auto; min-height: 0;",
@@ -259,6 +280,23 @@ pub fn ExpressionEditor(
             toolbar::StatusBar { editor }
             if (velocity_open.0)() {
                 velocity_sink::VelocityWindow {}
+            }
+            if quantize_open() {
+                quantize_panel_view::QuantizePanelView {
+                    panel: quantize,
+                    bins: quantize_bins.clone(),
+                    previews: quantize_previews.clone(),
+                    on_change: move |p: quantize_panel::QuantizePanel| {
+                        if let Some(h) = &on_quantize_change {
+                            h.call(p);
+                        }
+                    },
+                    on_apply: move |p: quantize_panel::QuantizePanel| {
+                        if let Some(h) = &on_quantize_apply {
+                            h.call(p);
+                        }
+                    },
+                }
             }
         }
     }
@@ -342,7 +380,6 @@ pub(crate) fn handle_mark(
     }
 }
 
-
 /// Lanes shown by default in either domain.
 ///
 /// Only Pitch: three overlaid curves on a first look is noise, and the
@@ -361,6 +398,8 @@ pub mod test_support {
 }
 
 pub use arp_panel::{ArpPanel, ArpSinkHandle};
+pub use quantize_panel::QuantizePanel;
+pub use quantize_panel_view::QuantizePanelView;
 pub use velocity_panel::{SinkHandle, VelocityPanel};
 pub use velocity_ramp::VelocityRamp;
 pub use velocity_sink::{EditorSink, PanelOpen, VelocityWindow};

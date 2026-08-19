@@ -11,7 +11,7 @@
 
 use dioxus::prelude::*;
 use expression_editor_core::doc::Dimension;
-use expression_editor_core::{chord, Editor, Shape, StripLane, Tool};
+use expression_editor_core::{Editor, Shape, StripLane, Tool, chord};
 
 use crate::drawer::ModDrawer;
 use crate::interaction::{self, Drag};
@@ -76,7 +76,8 @@ fn Seg(
     /// the button is the element with the click handler, and a testid on
     /// a plain child names a node the harness cannot dispatch to
     /// ("Expected element to have a Dioxus ID").
-    #[props(default)] testid: Option<String>,
+    #[props(default)]
+    testid: Option<String>,
     onclick: EventHandler<MouseEvent>,
     children: Element,
 ) -> Element {
@@ -128,9 +129,17 @@ fn divider() -> Element {
 // ── top bar ──────────────────────────────────────────────────────────
 
 #[component]
-pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>) -> Element {
+pub fn Toolbar(
+    editor: Signal<Editor>,
+    drag: Signal<Drag>,
+    drawer: Signal<ModDrawer>,
+    /// The quantize drawer's visibility. Owned by the host component —
+    /// the toolbar only toggles it.
+    quantize_open: Signal<bool>,
+) -> Element {
     let mut editor = editor;
     let mut drawer = drawer;
+    let mut quantize_open = quantize_open;
 
     let ed = editor.read();
     // What the modifiers say, falling back to what is armed. Holding
@@ -404,6 +413,27 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
                         title: "Redo".to_string(),
                         onclick: move |_| { editor.write().redo(); },
                         span { style: if can_redo { "" } else { "opacity: 0.3;" }, "↷" }
+                    }
+                }
+                // The quantize drawer, where the mode edits audio hits
+                // on a waveform. A tool on the toolbar rather than a
+                // status-bar setting because opening it changes what the
+                // surface is *for* — the engine was complete and there
+                // was no way to reach it.
+                // r[impl drums.quantize.panel]
+                if mode.draws_slices() {
+                    Segment {
+                        Seg {
+                            active: quantize_open(),
+                            accent: true,
+                            testid: "tool-quantize".to_string(),
+                            title: "Quantize — detect hits and put them on the grid".to_string(),
+                            onclick: move |_| {
+                                let open = quantize_open();
+                                quantize_open.set(!open);
+                            },
+                            "Quantize"
+                        }
                     }
                 }
                 Segment {
