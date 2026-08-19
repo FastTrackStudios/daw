@@ -13,8 +13,8 @@
 
 use blitz_dom::Document as _;
 use blitz_traits::events::{
-    BlitzPointerEvent, BlitzPointerId, MouseEventButton, MouseEventButtons, Point, PointerCoords,
-    UiEvent,
+    BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta, BlitzWheelEvent, MouseEventButton,
+    MouseEventButtons, Point, PointerCoords, UiEvent,
 };
 use keyboard_types::Modifiers;
 
@@ -133,6 +133,35 @@ impl DocumentTester {
             MouseEventButtons::None,
             mods,
         )));
+    }
+
+    /// Scrolls the mouse wheel over document coordinates `(x, y)`.
+    ///
+    /// `delta_y` is in pixels (negative = wheel up, the direction that
+    /// increases a knob). Blitz targets wheel events at the *hovered* node,
+    /// so this first moves the (unpressed) pointer there.
+    pub fn wheel_mods(&self, x: f64, y: f64, delta_y: f64, mods: Modifiers) {
+        self.pointer_move_mods(x, y, false, mods);
+        let (fx, fy) = (x as f32, y as f32);
+        self.send_ui_event(UiEvent::Wheel(BlitzWheelEvent {
+            delta: BlitzWheelDelta::Pixels(0.0, delta_y),
+            coords: PointerCoords {
+                page_x: fx,
+                page_y: fy,
+                screen_x: fx,
+                screen_y: fy,
+                client_x: fx,
+                client_y: fy,
+            },
+            buttons: MouseEventButtons::None,
+            mods,
+            element: Point::default(),
+        }));
+    }
+
+    /// [`DocumentTester::wheel_mods`] with no modifiers.
+    pub fn wheel(&self, x: f64, y: f64, delta_y: f64) {
+        self.wheel_mods(x, y, delta_y, Modifiers::empty());
     }
 
     /// Releases the primary mouse button at document coordinates `(x, y)`.
