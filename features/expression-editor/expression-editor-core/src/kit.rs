@@ -22,6 +22,12 @@ use crate::tracks::{Lane, LaneLayout, Workspace};
 /// Order is draw order **top to bottom** — `Other` is drawn first
 /// (top), `Kick` last (bottom) — so sorting lanes by role puts the kick
 /// at the bottom where a drum editor expects it.
+///
+/// A role is a label plus two draw/detect rules, not a drum-specific
+/// type: a guitar workspace defines `DI` / `Amps` over the same `Lane`
+/// machinery by adding variants here, and the fold, the group rule and
+/// the apply path need no changes.
+// r[impl drums.scope.generic-groups]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LaneRole {
     /// Cymbals, hats, rooms, returns — everything that is not a drum the
@@ -52,6 +58,7 @@ impl LaneRole {
 
     /// Whether hits are detected on this lane's signal by default.
     /// `Other` is never a source; toms join only when armed.
+    // r[impl drums.lanes.other]
     pub fn is_detection_source(self) -> bool {
         matches!(self, LaneRole::Kick | LaneRole::Snare)
     }
