@@ -314,6 +314,16 @@ pub fn label_for(action: &str) -> String {
 
 /// Action id fragment to overlay label.
 const LABELS: &[(&str, &str)] = &[
+    // Before the shorter ids they are prefixes of.
+    ("velocity.ramp_up_smooth", "Ramp up (smooth)"),
+    ("velocity.ramp_up", "Ramp up"),
+    ("velocity.ramp_down", "Ramp down"),
+    ("velocity.accent", "Accent pattern"),
+    ("velocity.compress", "Compress"),
+    ("velocity.expand", "Expand"),
+    ("velocity.randomize", "Humanise"),
+    ("velocity.flatten", "Flatten"),
+    ("velocity.panel", "Velocity panel"),
     ("razor.reverse", "Retrograde"),
     ("razor.invert", "Invert pitches"),
     ("razor.delete", "Delete contents"),
@@ -352,9 +362,29 @@ const LABELS: &[(&str, &str)] = &[
 /// Deliberately narrow. It is true only when `z` alone is pending, so a
 /// half-typed longer sequence is never mistaken for a held tool.
 pub fn zoom_prefix_held() -> bool {
+    held_prefix().as_deref() == Some("z")
+}
+
+/// The single-key prefix currently held, if exactly one is.
+///
+/// The generalisation of [`zoom_prefix_held`], because `z` stopped being
+/// the only key that is a prefix *and* a spring-loaded tool. `v` is the
+/// second: tap it for the velocity tree, hold it and drag to set
+/// velocity by hand.
+///
+/// Deliberately narrow, and for the same reason it always was: only a
+/// lone pending chord counts, so a half-typed longer sequence is never
+/// mistaken for a held tool.
+pub fn held_prefix() -> Option<String> {
     PENDING.with(|p| {
         let pending = p.borrow();
-        pending.len() == 1 && pending[0].key == key_code("z")
+        match pending.as_slice() {
+            [only] => match &only.key {
+                KeyCode::Character(c) => Some(c.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
     })
 }
 
@@ -372,6 +402,15 @@ pub fn is_pending() -> bool {
 /// silently: a binding naming something absent here is dead, which the
 /// test below catches.
 pub const ACTIONS: &[&str] = &[
+    "velocity.ramp_up",
+    "velocity.ramp_down",
+    "velocity.ramp_up_smooth",
+    "velocity.accent",
+    "velocity.compress",
+    "velocity.expand",
+    "velocity.randomize",
+    "velocity.flatten",
+    "velocity.panel",
     "razor.reverse",
     "razor.invert",
     "razor.delete",

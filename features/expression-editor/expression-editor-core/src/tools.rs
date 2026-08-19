@@ -42,6 +42,14 @@ pub enum Tool {
     /// the plain drag, which is what you want when cutting several areas
     /// in a row.
     Razor,
+    /// Vertical drags set velocity.
+    ///
+    /// The habit this replaces is REAPER's Alt+drag-on-a-note. A held
+    /// `v` arms it the way a held `z` arms zoom, which is better than a
+    /// modifier for the same reason zoom is: `v` is also a which-key
+    /// prefix, so the one key is both "shape velocity by hand" and the
+    /// door to every velocity command there is.
+    Velocity,
 }
 
 impl Tool {
@@ -93,10 +101,15 @@ impl Tool {
                 (C::Note, G::Drag),
                 (C::NoteEdge, G::Drag),
             ],
+            // Notes and their edges. Not the empty roll: a drag that
+            // starts on nothing has no note to set the velocity of, and
+            // stealing the marquee there would cost you the only way to
+            // *choose* the notes you are about to shape.
+            Tool::Velocity => &[(C::Note, G::Drag), (C::NoteEdge, G::Drag)],
         }
     }
 
-    pub const ALL: [Tool; 8] = [
+    pub const ALL: [Tool; 9] = [
         Tool::Select,
         Tool::Pen,
         Tool::Curve,
@@ -104,6 +117,7 @@ impl Tool {
         Tool::NoteDraw,
         Tool::NoteErase,
         Tool::Razor,
+        Tool::Velocity,
         Tool::Zoom,
     ];
 
@@ -126,6 +140,7 @@ impl Tool {
             Tool::NoteDraw => "Note Draw",
             Tool::NoteErase => "Note Erase",
             Tool::Razor => "Razor",
+            Tool::Velocity => "Velocity",
             Tool::Zoom => "Zoom",
         }
     }

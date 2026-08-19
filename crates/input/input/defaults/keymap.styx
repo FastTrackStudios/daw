@@ -50,7 +50,16 @@
       "k c": "razor.clear_lane",
       "k q": "razor.clear",
       "k 2": "razor.double",
-      "k h": "razor.halve"
+      "k h": "razor.halve",
+      "v u": "velocity.ramp_up",
+      "v d": "velocity.ramp_down",
+      "v s": "velocity.ramp_up_smooth",
+      "v a": "velocity.accent",
+      "v c": "velocity.compress",
+      "v e": "velocity.expand",
+      "v r": "velocity.randomize",
+      "v f": "velocity.flatten",
+      "v p": "velocity.panel"
     }
   },
   "keymap_context": {

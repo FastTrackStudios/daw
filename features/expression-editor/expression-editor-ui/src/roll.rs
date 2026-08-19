@@ -36,7 +36,7 @@ use crate::multitool_ui::{self, MultiTool};
 use crate::{
     canvas, cursor, drawer, drawer::ModDrawer, keys, paint, roll_widget, scroll, text, theme,
 };
-use crate::{draw_hint_of, BendFlow};
+use crate::{draw_hint_of, velocity_ramp, BendFlow};
 /// Pointer coordinates in **roll** space — element coordinates minus
 /// the keyboard gutter and timeline ruler.
 ///
@@ -163,6 +163,15 @@ pub fn Canvas(
     // its second key. That is what keeps `z`-as-prefix and `z`-as-tool
     // from having to be told apart by a timer.
     let mut spring_used = use_signal(|| false);
+
+    // The live velocity shape, if one is open.
+    //
+    // A signal rather than a field on the `Editor` because it holds a
+    // `velocity::Session`, which lives in `expression-editor-tools` —
+    // and `tools` depends on `core`, so `core` cannot hold one without
+    // a cycle. It is gesture state either way, which is what the other
+    // signals here are.
+    let mut ramp = use_signal(|| None::<crate::velocity_ramp::VelocityRamp>);
 
     // The viewport is followed by `ExpressionEditor`, which is the only
     // component that knows the whole chrome. See the effect there.
@@ -329,6 +338,13 @@ pub fn Canvas(
                         _ => None,
                     };
                     if let Some(action) = action {
+                        // Velocity commands first: they own a live shape
+                        // that outlives the keypress, which a function
+                        // taking only `&mut Editor` cannot hold.
+                        if let Some(hit) = velocity_action(&mut editor, &mut ramp, action) {
+                            ran |= hit;
+                            continue;
+                        }
                         let (region, anchor) = memagic_at(&editor.read(), hover());
                         ran |= keys::dispatch(&mut editor.write(), action, region, anchor);
                     }
@@ -346,11 +362,13 @@ pub fn Canvas(
                 // Tap and hold stay one idea: this only arms, and the
                 // key-up decides. A tap arms and disarms without you
                 // seeing it, and leaves the tree open for `z i`.
-                if keys::zoom_prefix_held() && spring_from.read().is_none() {
+                if let Some(armed) = keys::held_prefix().as_deref().and_then(spring_tool)
+                    && spring_from.read().is_none()
+                {
                     let previous = editor.read().tool;
-                    if previous != expression_editor_core::Tool::Zoom {
+                    if previous != armed {
                         spring_from.set(Some(previous));
-                        editor.write().tool = expression_editor_core::Tool::Zoom;
+                        editor.write().tool = armed;
                     }
                 }
                 if ran || keys::is_pending() {
@@ -525,7 +543,7 @@ pub fn Canvas(
                     // is the point. Hold-versus-tap by timeout is where
                     // this pattern usually goes wrong: it turns a slow
                     // tap into a hold.
-                    "z" => {
+                    key if spring_tool(key).is_some() => {
                         if let Some(previous) = spring_from.take() {
                             editor.write().tool = previous;
                         }
@@ -717,6 +735,28 @@ pub fn Canvas(
                     // is one: a wheel event carries none of its own, and
                     // zooming about the middle of the view when the
                     // mouse is somewhere else is the wrong place.
+                    // A live ramp takes the wheel while `v` is held.
+                    //
+                    // This is the half of the gesture that makes a
+                    // preset usable: you get a shape, then you dial how
+                    // hard it leans. Gated on the hold rather than on
+                    // the ramp merely existing, so scrolling the view
+                    // after you have shaped something still scrolls the
+                    // view.
+                    if keys::held_prefix().as_deref() == Some("v") {
+                        // Taken out before it is used: a `write()` guard
+                        // held across the body would still be live at
+                        // `ramp.set`, which is the second borrow.
+                        let taken = ramp.write().take();
+                        if let Some(mut live) = taken {
+                            let moved = live.nudge(&mut editor.write(), dy);
+                            ramp.set(Some(live));
+                            if moved {
+                                e.prevent_default();
+                                return;
+                            }
+                        }
+                    }
                     let (x, y) = hover().unwrap_or((vp.w * 0.5, vp.h * 0.5));
                     interaction::wheel(&mut editor.write(), x, y, dx, dy, m);
                     e.prevent_default();
@@ -923,4 +963,111 @@ fn razor_help_title(ed: &Editor) -> String {
     } else {
         "Razor · k".to_string()
     }
+}
+
+/// The tool a held which-key prefix springs into, if it has one.
+///
+/// Two keys are both a prefix and a tool. Tap `z` and it waits for a
+/// zoom target; hold it and drag, and it *is* the zoom tool for the
+/// length of the hold. `v` is the same shape for velocity: tap for the
+/// tree, hold and drag to set velocity by hand — which is the gesture
+/// REAPER spells `Alt`+drag, and which is better on a prefix because the
+/// one key then covers both "shape this by hand" and every velocity
+/// command there is.
+///
+/// A table rather than a field on `Tool`, because it is a fact about the
+/// *keymap* — which key opens which tree — and the keymap is
+/// configuration. A tool does not know what letter reaches it.
+fn spring_tool(key: &str) -> Option<expression_editor_core::Tool> {
+    use expression_editor_core::Tool;
+    match key {
+        "z" => Some(Tool::Zoom),
+        "v" => Some(Tool::Velocity),
+        _ => None,
+    }
+}
+
+/// Run a `velocity.*` action, if `action` is one.
+///
+/// `None` means "not mine", so the caller falls through to the ordinary
+/// dispatch. These are handled here rather than in [`keys::dispatch`]
+/// because a ramp *outlives its keypress* — it stays live so the wheel
+/// can go on adjusting it — and a function handed only `&mut Editor` has
+/// nowhere to keep one.
+///
+/// Pressing a ramp command while that same ramp is already live inverts
+/// it rather than opening a second one. Which direction you wanted is
+/// something you find out by looking at it, and re-pressing is a faster
+/// answer than undo-and-pick-the-other-command. Pressing a *different*
+/// one replaces it, from the same baseline, so trying four shapes in a
+/// row costs one undo rather than four.
+fn velocity_action(
+    editor: &mut Signal<Editor>,
+    ramp: &mut Signal<Option<crate::velocity_ramp::VelocityRamp>>,
+    action: &str,
+) -> Option<bool> {
+    use expression_editor_tools::velocity::CurvePreset;
+
+    let preset = match action {
+        "velocity.ramp_up" => Some(CurvePreset::Rise),
+        "velocity.ramp_down" => Some(CurvePreset::Fall),
+        "velocity.ramp_up_smooth" => Some(CurvePreset::RiseSmooth),
+        _ => None,
+    };
+
+    if let Some(preset) = preset {
+        // Already showing this shape? Turn it over.
+        let same = ramp.read().as_ref().map(|r| r.preset()) == Some(preset);
+        // Taken out before use: a `write()` guard held across the body
+        // would still be live at `ramp.set`, which is a second borrow.
+        let taken = ramp.write().take();
+        if same && let Some(mut live) = taken {
+            live.invert(&mut editor.write());
+            ramp.set(Some(live));
+            return Some(true);
+        } else if let Some(live) = taken {
+            // A different shape replaces the old one — but from the
+            // *original* velocities, so the shapes do not compound.
+            live.revert(&mut editor.write());
+        }
+        let notes = editor.read().selection.notes.clone();
+        let opened = crate::velocity_ramp::VelocityRamp::open(&mut editor.write(), preset, &notes);
+        let ok = opened.is_some();
+        ramp.set(opened);
+        return Some(ok);
+    }
+
+    // The rest act once and leave nothing live to adjust, so they close
+    // any open ramp first — committing it, not reverting it. You asked
+    // for the ramp; the next command is the one after it.
+    let closing = matches!(
+        action,
+        "velocity.accent"
+            | "velocity.compress"
+            | "velocity.expand"
+            | "velocity.randomize"
+            | "velocity.flatten"
+            | "velocity.panel"
+    );
+    if !closing {
+        return None;
+    }
+    ramp.set(None);
+
+    if action == "velocity.panel" {
+        // Handled by the caller, which owns the panel's visibility —
+        // this one is a piece of chrome, not an edit.
+        return Some(false);
+    }
+
+    let notes = editor.read().selection.notes.clone();
+    let mut ed = editor.write();
+    Some(match action {
+        "velocity.accent" => velocity_ramp::accent(&mut ed, &notes),
+        "velocity.compress" => velocity_ramp::dynamics(&mut ed, &notes, -0.35),
+        "velocity.expand" => velocity_ramp::dynamics(&mut ed, &notes, 0.35),
+        "velocity.randomize" => velocity_ramp::humanise(&mut ed, &notes),
+        "velocity.flatten" => velocity_ramp::flatten(&mut ed, &notes),
+        _ => false,
+    })
 }

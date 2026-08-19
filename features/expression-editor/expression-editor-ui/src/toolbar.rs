@@ -26,6 +26,7 @@ fn tool_glyph(tool: Tool) -> &'static str {
         Tool::NoteDraw => "▤",
         Tool::NoteErase => "✕",
         Tool::Razor => "⌗",
+        Tool::Velocity => "⇅",
         Tool::Zoom => "⌕",
     }
 }

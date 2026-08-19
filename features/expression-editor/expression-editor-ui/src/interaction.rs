@@ -1503,6 +1503,28 @@ fn legacy_pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16)
             current: (x, y),
             pending: None,
         },
+        // The same drag the map's `EditNoteVelocity` produces, so the
+        // tool and the binding cannot come apart.
+        //
+        // The whole selection when the note under the pointer is part of
+        // it, that note alone when it is not — `gesture_targets` is the
+        // rule the rest of the surface already follows, and the reason
+        // is that grabbing an unselected note should act on what you
+        // grabbed rather than on something else entirely.
+        Tool::Velocity => {
+            let notes = tools::gesture_targets(&ed.selection, under);
+            if notes.is_empty() {
+                Drag::None
+            } else {
+                ed.begin_gesture();
+                Drag::Velocity {
+                    notes,
+                    origin_y: y,
+                    fine: mods.shift,
+                    applied: 0.0,
+                }
+            }
+        }
         Tool::Select => {
             if under.is_some() {
                 ed.begin_gesture();

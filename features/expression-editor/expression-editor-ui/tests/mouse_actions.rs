@@ -1260,3 +1260,171 @@ fn the_razor_menu_and_the_razor_keys_agree() {
         }
     }
 }
+
+// ── the velocity ramp ───────────────────────────────────────────────
+
+fn vels(ed: &Editor) -> Vec<u8> {
+    let mut v: Vec<(f64, u8)> = ed
+        .doc
+        .notes
+        .iter()
+        .map(|n| (n.start, (n.velocity * 127.0).round() as u8))
+        .collect();
+    v.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    v.into_iter().map(|(_, x)| x).collect()
+}
+
+fn all_selected() -> Editor {
+    let mut ed = four_notes();
+    ed.selection.notes = vec![NoteId(1), NoteId(2), NoteId(3), NoteId(4)];
+    ed
+}
+
+/// A ramp rises across the selection in *time* order.
+///
+/// Not selection order. A crescendo is a statement about what happens
+/// first and what happens last, and a selection is a set carrying
+/// whatever order the clicks gave it — a ramp built from that would rise
+/// and fall at random.
+#[test]
+fn a_ramp_rises_from_the_first_note_to_the_last() {
+    use expression_editor_tools::velocity::CurvePreset;
+    use expression_editor_ui::velocity_ramp::VelocityRamp;
+
+    let mut ed = all_selected();
+    // Select them back to front, so click order and time order disagree.
+    ed.selection.notes = vec![NoteId(4), NoteId(2), NoteId(1), NoteId(3)];
+    let notes = ed.selection.notes.clone();
+    VelocityRamp::open(&mut ed, CurvePreset::Rise, &notes).expect("a ramp over four notes");
+
+    let after = vels(&ed);
+    assert!(
+        after.windows(2).all(|w| w[1] >= w[0]),
+        "the ramp did not rise in time order: {after:?}",
+    );
+    assert!(
+        after.last() > after.first(),
+        "the ramp is flat: {after:?}",
+    );
+}
+
+/// Strength is reversible, because everything comes from the baseline.
+///
+/// The property the whole design turns on. Dial the wheel up and back
+/// down and you must land on exactly what that setting gives you first
+/// time — not on a value that has been through two roundings and a
+/// clamp. Anything computed from the *current* velocities compounds, and
+/// a control that drifts as you use it is one you stop trusting.
+#[test]
+fn dialling_the_strength_back_lands_where_it_started() {
+    use expression_editor_tools::velocity::CurvePreset;
+    use expression_editor_ui::velocity_ramp::VelocityRamp;
+
+    let mut ed = all_selected();
+    let notes = ed.selection.notes.clone();
+    let mut ramp =
+        VelocityRamp::open(&mut ed, CurvePreset::Rise, &notes).expect("a ramp");
+    let opened = vels(&ed);
+
+    for _ in 0..5 {
+        ramp.nudge(&mut ed, 1.0);
+    }
+    assert_ne!(vels(&ed), opened, "five notches up changed nothing");
+    for _ in 0..5 {
+        ramp.nudge(&mut ed, -1.0);
+    }
+    assert_eq!(
+        vels(&ed),
+        opened,
+        "up five and down five did not come back — the strength is \
+         compounding instead of being read from the baseline",
+    );
+}
+
+/// Reverting puts the take back exactly.
+#[test]
+fn reverting_a_ramp_restores_the_original_velocities() {
+    use expression_editor_tools::velocity::CurvePreset;
+    use expression_editor_ui::velocity_ramp::VelocityRamp;
+
+    let mut ed = all_selected();
+    let before = vels(&ed);
+    let notes = ed.selection.notes.clone();
+    let ramp = VelocityRamp::open(&mut ed, CurvePreset::Rise, &notes).expect("a ramp");
+    assert_ne!(vels(&ed), before, "the ramp did nothing");
+    ramp.revert(&mut ed);
+    assert_eq!(vels(&ed), before, "revert did not restore the take");
+}
+
+/// Inverting turns a rise into a fall, and twice returns.
+#[test]
+fn inverting_a_ramp_turns_it_over_and_back() {
+    use expression_editor_tools::velocity::CurvePreset;
+    use expression_editor_ui::velocity_ramp::VelocityRamp;
+
+    let mut ed = all_selected();
+    let notes = ed.selection.notes.clone();
+    let mut ramp = VelocityRamp::open(&mut ed, CurvePreset::Rise, &notes).expect("a ramp");
+    let rising = vels(&ed);
+
+    ramp.invert(&mut ed);
+    let falling = vels(&ed);
+    assert!(
+        falling.last() < falling.first(),
+        "inverting a rise did not give a fall: {falling:?}",
+    );
+
+    ramp.invert(&mut ed);
+    assert_eq!(vels(&ed), rising, "inverting twice did not come back");
+}
+
+/// A ramp needs a span. One note is a value, not a shape.
+#[test]
+fn a_ramp_over_one_note_does_not_open() {
+    use expression_editor_tools::velocity::CurvePreset;
+    use expression_editor_ui::velocity_ramp::VelocityRamp;
+
+    let mut ed = four_notes();
+    ed.selection.notes = vec![NoteId(1)];
+    let notes = ed.selection.notes.clone();
+    assert!(
+        VelocityRamp::open(&mut ed, CurvePreset::Rise, &notes).is_none(),
+        "a one-note ramp opened",
+    );
+}
+
+/// A whole ramp — however many adjustments — is one undo.
+#[test]
+fn a_ramp_and_its_adjustments_are_one_undo() {
+    use expression_editor_tools::velocity::CurvePreset;
+    use expression_editor_ui::velocity_ramp::VelocityRamp;
+
+    let mut ed = all_selected();
+    let before = vels(&ed);
+    let notes = ed.selection.notes.clone();
+    let mut ramp = VelocityRamp::open(&mut ed, CurvePreset::Rise, &notes).expect("a ramp");
+    for _ in 0..8 {
+        ramp.nudge(&mut ed, 1.0);
+    }
+    ramp.invert(&mut ed);
+
+    assert!(ed.undo(), "the ramp opened no undo step");
+    assert_eq!(
+        vels(&ed),
+        before,
+        "one undo did not take the whole ramp with it",
+    );
+}
+
+/// Held `v` arms the velocity tool, the way held `z` arms zoom.
+#[test]
+fn the_velocity_tool_claims_a_note_drag() {
+    let mut ed = all_selected();
+    ed.tool = expression_editor_core::Tool::Velocity;
+    let (x, y) = at(&ed, PPQ * 1.25);
+    let d = interaction::pointer_down(&mut ed, x, y, plain(), 0);
+    assert!(
+        matches!(d, Drag::Velocity { .. }),
+        "the velocity tool did not claim a drag on a note",
+    );
+}

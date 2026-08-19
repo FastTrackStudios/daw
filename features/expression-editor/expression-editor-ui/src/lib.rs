@@ -30,6 +30,7 @@ pub mod curve_editor;
 pub mod drag;
 pub mod envelopes;
 pub mod velocity_panel;
+pub mod velocity_ramp;
 pub mod guitar;
 pub mod inspector;
 pub mod keys;
@@ -341,3 +342,4 @@ pub mod test_support {
 
 pub use arp_panel::{ArpPanel, ArpSinkHandle};
 pub use velocity_panel::{SinkHandle, VelocityPanel};
+pub use velocity_ramp::VelocityRamp;
