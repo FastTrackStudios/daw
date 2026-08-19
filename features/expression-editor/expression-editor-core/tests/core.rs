@@ -4655,7 +4655,13 @@ fn an_adaptive_grid_coarsens_as_the_view_zooms_out() {
 /// And a fixed grid stays exactly where it was put.
 #[test]
 fn a_fixed_grid_ignores_the_zoom() {
+    use adaptive_grid::Density;
+
     let mut ed = grid_editor();
+    // Said out loud, not inherited. This passed by accident while
+    // `Fixed` was the default; the claim is about a grid the user has
+    // pinned, and it should hold whatever the default becomes.
+    ed.set_grid_density(Density::Fixed);
     let before = ed.grid.effective();
     for _ in 0..8 {
         ed.zoom_time_at(ed.viewport.w * 0.5, 0.5);

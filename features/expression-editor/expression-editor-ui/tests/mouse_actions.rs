@@ -1588,11 +1588,22 @@ fn the_grid_tree_toggles_snap_and_adaptive() {
     assert!(grid_key(&mut ed, "g"));
     assert!(ed.grid.enabled, "`g g` did not turn it back on");
 
-    assert!(!ed.grid.adaptive.is_adaptive());
+    // A round trip from wherever it starts, rather than an assumption
+    // about the default — which is now adaptive, and could reasonably
+    // change again.
+    let was = ed.grid.adaptive.is_adaptive();
     assert!(grid_key(&mut ed, "a"));
-    assert!(ed.grid.adaptive.is_adaptive(), "`g a` did not arm adaptive");
+    assert_eq!(
+        ed.grid.adaptive.is_adaptive(),
+        !was,
+        "`g a` did not flip the adaptive grid",
+    );
     assert!(grid_key(&mut ed, "a"));
-    assert!(!ed.grid.adaptive.is_adaptive(), "`g a` did not disarm it");
+    assert_eq!(
+        ed.grid.adaptive.is_adaptive(),
+        was,
+        "`g a` twice did not come back",
+    );
 }
 
 /// Setting a division is setting the *ceiling*, and the readout keeps

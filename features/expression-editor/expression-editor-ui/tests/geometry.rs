@@ -451,23 +451,33 @@ fn the_status_bar_carries_the_grid_and_its_adaptive_setting() {
     // markup rather than the bare word.
     assert!(
         read("grid-adaptive").contains("AUTO"),
-        "adaptive should start off, readout is {:?}",
+        "the adaptive control is missing, readout is {:?}",
         read("grid-adaptive")
     );
     let fixed = read("grid-division");
     assert!(fixed.starts_with("1/"), "grid readout is {fixed:?}");
 
-    // Turn it on: the widest density, which at this zoom must coarsen
-    // the grid rather than leave it alone.
-    doc.query(by_testid("grid-adaptive"))
-        .immediately()
-        .expect("no adaptive toggle")
-        .click();
-    doc.drain();
+    // Click round to the widest density rather than assuming where the
+    // cycle starts. This used to click once and expect `WIDE+`, which
+    // was only true while `Fixed` was the default — the claim is that
+    // the control *reaches* every density and that the widest coarsens
+    // the grid, not that it is one press away.
+    // Six densities plus Fixed, so seven presses is a full lap and one
+    // more proves it is a cycle rather than a dead end.
+    for _ in 0..8 {
+        if read("grid-adaptive").contains("WIDE+") {
+            break;
+        }
+        doc.query(by_testid("grid-adaptive"))
+            .immediately()
+            .expect("no adaptive toggle")
+            .click();
+        doc.drain();
+    }
 
     assert!(
         read("grid-adaptive").contains("WIDE+"),
-        "one click should reach the widest density, readout is {:?}",
+        "the cycle never reached the widest density, readout is {:?}",
         read("grid-adaptive")
     );
     let adaptive = read("grid-division");

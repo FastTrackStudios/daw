@@ -446,10 +446,16 @@ pub struct Grid {
     pub enabled: bool,
     /// Whether — and how tightly — the division follows the zoom.
     ///
-    /// Off by default, so a grid stays exactly where it was put until
-    /// the user asks for otherwise. `triplet` stays a separate flag
-    /// precisely so this can scale the division by powers of two without
-    /// ever straightening a triplet grid.
+    /// **On** by default, at the middle density — see
+    /// [`adaptive_grid::Adaptive::default`]. [`Grid::division`] stays the
+    /// user's ceiling and the zoom only ever coarsens away from it, so a
+    /// grid that follows the view can never snap finer than was asked
+    /// for. [`Grid::label`] reports what is in use, not the ceiling,
+    /// which is what keeps that honest.
+    ///
+    /// `triplet` stays a separate flag precisely so this can scale the
+    /// division by powers of two without ever straightening a triplet
+    /// grid.
     pub adaptive: adaptive_grid::Adaptive,
 }
 
