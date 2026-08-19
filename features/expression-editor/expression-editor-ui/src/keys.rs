@@ -314,6 +314,20 @@ pub fn label_for(action: &str) -> String {
 
 /// Action id fragment to overlay label.
 const LABELS: &[(&str, &str)] = &[
+    // The degrees get their chord's *name* at the call site instead —
+    // see `crate::roll`, which rewrites these rows from the live tuning.
+    // These are the fallback for a panel with no editor to ask.
+    ("chord.degree.", "Fire the chord on this degree"),
+    ("chord.tonic_up", "Tonic up"),
+    ("chord.tonic_down", "Tonic down"),
+    ("chord.mode_next", "Next mode"),
+    ("chord.mode_prev", "Previous mode"),
+    ("chord.depth_next", "Deeper (7th, 9th…)"),
+    ("chord.depth_prev", "Shallower"),
+    ("chord.inversion_next", "Invert up"),
+    ("chord.inversion_prev", "Invert down"),
+    ("chord.octave_up", "Octave up"),
+    ("chord.octave_down", "Octave down"),
     // Before the shorter ids they are prefixes of.
     ("velocity.ramp_up_smooth", "Ramp up (smooth)"),
     ("velocity.ramp_up", "Ramp up"),
@@ -403,6 +417,23 @@ pub fn is_pending() -> bool {
 /// silently: a binding naming something absent here is dead, which the
 /// test below catches.
 pub const ACTIONS: &[&str] = &[
+    "chord.degree.1",
+    "chord.degree.2",
+    "chord.degree.3",
+    "chord.degree.4",
+    "chord.degree.5",
+    "chord.degree.6",
+    "chord.degree.7",
+    "chord.tonic_up",
+    "chord.tonic_down",
+    "chord.mode_next",
+    "chord.mode_prev",
+    "chord.depth_next",
+    "chord.depth_prev",
+    "chord.inversion_next",
+    "chord.inversion_prev",
+    "chord.octave_up",
+    "chord.octave_down",
     "view.reset",
     "velocity.ramp_up",
     "velocity.ramp_down",
@@ -450,6 +481,58 @@ pub fn dispatch(
 
     // The razor verbs, which are not view changes and so never reach
     // the MeMagic table below.
+    // The chord gun. Degrees first, since they are the ones fired in
+    // anger; the rest set up what a degree means.
+    if let Some(degree) = action
+        .strip_prefix("chord.degree.")
+        .and_then(|d| d.parse::<usize>().ok())
+    {
+        return ed.insert_chord(degree);
+    }
+    match action {
+        "chord.tonic_up" => {
+            ed.chord_gun.transpose(1);
+            return true;
+        }
+        "chord.tonic_down" => {
+            ed.chord_gun.transpose(-1);
+            return true;
+        }
+        "chord.mode_next" => {
+            ed.chord_gun.cycle_mode(true);
+            return true;
+        }
+        "chord.mode_prev" => {
+            ed.chord_gun.cycle_mode(false);
+            return true;
+        }
+        "chord.depth_next" => {
+            ed.chord_gun.cycle_depth(true);
+            return true;
+        }
+        "chord.depth_prev" => {
+            ed.chord_gun.cycle_depth(false);
+            return true;
+        }
+        "chord.inversion_next" => {
+            ed.chord_gun.cycle_inversion(true);
+            return true;
+        }
+        "chord.inversion_prev" => {
+            ed.chord_gun.cycle_inversion(false);
+            return true;
+        }
+        "chord.octave_up" => {
+            ed.chord_gun.octave = (ed.chord_gun.octave + 1).min(8);
+            return true;
+        }
+        "chord.octave_down" => {
+            ed.chord_gun.octave = (ed.chord_gun.octave - 1).max(0);
+            return true;
+        }
+        _ => {}
+    }
+
     match action {
         "razor.reverse" => return ed.razor_reverse(),
         "razor.invert" => return ed.razor_invert(),

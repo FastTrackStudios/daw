@@ -41,6 +41,7 @@ pub mod mode;
 pub mod modulation;
 pub mod mouse;
 pub mod multitool;
+pub mod harmony;
 pub mod razor;
 pub mod reference;
 pub mod rows;
@@ -200,6 +201,13 @@ pub struct Editor {
     /// The map already resolves modifiers on its own, and a second
     /// authority for the same question is how the two start disagreeing.
     pub held_mods: Mods,
+    /// The chord gun's key, scale, depth and inversion.
+    ///
+    /// Editor state rather than document state: it is how you are
+    /// *entering* notes, like the grid or the armed tool, and two people
+    /// opening the same part should not inherit each other's idea of
+    /// what `3` means.
+    pub chord_gun: harmony::ChordGun,
     /// Whether the coarse pitch handle snaps to the tuning. Shift
     /// reverses it per-gesture, as everywhere else on this surface.
     pub snap_pitch: bool,
@@ -259,6 +267,7 @@ impl Editor {
             // that default changed nothing anyone could see.
             tool: Tool::default(),
             held_mods: Mods::default(),
+            chord_gun: harmony::ChordGun::default(),
             razor_insert: false,
             razor_axis: None,
             dimension: Dimension::Pitch,
@@ -1311,6 +1320,50 @@ impl Editor {
         for a in &mut self.razor.areas {
             a.row_hi = (a.row_hi + drows).max(a.row_lo);
         }
+        true
+    }
+
+    // ── the chord gun ────────────────────────────────────────────────
+
+    /// Fire the chord on `degree` (1..=7) into the document.
+    ///
+    /// At the play cursor when there is one, else at the left edge of
+    /// the view — the same rule paste follows, and for the same reason:
+    /// dropping a chord at zero puts it off screen and looks like
+    /// nothing happened.
+    ///
+    /// One grid division long, because that is the length every other
+    /// insert on this surface uses and a chord you have to resize is a
+    /// chord you did not want fired.
+    ///
+    /// The new notes become the selection, so the gesture composes: fire
+    /// a chord, then `v u` to ramp it, or drag it somewhere else. And it
+    /// is one undo step, however many notes the depth produced.
+    pub fn insert_chord(&mut self, degree: usize) -> bool {
+        let pitches = self.chord_gun.pitches(degree);
+        if pitches.is_empty() {
+            return false;
+        }
+        let start = self
+            .playhead
+            .unwrap_or_else(|| self.camera.t_at(0.0))
+            .max(self.doc.start);
+        let start = self.snap_time(start);
+        let len = self.grid.step(self.units_per_beat());
+        // A free grid has no step to take a length from; a beat is the
+        // honest default rather than a zero-length note.
+        let len = if len > 0.0 { len } else { self.units_per_beat() };
+
+        self.begin_gesture();
+        let mut ids = Vec::with_capacity(pitches.len());
+        for pitch in pitches {
+            let id = self.doc.mint_id();
+            let mut note = doc::Note::new(id, start, start + len, pitch);
+            note.velocity = 100.0 / 127.0;
+            self.apply_live(&Edit::AddNote(Box::new(note)));
+            ids.push(id);
+        }
+        self.selection.notes = ids;
         true
     }
 

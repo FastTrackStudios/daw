@@ -4700,3 +4700,128 @@ fn grid_editor() -> Editor {
     ed
 }
 
+
+// ── the chord gun ───────────────────────────────────────────────────
+
+/// The degrees of C major are the chords everybody knows.
+///
+/// The theory is keyflow's, not ours — this asserts we are *asking it
+/// correctly*, which is the part that can be wrong here: the octave, the
+/// scale step the degree sits on, and turning intervals into pitches.
+#[test]
+fn the_degrees_of_c_major_are_the_expected_triads() {
+    use expression_editor_core::harmony::ChordGun;
+
+    let gun = ChordGun::default(); // C Ionian, triads, octave 4
+    // C4 is MIDI 60 with the (octave + 1) * 12 convention.
+    assert_eq!(gun.pitches(1), vec![60, 64, 67], "I should be C E G");
+    assert_eq!(gun.pitches(2), vec![62, 65, 69], "ii should be D F A");
+    assert_eq!(gun.pitches(5), vec![67, 71, 74], "V should be G B D");
+    assert_eq!(gun.pitches(6), vec![69, 72, 76], "vi should be A C E");
+}
+
+/// A degree outside the scale is nothing, not a panic or a wrap.
+#[test]
+fn a_degree_off_the_end_fires_nothing() {
+    use expression_editor_core::harmony::ChordGun;
+
+    let gun = ChordGun::default();
+    assert!(gun.pitches(0).is_empty());
+    assert!(gun.pitches(8).is_empty());
+}
+
+/// Depth stacks more of the scale on top, keeping what was there.
+#[test]
+fn depth_adds_tones_above_the_triad() {
+    use expression_editor_core::harmony::{ChordGun, HarmonizationDepth};
+
+    let mut gun = ChordGun::default();
+    let triad = gun.pitches(1);
+    gun.depth = HarmonizationDepth::Sevenths;
+    let seventh = gun.pitches(1);
+
+    assert_eq!(seventh.len(), triad.len() + 1, "a 7th is a triad plus one");
+    assert_eq!(&seventh[..3], &triad[..], "the triad moved under the 7th");
+    assert_eq!(seventh[3], 71, "Cmaj7's seventh is B");
+}
+
+/// Inverting lifts the bottom note an octave, and wraps at the top.
+#[test]
+fn inversions_rotate_the_chord_and_come_back() {
+    use expression_editor_core::harmony::ChordGun;
+
+    let mut gun = ChordGun::default();
+    let root = gun.pitches(1);
+    gun.cycle_inversion(true);
+    assert_eq!(gun.pitches(1), vec![64, 67, 72], "first inversion is E G C");
+    gun.cycle_inversion(true);
+    assert_eq!(gun.pitches(1), vec![67, 72, 76], "second is G C E");
+    gun.cycle_inversion(true);
+    assert_eq!(gun.pitches(1), root, "three inversions of a triad is none");
+}
+
+/// The mode changes what a degree means; the family does not change under
+/// you.
+#[test]
+fn cycling_the_mode_stays_inside_its_family() {
+    use expression_editor_core::harmony::ChordGun;
+    use keyflow_proto::key::scale::ScaleType;
+
+    let mut gun = ChordGun::default();
+    let ionian_iii = gun.pitches(3);
+    for _ in 0..7 {
+        gun.cycle_mode(true);
+        assert_eq!(
+            gun.mode.scale_type(),
+            ScaleType::Diatonic,
+            "cycling walked out of the diatonic family",
+        );
+    }
+    assert_eq!(
+        gun.pitches(3),
+        ionian_iii,
+        "seven steps through seven modes did not come home",
+    );
+}
+
+/// Firing a chord inserts it at the playhead, selects it, and is one undo.
+#[test]
+fn firing_a_chord_inserts_it_at_the_playhead() {
+    let mut ed = test_editor();
+    let before = ed.doc.notes.len();
+    ed.playhead = Some(PPQ * 2.0);
+    ed.grid.enabled = true;
+
+    assert!(ed.insert_chord(1), "the chord did not fire");
+    // The selection *is* the fired chord — filtering the document by
+    // start time would also catch whatever the fixture already had at
+    // that beat, which is what this test first did.
+    assert_eq!(
+        ed.selection.notes.len(),
+        3,
+        "a triad should be three notes, and they should be selected so \
+         the gesture composes with the next one",
+    );
+    let added: Vec<_> = ed
+        .selection
+        .notes
+        .iter()
+        .filter_map(|id| ed.doc.note(*id))
+        .collect();
+    assert_eq!(added.len(), 3, "a selected note is missing from the document");
+    assert!(
+        added.iter().all(|n| (n.start - PPQ * 2.0).abs() < 1.0),
+        "the chord did not land on the playhead",
+    );
+    assert!(
+        added.iter().all(|n| n.end > n.start),
+        "a fired chord has no length",
+    );
+
+    assert!(ed.undo(), "firing opened no undo step");
+    assert_eq!(
+        ed.doc.notes.len(),
+        before,
+        "one undo did not take the whole chord",
+    );
+}

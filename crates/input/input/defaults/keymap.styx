@@ -60,7 +60,24 @@
       "v e": "velocity.expand",
       "v r": "velocity.randomize",
       "v f": "velocity.flatten",
-      "v p": "velocity.panel"
+      "v p": "velocity.panel",
+      "h 1": "chord.degree.1",
+      "h 2": "chord.degree.2",
+      "h 3": "chord.degree.3",
+      "h 4": "chord.degree.4",
+      "h 5": "chord.degree.5",
+      "h 6": "chord.degree.6",
+      "h 7": "chord.degree.7",
+      "h t": "chord.tonic_up",
+      "h g": "chord.tonic_down",
+      "h s": "chord.mode_next",
+      "h a": "chord.mode_prev",
+      "h d": "chord.depth_next",
+      "h f": "chord.depth_prev",
+      "h i": "chord.inversion_next",
+      "h u": "chord.inversion_prev",
+      "h o": "chord.octave_up",
+      "h l": "chord.octave_down"
     }
   },
   "keymap_context": {

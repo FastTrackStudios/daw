@@ -841,7 +841,10 @@ pub fn Canvas(
             // through saying something specific, and answering a
             // different question would be the wrong help.
             if !which_key().is_empty() {
-                KeyPanel { title: None, rows: which_key() }
+                KeyPanel {
+                    title: chord_panel_title(&editor.read()),
+                    rows: name_chord_rows(&editor.read(), which_key()),
+                }
             } else if !editor.read().razor.is_empty() {
                 KeyPanel {
                     title: Some(razor_help_title(&editor.read())),
@@ -1078,4 +1081,49 @@ fn velocity_action(
         "velocity.flatten" => velocity_ramp::flatten(&mut ed, &notes),
         _ => false,
     })
+}
+
+/// Put the real chord names on the chord tree's degree rows.
+///
+/// The keymap can only say "fire the chord on this degree", because it
+/// is a static file and the answer depends on the key, the scale, the
+/// depth and the inversion. Which makes the generic label almost
+/// useless: the entire point of choosing by degree is that you are
+/// thinking in `I` and `vi`, and a panel that will not tell you the
+/// third degree of F Dorian is a panel you have to do theory to use.
+///
+/// Rewritten here rather than in `keys::label_for` because that has no
+/// editor to ask — it maps an action id to a string and nothing else.
+fn name_chord_rows(ed: &Editor, rows: Vec<keys::Continuation>) -> Vec<keys::Continuation> {
+    rows.into_iter()
+        .map(|c| {
+            let Ok(degree) = c.key.parse::<usize>() else {
+                return c;
+            };
+            if !(1..=7).contains(&degree) {
+                return c;
+            }
+            let name = ed.chord_gun.chord_name(degree);
+            if name.is_empty() {
+                return c;
+            }
+            keys::Continuation { label: name, ..c }
+        })
+        .collect()
+}
+
+/// Name the chord tree after the scale it is currently firing from.
+fn chord_panel_title(ed: &Editor) -> Option<String> {
+    // Only while the chord prefix is the one being typed — every other
+    // sequence keeps the untitled panel it has always had.
+    if keys::held_prefix().as_deref() != Some("h") {
+        return None;
+    }
+    let gun = &ed.chord_gun;
+    Some(format!(
+        "{} · {} · inv {}",
+        gun.scale_name(),
+        gun.depth.name(),
+        gun.inversion,
+    ))
 }
