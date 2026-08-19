@@ -58,6 +58,7 @@ use expression_editor_ui::workflow::Workflow;
 
 pub mod app;
 pub mod cli;
+pub mod drum_host;
 pub mod library;
 
 pub use app::{App, stage};
@@ -265,6 +266,10 @@ pub struct Runner {
     pub loaded: Loaded,
     /// What to show in the window title: enough to tell two runs apart.
     pub label: String,
+    /// The drum workspace's write half — `Some` only for
+    /// [`Loaded::DrumWorkspace`], where the panel's Apply and the slip
+    /// drag land through it.
+    pub host: Option<drum_host::SharedDrumHost>,
 }
 
 /// The document, and the shape of the round trip behind it.
@@ -362,11 +367,13 @@ impl Runner {
                 daw: None,
                 loaded: Loaded::Scene(Box::new(demo::editor(*scene, viewport))),
                 label: format!("scene: {}", scene.label()),
+                host: None,
             },
             Source::Workflow(w) => Runner {
                 daw: None,
                 loaded: Loaded::Scene(Box::new(w.editor(viewport))),
                 label: w.label().to_string(),
+                host: None,
             },
             Source::Rpp(path) => match &target.drums {
                 Some(folder) => Self::open_rpp_drums(path, folder.as_deref(), viewport)?,
@@ -405,6 +412,7 @@ impl Runner {
                 path.file_name().unwrap_or_default().to_string_lossy(),
                 notes,
             ),
+            host: None,
         })
     }
 
@@ -432,6 +440,7 @@ impl Runner {
             ),
             daw: Some(daw),
             loaded: Loaded::Midi(Box::new(session)),
+            host: None,
         })
     }
     /// Which track of a standard MIDI file to open.
@@ -478,6 +487,7 @@ impl Runner {
                     label: format!("{name} — {}", cand.describe()),
                     daw: Some(daw),
                     loaded: runner,
+                    host: None,
                 });
             }
         }
@@ -536,10 +546,20 @@ impl Runner {
             folder: Option<String>,
             role: expression_editor_core::kit::LaneRole,
             doc: expression_editor_core::ExpressionDoc,
+            item: ItemRef,
+            length_secs: f64,
         }
 
         let mut members: Vec<Member> = Vec::new();
         let mut items_seen = 0usize;
+        // The trigger lanes' running sums (mean of the members), built
+        // while the samples are in hand — the host detects on these.
+        // r[impl drums.group.detection-source]
+        let mut sums: std::collections::HashMap<
+            expression_editor_core::kit::LaneRole,
+            (Vec<f64>, usize),
+        > = std::collections::HashMap::new();
+        let mut sample_rate = 0.0f64;
         for track in &tracks {
             if track.is_folder {
                 continue;
@@ -572,12 +592,27 @@ impl Runner {
             else {
                 continue;
             };
+            if sample_rate <= 0.0 {
+                sample_rate = rate;
+            }
+            if role.is_detection_source() {
+                let (sum, count) = sums.entry(role).or_default();
+                if sum.len() < samples.len() {
+                    sum.resize(samples.len(), 0.0);
+                }
+                for (o, v) in sum.iter_mut().zip(samples.iter()) {
+                    *o += v;
+                }
+                *count += 1;
+            }
             members.push(Member {
                 guid: track.guid.clone(),
                 name: track.name.clone(),
                 folder: chain.first().map(|s| s.to_string()),
                 role,
                 doc: percussion_doc(&samples, rate),
+                item: ItemRef::Guid(item_guid),
+                length_secs,
             });
         }
 
@@ -589,6 +624,35 @@ impl Runner {
         }
 
         let mics = members.len();
+        let take_secs = members.iter().map(|m| m.length_secs).fold(0.0f64, f64::max);
+        // The kit group's items, by role — the host edits all of them
+        // for every gesture. r[impl drums.group.kit]
+        let host_lanes: Vec<drum_host::HostLane> = expression_editor_core::kit::LaneRole::ALL
+            .into_iter()
+            .filter_map(|role| {
+                let items: Vec<ItemRef> = members
+                    .iter()
+                    .filter(|m| m.role == role)
+                    .map(|m| m.item.clone())
+                    .collect();
+                if items.is_empty() {
+                    return None;
+                }
+                let summed = sums.remove(&role).map(|(mut sum, count)| {
+                    let scale = 1.0 / count.max(1) as f64;
+                    for v in &mut sum {
+                        *v *= scale;
+                    }
+                    sum
+                });
+                Some(drum_host::HostLane {
+                    role,
+                    items,
+                    summed,
+                })
+            })
+            .collect();
+
         let mut it = members.into_iter();
         let first = it.next().expect("checked non-empty");
         let mut editor = Editor::new(first.doc, viewport);
@@ -620,10 +684,19 @@ impl Runner {
             editor.bpm = bpm;
         }
 
+        let host = drum_host::DrumHost::new(
+            daw.clone(),
+            ctx,
+            host_lanes,
+            sample_rate,
+            take_secs,
+            60.0 / editor.bpm.max(1.0),
+        );
         Ok(Runner {
             label: format!("{name} — drums: {} ({mics} mics)", kit.name),
             daw: Some(daw),
             loaded: Loaded::DrumWorkspace(Box::new(editor)),
+            host: Some(std::sync::Arc::new(host)),
         })
     }
 

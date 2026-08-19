@@ -103,7 +103,14 @@ fn main() {
     // dropping it here would leave a document with nowhere to go back
     // to the moment write-back lands.
     let _daw = runner.daw;
-    stage(runner.loaded.into_editor());
+    // A drum workspace stages its write half with it, so the quantize
+    // panel's Apply and the slip drag reach the daw.
+    match runner.host {
+        Some(host) => {
+            expression_editor_standalone::app::stage_with_host(runner.loaded.into_editor(), host)
+        }
+        None => stage(runner.loaded.into_editor()),
+    }
 
     let window = WindowAttributes::default()
         .with_title(format!("Expression editor — {}", runner.label))
