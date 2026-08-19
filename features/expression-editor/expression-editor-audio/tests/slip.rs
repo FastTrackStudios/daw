@@ -127,7 +127,10 @@ fn one_undo_step_restores_every_mic() {
     .expect("slip applied");
     daw.end_undo_block(ctx.clone(), "Slip hit", None);
 
-    assert_eq!(daw.last_undo_label(ctx.clone()).as_deref(), Some("Slip hit"));
+    assert_eq!(
+        daw.last_undo_label(ctx.clone()).as_deref(),
+        Some("Slip hit")
+    );
     assert!(daw.undo(ctx.clone()), "one undo step");
     for (i, item) in items.iter().enumerate() {
         assert_eq!(pieces_on(&daw, item), before[i], "mic {i} restored");
