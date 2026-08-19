@@ -99,3 +99,43 @@ fn one_slip_cuts_and_slides_every_mic_identically() {
     assert!((mid.2 - 0.995).abs() < 1e-9, "middle reads from its cut");
     assert!((tail.0 - 1.495).abs() < 1e-9, "tail did not move");
 }
+
+// r[verify drums.verify.slip-gesture]
+// r[verify drums.quantize.undo]
+#[test]
+fn one_undo_step_restores_every_mic() {
+    use daw::service::Projects;
+    let daw = project();
+    let items = mics(&daw, &["Kick In", "Kick Out", "Kick Sub"]);
+    let ctx = ProjectContext::Current;
+    let before: Vec<_> = items.iter().map(|i| pieces_on(&daw, i)).collect();
+
+    daw.begin_undo_block(ctx.clone(), "Slip hit");
+    slip_hit(
+        &daw,
+        ctx.clone(),
+        &items,
+        1.0,
+        1.5,
+        TAKE_LEN,
+        0.030,
+        SplitConfig {
+            leading_pad_secs: 0.005,
+            crossfade_secs: 0.005,
+        },
+    )
+    .expect("slip applied");
+    daw.end_undo_block(ctx.clone(), "Slip hit", None);
+
+    assert_eq!(daw.last_undo_label(ctx.clone()).as_deref(), Some("Slip hit"));
+    assert!(daw.undo(ctx.clone()), "one undo step");
+    for (i, item) in items.iter().enumerate() {
+        assert_eq!(pieces_on(&daw, item), before[i], "mic {i} restored");
+    }
+    assert!(!daw.undo(ctx.clone()), "and only one");
+
+    // Redo brings the whole group edit back.
+    assert!(daw.redo(ctx.clone()));
+    let first = pieces_on(&daw, &items[0]);
+    assert_eq!(first.len(), 3, "redo reinstated the split");
+}
