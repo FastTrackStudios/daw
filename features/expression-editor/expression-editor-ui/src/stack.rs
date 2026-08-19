@@ -22,7 +22,7 @@
 use expression_editor_core::doc::{ExpressionDoc, Note};
 use expression_editor_core::rows::RowSpace;
 use expression_editor_core::tracks::StackRow;
-use expression_editor_core::{Editor, Mode, Viewport};
+use expression_editor_core::{Editor, Mode};
 
 use dioxus::prelude::*;
 use dioxus_elements::input_data::MouseButton;
@@ -392,17 +392,22 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
                     touch-action: none; user-select: none; cursor: pointer;",
             view_box: "0 0 {vp.w + canvas::GUTTER_W:.0} {vp.h + canvas::RULER_H:.0}",
             preserve_aspect_ratio: "none",
-            onmounted: move |e| {
-                let data = e.data();
-                spawn(async move {
-                    if let Ok(r) = data.get_client_rect().await {
-                        editor.write().resize(Viewport::new(
-                            r.width() - canvas::GUTTER_W,
-                            r.height() - canvas::RULER_H,
-                        ));
-                    }
-                });
-            },
+            // No `onmounted` measure here, deliberately.
+            //
+            // This used to `spawn` and `await get_client_rect()` from the
+            // mount handler — the re-entrancy pattern that caused #167,
+            // and the one the Blitz testing notes say never to use: the
+            // await re-enters the document while the mount that started
+            // it is still on the stack.
+            //
+            // It is also unnecessary. `ExpressionEditor` already keeps
+            // `ed.viewport` in step with the host's space through
+            // `sizing::viewport_within`, in one effect, for whichever
+            // view is showing. The stack was measuring itself only
+            // because `chrome_of` charged it for a lane strip it does
+            // not render, which made the shared answer wrong — so the
+            // fix was to make the shared answer right rather than to
+            // keep a second one.
             onpointermove: move |e: PointerEvent| {
                 let Some((lx, ly)) = panning() else { return };
                 let c = e.data().element_coordinates();

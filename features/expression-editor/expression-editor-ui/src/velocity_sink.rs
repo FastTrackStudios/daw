@@ -155,13 +155,32 @@ pub struct PanelOpen(pub Signal<bool>);
 
 /// The velocity panel, in a window you can move.
 ///
-/// Not yet a separate OS window, which is what it wants to be — see the
-/// module docs of `expression-editor-standalone`. `dioxus-native` can
-/// hold several windows (`DioxusNativeApplication::add_window`) but
-/// exposes no way to reach the application from a component, and
-/// `launch_cfg` is the only entry point. So this is a window in every
-/// respect the surface can control: it floats over the editor, it has a
-/// title bar, you drag it where you want it, and it closes.
+/// Not a separate OS window, which is what it wants to be.
+///
+/// **dioxus-native has no multi-window support**, and the gap is deeper
+/// than it looks. `DioxusNativeApplication::add_window` exists and is
+/// public, but it forwards to `BlitzApplication::add_window`, which only
+/// pushes to a queue that Blitz drains with `View::init` + `resume`.
+/// Every piece of Dioxus wiring — the document provider, the event
+/// handlers, the shell provider, history, the renderer, the winit
+/// window, and `initial_build()` — lives in
+/// `DioxusNativeApplication::can_create_surfaces` and runs for exactly
+/// one `pending_window: Option<_>`. A window added the other way comes
+/// up with an unbuilt vdom and no providers. Upstream marks the same
+/// spot: *"todo(jon): we should actually mess with the pending windows
+/// instead of passing along the contexts"*.
+///
+/// The canonical Dioxus API is `DesktopContext::new_window(dom, cfg)` —
+/// build a pending window, push it to a shared queue, poke the event
+/// loop through the proxy — but that is `dioxus-desktop`, which means
+/// WebKit, which this editor does not use. Porting that pattern to
+/// native is three changes and would need a dioxus fork beside the blitz
+/// one; parked until dioxus's next Blitz sync, which the fork bump is
+/// waiting on anyway.
+///
+/// So: a window in every respect the surface itself controls. It floats
+/// over the editor, it has a title bar, you drag it where you want it,
+/// and it closes.
 #[component]
 pub fn VelocityWindow() -> Element {
     let mut open = use_context::<PanelOpen>().0;

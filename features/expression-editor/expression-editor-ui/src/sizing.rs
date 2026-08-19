@@ -175,7 +175,11 @@ pub fn chrome_of(ed: &Editor, inspector_open: bool) -> Chrome {
     Chrome {
         inspector_open,
         switcher: crate::switcher::is_shown(ed),
-        lane_strip_h: ed.lane_strip_h,
+        // The stack view renders instead of the roll *and* its lane
+        // strip, so in that mode there is no strip to subtract. Charging
+        // for one left the stack short by its height — which is why it
+        // used to measure itself on mount instead of trusting this.
+        lane_strip_h: if ed.stacked { 0.0 } else { ed.lane_strip_h },
     }
 }
 
