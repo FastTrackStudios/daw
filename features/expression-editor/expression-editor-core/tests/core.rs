@@ -4831,3 +4831,76 @@ fn firing_a_chord_inserts_it_at_the_playhead() {
         "one undo did not take the whole chord",
     );
 }
+
+// ── the action declarations ─────────────────────────────────────────
+
+/// Every declared action is well-formed, and the ones this crate owns
+/// all do something.
+///
+/// The declarations replaced three hand-kept lists — ids, labels, and a
+/// dispatch match — none of which were tied together. This is the tie:
+/// an action nobody wired up is a test failure rather than a key that
+/// silently does nothing.
+///
+/// Two groups are declared here and run by `expression-editor-ui`:
+/// velocity needs `expression-editor-tools`, which depends on this
+/// crate, and MeMagic is anchored on a pointer this crate has no notion
+/// of. They are skipped *here* and covered *there*, so between the two
+/// nothing declared is unreachable.
+#[test]
+fn every_declared_action_is_wired_up() {
+    use expression_editor_core::actions;
+
+    let all = actions::all();
+    assert!(all.len() >= 60, "only {} actions declared", all.len());
+
+    let mut seen = std::collections::BTreeSet::new();
+    for meta in &all {
+        assert!(seen.insert(meta.id), "two actions share the id {}", meta.id);
+        assert!(!meta.description.is_empty(), "{} has no description", meta.id);
+        assert!(
+            !meta.shortcut.is_empty(),
+            "{} advertises no way to reach it",
+            meta.id,
+        );
+        assert_eq!(
+            meta.category, "Expression Editor",
+            "{} would land in the wrong menu",
+            meta.id,
+        );
+
+        let ours = !meta.id.starts_with("FTS_EDITOR_VELOCITY")
+            && meta.id != actions::view::MEMAGIC.id;
+        if !ours {
+            continue;
+        }
+
+        // Enough material for every kind: notes, a selection, a razor
+        // over them, and a second track to step to.
+        let mut ed = grid_editor();
+        ed.tracks.push(expression_editor_core::tracks::Track::new(
+            "second",
+            ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 4.0),
+        ));
+        ed.selection.notes = ed.doc.notes.iter().map(|n| n.id).collect();
+        ed.razor.add(expression_editor_core::RazorArea::new(
+            0.0,
+            PPQ * 4.0,
+            0,
+            127,
+        ));
+        assert!(
+            actions::run(&mut ed, meta.id),
+            "`{}` ({}) is declared and does nothing",
+            meta.id,
+            meta.shortcut,
+        );
+    }
+}
+
+/// An id nobody declared is not silently swallowed.
+#[test]
+fn an_unknown_action_falls_through() {
+    let mut ed = grid_editor();
+    assert!(!expression_editor_core::actions::run(&mut ed, "FTS_EDITOR_NOPE"));
+}

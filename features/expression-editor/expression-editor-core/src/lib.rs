@@ -41,6 +41,7 @@ pub mod mode;
 pub mod modulation;
 pub mod mouse;
 pub mod multitool;
+pub mod actions;
 pub mod harmony;
 pub mod razor;
 pub mod reference;

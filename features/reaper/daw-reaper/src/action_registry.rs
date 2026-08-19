@@ -1506,6 +1506,10 @@ mod tests {
             description: "A test action",
             category,
             group: "",
+            // A REAPER named command is reached from REAPER's own action
+            // list, which shows the binding the user gave it — so a hint
+            // baked in here would be a second, staler answer.
+            shortcut: "",
             toggleable: false,
             undo: false,
         }

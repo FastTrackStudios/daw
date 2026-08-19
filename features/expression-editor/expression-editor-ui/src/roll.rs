@@ -1030,10 +1030,12 @@ fn velocity_action(
 ) -> Option<bool> {
     use expression_editor_tools::velocity::CurvePreset;
 
+    use expression_editor_core::actions::velocity as v;
+
     let preset = match action {
-        "velocity.ramp_up" => Some(CurvePreset::Rise),
-        "velocity.ramp_down" => Some(CurvePreset::Fall),
-        "velocity.ramp_up_smooth" => Some(CurvePreset::RiseSmooth),
+        a if a == v::RAMP_UP.id => Some(CurvePreset::Rise),
+        a if a == v::RAMP_DOWN.id => Some(CurvePreset::Fall),
+        a if a == v::RAMP_SMOOTH.id => Some(CurvePreset::RiseSmooth),
         _ => None,
     };
 
@@ -1062,21 +1064,21 @@ fn velocity_action(
     // The rest act once and leave nothing live to adjust, so they close
     // any open ramp first — committing it, not reverting it. You asked
     // for the ramp; the next command is the one after it.
-    let closing = matches!(
-        action,
-        "velocity.accent"
-            | "velocity.compress"
-            | "velocity.expand"
-            | "velocity.randomize"
-            | "velocity.flatten"
-            | "velocity.panel"
-    );
+    let closing = [
+        v::ACCENT.id,
+        v::COMPRESS.id,
+        v::EXPAND.id,
+        v::HUMANISE.id,
+        v::FLATTEN.id,
+        v::PANEL.id,
+    ]
+    .contains(&action);
     if !closing {
         return None;
     }
     ramp.set(None);
 
-    if action == "velocity.panel" {
+    if action == v::PANEL.id {
         // Chrome, not an edit. `try_consume_context` because a host that
         // mounts the canvas without the editor's own chrome — the
         // screenshot harness does — has no window to toggle, and that is
@@ -1093,11 +1095,11 @@ fn velocity_action(
     let notes = editor.read().selection.notes.clone();
     let mut ed = editor.write();
     Some(match action {
-        "velocity.accent" => velocity_ramp::accent(&mut ed, &notes),
-        "velocity.compress" => velocity_ramp::dynamics(&mut ed, &notes, -0.35),
-        "velocity.expand" => velocity_ramp::dynamics(&mut ed, &notes, 0.35),
-        "velocity.randomize" => velocity_ramp::humanise(&mut ed, &notes),
-        "velocity.flatten" => velocity_ramp::flatten(&mut ed, &notes),
+        a if a == v::ACCENT.id => velocity_ramp::accent(&mut ed, &notes),
+        a if a == v::COMPRESS.id => velocity_ramp::dynamics(&mut ed, &notes, -0.35),
+        a if a == v::EXPAND.id => velocity_ramp::dynamics(&mut ed, &notes, 0.35),
+        a if a == v::HUMANISE.id => velocity_ramp::humanise(&mut ed, &notes),
+        a if a == v::FLATTEN.id => velocity_ramp::flatten(&mut ed, &notes),
         _ => false,
     })
 }
