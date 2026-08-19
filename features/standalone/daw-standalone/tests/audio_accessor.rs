@@ -278,3 +278,119 @@ fn a_track_accessor_declines_because_there_is_no_mix_to_render() {
         "None, not silence — a caller must not conclude the track is empty"
     );
 }
+
+/// Read `n` mono samples at the source rate from `start`.
+fn read(daw: &Standalone, acc: &str, start: f64, n: u32) -> Vec<f64> {
+    daw.get_samples(GetSamplesRequest {
+        accessor_id: acc.to_string(),
+        sample_rate: SR as f64,
+        num_channels: 1,
+        start_time: start,
+        num_samples: n,
+    })
+    .samples
+}
+
+fn set_take(daw: &Standalone, f: impl Fn(&mut daw_proto::item::Take)) {
+    daw.write_project("p", |p| {
+        for tl in p.takes.values_mut() {
+            for t in tl.takes.iter_mut() {
+                f(t);
+            }
+        }
+    });
+}
+
+// r[verify drums.open.accessor-placement]
+#[test]
+fn the_accessor_reads_in_take_playback_time() {
+    // A start offset of 0.1 s means take time 0 is source time 0.1 —
+    // the same samples REAPER's accessor would hand back.
+    let (daw, item, _dir) = project_with_audio(0.5);
+    let plain = daw
+        .create_take_accessor(ProjectContext::Current, item.clone(), TakeRef::Active)
+        .expect("accessor");
+    let from_source = read(&daw, &plain, 0.1, 500);
+    daw.destroy_accessor(&plain);
+
+    set_take(&daw, |t| {
+        t.start_offset = daw_proto::Duration::from_seconds(0.1)
+    });
+    let shifted = daw
+        .create_take_accessor(ProjectContext::Current, item.clone(), TakeRef::Active)
+        .expect("accessor");
+    let from_take = read(&daw, &shifted, 0.0, 500);
+    daw.destroy_accessor(&shifted);
+    let worst = from_source
+        .iter()
+        .zip(&from_take)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(worst < 1e-9, "start offset ignored (diff {worst})");
+
+    // Play rate 2: take time 0.1 is source time 0.1 + 0.2 = 0.3.
+    set_take(&daw, |t| t.play_rate = 2.0);
+    let fast = daw
+        .create_take_accessor(ProjectContext::Current, item.clone(), TakeRef::Active)
+        .expect("accessor");
+    let a = read(&daw, &fast, 0.1, 1)[0];
+    daw.destroy_accessor(&fast);
+    set_take(&daw, |t| {
+        t.play_rate = 1.0;
+        t.start_offset = daw_proto::Duration::from_seconds(0.0);
+    });
+    let plain = daw
+        .create_take_accessor(ProjectContext::Current, item.clone(), TakeRef::Active)
+        .expect("accessor");
+    let b = read(&daw, &plain, 0.3, 1)[0];
+    daw.destroy_accessor(&plain);
+    assert!((a - b).abs() < 1e-9, "play rate ignored ({a} vs {b})");
+
+    // A stretch marker map overrides offset+rate: take 0.2 s plays
+    // source 0.4 s.
+    use daw_proto::{StretchMarker, StretchMarkers, StretchTakeRef};
+    StretchMarkers::set_stretch_markers(
+        &daw,
+        StretchTakeRef {
+            project: ProjectContext::Current,
+            item: item.clone(),
+            take: TakeRef::Active,
+        },
+        vec![StretchMarker::new(0.0, 0.0), StretchMarker::new(0.2, 0.4)],
+    )
+    .expect("markers");
+    let warped = daw
+        .create_take_accessor(ProjectContext::Current, item.clone(), TakeRef::Active)
+        .expect("accessor");
+    let w = read(&daw, &warped, 0.2, 1)[0];
+    daw.destroy_accessor(&warped);
+    let plain = daw
+        .create_take_accessor(ProjectContext::Current, item, TakeRef::Active)
+        .expect("accessor");
+    let p = read(&daw, &plain, 0.4, 1)[0];
+    assert!((w - p).abs() < 1e-9, "markers ignored ({w} vs {p})");
+}
+
+// r[verify drums.open.peaks]
+#[test]
+fn take_peaks_cover_the_item_in_take_time() {
+    use daw_proto::Peaks;
+    let (daw, item, _dir) = project_with_audio(0.5);
+    let peaks = daw.take_peaks(ProjectContext::Current, item.clone(), TakeRef::Active, 441);
+    assert_eq!(peaks.num_channels, 1);
+    assert_eq!(peaks.samples_per_peak, 441);
+    // 0.5 s at 44.1k / 441 = 50 blocks of (min, max).
+    assert_eq!(peaks.peaks.len(), 100);
+    assert!(peaks.peaks.iter().any(|p| p.abs() > 0.3), "real peaks");
+    assert!(peaks.peaks.chunks(2).all(|p| p[0] <= 0.0 && p[1] >= 0.0));
+
+    // A take with no media: empty, not an error.
+    set_take(&daw, |t| {
+        t.source_file_path = Some("/nonexistent/x.wav".into())
+    });
+    daw.write_project("p", |p| {
+        p.audio_sources.clear();
+    });
+    let none = daw.take_peaks(ProjectContext::Current, item, TakeRef::Active, 441);
+    assert!(none.peaks.is_empty());
+}

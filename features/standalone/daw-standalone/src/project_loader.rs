@@ -407,6 +407,22 @@ fn populate_tracks(
                 let mut takes_out = Vec::with_capacity(ri.takes.len().max(1));
                 for (take_idx, rt_take) in ri.takes.iter().enumerate() {
                     let take = build_take(&item_guid, take_idx as u32, rt_take, summary);
+                    // r[impl drums.open.stretch-markers]
+                    // `SM` lines are keyed per take; the third token is the
+                    // marker's slope (daw-proto's field of the same name).
+                    if !rt_take.stretch_markers.is_empty() {
+                        let mut markers: Vec<daw_proto::StretchMarker> = rt_take
+                            .stretch_markers
+                            .iter()
+                            .map(|sm| daw_proto::StretchMarker {
+                                position: sm.position,
+                                source_position: sm.source_position,
+                                slope: sm.rate.unwrap_or(0.0),
+                            })
+                            .collect();
+                        markers.sort_by(|a, b| a.position.total_cmp(&b.position));
+                        p.stretch_markers.insert(take.guid.clone(), markers);
+                    }
                     // If this is a MIDI take, decode its event stream
                     // into MidiNote entries on `p.midi_notes`. The
                     // renderer reads from this map to feed VST3i /

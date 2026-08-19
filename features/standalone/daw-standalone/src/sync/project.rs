@@ -184,6 +184,24 @@ impl Projects for Standalone {
             {
                 let summary =
                     crate::project_loader::load_rpp_text(self, &name, path, &text).ok()?;
+                // r[impl drums.open.rpp]
+                // Media resolves against the file's directory, as REAPER
+                // does; a source that cannot be found is a per-take entry
+                // in the materialize report, never a failed open.
+                #[cfg(feature = "decode")]
+                {
+                    let dir = std::path::Path::new(path)
+                        .parent()
+                        .map(|d| d.to_path_buf())
+                        .unwrap_or_default();
+                    self.media_bay().set_file_resolver(Box::new(
+                        crate::media_bay::ProjectRelativeResolver::new(dir),
+                    ));
+                    let _ = crate::audio_engine::materialize::materialize_via_bay(
+                        self,
+                        &summary.project_guid,
+                    );
+                }
                 let s = self.state.lock().ok()?;
                 s.projects
                     .get(&summary.project_guid)
