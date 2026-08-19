@@ -271,12 +271,13 @@ Delete). Both edit the hit list only; nothing is written until a drag or
 Apply.
 
 r[drums.manual.daw-split]
-`daw-proto` `Items` MUST offer the split primitive the gesture needs:
-split an item at a project time into two items (left keeps the original
-take order, right gets the same takes with offsets advanced), with
-optional crossfade length/shape; implemented for `Standalone` and for
-REAPER. `apply_split` and the manual slip both use it; neither hand-rolls
-a split from `create_item`.
+The gesture's split primitive is the one the quantizer already has:
+`apply_quantize` splits by duplicate + set position/length/start-offset
++ fades, over `Items`/`Takes` calls both backends implement — a facade
+`split_item` RPC was considered and declined there, and this spec keeps
+that decision. The requirement is sharing: the manual slip MUST use the
+same split helper `apply_split` uses (hoisted, not copied), so a
+quantize cut and a hand cut cannot come apart in pad or fade semantics.
 
 ## Scope and portability
 

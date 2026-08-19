@@ -54,6 +54,7 @@ pub mod quantize;
 pub mod retime;
 #[cfg(feature = "daw")]
 pub mod session;
+pub mod slip;
 pub mod spans;
 #[cfg(feature = "daw")]
 pub mod write_dynamics;
