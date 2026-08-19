@@ -878,3 +878,41 @@ async fn a_prefix_tree_stays_up_until_it_has_been_used() -> dioxus_test::Result<
     );
     Ok(())
 }
+
+/// Opening one tree after another must not corrupt the DOM.
+///
+/// Reported from the running app: pressing `g` panicked in blitz-dom's
+/// `node_at_path` with "invalid key" — a mutation path walking to a node
+/// that no longer exists, which is what a template whose *shape* changed
+/// between renders looks like from inside the diff.
+#[tokio::test]
+async fn switching_between_prefix_trees_does_not_corrupt_the_dom()
+-> dioxus_test::Result<()> {
+    use dioxus_test::keyboard_types::{Key, Modifiers};
+
+    let mut ed = one_note();
+    // A razor, so the panel is already up with the *other* shape — the
+    // razor help has a title, a which-key tree does not.
+    ed.razor.add(expression_editor_core::RazorArea::new(
+        0.0, PPQ, NOTE_ROW - 1, NOTE_ROW + 1,
+    ));
+    stage(ed);
+
+    let tester = render(Staged).with_window_size(1000, 620).build();
+    tester.query(by_testid("roll")).immediately()?;
+    focused(&tester)?;
+    let _ = tester.pump().await;
+
+    // razor help (titled) → grid tree (untitled) → chord tree (titled)
+    for key in ["g", "Escape", "h", "Escape", "v", "Escape", "g"] {
+        let k = if key == "Escape" {
+            Key::Escape
+        } else {
+            Key::Character(key.into())
+        };
+        tester.press_key(k, Modifiers::empty());
+        tester.drain();
+        let _ = tester.pump().await;
+    }
+    Ok(())
+}

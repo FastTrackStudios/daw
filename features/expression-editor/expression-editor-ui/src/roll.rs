@@ -853,16 +853,8 @@ pub fn Canvas(
             // The sequence wins when both could show — you are part-way
             // through saying something specific, and answering a
             // different question would be the wrong help.
-            if !which_key().is_empty() {
-                KeyPanel {
-                    title: chord_panel_title(&editor.read()),
-                    rows: name_chord_rows(&editor.read(), which_key()),
-                }
-            } else if !editor.read().razor.is_empty() {
-                KeyPanel {
-                    title: Some(razor_help_title(&editor.read())),
-                    rows: razor_help_rows(&editor.read()),
-                }
+            if let Some(panel) = key_panel(&editor.read(), which_key()) {
+                KeyPanel { title: panel.0, rows: panel.1 }
             }
         }
     }
@@ -881,7 +873,37 @@ pub fn Canvas(
 /// anchored on, is far likelier to be on the left half of a piano roll
 /// than the right, since that is where the material you just clicked is.
 #[component]
-fn KeyPanel(title: Option<String>, rows: Vec<keys::Continuation>) -> Element {
+fn KeyPanel(title: String, rows: Vec<keys::Continuation>) -> Element {
+    // Every branch resolved *before* the markup, so this component has
+    // exactly one shape. `rsx!` conditionals add and remove nodes, and a
+    // template whose node count depends on its props is what blitz-dom
+    // walks a stale path through — the "invalid key" panic out of
+    // `node_at_path`. A heading that is sometimes absent and a label
+    // that is sometimes prefixed were two such conditionals; both are
+    // now styles and strings, which change without moving anything.
+    let heading = if title.is_empty() {
+        "display: none;".to_string()
+    } else {
+        format!(
+            "display: block; padding: 2px 10px 5px; margin-bottom: 3px; \
+             border-bottom: 1px solid {}; color: {}; \
+             font-weight: 600; letter-spacing: 0.4px;",
+            theme::PANEL_BORDER, theme::TEXT_DIM,
+        )
+    };
+    let rows: Vec<(String, String, &'static str)> = rows
+        .into_iter()
+        .map(|c| {
+            let label = if c.is_group {
+                format!("+{}", c.label)
+            } else {
+                c.label
+            };
+            let colour = if c.is_group { theme::TEXT_DIM } else { theme::TEXT };
+            (c.key, label, colour)
+        })
+        .collect();
+
     rsx! {
         div {
             "data-testid": "which-key",
@@ -893,20 +915,10 @@ fn KeyPanel(title: Option<String>, rows: Vec<keys::Continuation>) -> Element {
                  font-size: 11px; box-shadow: 0 6px 24px rgba(0,0,0,0.45);",
                 theme::PANEL_BORDER, theme::SURFACE_INSET, theme::TEXT,
             ),
-            if let Some(title) = title {
+            div { style: heading, "{title}" }
+            for (key, label, colour) in rows.into_iter() {
                 div {
-                    style: format!(
-                        "padding: 2px 10px 5px; margin-bottom: 3px; \
-                         border-bottom: 1px solid {}; color: {}; \
-                         font-weight: 600; letter-spacing: 0.4px;",
-                        theme::PANEL_BORDER, theme::TEXT_DIM,
-                    ),
-                    "{title}"
-                }
-            }
-            for c in rows.into_iter() {
-                div {
-                    key: "{c.key}",
+                    key: "{key}",
                     style: "display: flex; align-items: baseline; gap: 8px; \
                             padding: 2px 10px;",
                     span {
@@ -914,15 +926,9 @@ fn KeyPanel(title: Option<String>, rows: Vec<keys::Continuation>) -> Element {
                             "min-width: 34px; font-weight: 600; color: {};",
                             theme::ACCENT,
                         ),
-                        "{c.key}"
+                        "{key}"
                     }
-                    span {
-                        style: format!(
-                            "color: {};",
-                            if c.is_group { theme::TEXT_DIM } else { theme::TEXT },
-                        ),
-                        if c.is_group { "+{c.label}" } else { "{c.label}" }
-                    }
+                    span { style: format!("color: {colour};"), "{label}" }
                 }
             }
         }
@@ -1126,17 +1132,41 @@ fn name_chord_rows(ed: &Editor, rows: Vec<keys::Continuation>) -> Vec<keys::Cont
 }
 
 /// Name the chord tree after the scale it is currently firing from.
-fn chord_panel_title(ed: &Editor) -> Option<String> {
+fn chord_panel_title(ed: &Editor) -> String {
     // Only while the chord prefix is the one being typed — every other
-    // sequence keeps the untitled panel it has always had.
+    // sequence keeps the bare panel it has always had. Empty rather than
+    // `None`, because the heading is always *rendered*; see `KeyPanel`.
     if keys::held_prefix().as_deref() != Some("h") {
-        return None;
+        return String::new();
     }
     let gun = &ed.chord_gun;
-    Some(format!(
+    format!(
         "{} · {} · inv {}",
         gun.scale_name(),
         gun.depth.name(),
         gun.inversion,
-    ))
+    )
+}
+
+/// What the key panel should be showing, if anything.
+///
+/// One decision in one place, so the panel is *one* mounted component
+/// rather than a choice between two. It used to be an `if`/`else if`
+/// with a `KeyPanel` in each arm, and switching arms swapped a titled
+/// panel for an untitled one — the same component with a structurally
+/// different body. That is what a template diff walks a stale path
+/// through, and what the "invalid key" panic out of blitz-dom's
+/// `node_at_path` is: a mutation aimed at a node the last render's
+/// shape had and this one does not.
+fn key_panel(
+    ed: &Editor,
+    which_key: Vec<keys::Continuation>,
+) -> Option<(String, Vec<keys::Continuation>)> {
+    if !which_key.is_empty() {
+        return Some((chord_panel_title(ed), name_chord_rows(ed, which_key)));
+    }
+    if !ed.razor.is_empty() {
+        return Some((razor_help_title(ed), razor_help_rows(ed)));
+    }
+    None
 }

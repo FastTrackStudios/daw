@@ -2825,7 +2825,15 @@ pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
                 t: mouse_t,
             })
         }
-        ("g", false, _) => {
+        // `g` split the selected note. It cannot any more — `g` is the
+        // grid prefix, so the sequence resolver takes the key and this
+        // arm stopped being reachable, exactly as plain `v` did when `v`
+        // became the velocity prefix.
+        //
+        // Split is `b` — break. `s` would be the obvious letter and is
+        // the Select tool; of what is actually free (a, b, j, n, w, y)
+        // this is the only one that means anything.
+        ("b", false, _) => {
             let Some(&id) = ed.selection.notes.first() else {
                 return false;
             };
