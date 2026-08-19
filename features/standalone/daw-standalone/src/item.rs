@@ -292,8 +292,24 @@ impl Items for Standalone {
                 if let Some(src_takes) = p.takes.get(&item_guid).cloned() {
                     let mut takes = src_takes;
                     for take in &mut takes.takes {
+                        let old_guid = take.guid.clone();
                         take.guid = Uuid::new_v4().to_string();
                         take.item_guid = new_guid.clone();
+                        // Everything keyed by the take guid comes with
+                        // it, or the duplicate is silent and unwarped
+                        // where the original plays: the materialized
+                        // source (an `Arc`, so this is a refcount, not a
+                        // copy), the stretch markers, and the mode.
+                        #[cfg(any(feature = "audio", feature = "decode"))]
+                        if let Some(audio) = p.audio_sources.get(&old_guid).cloned() {
+                            p.audio_sources.insert(take.guid.clone(), audio);
+                        }
+                        if let Some(markers) = p.stretch_markers.get(&old_guid).cloned() {
+                            p.stretch_markers.insert(take.guid.clone(), markers);
+                        }
+                        if let Some(mode) = p.stretch_modes.get(&old_guid).copied() {
+                            p.stretch_modes.insert(take.guid.clone(), mode);
+                        }
                     }
                     p.takes.insert(new_guid.clone(), takes);
                 }

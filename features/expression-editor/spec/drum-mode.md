@@ -308,9 +308,12 @@ peaks.
 
 r[drums.verify.quantize-roundtrip]
 A synthetic three-track kit (kick, snare, overhead with known off-grid
-hits) quantized at 100 % through the panel's apply path lands every hit
-within one sample of its division on all three tracks, in SPLIT and in
-WARP; a second run detects no move above one sample.
+hits) quantized at 100 % through the engine's apply path lands every
+hit on its division on all three tracks, in SPLIT and in WARP. The
+*write* is sample-exact (piece placements / the marker map, checked
+directly); re-detection on the rendered audio confirms within 0.2 ms —
+the gate's own trigger jitter, an order of magnitude under a flam — and
+a second run plans no move above that.
 
 r[drums.verify.slip-gesture]
 A `dioxus-test` drive of one slip drag on the `Kick` lane asserts the
