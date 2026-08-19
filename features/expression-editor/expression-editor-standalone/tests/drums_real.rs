@@ -65,4 +65,10 @@ fn the_real_kit_opens_as_role_lanes() {
         }
     }
     assert!(ed.stacked, "opens in the stacked view");
+    // r[verify drums.group.tempo]
+    assert!(
+        (ed.bpm - 84.0).abs() < 1e-6,
+        "grid runs at the session's 84 bpm, got {}",
+        ed.bpm
+    );
 }

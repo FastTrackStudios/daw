@@ -611,6 +611,14 @@ impl Runner {
         // The stack *is* the drum workspace view; the roll is one click
         // away per lane.
         editor.stacked = true;
+        // Grid targets come from the project's tempo, not a default —
+        // a hit quantized against 120 in an 84 bpm session lands
+        // nowhere musical.
+        // r[impl drums.group.tempo]
+        let bpm = daw::service::tempo_map::TempoMap::get_tempo_at(&daw, ctx.clone(), 0.0);
+        if bpm > 0.0 {
+            editor.bpm = bpm;
+        }
 
         Ok(Runner {
             label: format!("{name} — drums: {} ({mics} mics)", kit.name),
