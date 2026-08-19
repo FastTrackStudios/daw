@@ -698,3 +698,105 @@ async fn the_key_panel_sits_in_the_bottom_right() -> dioxus_test::Result<()> {
     );
     Ok(())
 }
+
+// ── the velocity window ─────────────────────────────────────────────
+
+/// `v p` opens the velocity window; pressing it again closes it.
+///
+/// The panel has existed since the MVelocity port and had two sinks — a
+/// REAPER one and a demo take — but none for the editor it ships inside,
+/// because `VelocitySink` demanded `Send + Sync` and the editor lives in
+/// a dioxus `Signal`. Nothing ever needed that bound.
+#[tokio::test]
+async fn v_p_opens_the_velocity_window() -> dioxus_test::Result<()> {
+    use dioxus_test::keyboard_types::{Key, Modifiers};
+
+    let tester = render(Surface).with_window_size(1000, 620).build();
+    tester.query(by_testid("roll")).immediately()?;
+    focused(&tester)?;
+
+    assert!(
+        tester.query(by_testid("velocity-window")).immediately().is_err(),
+        "the velocity window was up before anything asked for it",
+    );
+
+    tester.press_key(Key::Character("v".into()), Modifiers::empty());
+    tester.drain();
+    tester.press_key(Key::Character("p".into()), Modifiers::empty());
+    tester.drain();
+    let _ = tester.pump().await;
+    tester.query(by_testid("velocity-window")).immediately()?;
+
+    tester.press_key(Key::Character("v".into()), Modifiers::empty());
+    tester.drain();
+    tester.press_key(Key::Character("p".into()), Modifiers::empty());
+    tester.drain();
+    let _ = tester.pump().await;
+    assert!(
+        tester.query(by_testid("velocity-window")).immediately().is_err(),
+        "`v p` a second time did not close the window",
+    );
+    Ok(())
+}
+
+/// The window has a grab bar, so it can be moved off what it covers.
+///
+/// **Ignored: the harness cannot see this window.** It is in the DOM —
+/// the test above finds it by testid and passes — but `document_origin`
+/// and `size` both read zero for it and for everything inside it, so
+/// nothing can be aimed at it and no press reaches the bar. Zero
+/// survives a `position: relative` ancestor, an explicit width *and*
+/// height, `pointer-events: none` on the label, and four extra pump
+/// cycles, which rules out the usual causes.
+///
+/// The likeliest remaining explanation is that this Blitz build does not
+/// lay out an absolutely positioned subtree that appears mid-session —
+/// every absolute element that *does* measure here (the cursor layer,
+/// the which-key panel) is mounted from the first render. Worth a proper
+/// look before anything else is built on a floating panel.
+#[ignore = "the harness measures this window as 0x0 — see the doc comment"]
+#[tokio::test]
+async fn the_velocity_window_can_be_moved() -> dioxus_test::Result<()> {
+    use dioxus_test::keyboard_types::{Key, Modifiers};
+
+    let tester = render(Surface).with_window_size(1000, 620).build();
+    tester.query(by_testid("roll")).immediately()?;
+    focused(&tester)?;
+    tester.press_key(Key::Character("v".into()), Modifiers::empty());
+    tester.drain();
+    tester.press_key(Key::Character("p".into()), Modifiers::empty());
+    tester.drain();
+    let _ = tester.pump().await;
+
+    let before = tester
+        .query(by_testid("velocity-window"))
+        .immediately()?
+        .attribute("style")
+        .unwrap_or_default();
+
+    let bar = tester.query(by_testid("velocity-window-title")).immediately()?;
+    let (ox, oy) = bar.document_origin();
+    tester.pointer_down(ox + 40.0, oy + 8.0);
+    let _ = tester.pump().await;
+    assert_eq!(
+        tester
+            .query(by_testid("velocity-window"))
+            .immediately()?
+            .attribute("data-grabbed")
+            .as_deref(),
+        Some("true"),
+        "pressing the title bar did not start a grab",
+    );
+    tester.pointer_move(ox + 140.0, oy + 68.0, true);
+    let _ = tester.pump().await;
+    tester.pointer_up(ox + 140.0, oy + 68.0);
+    let _ = tester.pump().await;
+
+    let after = tester
+        .query(by_testid("velocity-window"))
+        .immediately()?
+        .attribute("style")
+        .unwrap_or_default();
+    assert_ne!(before, after, "dragging the title bar did not move the window");
+    Ok(())
+}

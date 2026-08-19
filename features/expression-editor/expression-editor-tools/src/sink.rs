@@ -11,7 +11,19 @@
 use crate::velocity::Session;
 
 /// A take that velocity edits can be read from and written to.
-pub trait VelocitySink: Send + Sync + 'static {
+///
+/// `'static` only — deliberately not `Send + Sync`. A sink is driven by
+/// the panel, the panel runs on the UI thread, and nothing here ever
+/// crosses one. The bounds were a guess at a requirement that never
+/// arrived, and they cost something real: the editor's own sink reads
+/// its selection out of a dioxus `Signal`, which is not `Sync`, so the
+/// one surface most obviously entitled to a velocity panel was the one
+/// that could not have one.
+///
+/// A backend that genuinely does cross threads is free to be `Send` on
+/// its own account; requiring it of every implementor to serve a case
+/// that does not exist is the wrong way round.
+pub trait VelocitySink: 'static {
     /// Bind to the user's current target and read its notes into a fresh
     /// session.
     ///

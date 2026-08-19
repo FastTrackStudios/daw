@@ -1055,8 +1055,16 @@ fn velocity_action(
     ramp.set(None);
 
     if action == "velocity.panel" {
-        // Handled by the caller, which owns the panel's visibility —
-        // this one is a piece of chrome, not an edit.
+        // Chrome, not an edit. `try_consume_context` because a host that
+        // mounts the canvas without the editor's own chrome — the
+        // screenshot harness does — has no window to toggle, and that is
+        // a supported configuration rather than a missing one.
+        if let Some(panel) = try_consume_context::<crate::velocity_sink::PanelOpen>() {
+            let mut open = panel.0;
+            let now = !open();
+            open.set(now);
+            return Some(true);
+        }
         return Some(false);
     }
 

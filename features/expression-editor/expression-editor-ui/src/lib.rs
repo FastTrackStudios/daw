@@ -31,6 +31,7 @@ pub mod drag;
 pub mod envelopes;
 pub mod velocity_panel;
 pub mod velocity_ramp;
+pub mod velocity_sink;
 pub mod guitar;
 pub mod inspector;
 pub mod keys;
@@ -160,6 +161,17 @@ pub fn ExpressionEditor(
     let draft = use_signal(|| initial_draft.clone());
     let mut pending = use_signal(|| None::<menu_ui::Pending>);
 
+    // The velocity panel's visibility, and the sink it shapes.
+    //
+    // Provided as context rather than threaded as props because the
+    // thing that opens it is a key press inside the canvas, several
+    // components down, and the panel itself is a sibling of the canvas
+    // rather than a child. A prop chain between two cousins is how the
+    // component in the middle ends up knowing about a feature it has
+    // nothing to do with.
+    let velocity_open = use_context_provider(|| velocity_sink::PanelOpen(Signal::new(false)));
+    use_context_provider(|| SinkHandle::new(velocity_sink::EditorSink::new(editor)));
+
     // Follow the space the host reports.
     //
     // Here rather than in the canvas because this is the only component
@@ -220,7 +232,12 @@ pub fn ExpressionEditor(
             // inline <svg> as a replaced element with an intrinsic
             // aspect ratio, so without an explicit `flex: 0 0 auto` on
             // the chrome it will happily eat the toolbar and status bar.
-            style: "display: flex; flex-direction: column; width: 100%; height: 100%; \
+            // `position: relative` is what gives the floating velocity
+            // window something to be absolute *against*. Without a
+            // positioned ancestor Blitz laid it out at zero size and zero
+            // origin — present in the DOM, invisible, and unhittable.
+            style: "position: relative; display: flex; flex-direction: column; \
+                    width: 100%; height: 100%; \
                     min-height: 0; overflow: hidden; background: {theme::BG}; \
                     color: {theme::TEXT}; font-family: system-ui, sans-serif;",
             toolbar::Toolbar { editor, drag, drawer }
@@ -240,6 +257,9 @@ pub fn ExpressionEditor(
                 inspector::Inspector { editor, open: inspector_open, panel_top }
             }
             toolbar::StatusBar { editor }
+            if (velocity_open.0)() {
+                velocity_sink::VelocityWindow {}
+            }
         }
     }
 }
@@ -343,3 +363,4 @@ pub mod test_support {
 pub use arp_panel::{ArpPanel, ArpSinkHandle};
 pub use velocity_panel::{SinkHandle, VelocityPanel};
 pub use velocity_ramp::VelocityRamp;
+pub use velocity_sink::{EditorSink, PanelOpen, VelocityWindow};
