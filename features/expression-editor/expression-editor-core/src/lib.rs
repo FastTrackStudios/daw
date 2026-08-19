@@ -1719,6 +1719,40 @@ impl Editor {
     /// to open something rather than assuming the edit happened.
     pub fn run_command(&mut self, cmd: &menu::Command, under: Option<NoteId>) -> bool {
         use menu::Command as C;
+
+        // The razor verbs, which act on the areas rather than on a
+        // selection — so they are answered before `command_targets`
+        // works out what a note command would apply to.
+        //
+        // These call the same methods the keyboard does. A menu that
+        // reimplemented them would be a second definition of "reverse",
+        // and the two would differ the first time either changed.
+        match cmd {
+            C::RazorReverse => return self.razor_reverse(),
+            C::RazorReversePitches => return self.razor_reverse_pitches(),
+            C::RazorInvert => return self.razor_invert(),
+            C::RazorDeleteContents => return self.razor_delete_contents(),
+            C::RazorDuplicate => return self.razor_duplicate(),
+            C::RazorSelectContents => return self.razor_select_contents(),
+            C::RazorSplit => return self.razor_split(),
+            C::RazorClearLane => return self.razor_clear_lane(),
+            C::RazorFullLane => return self.razor_full_lane(),
+            // The factor is carried as a small integer because `Command`
+            // derives `PartialEq` and a menu built twice has to compare
+            // equal — two `f64`s that went through different arithmetic
+            // do not reliably do that.
+            C::RazorScale(n) => {
+                let factor = if *n <= 1 { 0.5 } else { *n as f64 };
+                return self.razor_scale(factor);
+            }
+            C::RazorClear => {
+                let had = !self.razor.is_empty();
+                self.razor.clear();
+                return had;
+            }
+            _ => {}
+        }
+
         let targets = self.command_targets(under);
         match cmd {
             C::Copy => self.clipboard.copy_from(&self.doc, &targets),
@@ -1852,6 +1886,20 @@ impl Editor {
             }
             // These still need UI: a submenu, a panel.
             C::SetArticulation(_) | C::Properties => false,
+            // Answered above, before the targets are worked out. Listed
+            // rather than swept up by a `_`, so a *new* note command
+            // still fails to compile until it has an arm.
+            C::RazorReverse
+            | C::RazorReversePitches
+            | C::RazorInvert
+            | C::RazorDeleteContents
+            | C::RazorDuplicate
+            | C::RazorSelectContents
+            | C::RazorSplit
+            | C::RazorClearLane
+            | C::RazorFullLane
+            | C::RazorScale(_)
+            | C::RazorClear => false,
         }
     }
 

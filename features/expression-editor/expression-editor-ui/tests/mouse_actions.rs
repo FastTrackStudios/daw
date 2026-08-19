@@ -1171,3 +1171,92 @@ fn the_razor_help_matches_the_razor_keys() {
         );
     }
 }
+
+// ── the razor's context menu ────────────────────────────────────────
+
+/// Right-clicking a razor area offers the razor's verbs.
+///
+/// The map has bound `RazorArea + RightClick` to `ContextMenu` since
+/// razors existed, and the only menu was the note menu — so the surface
+/// was promising something nothing implemented, and you got Cut, Copy
+/// and Properties for notes on a rectangle you had just drawn.
+#[test]
+fn right_clicking_a_razor_offers_its_verbs() {
+    use expression_editor_core::menu;
+
+    let mut ed = razor_mode(PPQ * 2.0);
+    // Back to Select: the menu is the path that must work without
+    // having found the tool.
+    ed.tool = expression_editor_core::Tool::Select;
+
+    let items = menu::menu_at(&ed, None, PPQ, ROW);
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        labels.contains(&"Retrograde") && labels.contains(&"Delete Contents"),
+        "the razor menu is missing its verbs: {labels:?}",
+    );
+    assert!(
+        !labels.contains(&"Paste"),
+        "the razor menu still carries the note commands: {labels:?}",
+    );
+}
+
+/// Outside every area it is still the note menu.
+#[test]
+fn right_clicking_off_the_razor_is_still_the_note_menu() {
+    use expression_editor_core::menu;
+
+    let ed = razor_mode(PPQ * 2.0);
+    // Right time, wrong row — an area is a rectangle, and time alone
+    // cannot say whether a click was inside one.
+    let items = menu::menu_at(&ed, None, PPQ, ROW + 40);
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        labels.contains(&"Paste"),
+        "a click outside the area lost the note menu: {labels:?}",
+    );
+}
+
+/// Every razor menu item runs, and runs the same thing the key does.
+#[test]
+fn the_razor_menu_and_the_razor_keys_agree() {
+    use expression_editor_core::menu::{self, Command};
+
+    for item in menu::razor_menu(&razor_mode(PPQ * 2.0)) {
+        let mut ed = razor_mode(PPQ * 2.0);
+        ed.doc.notes[1].row = ROW + 2;
+        ed.selection.notes = vec![NoteId(1)];
+        assert!(
+            ed.run_command(&item.command, None),
+            "the menu offers `{}` and it did nothing",
+            item.label,
+        );
+
+        // The ones with a keyboard twin must land in the same place.
+        let key = match item.command {
+            Command::RazorReverse => Some("r"),
+            Command::RazorInvert => Some("v"),
+            Command::RazorDeleteContents => Some("x"),
+            Command::RazorDuplicate => Some("d"),
+            Command::RazorFullLane => Some("f"),
+            _ => None,
+        };
+        if let Some(key) = key {
+            let mut typed = razor_mode(PPQ * 2.0);
+            typed.doc.notes[1].row = ROW + 2;
+            typed.selection.notes = vec![NoteId(1)];
+            press(&mut typed, key);
+            assert_eq!(
+                typed.doc.notes.len(),
+                ed.doc.notes.len(),
+                "`{}` and the `{key}` key disagreed",
+                item.label,
+            );
+            assert_eq!(
+                typed.razor.areas, ed.razor.areas,
+                "`{}` and the `{key}` key left different areas",
+                item.label,
+            );
+        }
+    }
+}

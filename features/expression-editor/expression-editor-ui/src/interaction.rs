@@ -304,6 +304,11 @@ pub enum Drag {
         y: f64,
         under: Option<NoteId>,
         t: f64,
+        /// The row clicked, so the menu can tell whether the click
+        /// landed inside a razor area. Time alone cannot: an area is a
+        /// rectangle, and a click at the right moment on the wrong row
+        /// is outside it.
+        row: i32,
     },
     /// Vertical drag over notes edits velocity.
     Velocity {
@@ -923,7 +928,13 @@ fn run_action(ed: &mut Editor, action: Action, x: f64, y: f64, mods: Mods) -> Op
             })
         }
 
-        Action::ContextMenu => Some(Drag::ContextMenu { x, y, under, t }),
+        Action::ContextMenu => Some(Drag::ContextMenu {
+            x,
+            y,
+            under,
+            t,
+            row,
+        }),
 
         // Expression tools stay with the tool-driven path: `None` here
         // is the deliberate hand-off, not a gap.

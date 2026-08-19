@@ -29,14 +29,17 @@ pub struct ContextMenu {
     pub under: Option<NoteId>,
     /// Document time of the click — what "split here" acts on.
     pub t: f64,
+    /// The row clicked, which with `t` says whether a razor was under it.
+    pub row: i32,
 }
 
 impl ContextMenu {
-    pub fn show(&mut self, x: f64, y: f64, under: Option<NoteId>, t: f64) {
+    pub fn show(&mut self, x: f64, y: f64, under: Option<NoteId>, t: f64, row: i32) {
         self.open = true;
         self.at = (x, y);
         self.under = under;
         self.t = t;
+        self.row = row;
     }
 
     pub fn close(&mut self) {
@@ -70,7 +73,11 @@ pub fn ContextMenuOverlay(
 
     let ed = editor.read();
     let vp = ed.viewport;
-    let items = menu::note_menu(&ed, state.under, state.t);
+    // `menu_at`, not `note_menu`: a razor under the click gets the
+    // razor's verbs. The map has bound right-click on an area to this
+    // menu since razors existed, and until now the menu answered with
+    // Cut/Copy/Properties for notes.
+    let items = menu::menu_at(&ed, state.under, state.t, state.row);
     drop(ed);
 
     // Height has to account for the rules between groups, or the last

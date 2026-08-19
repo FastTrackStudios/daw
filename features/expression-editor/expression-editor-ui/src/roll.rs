@@ -652,8 +652,8 @@ pub fn Canvas(
                     // A right-click resolves to a menu request rather
                     // than a drag. Opening it here — not in `interaction`
                     // — keeps the core pointer path free of UI state.
-                    if let Drag::ContextMenu { x, y, under, t } = d {
-                        menu_state.write().show(x, y, under, t);
+                    if let Drag::ContextMenu { x, y, under, t, row } = d {
+                        menu_state.write().show(x, y, under, t, row);
                         return;
                     }
                     menu_state.write().close();
