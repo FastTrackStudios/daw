@@ -110,12 +110,12 @@
       {
         "when": "tab:performance",
         "bindings": {
-          "Space": "fts.session.toggle_playback",
-          "Shift+l": "fts.session.toggle_song_loop",
-          "Right": "fts.session.smart_next",
-          "Left": "fts.session.smart_previous",
-          "Down": "fts.session.next_song",
-          "Up": "fts.session.previous_song"
+          "Space": "FTS_SESSION_TOGGLE_PLAYBACK",
+          "Shift+l": "FTS_SESSION_TOGGLE_SONG_LOOP",
+          "Right": "FTS_SESSION_SMART_NEXT",
+          "Left": "FTS_SESSION_SMART_PREVIOUS",
+          "Down": "FTS_SESSION_NEXT_SONG",
+          "Up": "FTS_SESSION_PREVIOUS_SONG"
         }
       },
       {
