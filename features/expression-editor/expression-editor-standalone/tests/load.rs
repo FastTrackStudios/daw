@@ -86,8 +86,10 @@ fn no_arguments_opens_a_scene() {
 #[test]
 fn flags_parse() {
     let args = Args::parse(
-        ["guitar", "--mode", "guitar", "--track", "Vox", "--item", "2", "--size", "800x600"]
-            .map(String::from),
+        [
+            "guitar", "--mode", "guitar", "--track", "Vox", "--item", "2", "--size", "800x600",
+        ]
+        .map(String::from),
     )
     .unwrap();
     assert_eq!(args.mode, Some(Mode::Guitar));
@@ -127,13 +129,7 @@ fn the_mode_override_wins_over_what_the_source_implies() {
 #[test]
 fn a_project_opens_on_its_first_editable_item() {
     let path = write_fixture("first-editable.rpp", &fixture_rpp());
-    let runner = Runner::open(
-        &Source::Rpp(path),
-        &Target::default(),
-        viewport(),
-        None,
-    )
-    .unwrap();
+    let runner = Runner::open(&Source::Rpp(path), &Target::default(), viewport(), None).unwrap();
     // Vox comes first but its source will not decode, so the runner
     // must have fallen through to the MIDI item on Keys.
     assert!(runner.label.contains("Keys"), "got {:?}", runner.label);
@@ -147,7 +143,7 @@ fn a_named_track_narrows_the_search() {
         &Source::Rpp(path.clone()),
         &Target {
             track: Some("Vox".into()),
-            item: None,
+            ..Target::default()
         },
         viewport(),
         None,
@@ -159,7 +155,7 @@ fn a_named_track_narrows_the_search() {
         &Source::Rpp(path),
         &Target {
             track: Some("Keys".into()),
-            item: None,
+            ..Target::default()
         },
         viewport(),
         None,
@@ -175,7 +171,7 @@ fn an_unknown_track_says_so_rather_than_opening_something_else() {
         &Source::Rpp(path),
         &Target {
             track: Some("Bagpipes".into()),
-            item: None,
+            ..Target::default()
         },
         viewport(),
         None,
@@ -325,7 +321,10 @@ fn a_transcription_opens_as_a_guitar_roll() {
     // The file's own tuning, not the mode preset's — a drop-D or a
     // seven-string must not be forced onto standard six.
     assert!(
-        matches!(editor.doc.row_space, expression_editor_core::RowSpace::Strings(_)),
+        matches!(
+            editor.doc.row_space,
+            expression_editor_core::RowSpace::Strings(_)
+        ),
         "a transcription must open on a string row space"
     );
     // Rows are pitches, so every note must land on the neck.

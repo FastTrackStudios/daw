@@ -99,11 +99,7 @@ fn main() {
     );
 }
 
-
 // ── the runner's root component ─────────────────────────────────────
-
-
-
 
 /// Hand the editor the whole window.
 ///
@@ -123,7 +119,10 @@ pub fn DevApp() -> Element {
     // a file argument still opens on that file.
     let editor = use_signal(|| {
         expression_editor_standalone::app::take_staged().unwrap_or_else(|| {
-            expression_editor_ui::demo::editor(expression_editor_ui::demo::Scene::Phrase, viewport())
+            expression_editor_ui::demo::editor(
+                expression_editor_ui::demo::Scene::Phrase,
+                viewport(),
+            )
         })
     });
 

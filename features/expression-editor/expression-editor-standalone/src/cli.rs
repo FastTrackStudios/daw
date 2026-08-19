@@ -58,6 +58,10 @@ SOURCE:
 OPTIONS:
     --track <name|N> pick a track by name (substring) or 1-based index
     --item <N>       pick the Nth item (0-based) among the candidates
+    --drums [folder] open a .rpp as a drum workspace: every track under the
+                     kit folder, folded into role lanes. The optional value
+                     names the folder (put it after the source); without it
+                     the first folder named like a kit (Drums, Kit) is used
     --mode <mode>    midi | mpe | vocals | drums | guitar | pitched-audio | unpitched-audio
     --size <WxH>     window size (default 1200x760)
     --out <path>     PNG destination (--example shot only)
@@ -118,10 +122,10 @@ impl Args {
                 "--track" => target.track = Some(value("--track")?),
                 "--item" => {
                     let v = value("--item")?;
-                    target.item = Some(
-                        v.parse()
-                            .map_err(|_| ArgsError::Bad(format!("--item {v:?} is not a number")))?,
-                    );
+                    target.item =
+                        Some(v.parse().map_err(|_| {
+                            ArgsError::Bad(format!("--item {v:?} is not a number"))
+                        })?);
                 }
                 "--mode" => {
                     let v = value("--mode")?;
@@ -139,6 +143,21 @@ impl Args {
                     })?;
                     width = w;
                     height = h;
+                }
+                // r[impl drums.open.runner]
+                "--drums" => {
+                    // The value is optional: bare `--drums` means "find
+                    // the kit folder yourself". A following token is the
+                    // folder name only when the source has already been
+                    // given — otherwise `--drums song.rpp` would eat the
+                    // source as a folder name, which is the likelier typo.
+                    let folder = match it.peek() {
+                        Some(next) if !next.starts_with('-') && positional.is_some() => {
+                            Some(it.next().expect("peeked"))
+                        }
+                        _ => None,
+                    };
+                    target.drums = Some(folder);
                 }
                 "--out" => out = Some(PathBuf::from(value("--out")?)),
                 other if other.starts_with('-') => {

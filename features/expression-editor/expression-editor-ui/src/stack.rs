@@ -20,6 +20,7 @@
 //! content to its own height.
 
 use expression_editor_core::doc::{ExpressionDoc, Note};
+use expression_editor_core::kit;
 use expression_editor_core::rows::RowSpace;
 use expression_editor_core::tracks::StackRow;
 use expression_editor_core::{Editor, Mode};
@@ -54,6 +55,26 @@ pub struct LaneView {
     pub dividers: Vec<f64>,
     /// Labels down the left edge, paired with their y.
     pub labels: Vec<(f64, String)>,
+    /// The summed waveform of a role lane (kick, snare, other), as
+    /// mirrored polygon points — the same shape
+    /// [`canvas::take_waveform`] builds for the roll. `None` when the
+    /// lane has no role, no members with peaks, or splits its members.
+    pub waveform: Option<String>,
+    /// One sub-row per member for a split role lane (toms). Empty
+    /// otherwise.
+    pub sub_lanes: Vec<SubLane>,
+}
+
+/// One member's sub-row inside a split role lane (toms).
+pub struct SubLane {
+    /// The member's own waveform polygon, if it carries peaks.
+    pub points: Option<String>,
+    /// The member track's name, drawn small in the gutter.
+    pub label: String,
+    /// Baseline y of that label, in viewport pixels.
+    pub label_y: f64,
+    /// Unused or hidden members draw at half opacity.
+    pub faded: bool,
 }
 
 /// A note as it appears in a lane.
@@ -147,7 +168,11 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
     // Every member's notes, primary last so the track you are editing
     // draws on top of the guide rather than under it.
     let mut notes: Vec<LaneNote> = Vec::new();
-    for &i in members.iter().filter(|&&i| i != track_index).chain([&track_index]) {
+    for &i in members
+        .iter()
+        .filter(|&&i| i != track_index)
+        .chain([&track_index])
+    {
         let Some(member) = ed.tracks.track(i) else {
             continue;
         };
@@ -174,17 +199,84 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
         }));
     }
 
+    // A role lane (kick / snare / toms / other) is labelled by its role
+    // and drawn as its members' audio, not by any one member's row
+    // space — so the row-space guides give way to the waveform.
+    let lane_def = ed.tracks.layout().lane(row.lane);
+    let role = lane_def.and_then(|l| l.role);
+    let role_split = role.is_some() && lane_def.is_some_and(|l| l.split);
+
+    let mut waveform = None;
+    let mut sub_lanes = Vec::new();
+    let mut sub_dividers = Vec::new();
+    if let Some((v0, v1)) = view_span_secs(ed) {
+        let count = (ed.viewport.w.ceil() as usize).clamp(2, 2048);
+        if role.is_some() && !role_split {
+            // r[impl drums.lanes.summed]
+            let mems: Vec<(&[f32], f64, f64)> = members
+                .iter()
+                .filter_map(|&i| {
+                    let d = doc_for(ed, i)?;
+                    let (s, e) = doc_span_secs(ed, d)?;
+                    Some((d.peaks.as_slice(), s, e))
+                })
+                .collect();
+            let cols = summed_columns(&mems, v0, v1, count);
+            waveform = columns_polygon(&cols, ed.viewport.w, y0, h);
+        } else if role_split {
+            // r[impl drums.lanes.toms-split]
+            //
+            // Every member gets a sub-row, hidden and `Unused` ones
+            // included — a tom that is parked still holds its place in
+            // the kit, it just draws faded.
+            let all = ed.tracks.lane_tracks(row.lane);
+            let k = all.len().max(1);
+            let sub_h = h / k as f64;
+            for (j, &i) in all.iter().enumerate() {
+                let Some(member) = ed.tracks.track(i) else {
+                    continue;
+                };
+                let sy = y0 + sub_h * j as f64;
+                if j > 0 {
+                    sub_dividers.push(sy);
+                }
+                let points = doc_for(ed, i).and_then(|d| {
+                    let (s, e) = doc_span_secs(ed, d)?;
+                    let cols = summed_columns(&[(d.peaks.as_slice(), s, e)], v0, v1, count);
+                    columns_polygon(&cols, ed.viewport.w, sy, sub_h)
+                });
+                sub_lanes.push(SubLane {
+                    points,
+                    label: member.name.clone(),
+                    label_y: sy + 9.0,
+                    faded: kit::is_unused_name(&member.name) || member.hidden,
+                });
+            }
+        }
+    }
+
     // Guides span whatever the camera is actually showing, which is not
     // necessarily the content range any more — an edit can push content
     // past the edge, and the lane deliberately does not chase it.
     let (lo, hi) = cam.span(h);
-    let (dividers, labels) = guides(&doc.row_space, lo, hi, y_of);
+    let (mut dividers, labels) = if role.is_some() {
+        // The role label and the waveform are the lane's furniture; the
+        // row space's band names underneath them would just collide.
+        (Vec::new(), Vec::new())
+    } else {
+        guides(&doc.row_space, lo, hi, y_of)
+    };
+    dividers.extend(sub_dividers);
 
     // A drum lane's header offers a hand split only when the piece has
     // two hands to offer.
     let (two_handed_row, split) = match &doc.row_space {
         RowSpace::Drums(m) => {
-            let row = doc.notes.first().map(|n| n.row.max(0) as usize).unwrap_or(0);
+            let row = doc
+                .notes
+                .first()
+                .map(|n| n.row.max(0) as usize)
+                .unwrap_or(0);
             if m.is_two_handed(row) {
                 (Some(row), ed.split_pieces.contains(&row))
             } else {
@@ -196,7 +288,11 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
 
     Some(LaneView {
         track: track_index,
-        name: track.name.clone(),
+        // A role lane is the role, not whichever member happens to be
+        // primary — "Kick", not "Kick In".
+        name: role
+            .map(|r| r.label().to_string())
+            .unwrap_or_else(|| track.name.clone()),
         mode: track.mode,
         y: row.y as f64 - ed.stack_scroll,
         h: row.height as f64,
@@ -207,6 +303,8 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
         labels,
         two_handed_row,
         split,
+        waveform,
+        sub_lanes,
     })
 }
 
@@ -325,6 +423,126 @@ fn to_editor_time(ed: &Editor, doc: &ExpressionDoc, t: f64) -> f64 {
         return t;
     }
     t / from * to
+}
+
+/// A track's current document — the editor's live one when the track is
+/// active, its parked copy otherwise.
+fn doc_for(ed: &Editor, i: usize) -> Option<&ExpressionDoc> {
+    if i == ed.tracks.active() {
+        Some(&ed.doc)
+    } else {
+        ed.tracks.doc_of(i)
+    }
+}
+
+/// The viewport's visible time span, in seconds.
+///
+/// Seconds for the same reason [`to_editor_time`] goes through them:
+/// each member's peaks are indexed in its *own* document's units, and
+/// seconds are the one base they all share.
+fn view_span_secs(ed: &Editor) -> Option<(f64, f64)> {
+    let (t0, t1) = ed.camera.time_span(ed.viewport);
+    let ups = ed.doc.time_base.units_per_second(ed.bpm);
+    if ups.abs() < 1e-9 {
+        return None;
+    }
+    Some((t0 / ups, t1 / ups))
+}
+
+/// A document's `[start, end]` span, in seconds.
+fn doc_span_secs(ed: &Editor, doc: &ExpressionDoc) -> Option<(f64, f64)> {
+    let ups = doc.time_base.units_per_second(ed.bpm);
+    if ups.abs() < 1e-9 {
+        return None;
+    }
+    Some((doc.start / ups, doc.end / ups))
+}
+
+/// A member's mean peak value over one column's time span.
+///
+/// The member's peaks are uniform over `[start, end]` seconds; the
+/// column covers `[t0, t1)`. Bins overlapping the column are averaged,
+/// and a column entirely outside the member is silence — the member
+/// simply isn't sounding there.
+fn member_column(peaks: &[f32], start: f64, end: f64, t0: f64, t1: f64) -> f32 {
+    if peaks.is_empty() || end <= start {
+        return 0.0;
+    }
+    let n = peaks.len();
+    let span = end - start;
+    let lo = ((t0 - start) / span * n as f64).floor() as isize;
+    let hi = ((t1 - start) / span * n as f64).ceil() as isize;
+    if hi <= 0 || lo >= n as isize {
+        return 0.0;
+    }
+    let lo = lo.max(0) as usize;
+    let hi = (hi.min(n as isize) as usize).max(lo + 1);
+    peaks[lo..hi].iter().sum::<f32>() / (hi - lo) as f32
+}
+
+/// The summed waveform of a role lane, one value per viewport column.
+///
+/// Per column, the **mean** of the members' peaks — the members are
+/// phase-aligned mics of one source, so the mean is the mix a SUM bus
+/// would render — normalised so the lane's loudest column is 1.0.
+/// Members with no peaks are skipped rather than dragging the mean
+/// down; a lane with one member yields that member.
+///
+/// `members` is `(peaks, start_secs, end_secs)` per member;
+/// `view_start`/`view_end` bound the columns, in seconds.
+// r[impl drums.lanes.summed]
+pub fn summed_columns(
+    members: &[(&[f32], f64, f64)],
+    view_start: f64,
+    view_end: f64,
+    columns: usize,
+) -> Vec<f32> {
+    let columns = columns.max(2);
+    let mut out = vec![0.0f32; columns];
+    let live: Vec<_> = members.iter().filter(|(p, _, _)| !p.is_empty()).collect();
+    if live.is_empty() || view_end <= view_start {
+        return out;
+    }
+    let step = (view_end - view_start) / columns as f64;
+    for (i, v) in out.iter_mut().enumerate() {
+        let t0 = view_start + step * i as f64;
+        let sum: f32 = live
+            .iter()
+            .map(|(p, s, e)| member_column(p, *s, *e, t0, t0 + step))
+            .sum();
+        *v = sum / live.len() as f32;
+    }
+    let max = out.iter().copied().fold(0.0f32, f32::max);
+    if max > 0.0 {
+        for v in &mut out {
+            *v /= max;
+        }
+    }
+    out
+}
+
+/// Column values as one mirrored polygon, the shape
+/// [`canvas::take_waveform`] draws: zero on the row's midline, full
+/// scale just short of its edges. `None` when there is nothing to draw.
+fn columns_polygon(cols: &[f32], w: f64, y0: f64, h: f64) -> Option<String> {
+    if cols.len() < 2 || cols.iter().all(|&v| v <= 0.0) {
+        return None;
+    }
+    let mid = y0 + h * 0.5;
+    let max_half = h * 0.46;
+    let mut top = String::new();
+    let mut bottom = Vec::with_capacity(cols.len());
+    for (i, &v) in cols.iter().enumerate() {
+        let x = w * (i as f64 / (cols.len() - 1) as f64);
+        let half = max_half * (v as f64).clamp(0.0, 1.0);
+        if i > 0 {
+            top.push(' ');
+        }
+        top.push_str(&format!("{x:.1},{:.1}", mid - half));
+        bottom.push(format!("{x:.1},{:.1}", mid + half));
+    }
+    bottom.reverse();
+    Some(format!("{top} {}", bottom.join(" ")))
 }
 
 /// Dividers and labels for a lane's row space.
@@ -502,6 +720,26 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
                         }
                         g {
                             transform: "translate({canvas::GUTTER_W}, 0)",
+                            // A role lane's audio, behind everything
+                            // else — the hits draw over it.
+                            // r[impl drums.lanes.summed]
+                            if let Some(w) = lane.waveform.as_ref() {
+                                polygon {
+                                    points: "{w}",
+                                    fill: theme::REFERENCE,
+                                    opacity: "0.3",
+                                }
+                            }
+                            // r[impl drums.lanes.toms-split]
+                            for s in lane.sub_lanes.iter() {
+                                if let Some(p) = s.points.as_ref() {
+                                    polygon {
+                                        points: "{p}",
+                                        fill: theme::REFERENCE,
+                                        opacity: if s.faded { "0.15" } else { "0.3" },
+                                    }
+                                }
+                            }
                             for d in lane.dividers.iter() {
                                 line {
                                     x1: 0, x2: "{vp.w}",
@@ -509,6 +747,8 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
                                     stroke: theme::GRID_SUB, stroke_width: 1,
                                 }
                             }
+                            // The lane's hits over the waveform.
+                            // r[impl drums.lanes.hits]
                             for n in lane.notes.iter() {
                                 // A grace note draws at two-thirds
                                 // height, the way engraving shrinks one
@@ -567,6 +807,18 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
                             fill: if lane.active { theme::TEXT } else { theme::TEXT_DIM },
                             "{lane.name}"
                         }
+                        // Each tom's name at its own sub-row, indented
+                        // under the lane's role label.
+                        // r[impl drums.lanes.toms-split]
+                        for s in lane.sub_lanes.iter() {
+                            text {
+                                x: 12, y: "{s.label_y:.1}",
+                                font_size: "8",
+                                fill: theme::TEXT_DIM,
+                                opacity: if s.faded { "0.5" } else { "1" },
+                                "{s.label}"
+                            }
+                        }
                         // Two-handed pieces carry a hand affordance in
                         // the header. Only they do: a hi-hat showing a
                         // split control that does nothing is worse than
@@ -587,5 +839,49 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::summed_columns;
+
+    // r[verify drums.lanes.summed]
+    #[test]
+    fn summed_columns_means_members_and_normalises() {
+        // Two members over the same 4-second span, viewed whole in four
+        // columns: column values are the per-column MEAN of the two,
+        // then scaled so the loudest column is exactly 1.0.
+        let a = [1.0f32, 1.0, 0.0, 0.0];
+        let b = [0.0f32, 1.0, 0.0, 0.0];
+        let cols = summed_columns(&[(&a, 0.0, 4.0), (&b, 0.0, 4.0)], 0.0, 4.0, 4);
+        assert_eq!(cols, vec![0.5, 1.0, 0.0, 0.0]);
+        assert_eq!(cols.iter().copied().fold(0.0f32, f32::max), 1.0);
+    }
+
+    // r[verify drums.lanes.summed]
+    #[test]
+    fn summed_columns_skips_empty_members_and_scales_one() {
+        // A member with no peaks is skipped, not averaged in as silence.
+        let a = [1.0f32, 1.0, 0.0, 0.0];
+        let none: [f32; 0] = [];
+        let cols = summed_columns(&[(&a, 0.0, 4.0), (&none, 0.0, 4.0)], 0.0, 4.0, 4);
+        assert_eq!(cols, vec![1.0, 1.0, 0.0, 0.0]);
+
+        // A single quiet member still fills the lane: normalised so its
+        // own loudest column is 1.0.
+        let quiet = [0.2f32, 0.4];
+        let cols = summed_columns(&[(&quiet, 0.0, 2.0)], 0.0, 2.0, 2);
+        assert_eq!(cols, vec![0.5, 1.0]);
+    }
+
+    // r[verify drums.lanes.summed]
+    #[test]
+    fn summed_columns_is_silent_outside_a_member() {
+        // A member spanning only the first half of the view contributes
+        // silence to columns past its end.
+        let a = [1.0f32, 1.0];
+        let cols = summed_columns(&[(&a, 0.0, 2.0)], 0.0, 4.0, 4);
+        assert_eq!(cols, vec![1.0, 1.0, 0.0, 0.0]);
     }
 }

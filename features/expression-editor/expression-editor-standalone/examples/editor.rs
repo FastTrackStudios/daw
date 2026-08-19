@@ -60,12 +60,12 @@ fn WindowedApp() -> Element {
 /// winit reports physical pixels; the editor lays out in CSS pixels, so
 /// the scale factor comes off here and nothing downstream has to know
 /// the display's density.
-fn report(window: &dyn dioxus_native::winit::window::Window, size: dioxus_native::PhysicalSize<u32>) {
+fn report(
+    window: &dyn dioxus_native::winit::window::Window,
+    size: dioxus_native::PhysicalSize<u32>,
+) {
     let scale = window.scale_factor();
-    expression_editor_ui::available_space(
-        size.width as f64 / scale,
-        size.height as f64 / scale,
-    );
+    expression_editor_ui::available_space(size.width as f64 / scale, size.height as f64 / scale);
 }
 
 fn main() {

@@ -45,7 +45,10 @@ async fn main() {
         }
     };
 
-    let out = args.out.clone().unwrap_or_else(|| default_out(&runner.label));
+    let out = args
+        .out
+        .clone()
+        .unwrap_or_else(|| default_out(&runner.label));
     if let Some(dir) = out.parent()
         && let Err(e) = std::fs::create_dir_all(dir)
     {
@@ -73,7 +76,13 @@ async fn main() {
 fn default_out(label: &str) -> PathBuf {
     let slug: String = label
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect();
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../../target/gui-shots/expression-editor-standalone")
