@@ -49,7 +49,6 @@ pub mod item;
 pub mod live_midi;
 pub mod main_thread;
 pub mod marker;
-pub mod markers_regions;
 pub mod midi;
 pub mod peak;
 pub mod plugin_loader;
@@ -106,7 +105,6 @@ pub use live_midi::*;
 #[cfg(feature = "vox")]
 pub use marker::MarkersClient;
 pub use marker::{Marker, MarkerError, MarkerEvent, Markers, MarkersRpc};
-pub use markers_regions::*;
 pub use midi::*;
 pub use peak::*;
 pub use plugin_loader::*;
