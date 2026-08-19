@@ -22,10 +22,13 @@
 
 use daw::service::item::Items;
 use daw::service::{
-    Duration, FadeShape, ItemRef, PositionInSeconds, ProjectContext, TakeRef, Takes,
+    Duration, FadeShape, ItemRef, PositionInSeconds, ProjectContext, StretchMarkers,
+    StretchTakeRef, TakeRef, Takes,
 };
 
+use crate::align::Alignment;
 use crate::quantize::{Piece, SplitConfig};
+use crate::retime::TakePlacement;
 
 /// What a group edit did.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -198,6 +201,55 @@ where
             }
             applied.pieces += 1;
         }
+        applied.items += 1;
+    }
+    Ok(applied)
+}
+
+/// Warp every item in the group by one plan.
+///
+/// The WARP half of the group write: the plan's alignment becomes one
+/// stretch-marker map, written to every member take — identical in
+/// project time, adjusted per take for its own start offset and play
+/// rate. Offered for a group even though SPLIT is the drum default,
+/// because a user who accepts the phase cost is entitled to; refused
+/// only where SPLIT is refused, on a ragged start.
+///
+/// `applied.pieces` counts markers written per item.
+// r[impl drums.quantize.apply]
+pub fn apply_warp<D>(
+    daw: &D,
+    project: ProjectContext,
+    items: &[ItemRef],
+    alignment: &Alignment,
+) -> Result<Applied, GroupError>
+where
+    D: Items + Takes + StretchMarkers,
+{
+    group_start(daw, project.clone(), items)?;
+    let mut applied = Applied::default();
+    for item in items {
+        let info = daw
+            .get_item(project.clone(), item.clone())
+            .ok_or(GroupError::Missing)?;
+        let take = daw
+            .get_take(project.clone(), item.clone(), TakeRef::Active)
+            .ok_or(GroupError::Missing)?;
+        let placement = TakePlacement {
+            item_position: info.position.as_seconds(),
+            start_offset: take.start_offset.as_seconds(),
+            play_rate: if take.play_rate > 0.0 {
+                take.play_rate
+            } else {
+                1.0
+            },
+            frame_rate: alignment.frame_rate,
+        };
+        let markers = crate::retime::alignment_markers(alignment, placement);
+        let location = StretchTakeRef::new(project.clone(), item.clone(), TakeRef::Active);
+        daw.set_stretch_markers(location, markers.clone())
+            .map_err(|e| GroupError::write("stretch markers", e))?;
+        applied.pieces += markers.len();
         applied.items += 1;
     }
     Ok(applied)
