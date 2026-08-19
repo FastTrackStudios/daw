@@ -225,6 +225,7 @@ pub fn roll_scene(
     lanes(&mut scene, ed, roll_at, vp.w);
     guides(&mut scene, ed, roll_at, vp.w, labels);
     audio(&mut scene, ed, roll_at);
+    time_selection(&mut scene, ed, roll_at, vp.h);
     razors(&mut scene, ed, roll_at, overlay.razor.as_ref());
     references(&mut scene, ed, roll_at);
     notes(&mut scene, ed, roll_at, labels);
@@ -563,6 +564,41 @@ fn draft(scene: &mut Scene, overlay: &Overlay, at: Affine) {
             color(theme::ACCENT),
             None,
             &kurbo::Circle::new((*x, *y), r),
+        );
+    }
+}
+
+/// The time selection: a span with no pitch.
+///
+/// Full height and unfilled but for a wash, which is what distinguishes
+/// it from a razor at a glance. A razor is a *rectangle* — it has rows,
+/// and what it holds is what it will carve. A time selection is two
+/// points on the timeline and says nothing about pitch, so drawing it as
+/// a box would claim a boundary it does not have.
+fn time_selection(scene: &mut Scene, ed: &Editor, at: Affine, h: f64) {
+    let Some((t0, t1)) = ed.time_selection else {
+        return;
+    };
+    let (x0, x1) = (ed.camera.x(t0), ed.camera.x(t1));
+    if x1 <= x0 {
+        return;
+    }
+    scene.fill(
+        Fill::NonZero,
+        at,
+        with_alpha(color(theme::SELECTED), 0.10),
+        None,
+        &Rect::new(x0, 0.0, x1, h),
+    );
+    // The edges carry the weight: a 10% wash is easy to lose over a
+    // dense roll, and where the range *ends* is the thing being read.
+    for x in [x0, x1] {
+        scene.stroke(
+            &stroke_of(1.0),
+            at,
+            with_alpha(color(theme::SELECTED), 0.8),
+            None,
+            &Line::new((x, 0.0), (x, h)),
         );
     }
 }

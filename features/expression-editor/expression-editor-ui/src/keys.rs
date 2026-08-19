@@ -329,6 +329,16 @@ pub fn label_for(action: &str) -> String {
 
 /// Action id fragment to overlay label.
 const LABELS: &[(&str, &str)] = &[
+    ("cursor.left.measure", "Cursor back a measure"),
+    ("cursor.right.measure", "Cursor on a measure"),
+    ("cursor.left.select", "Extend selection left"),
+    ("cursor.right.select", "Extend selection right"),
+    ("cursor.left.grid", "Cursor back a grid step"),
+    ("cursor.right.grid", "Cursor on a grid step"),
+    ("notes.shorten", "Shorten by a grid step"),
+    ("notes.lengthen", "Lengthen by a grid step"),
+    ("track.next", "Next track"),
+    ("track.prev", "Previous track"),
     // Longest first: `grid.1` is a prefix of `grid.16`.
     ("grid.16", "1/16 — sixteenth"),
     ("grid.toggle", "Snap on/off"),
@@ -442,6 +452,16 @@ pub fn is_pending() -> bool {
 /// silently: a binding naming something absent here is dead, which the
 /// test below catches.
 pub const ACTIONS: &[&str] = &[
+    "cursor.left.measure",
+    "cursor.right.measure",
+    "cursor.left.grid",
+    "cursor.right.grid",
+    "cursor.left.select",
+    "cursor.right.select",
+    "notes.shorten",
+    "notes.lengthen",
+    "track.next",
+    "track.prev",
     "grid.1",
     "grid.2",
     "grid.4",
@@ -515,6 +535,52 @@ pub fn dispatch(
 
     // The razor verbs, which are not view changes and so never reach
     // the MeMagic table below.
+    // `hjkl`, as the FTS REAPER profile defines it. `h`/`l` walk the
+    // edit cursor and `j`/`k` change track — *not* note movement, which
+    // is on the arrows there and here. Moving the cursor is what you do
+    // constantly; moving notes is what you do on purpose.
+    match action {
+        "cursor.left.measure" => {
+            let d = ed.measure();
+            return ed.move_cursor(-d);
+        }
+        "cursor.right.measure" => {
+            let d = ed.measure();
+            return ed.move_cursor(d);
+        }
+        "cursor.left.grid" => {
+            let d = ed.grid_step();
+            return ed.move_cursor(-d);
+        }
+        "cursor.right.grid" => {
+            let d = ed.grid_step();
+            return ed.move_cursor(d);
+        }
+        "cursor.left.select" => {
+            let d = ed.grid_step();
+            return ed.move_cursor_extending(-d);
+        }
+        "cursor.right.select" => {
+            let d = ed.grid_step();
+            return ed.move_cursor_extending(d);
+        }
+        // `Shift+h`/`Shift+l` is note length in `midi.styx`, where the
+        // arrange profile has it extending a time selection. The MIDI
+        // editor's reading wins here, because this *is* the MIDI editor
+        // — and the time selection keeps the Ctrl+Shift pair.
+        "notes.shorten" => {
+            let d = ed.grid_step();
+            return ed.nudge_note_lengths(-d);
+        }
+        "notes.lengthen" => {
+            let d = ed.grid_step();
+            return ed.nudge_note_lengths(d);
+        }
+        "track.next" => return ed.step_track(1),
+        "track.prev" => return ed.step_track(-1),
+        _ => {}
+    }
+
     // The grid tree. Divisions are `grid.<denominator>`, so the five
     // sizes are one arm rather than five — and adding 1/32 later is a
     // line in the keymap and nothing here.

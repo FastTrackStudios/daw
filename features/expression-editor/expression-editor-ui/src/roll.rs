@@ -962,10 +962,10 @@ fn razor_help_rows(ed: &Editor) -> Vec<keys::Continuation> {
             })
             .collect();
     }
-    let mut rows: Vec<keys::Continuation> = keys::continuations_after("k")
+    let mut rows: Vec<keys::Continuation> = keys::continuations_after("a")
         .into_iter()
         .map(|c| keys::Continuation {
-            key: format!("k {}", c.key),
+            key: format!("a {}", c.key),
             ..c
         })
         .collect();
@@ -983,7 +983,7 @@ fn razor_help_title(ed: &Editor) -> String {
     if interaction::razor_mode_live(ed) {
         "Razor".to_string()
     } else {
-        "Razor · k".to_string()
+        "Razor · a".to_string()
     }
 }
 
@@ -1136,7 +1136,7 @@ fn chord_panel_title(ed: &Editor) -> String {
     // Only while the chord prefix is the one being typed — every other
     // sequence keeps the bare panel it has always had. Empty rather than
     // `None`, because the heading is always *rendered*; see `KeyPanel`.
-    if keys::held_prefix().as_deref() != Some("h") {
+    if keys::held_prefix().as_deref() != Some("c") {
         return String::new();
     }
     let gun = &ed.chord_gun;

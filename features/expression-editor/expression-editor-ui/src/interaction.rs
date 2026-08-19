@@ -2797,7 +2797,10 @@ pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
             true
         }
         ("s", false, _) => set_tool(ed, Tool::Select),
-        ("c", false, _) => set_tool(ed, Tool::Curve),
+        // Curve was `c`, which the chord gun needs — `c` for chord is
+        // the one strong mnemonic left, and a tool letter is cheaper to
+        // move than a whole tree. `w` for the wave it draws.
+        ("w", false, _) => set_tool(ed, Tool::Curve),
         ("d", false, _) => set_tool(ed, Tool::NoteDraw),
         ("e", false, _) => set_tool(ed, Tool::NoteErase),
         ("p", false, _) => set_tool(ed, Tool::Pen),

@@ -201,6 +201,19 @@ pub struct Editor {
     /// The map already resolves modifiers on its own, and a second
     /// authority for the same question is how the two start disagreeing.
     pub held_mods: Mods,
+    /// The time selection: a span with no pitch, unlike a razor.
+    ///
+    /// The two are different tools and both are worth having. A razor is
+    /// a rectangle — these rows, this span — and carves. A time
+    /// selection is the whole part between two points, and is what
+    /// loops, renders and "select notes in the range" act on. REAPER
+    /// keeps both for the same reason.
+    ///
+    /// Extended by the cursor keys, which is the point: `Ctrl+Shift+h`
+    /// and `Ctrl+Shift+l` walk the edit cursor and drag the selection
+    /// behind it, so a range gets built by pressing a key rather than by
+    /// aiming a drag.
+    pub time_selection: Option<(f64, f64)>,
     /// The chord gun's key, scale, depth and inversion.
     ///
     /// Editor state rather than document state: it is how you are
@@ -267,6 +280,7 @@ impl Editor {
             // that default changed nothing anyone could see.
             tool: Tool::default(),
             held_mods: Mods::default(),
+            time_selection: None,
             chord_gun: harmony::ChordGun::default(),
             razor_insert: false,
             razor_axis: None,
@@ -1321,6 +1335,105 @@ impl Editor {
             a.row_hi = (a.row_hi + drows).max(a.row_lo);
         }
         true
+    }
+
+    // ── the edit cursor, and what follows it ─────────────────────────
+    //
+    // `hjkl` as the FTS REAPER profile defines it
+    // (`reaper-input/config/.../navigation.styx` and `midi.styx`): `h`
+    // and `l` walk the edit cursor, `j` and `k` change track. The
+    // modifiers stack meanings on the horizontal pair — Ctrl for a grid
+    // step instead of a measure, Ctrl+Shift to drag a time selection
+    // along behind it.
+    //
+    // Note that `h`/`l` are *not* note movement in that profile, and
+    // deliberately: the arrows are. Moving the cursor is what you do
+    // constantly and moving notes is what you do on purpose.
+
+    /// Where the edit cursor is, or the left edge of the view.
+    ///
+    /// The cursor is `Option` because a document does not necessarily
+    /// have one; every command that walks it has to start somewhere, and
+    /// what is on screen is the least surprising place.
+    pub fn cursor(&self) -> f64 {
+        self.playhead.unwrap_or_else(|| self.camera.t_at(0.0))
+    }
+
+    /// Move the edit cursor by `delta`, clamped to the document.
+    pub fn move_cursor(&mut self, delta: f64) -> bool {
+        let to = (self.cursor() + delta).clamp(self.doc.start, self.doc.end);
+        let moved = self.playhead != Some(to);
+        self.playhead = Some(to);
+        moved
+    }
+
+    /// Move the cursor and drag the time selection with it.
+    ///
+    /// Anchored on where the selection already starts, so pressing the
+    /// key repeatedly grows one range rather than making a new one each
+    /// time — and reversing direction shrinks it back rather than
+    /// flipping to a fresh range on the other side.
+    pub fn move_cursor_extending(&mut self, delta: f64) -> bool {
+        let from = self.time_selection.map(|(a, _)| a).unwrap_or(self.cursor());
+        if !self.move_cursor(delta) {
+            return false;
+        }
+        let to = self.cursor();
+        self.time_selection = Some(if from <= to { (from, to) } else { (to, from) });
+        true
+    }
+
+    /// One measure, in document units — what `h` and `l` step by.
+    pub fn measure(&self) -> f64 {
+        self.units_per_bar()
+    }
+
+    /// The grid step, or a beat when the grid is free.
+    pub fn grid_step(&self) -> f64 {
+        let step = self.grid.step(self.units_per_beat());
+        if step > 0.0 { step } else { self.units_per_beat() }
+    }
+
+    pub fn clear_time_selection(&mut self) -> bool {
+        self.time_selection.take().is_some()
+    }
+
+    /// Lengthen or shorten the selected notes by `delta`.
+    ///
+    /// Never past nothing: a note dragged shorter than zero would read
+    /// as one that starts after it ends, and the shortening key is held
+    /// down as readily as any other.
+    pub fn nudge_note_lengths(&mut self, delta: f64) -> bool {
+        let notes = self.selection.notes.clone();
+        if notes.is_empty() {
+            return false;
+        }
+        let floor = self.grid_step() * 0.25;
+        self.begin_gesture();
+        let mut ok = false;
+        for id in notes {
+            let Some(n) = self.doc.note(id) else { continue };
+            let (start, end) = (n.start, n.end);
+            let next = (end + delta).max(start + floor);
+            if (next - end).abs() > f64::EPSILON {
+                ok |= self.apply_live(&Edit::Resize {
+                    note: id,
+                    start,
+                    end: next,
+                });
+            }
+        }
+        ok
+    }
+
+    /// Step to another track, wrapping at both ends.
+    pub fn step_track(&mut self, delta: i32) -> bool {
+        let n = self.tracks.len() as i32;
+        if n <= 1 {
+            return false;
+        }
+        let next = (self.active_track() as i32 + delta).rem_euclid(n) as usize;
+        self.switch_track(next)
     }
 
     // ── the chord gun ────────────────────────────────────────────────

@@ -649,7 +649,7 @@ async fn a_razor_from_another_tool_lists_the_prefix_spelling()
     let html = tester.query(by_testid("which-key")).immediately()?.inner_html();
 
     assert!(
-        html.contains("k r") || html.contains("k v"),
+        html.contains("a r") || html.contains("a v"),
         "the panel did not offer the prefix spelling: {html}",
     );
     assert!(
