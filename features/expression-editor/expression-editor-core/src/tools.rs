@@ -436,6 +436,13 @@ pub struct Grid {
     /// 1/4, and the control would stop meaning anything.
     fitted: Option<f64>,
     pub triplet: bool,
+    /// Dotted: each step is half again as long.
+    ///
+    /// Mutually exclusive with `triplet` in practice — see
+    /// [`Grid::set_triplet`] — because a dotted triplet is a real thing
+    /// nobody sets from a grid menu, and two toggles that can both be on
+    /// would make the readout say something no one asked for.
+    pub dotted: bool,
     pub enabled: bool,
     /// Whether — and how tightly — the division follows the zoom.
     ///
@@ -452,6 +459,7 @@ impl Default for Grid {
             division: 1.0 / 16.0,
             fitted: None,
             triplet: false,
+            dotted: false,
             enabled: true,
             adaptive: adaptive_grid::Adaptive::default(),
         }
@@ -473,12 +481,32 @@ impl Grid {
     /// Grid step in document units.
     pub fn step(&self, units_per_beat: f64) -> f64 {
         let beats = self.effective() * 4.0;
+        // Two thirds for a triplet, three halves for a dotted note —
+        // the definitions, not adjustments to them.
         let beats = if self.triplet {
             beats * 2.0 / 3.0
+        } else if self.dotted {
+            beats * 1.5
         } else {
             beats
         };
         beats * units_per_beat
+    }
+
+    /// Arm the triplet grid, clearing dotted.
+    pub fn set_triplet(&mut self, on: bool) {
+        self.triplet = on;
+        if on {
+            self.dotted = false;
+        }
+    }
+
+    /// Arm the dotted grid, clearing triplet.
+    pub fn set_dotted(&mut self, on: bool) {
+        self.dotted = on;
+        if on {
+            self.triplet = false;
+        }
     }
 
     pub fn snap(&self, t: f64, origin: f64, units_per_beat: f64) -> f64 {
@@ -521,11 +549,33 @@ impl Grid {
             .is_some_and(|f| (f / self.division - 1.0).abs() > 1e-9)
     }
 
-    /// `1/16` / `1/16T`, for the fixed-width toolbar readout.
+    /// `1/16`, `1/16T`, `1/16.` — for the fixed-width toolbar readout.
+    ///
+    /// A whole note reads as `1`, not `1/1`: it is the bar, and every
+    /// grid menu in every DAW calls it that.
     pub fn label(&self) -> String {
         let denom = (1.0 / self.effective()).round() as i64;
+        let base = if denom <= 1 {
+            "1".to_string()
+        } else {
+            format!("1/{denom}")
+        };
         if self.triplet {
-            format!("1/{denom}T")
+            format!("{base}T")
+        } else if self.dotted {
+            format!("{base}.")
+        } else {
+            base
+        }
+    }
+
+    /// The *setting*, spelled the same way [`Grid::label`] spells the
+    /// division in use — so a readout showing both cannot render the
+    /// same number two ways.
+    pub fn ceiling_label(&self) -> String {
+        let denom = (1.0 / self.division).round() as i64;
+        if denom <= 1 {
+            "1".to_string()
         } else {
             format!("1/{denom}")
         }
@@ -537,6 +587,13 @@ impl Grid {
     /// moved the view. `Editor::grid_coarser` refits straight after.
     pub fn coarser(&mut self) {
         self.division = (self.division * 2.0).min(1.0);
+        self.fitted = None;
+    }
+
+    /// Set the division, dropping whatever the zoom had fitted — same
+    /// reasoning as [`Grid::coarser`].
+    pub fn set_division(&mut self, division: f64) {
+        self.division = division.clamp(1.0 / 128.0, 1.0);
         self.fitted = None;
     }
 

@@ -77,7 +77,21 @@
       "h i": "chord.inversion_next",
       "h u": "chord.inversion_prev",
       "h o": "chord.octave_up",
-      "h l": "chord.octave_down"
+      "h l": "chord.octave_down",
+      "g q": "grid.1",
+      "g w": "grid.2",
+      "g e": "grid.4",
+      "g r": "grid.8",
+      "g f": "grid.16",
+      "g 1": "grid.1",
+      "g 2": "grid.2",
+      "g 3": "grid.4",
+      "g 4": "grid.8",
+      "g 5": "grid.16",
+      "g g": "grid.toggle",
+      "g d": "grid.dotted",
+      "g t": "grid.triplet",
+      "g a": "grid.adaptive"
     }
   },
   "keymap_context": {

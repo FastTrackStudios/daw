@@ -800,3 +800,81 @@ async fn the_velocity_window_can_be_moved() -> dioxus_test::Result<()> {
     assert_ne!(before, after, "dragging the title bar did not move the window");
     Ok(())
 }
+
+// ── a held prefix stays open ────────────────────────────────────────
+
+/// Holding `g` lets you fire grid command after grid command.
+///
+/// A sequence ends when its second key fires, which is right for a
+/// *tapped* prefix and wrong for a held one: while you are holding `g`
+/// the tree is a panel you are reading, and the next key should be
+/// another grid command. Before this, holding `g` and pressing `e` then
+/// `t` set the division and then toggled **timing mode**, because `t`
+/// had quietly fallen back to being a bare shortcut.
+#[tokio::test]
+async fn a_held_prefix_takes_more_than_one_command() -> dioxus_test::Result<()> {
+    use dioxus_test::keyboard_types::{Key, Modifiers};
+
+    let mut ed = one_note();
+    ed.timing_mode = false;
+    stage(ed);
+
+    let tester = render(Staged).with_window_size(1000, 620).build();
+    tester.query(by_testid("roll")).immediately()?;
+    focused(&tester)?;
+
+    // Hold g, and do not let go.
+    tester.key_down(Key::Character("g".into()), Modifiers::empty());
+    tester.drain();
+    // `g e` — a quarter.
+    tester.press_key(Key::Character("e".into()), Modifiers::empty());
+    tester.drain();
+    // `t` again, which is triplet inside the tree and timing mode outside.
+    tester.press_key(Key::Character("t".into()), Modifiers::empty());
+    tester.drain();
+    tester.key_up(Key::Character("g".into()), Modifiers::empty());
+    let _ = tester.pump().await;
+
+    let readout = tester.query(by_testid("grid-division")).immediately()?.inner_html();
+    assert!(
+        readout.contains("1/4T"),
+        "the second key did not reach the grid tree: readout {readout}",
+    );
+    Ok(())
+}
+
+/// Releasing a prefix hides the tree only once it has been *used*.
+///
+/// The processor's rule, not the surface's: `notify_key_release` returns
+/// "hide it" for a sticky run that fired at least one action, and
+/// `false` for a bare hold-and-release — deliberately, so the overlay
+/// keeps guiding someone who is still reading it. A tapped prefix is the
+/// ordinary which-key case and its tree has to stay up for the second
+/// key.
+#[tokio::test]
+async fn a_prefix_tree_stays_up_until_it_has_been_used() -> dioxus_test::Result<()> {
+    use dioxus_test::keyboard_types::{Key, Modifiers};
+
+    let tester = render(Surface).with_window_size(1000, 620).build();
+    tester.query(by_testid("roll")).immediately()?;
+    focused(&tester)?;
+
+    // Tap the prefix and let go, having done nothing with it.
+    tester.press_key(Key::Character("g".into()), Modifiers::empty());
+    tester.drain();
+    let _ = tester.pump().await;
+    assert!(
+        tester.query(by_testid("which-key")).immediately().is_ok(),
+        "a tapped prefix closed its own tree",
+    );
+
+    // Now use it. The action ends the run, and the tree goes.
+    tester.press_key(Key::Character("e".into()), Modifiers::empty());
+    tester.drain();
+    let _ = tester.pump().await;
+    assert!(
+        tester.query(by_testid("which-key")).immediately().is_err(),
+        "the tree stayed up after its sequence completed",
+    );
+    Ok(())
+}

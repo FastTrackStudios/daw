@@ -571,7 +571,7 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
     let adaptive_on = ed.grid.adaptive.is_adaptive();
     let coarsened = ed.grid.is_coarsened();
     // What was asked for, as opposed to what the zoom is allowing.
-    let ceiling_label = format!("1/{:.0}", 1.0 / ed.grid.division);
+    let ceiling_label = ed.grid.ceiling_label();
     // The setting, spelled out, so the readout can show what is in use
     // while the tooltip says what was asked for — the two differ exactly
     // when the zoom is holding the grid back.

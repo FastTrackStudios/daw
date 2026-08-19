@@ -1646,6 +1646,26 @@ impl Editor {
         self.settle_camera();
     }
 
+    /// Set the division outright, and refit to the view at once.
+    ///
+    /// The *ceiling*, like every other grid control: an adaptive grid
+    /// may still show something coarser, which is what the readout says.
+    pub fn set_grid_division(&mut self, division: f64) {
+        self.grid.set_division(division);
+        self.settle_camera();
+    }
+
+    /// Triplet and dotted, which clear each other.
+    pub fn set_grid_triplet(&mut self, on: bool) {
+        self.grid.set_triplet(on);
+        self.settle_camera();
+    }
+
+    pub fn set_grid_dotted(&mut self, on: bool) {
+        self.grid.set_dotted(on);
+        self.settle_camera();
+    }
+
     pub fn grid_finer(&mut self) {
         self.grid.finer();
         self.settle_camera();

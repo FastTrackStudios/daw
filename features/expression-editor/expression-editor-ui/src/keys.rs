@@ -181,7 +181,15 @@ pub fn resolve(key: &str, mods: Mods) -> Vec<InputCommand> {
 /// Holding a prefix is a *state*, which is what makes spring-loading
 /// possible: `z` down opens the tree and arms the tool, `z` up closes
 /// it. Neither half works if the processor thinks the key is already up.
-pub fn release(key: &str, mods: Mods) {
+///
+/// Returns the processor's own answer to "should the overlay go now?" —
+/// `true` when a sticky-prefix run that fired at least one action has
+/// ended. The sticky behaviour itself is entirely the processor's:
+/// `InputProcessor` keeps a `sticky_anchor` and rewinds the sequence to
+/// it after every match while the anchor is held, so holding `g` and
+/// tapping `q`, `w`, `e` fires three grid commands. Nothing here needs
+/// to re-open anything; it only has to report the release.
+pub fn release(key: &str, mods: Mods) -> bool {
     let chord = KeyChord::new(
         key_code(key),
         Modifiers {
@@ -191,11 +199,18 @@ pub fn release(key: &str, mods: Mods) {
             ..Default::default()
         },
     );
-    PROCESSOR.with(|p| {
-        if let Some(proc) = p.borrow_mut().as_mut() {
-            proc.notify_key_release(chord);
-        }
+    let hide = PROCESSOR.with(|p| {
+        p.borrow_mut()
+            .as_mut()
+            .map(|proc| proc.notify_key_release(chord))
+            .unwrap_or(false)
     });
+    // The mirror the overlay walks has to follow the processor's state,
+    // which a sticky release just cleared.
+    if !is_pending() {
+        PENDING.with(|p| p.borrow_mut().clear());
+    }
+    hide
 }
 
 /// Abandon a half-typed sequence.
@@ -314,6 +329,16 @@ pub fn label_for(action: &str) -> String {
 
 /// Action id fragment to overlay label.
 const LABELS: &[(&str, &str)] = &[
+    // Longest first: `grid.1` is a prefix of `grid.16`.
+    ("grid.16", "1/16 — sixteenth"),
+    ("grid.toggle", "Snap on/off"),
+    ("grid.triplet", "Triplet"),
+    ("grid.dotted", "Dotted"),
+    ("grid.adaptive", "Follow the zoom"),
+    ("grid.1", "1 — measure"),
+    ("grid.2", "1/2 — half"),
+    ("grid.4", "1/4 — quarter"),
+    ("grid.8", "1/8 — eighth"),
     // The degrees get their chord's *name* at the call site instead —
     // see `crate::roll`, which rewrites these rows from the live tuning.
     // These are the fallback for a panel with no editor to ask.
@@ -417,6 +442,15 @@ pub fn is_pending() -> bool {
 /// silently: a binding naming something absent here is dead, which the
 /// test below catches.
 pub const ACTIONS: &[&str] = &[
+    "grid.1",
+    "grid.2",
+    "grid.4",
+    "grid.8",
+    "grid.16",
+    "grid.toggle",
+    "grid.dotted",
+    "grid.triplet",
+    "grid.adaptive",
     "chord.degree.1",
     "chord.degree.2",
     "chord.degree.3",
@@ -481,6 +515,47 @@ pub fn dispatch(
 
     // The razor verbs, which are not view changes and so never reach
     // the MeMagic table below.
+    // The grid tree. Divisions are `grid.<denominator>`, so the five
+    // sizes are one arm rather than five — and adding 1/32 later is a
+    // line in the keymap and nothing here.
+    if let Some(denom) = action
+        .strip_prefix("grid.")
+        .and_then(|d| d.parse::<f64>().ok())
+    {
+        ed.set_grid_division(1.0 / denom);
+        return true;
+    }
+    match action {
+        "grid.toggle" => {
+            ed.grid.enabled = !ed.grid.enabled;
+            return true;
+        }
+        "grid.dotted" => {
+            let on = !ed.grid.dotted;
+            ed.set_grid_dotted(on);
+            return true;
+        }
+        "grid.triplet" => {
+            let on = !ed.grid.triplet;
+            ed.set_grid_triplet(on);
+            return true;
+        }
+        "grid.adaptive" => {
+            use adaptive_grid::Density;
+            // Off ↔ the middle setting. A cycle through all six
+            // densities would make "is it on?" take five presses to
+            // answer, and Medium is the one worth having.
+            let next = if ed.grid.adaptive.is_adaptive() {
+                Density::Fixed
+            } else {
+                Density::Medium
+            };
+            ed.set_grid_density(next);
+            return true;
+        }
+        _ => {}
+    }
+
     // The chord gun. Degrees first, since they are the ones fired in
     // anger; the rest set up what a degree means.
     if let Some(degree) = action

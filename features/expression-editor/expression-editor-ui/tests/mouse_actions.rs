@@ -1496,3 +1496,137 @@ fn the_zoom_tool_leaves_a_fixed_grid_alone() {
 
     assert_eq!(ed.grid.effective(), before, "a fixed grid followed the zoom");
 }
+
+// ── the grid tree ───────────────────────────────────────────────────
+//
+// `g` mirrors the FTS REAPER profile's grid menu
+// (`reaper-input/config/.../grid.styx`): divisions on the top row,
+// flavour toggles on the home row, so the same muscle memory sets the
+// editor's grid as sets the arrange grid.
+
+fn grid_key(ed: &mut Editor, second: &str) -> bool {
+    // Through the real resolver, so the keymap is what is being tested
+    // rather than a table restating it.
+    expression_editor_ui::keys::resolve("g", plain());
+    expression_editor_ui::keys::release("g", plain());
+    let cmds = expression_editor_ui::keys::resolve(second, plain());
+    expression_editor_ui::keys::release(second, plain());
+    let mut ran = false;
+    for cmd in &cmds {
+        if let input::InputCommand::Action(a) = cmd {
+            ran |= expression_editor_ui::keys::dispatch(
+                ed,
+                &a.0,
+                expression_editor_core::memagic::Region::NoteArea,
+                expression_editor_core::memagic::Anchor { t: 0.0, row: None },
+            );
+        }
+    }
+    ran
+}
+
+/// The top row and the number row set the same five divisions.
+///
+/// Both, because the letters are where the REAPER profile put them and
+/// the digits are what the sizes *are* — and someone reaching for `g 3`
+/// meaning a quarter note should not have to know that `e` is the third
+/// key of QWERTY.
+#[test]
+fn the_grid_tree_sets_divisions_from_both_rows() {
+    for (letter, digit, division, label) in [
+        ("q", "1", 1.0, "1"),
+        ("w", "2", 1.0 / 2.0, "1/2"),
+        ("e", "3", 1.0 / 4.0, "1/4"),
+        ("r", "4", 1.0 / 8.0, "1/8"),
+        ("f", "5", 1.0 / 16.0, "1/16"),
+    ] {
+        for key in [letter, digit] {
+            let mut ed = four_notes();
+            assert!(grid_key(&mut ed, key), "`g {key}` did nothing");
+            assert!(
+                (ed.grid.division - division).abs() < 1e-9,
+                "`g {key}` set 1/{:.0}, wanted {label}",
+                1.0 / ed.grid.division,
+            );
+            assert_eq!(ed.grid.label(), label, "`g {key}` reads wrong");
+        }
+    }
+}
+
+/// Dotted is three halves of the step; triplet is two thirds.
+#[test]
+fn dotted_and_triplet_scale_the_step_and_clear_each_other() {
+    let mut ed = four_notes();
+    grid_key(&mut ed, "e"); // a quarter
+    let plainly = ed.grid.step(ed.units_per_beat());
+
+    assert!(grid_key(&mut ed, "d"), "`g d` did nothing");
+    assert!(ed.grid.dotted);
+    assert!(
+        (ed.grid.step(ed.units_per_beat()) - plainly * 1.5).abs() < 1e-6,
+        "a dotted step is not half again as long",
+    );
+    assert_eq!(ed.grid.label(), "1/4.", "the readout does not show the dot");
+
+    assert!(grid_key(&mut ed, "t"), "`g t` did nothing");
+    assert!(ed.grid.triplet);
+    assert!(!ed.grid.dotted, "triplet did not clear dotted");
+    assert!(
+        (ed.grid.step(ed.units_per_beat()) - plainly * 2.0 / 3.0).abs() < 1e-6,
+        "a triplet step is not two thirds",
+    );
+    assert_eq!(ed.grid.label(), "1/4T");
+}
+
+/// `g g` snaps on and off; `g a` arms the adaptive grid.
+#[test]
+fn the_grid_tree_toggles_snap_and_adaptive() {
+    let mut ed = four_notes();
+    ed.grid.enabled = true;
+    assert!(grid_key(&mut ed, "g"));
+    assert!(!ed.grid.enabled, "`g g` did not turn snapping off");
+    assert!(grid_key(&mut ed, "g"));
+    assert!(ed.grid.enabled, "`g g` did not turn it back on");
+
+    assert!(!ed.grid.adaptive.is_adaptive());
+    assert!(grid_key(&mut ed, "a"));
+    assert!(ed.grid.adaptive.is_adaptive(), "`g a` did not arm adaptive");
+    assert!(grid_key(&mut ed, "a"));
+    assert!(!ed.grid.adaptive.is_adaptive(), "`g a` did not disarm it");
+}
+
+/// Setting a division is setting the *ceiling*, and the readout keeps
+/// showing what is actually being snapped to.
+///
+/// The complaint this comes from: set 1/16, zoom out until the grid is
+/// really showing whole notes, and a readout that still says 1/16 is
+/// lying about where the next note will land.
+#[test]
+fn the_readout_shows_the_division_in_use_not_the_one_asked_for() {
+    use adaptive_grid::Density;
+
+    let mut ed = four_notes();
+    ed.tool = expression_editor_core::Tool::Zoom;
+    grid_key(&mut ed, "f"); // 1/16
+    ed.set_grid_density(Density::Medium);
+    assert_eq!(ed.grid.label(), "1/16");
+
+    // Zoom far enough out that a sixteenth is not worth drawing.
+    let (x, y) = (400.0, ed.viewport.h * 0.5);
+    let mut d = interaction::pointer_down(&mut ed, x, y, plain(), 0);
+    interaction::pointer_move(&mut ed, &mut d, x - 380.0, y, plain());
+    interaction::pointer_up(&mut ed, d, x - 380.0, y, plain());
+
+    assert!(ed.grid.is_coarsened(), "the zoom did not coarsen the grid");
+    assert_ne!(
+        ed.grid.label(),
+        "1/16",
+        "the readout still claims the setting while snapping to something \
+         coarser",
+    );
+    assert_eq!(
+        ed.grid.ceiling_label(),
+        "1/16",
+        "the ceiling is what the user asked for and should not move",
+    );
+}

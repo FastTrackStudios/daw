@@ -173,6 +173,7 @@ pub fn Canvas(
     // signals here are.
     let mut ramp = use_signal(|| None::<crate::velocity_ramp::VelocityRamp>);
 
+
     // The viewport is followed by `ExpressionEditor`, which is the only
     // component that knows the whole chrome. See the effect there.
 
@@ -353,11 +354,10 @@ pub fn Canvas(
                 // to `z i` must not also fire the tool shortcut.
                 which_key.set(keys::continuations());
 
-                // Arm the zoom tool the instant `z` goes down, not at
-                // the first drag. The toolbar reads `ed.tool`, so this
-                // is what makes holding `z` *look* like what it is —
-                // waiting for the drag to arm it left the button dark
-                // while the surface was already in zoom mode.
+                // Arm the spring-loaded tool the instant its prefix goes
+                // down, not at the first drag. The toolbar reads
+                // `ed.tool`, so arming late left the button dark while
+                // the surface was already in zoom mode.
                 //
                 // Tap and hold stay one idea: this only arms, and the
                 // key-up decides. A tap arms and disarms without you
@@ -371,6 +371,7 @@ pub fn Canvas(
                         editor.write().tool = armed;
                     }
                 }
+
                 if ran || keys::is_pending() {
                     e.prevent_default();
                     return;
@@ -524,7 +525,19 @@ pub fn Canvas(
                 // The processor has to hear about the release, or it
                 // goes on believing the key is held and OS auto-repeat
                 // walks the sequence tree on its own. See `keys::release`.
-                keys::release(&e.key().to_string(), mods_of(e.modifiers()));
+                // The processor owns sticky-prefix behaviour — holding `g`
+                // and tapping `q`, `w`, `e` in turn is `sticky_anchor`,
+                // which it maintains itself. All the surface has to do is
+                // report the release honestly and act on the answer:
+                // `true` means a sticky run that fired at least one
+                // action has ended, so the overlay should go. A bare
+                // hold-and-release returns `false` and the tree stays up,
+                // because you were reading it rather than using it.
+                if keys::release(&e.key().to_string(), mods_of(e.modifiers())) {
+                    which_key.set(Vec::new());
+                } else {
+                    which_key.set(keys::continuations());
+                }
                 // `R` is momentary: references drop back the instant it
                 // is released, so it can never be left on by accident.
                 match e.key().to_string().as_str() {
