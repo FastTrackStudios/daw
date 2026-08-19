@@ -467,17 +467,7 @@ impl Runner {
     }
 
     fn open_rpp(path: &Path, target: &Target, viewport: Viewport) -> Result<Self, LoadError> {
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| LoadError::Read(path.to_path_buf(), e.to_string()))?;
-        let daw = Standalone::new();
-        // Sources are ordinary files on disk here, so the bay resolves
-        // them from the filesystem. A browser host would install a
-        // JS-backed resolver instead; the loader below is the same.
-        daw.media_bay()
-            .set_file_resolver(Box::new(daw::standalone::media_bay::FsFileResolver));
-        let name = file_label(path);
-        let summary =
-            load_rpp_text(&daw, &name, &path.to_string_lossy(), &text).map_err(LoadError::Rpp)?;
+        let (daw, name, summary) = open_project(path)?;
         let ctx = ProjectContext::Project(summary.project_guid.clone());
 
         let candidates = candidate_items(&daw, &ctx, target)?;
@@ -508,14 +498,7 @@ impl Runner {
         kit_folder: Option<&str>,
         viewport: Viewport,
     ) -> Result<Self, LoadError> {
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| LoadError::Read(path.to_path_buf(), e.to_string()))?;
-        let daw = Standalone::new();
-        daw.media_bay()
-            .set_file_resolver(Box::new(daw::standalone::media_bay::FsFileResolver));
-        let name = file_label(path);
-        let summary =
-            load_rpp_text(&daw, &name, &path.to_string_lossy(), &text).map_err(LoadError::Rpp)?;
+        let (daw, name, summary) = open_project(path)?;
         let ctx = ProjectContext::Project(summary.project_guid.clone());
 
         let tracks = Tracks::all(&daw, ctx.clone());
@@ -970,6 +953,48 @@ fn seed_empty_project(daw: &Standalone, path: &Path) -> String {
         path: path.to_string_lossy().into_owned(),
     });
     guid
+}
+
+/// Load an `.rpp` into a fresh backend with its media resolved and
+/// materialized, the way `Projects::open` does it: sources resolve
+/// against the file's directory (REAPER stores them relative to the
+/// project), and uncompressed PCM is mmap'd rather than decoded. A
+/// source that cannot be found is a per-take warning inside the
+/// materialize report, never a failed open.
+// r[impl drums.open.rpp]
+fn open_project(
+    path: &Path,
+) -> Result<
+    (
+        Standalone,
+        String,
+        daw::standalone::project_loader::LoadedProject,
+    ),
+    LoadError,
+> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| LoadError::Read(path.to_path_buf(), e.to_string()))?;
+    let daw = Standalone::new();
+    let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    daw.media_bay().set_file_resolver(Box::new(
+        daw::standalone::media_bay::ProjectRelativeResolver::new(dir),
+    ));
+    let name = file_label(path);
+    let summary =
+        load_rpp_text(&daw, &name, &path.to_string_lossy(), &text).map_err(LoadError::Rpp)?;
+    let audio = daw::standalone::audio_engine::materialize::materialize_via_bay(
+        &daw,
+        &summary.project_guid,
+    )
+    .map_err(LoadError::Rpp)?;
+    if !audio.failed.is_empty() {
+        tracing::warn!(
+            failed = audio.failed.len(),
+            loaded = audio.loaded,
+            "some sources did not materialize"
+        );
+    }
+    Ok((daw, name, summary))
 }
 
 fn file_label(path: &Path) -> String {
