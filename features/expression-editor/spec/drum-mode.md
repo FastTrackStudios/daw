@@ -49,9 +49,10 @@ r[drums.open.stretch-markers]
 Loading an `.RPP` MUST carry each take's `SM` stretch markers into
 `ProjectState` under the take (REAPER keys markers per take; a
 multi-take item's markers belong to the take they were read from) with
-the third token as `slope`, and the `PLAYRATE` pitch-mode field as the
-take's `StretchMode`. `get_stretch_markers` on a freshly opened project
-returns what the file said.
+the third token as `slope`. (`PLAYRATE`'s fourth field is the pitch-shift
+algorithm, not a stretch-marker mode; `StretchMode` is not in the file
+and stays `ProjectDefault` on load.) `get_stretch_markers` on a freshly
+opened project returns what the file said.
 
 r[drums.open.accessor-placement]
 The standalone `AudioAccessors` take accessor MUST return audio in
@@ -192,10 +193,46 @@ same `apply_split` / `Plan::alignment` path the engine already has —
 the panel adds no second write path. After Apply the lanes re-detect
 and the hit histogram reflects the new state.
 
+r[drums.quantize.grid-options]
+The grid control MUST offer straight, triplet and dotted divisions from
+1/4 to 1/64 and a swing amount (0–100 %, applied to the off-beat
+divisions), reading the project's grid setting as its initial value
+when the backend exposes one. Targets are computed from the chosen grid
+over the tempo map, so swing and triplets are target placement only —
+the planner is unchanged.
+
+r[drums.quantize.filter-presets]
+The detector's filter block (high-pass, low-pass, a transient-attack
+emphasis and a gain compensation) MUST be savable as named presets
+(`Kick`, `Snare`, `Toms`, `Full kit` ship as defaults, user presets are
+stored with the editor's settings), chosen per lane from the *Detect*
+section, so dialling a kick in is one pick rather than four sliders.
+
+r[drums.quantize.slider-defaults]
+Every slider in the panel supports *right-click → store as my default*
+and *Alt-click → reset to default*, and the panel remembers its last
+settings across sessions — the same affordance Perfect Timing ships,
+because a drum editor re-dials the same kit for every song.
+
 r[drums.quantize.undo]
 Apply is undoable as one step (`Undo` returns every member to its
 pre-apply items/markers), and re-opening the panel after an undo shows
 the plan again, unchanged.
+
+### What was taken from Perfect Timing, and what was not
+
+The script (80icio, ReaPack `Items Editing/80icio_Perfect Timing! -
+Audio Quantizer.lua`, v0.41, unlicensed — read for the method, nothing
+copied; see `grid-quantize.md`) settled these choices: the three-page
+settings layout (*Main / Filters / Advanced*) becomes our *Detect /
+Target / Write* drawer; the histogram and the trigger lines drawn in
+the editing window itself are kept; the "Edit Tracks" indented member
+list becomes lane roles with a member tree; sliders store defaults on
+right-click. Its v0.41 simplified grid scan from *closest and loudest*
+to *closest*; ours keeps loudest-wins in the window (`grid-quantize.md`
+explains why the ghost note must not win), and that difference is
+deliberate. Its constraints — one item per track, items sharing start
+and length — are our group rule, stated in `drums.group.kit`.
 
 ## Manual editing
 
