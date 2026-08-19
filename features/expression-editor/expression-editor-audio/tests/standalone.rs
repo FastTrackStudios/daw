@@ -388,16 +388,19 @@ fn a_pitch_edit_renders_without_baking_the_timing_in() {
     };
     assert!(markers >= 2, "and the timing still went to the host");
 
-    // The rendered audio sits where it was analysed, not where it was
-    // moved to — the markers do the moving.
+    // The rendered *file* sits where it was analysed — the markers do
+    // the moving. The accessor reads the take as played (placement and
+    // markers applied, the same as REAPER's — r[drums.open.
+    // accessor-placement]), so a reload sees the note at its *moved*
+    // position: the timing edit round-trips visibly.
     let rendered = std::fs::read(&path).expect("render exists");
     assert!(rendered.len() > 44);
     let reopened = open(&daw, item, secs, 1.0).expect("reload");
     let n = reopened.editor.doc.note(NoteId(1)).unwrap();
     assert_eq!(n.row, 64, "the pitch edit is in the audio");
     assert!(
-        n.start < 5.0,
-        "and the note is still at its analysed position, got {}",
+        (n.start - 8.0).abs() < 3.0,
+        "and the note is heard where it was moved to, got {}",
         n.start
     );
 }

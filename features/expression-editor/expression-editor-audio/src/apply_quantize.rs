@@ -106,6 +106,7 @@ pub fn group_start<D: Items>(
 /// The first piece reuses the original item and the rest are duplicates,
 /// so an undo in the host is one step per track rather than one per
 /// piece, and a group that is already correct is not rebuilt.
+// r[impl drums.group.kit]
 pub fn apply_split<D>(
     daw: &D,
     project: ProjectContext,
