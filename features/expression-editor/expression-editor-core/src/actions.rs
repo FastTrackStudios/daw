@@ -240,57 +240,132 @@ pub mod cursor {
 pub mod chord {
     #[architect::actions(namespace = "FTS_EDITOR_CHORD")]
     pub trait ChordActions {
-        #[action(undo, description = "Fire the chord on the first scale degree",
-            category = "Expression Editor", group = "Chords", shortcut = "c 1")]
+        #[action(
+            undo,
+            description = "Fire the chord on the first scale degree",
+            category = "Expression Editor",
+            group = "Chords",
+            shortcut = "c 1"
+        )]
         fn degree_1(&self);
-        #[action(undo, description = "Fire the chord on the second scale degree",
-            category = "Expression Editor", group = "Chords", shortcut = "c 2")]
+        #[action(
+            undo,
+            description = "Fire the chord on the second scale degree",
+            category = "Expression Editor",
+            group = "Chords",
+            shortcut = "c 2"
+        )]
         fn degree_2(&self);
-        #[action(undo, description = "Fire the chord on the third scale degree",
-            category = "Expression Editor", group = "Chords", shortcut = "c 3")]
+        #[action(
+            undo,
+            description = "Fire the chord on the third scale degree",
+            category = "Expression Editor",
+            group = "Chords",
+            shortcut = "c 3"
+        )]
         fn degree_3(&self);
-        #[action(undo, description = "Fire the chord on the fourth scale degree",
-            category = "Expression Editor", group = "Chords", shortcut = "c 4")]
+        #[action(
+            undo,
+            description = "Fire the chord on the fourth scale degree",
+            category = "Expression Editor",
+            group = "Chords",
+            shortcut = "c 4"
+        )]
         fn degree_4(&self);
-        #[action(undo, description = "Fire the chord on the fifth scale degree",
-            category = "Expression Editor", group = "Chords", shortcut = "c 5")]
+        #[action(
+            undo,
+            description = "Fire the chord on the fifth scale degree",
+            category = "Expression Editor",
+            group = "Chords",
+            shortcut = "c 5"
+        )]
         fn degree_5(&self);
-        #[action(undo, description = "Fire the chord on the sixth scale degree",
-            category = "Expression Editor", group = "Chords", shortcut = "c 6")]
+        #[action(
+            undo,
+            description = "Fire the chord on the sixth scale degree",
+            category = "Expression Editor",
+            group = "Chords",
+            shortcut = "c 6"
+        )]
         fn degree_6(&self);
-        #[action(undo, description = "Fire the chord on the seventh scale degree",
-            category = "Expression Editor", group = "Chords", shortcut = "c 7")]
+        #[action(
+            undo,
+            description = "Fire the chord on the seventh scale degree",
+            category = "Expression Editor",
+            group = "Chords",
+            shortcut = "c 7"
+        )]
         fn degree_7(&self);
 
-        #[action(description = "Move the tonic up a semitone",
-            category = "Expression Editor", group = "Chords", shortcut = "c t")]
+        #[action(
+            description = "Move the tonic up a semitone",
+            category = "Expression Editor",
+            group = "Chords",
+            shortcut = "c t"
+        )]
         fn tonic_up(&self);
-        #[action(description = "Move the tonic down a semitone",
-            category = "Expression Editor", group = "Chords", shortcut = "c g")]
+        #[action(
+            description = "Move the tonic down a semitone",
+            category = "Expression Editor",
+            group = "Chords",
+            shortcut = "c g"
+        )]
         fn tonic_down(&self);
-        #[action(description = "Next mode of the current scale family",
-            category = "Expression Editor", group = "Chords", shortcut = "c s")]
+        #[action(
+            description = "Next mode of the current scale family",
+            category = "Expression Editor",
+            group = "Chords",
+            shortcut = "c s"
+        )]
         fn mode_next(&self);
-        #[action(description = "Previous mode of the current scale family",
-            category = "Expression Editor", group = "Chords", shortcut = "c a")]
+        #[action(
+            description = "Previous mode of the current scale family",
+            category = "Expression Editor",
+            group = "Chords",
+            shortcut = "c a"
+        )]
         fn mode_prev(&self);
-        #[action(description = "Deeper chords — sevenths, ninths, and up",
-            category = "Expression Editor", group = "Chords", shortcut = "c d")]
+        #[action(
+            description = "Deeper chords — sevenths, ninths, and up",
+            category = "Expression Editor",
+            group = "Chords",
+            shortcut = "c d"
+        )]
         fn depth_next(&self);
-        #[action(description = "Shallower chords, back towards triads",
-            category = "Expression Editor", group = "Chords", shortcut = "c f")]
+        #[action(
+            description = "Shallower chords, back towards triads",
+            category = "Expression Editor",
+            group = "Chords",
+            shortcut = "c f"
+        )]
         fn depth_prev(&self);
-        #[action(description = "Invert the chord up",
-            category = "Expression Editor", group = "Chords", shortcut = "c i")]
+        #[action(
+            description = "Invert the chord up",
+            category = "Expression Editor",
+            group = "Chords",
+            shortcut = "c i"
+        )]
         fn inversion_next(&self);
-        #[action(description = "Invert the chord down",
-            category = "Expression Editor", group = "Chords", shortcut = "c u")]
+        #[action(
+            description = "Invert the chord down",
+            category = "Expression Editor",
+            group = "Chords",
+            shortcut = "c u"
+        )]
         fn inversion_prev(&self);
-        #[action(description = "Fire chords an octave higher",
-            category = "Expression Editor", group = "Chords", shortcut = "c o")]
+        #[action(
+            description = "Fire chords an octave higher",
+            category = "Expression Editor",
+            group = "Chords",
+            shortcut = "c o"
+        )]
         fn octave_up(&self);
-        #[action(description = "Fire chords an octave lower",
-            category = "Expression Editor", group = "Chords", shortcut = "c l")]
+        #[action(
+            description = "Fire chords an octave lower",
+            category = "Expression Editor",
+            group = "Chords",
+            shortcut = "c l"
+        )]
         fn octave_down(&self);
     }
 }
@@ -299,44 +374,105 @@ pub mod chord {
 pub mod razor {
     #[architect::actions(namespace = "FTS_EDITOR_RAZOR")]
     pub trait RazorActions {
-        #[action(undo, description = "Reverse the area's contents in time",
-            category = "Expression Editor", group = "Razor", shortcut = "a r")]
+        #[action(
+            undo,
+            description = "Reverse the area's contents in time",
+            category = "Expression Editor",
+            group = "Razor",
+            shortcut = "a r"
+        )]
         fn reverse(&self);
-        #[action(undo, description = "Reverse the pitches, keeping the rhythm",
-            category = "Expression Editor", group = "Razor", shortcut = "a Ctrl+r")]
+        #[action(
+            undo,
+            description = "Reverse the pitches, keeping the rhythm",
+            category = "Expression Editor",
+            group = "Razor",
+            shortcut = "a Ctrl+r"
+        )]
         fn reverse_pitches(&self);
-        #[action(undo, description = "Mirror the pitches about their own centre",
-            category = "Expression Editor", group = "Razor", shortcut = "a v")]
+        #[action(
+            undo,
+            description = "Mirror the pitches about their own centre",
+            category = "Expression Editor",
+            group = "Razor",
+            shortcut = "a v"
+        )]
         fn invert(&self);
-        #[action(undo, description = "Delete everything inside the areas",
-            category = "Expression Editor", group = "Razor", shortcut = "a x")]
+        #[action(
+            undo,
+            description = "Delete everything inside the areas",
+            category = "Expression Editor",
+            group = "Razor",
+            shortcut = "a x"
+        )]
         fn delete_contents(&self);
-        #[action(undo, description = "Copy the contents on by the area's own width",
-            category = "Expression Editor", group = "Razor", shortcut = "a d")]
+        #[action(
+            undo,
+            description = "Copy the contents on by the area's own width",
+            category = "Expression Editor",
+            group = "Razor",
+            shortcut = "a d"
+        )]
         fn duplicate(&self);
-        #[action(undo, description = "Split notes at the area edges, leaving them in place",
-            category = "Expression Editor", group = "Razor", shortcut = "a p")]
+        #[action(
+            undo,
+            description = "Split notes at the area edges, leaving them in place",
+            category = "Expression Editor",
+            group = "Razor",
+            shortcut = "a p"
+        )]
         fn split(&self);
-        #[action(description = "Select the notes inside the areas",
-            category = "Expression Editor", group = "Razor", shortcut = "a s")]
+        #[action(
+            description = "Select the notes inside the areas",
+            category = "Expression Editor",
+            group = "Razor",
+            shortcut = "a s"
+        )]
         fn select_contents(&self);
-        #[action(description = "Take the notes inside the areas out of the selection",
-            category = "Expression Editor", group = "Razor", shortcut = "a u")]
+        #[action(
+            description = "Take the notes inside the areas out of the selection",
+            category = "Expression Editor",
+            group = "Razor",
+            shortcut = "a u"
+        )]
         fn unselect_contents(&self);
-        #[action(description = "Grow the areas to cover every row",
-            category = "Expression Editor", group = "Razor", shortcut = "a f")]
+        #[action(
+            description = "Grow the areas to cover every row",
+            category = "Expression Editor",
+            group = "Razor",
+            shortcut = "a f"
+        )]
         fn full_lane(&self);
-        #[action(undo, description = "Erase the active expression lane across the areas",
-            category = "Expression Editor", group = "Razor", shortcut = "a c")]
+        #[action(
+            undo,
+            description = "Erase the active expression lane across the areas",
+            category = "Expression Editor",
+            group = "Razor",
+            shortcut = "a c"
+        )]
         fn clear_lane(&self);
-        #[action(description = "Drop the areas, keeping the material",
-            category = "Expression Editor", group = "Razor", shortcut = "a q")]
+        #[action(
+            description = "Drop the areas, keeping the material",
+            category = "Expression Editor",
+            group = "Razor",
+            shortcut = "a q"
+        )]
         fn clear(&self);
-        #[action(undo, description = "Stretch the contents to twice the length",
-            category = "Expression Editor", group = "Razor", shortcut = "a 2")]
+        #[action(
+            undo,
+            description = "Stretch the contents to twice the length",
+            category = "Expression Editor",
+            group = "Razor",
+            shortcut = "a 2"
+        )]
         fn double(&self);
-        #[action(undo, description = "Squeeze the contents to half the length",
-            category = "Expression Editor", group = "Razor", shortcut = "a h")]
+        #[action(
+            undo,
+            description = "Squeeze the contents to half the length",
+            category = "Expression Editor",
+            group = "Razor",
+            shortcut = "a h"
+        )]
         fn halve(&self);
     }
 }
@@ -346,32 +482,77 @@ pub mod razor {
 pub mod velocity {
     #[architect::actions(namespace = "FTS_EDITOR_VELOCITY")]
     pub trait VelocityActions {
-        #[action(undo, description = "Ramp the selection's velocity up, adjustable with the wheel",
-            category = "Expression Editor", group = "Velocity", shortcut = "v u")]
+        #[action(
+            undo,
+            description = "Ramp the selection's velocity up, adjustable with the wheel",
+            category = "Expression Editor",
+            group = "Velocity",
+            shortcut = "v u"
+        )]
         fn ramp_up(&self);
-        #[action(undo, description = "Ramp the selection's velocity down",
-            category = "Expression Editor", group = "Velocity", shortcut = "v d")]
+        #[action(
+            undo,
+            description = "Ramp the selection's velocity down",
+            category = "Expression Editor",
+            group = "Velocity",
+            shortcut = "v d"
+        )]
         fn ramp_down(&self);
-        #[action(undo, description = "Ramp up on a smooth S-curve",
-            category = "Expression Editor", group = "Velocity", shortcut = "v s")]
+        #[action(
+            undo,
+            description = "Ramp up on a smooth S-curve",
+            category = "Expression Editor",
+            group = "Velocity",
+            shortcut = "v s"
+        )]
         fn ramp_smooth(&self);
-        #[action(undo, description = "Accent the first of every four",
-            category = "Expression Editor", group = "Velocity", shortcut = "v a")]
+        #[action(
+            undo,
+            description = "Accent the first of every four",
+            category = "Expression Editor",
+            group = "Velocity",
+            shortcut = "v a"
+        )]
         fn accent(&self);
-        #[action(undo, description = "Narrow the selection's dynamic range",
-            category = "Expression Editor", group = "Velocity", shortcut = "v c")]
+        #[action(
+            undo,
+            description = "Narrow the selection's dynamic range",
+            category = "Expression Editor",
+            group = "Velocity",
+            shortcut = "v c"
+        )]
         fn compress(&self);
-        #[action(undo, description = "Widen the selection's dynamic range",
-            category = "Expression Editor", group = "Velocity", shortcut = "v e")]
+        #[action(
+            undo,
+            description = "Widen the selection's dynamic range",
+            category = "Expression Editor",
+            group = "Velocity",
+            shortcut = "v e"
+        )]
         fn expand(&self);
-        #[action(undo, description = "Scatter the velocities slightly",
-            category = "Expression Editor", group = "Velocity", shortcut = "v r")]
+        #[action(
+            undo,
+            description = "Scatter the velocities slightly",
+            category = "Expression Editor",
+            group = "Velocity",
+            shortcut = "v r"
+        )]
         fn humanise(&self);
-        #[action(undo, description = "Set every selected note to the selection's average",
-            category = "Expression Editor", group = "Velocity", shortcut = "v f")]
+        #[action(
+            undo,
+            description = "Set every selected note to the selection's average",
+            category = "Expression Editor",
+            group = "Velocity",
+            shortcut = "v f"
+        )]
         fn flatten(&self);
-        #[action(description = "Open the velocity panel",
-            category = "Expression Editor", group = "Velocity", toggleable, shortcut = "v p")]
+        #[action(
+            description = "Open the velocity panel",
+            category = "Expression Editor",
+            group = "Velocity",
+            toggleable,
+            shortcut = "v p"
+        )]
         fn panel(&self);
     }
 }
@@ -381,26 +562,54 @@ pub mod velocity {
 pub mod view {
     #[architect::actions(namespace = "FTS_EDITOR_VIEW")]
     pub trait ViewActions {
-        #[action(description = "Zoom to whatever the pointer is over",
-            category = "Expression Editor", group = "View", shortcut = "z x")]
+        #[action(
+            description = "Zoom to whatever the pointer is over",
+            category = "Expression Editor",
+            group = "View",
+            shortcut = "z x"
+        )]
         fn memagic(&self);
-        #[action(description = "Fit the whole item in the view",
-            category = "Expression Editor", group = "View", shortcut = "z i")]
+        #[action(
+            description = "Fit the whole item in the view",
+            category = "Expression Editor",
+            group = "View",
+            shortcut = "z i"
+        )]
         fn fit_item(&self);
-        #[action(description = "Fit the notes in view",
-            category = "Expression Editor", group = "View", shortcut = "z n")]
+        #[action(
+            description = "Fit the notes in view",
+            category = "Expression Editor",
+            group = "View",
+            shortcut = "z n"
+        )]
         fn fit_notes(&self);
-        #[action(description = "Centre on the notes",
-            category = "Expression Editor", group = "View", shortcut = "z c")]
+        #[action(
+            description = "Centre on the notes",
+            category = "Expression Editor",
+            group = "View",
+            shortcut = "z c"
+        )]
         fn center(&self);
-        #[action(description = "Frame the top of the pitch range",
-            category = "Expression Editor", group = "View", shortcut = "z t")]
+        #[action(
+            description = "Frame the top of the pitch range",
+            category = "Expression Editor",
+            group = "View",
+            shortcut = "z t"
+        )]
         fn top(&self);
-        #[action(description = "Frame the bottom of the pitch range",
-            category = "Expression Editor", group = "View", shortcut = "z b")]
+        #[action(
+            description = "Frame the bottom of the pitch range",
+            category = "Expression Editor",
+            group = "View",
+            shortcut = "z b"
+        )]
         fn bottom(&self);
-        #[action(description = "Reset the view",
-            category = "Expression Editor", group = "View", shortcut = "z r")]
+        #[action(
+            description = "Reset the view",
+            category = "Expression Editor",
+            group = "View",
+            shortcut = "z r"
+        )]
         fn reset(&self);
     }
 }
@@ -616,7 +825,9 @@ pub fn run(ed: &mut Editor, id: &str) -> bool {
     }
     if let Some(modes) = view_modes(id) {
         let anchor = memagic::Anchor {
-            t: ed.playhead.unwrap_or_else(|| ed.camera.t_at(ed.viewport.w * 0.5)),
+            t: ed
+                .playhead
+                .unwrap_or_else(|| ed.camera.t_at(ed.viewport.w * 0.5)),
             row: Some(ed.camera.vertical.center),
         };
         return ed.memagic_with(modes, anchor, &memagic::Config::default());
@@ -634,23 +845,33 @@ fn view_modes(id: &str) -> Option<memagic::Modes> {
     Some(match id {
         i if i == view::FIT_ITEM.id => Modes {
             horizontal: Horizontal::FitItem,
-            vertical: Vertical::FitNotes { scope: Scope::InItem },
+            vertical: Vertical::FitNotes {
+                scope: Scope::InItem,
+            },
         },
         i if i == view::FIT_NOTES.id => Modes {
             horizontal: Horizontal::Keep,
-            vertical: Vertical::FitNotes { scope: Scope::InView },
+            vertical: Vertical::FitNotes {
+                scope: Scope::InView,
+            },
         },
         i if i == view::CENTER.id => Modes {
             horizontal: Horizontal::Keep,
-            vertical: Vertical::Center { scope: Scope::InView },
+            vertical: Vertical::Center {
+                scope: Scope::InView,
+            },
         },
         i if i == view::TOP.id => Modes {
             horizontal: Horizontal::Keep,
-            vertical: Vertical::Highest { scope: Scope::InView },
+            vertical: Vertical::Highest {
+                scope: Scope::InView,
+            },
         },
         i if i == view::BOTTOM.id => Modes {
             horizontal: Horizontal::Keep,
-            vertical: Vertical::Lowest { scope: Scope::InView },
+            vertical: Vertical::Lowest {
+                scope: Scope::InView,
+            },
         },
         _ => return None,
     })

@@ -11,7 +11,7 @@
 //! right for free.
 
 use crate::blob;
-use crate::doc::{Curve, ExpressionDoc, Dimension, Note, NoteId, Point, Target};
+use crate::doc::{Curve, Dimension, ExpressionDoc, Note, NoteId, Point, Target};
 use crate::modulation::Stack;
 use crate::rows::{Articulation, RowSpace};
 use crate::shape::Shape;
@@ -330,7 +330,12 @@ impl Edit {
                 extend_to_note_edges(n, *dimension);
                 true
             }
-            Edit::EraseDimension { note, dimension, t0, t1 } => {
+            Edit::EraseDimension {
+                note,
+                dimension,
+                t0,
+                t1,
+            } => {
                 let Some(n) = doc.note_mut(*note) else {
                     return false;
                 };
@@ -367,7 +372,8 @@ impl Edit {
                 };
                 let (lo, hi) = ordered(*t0, *t1);
                 let default = dimension.default_value();
-                let pivot = blob::effective_center(n.curve(*dimension), lo, hi, DEFAULT_SAMPLES, default);
+                let pivot =
+                    blob::effective_center(n.curve(*dimension), lo, hi, DEFAULT_SAMPLES, default);
                 n.curve_mut(*dimension).scale_about(lo, hi, pivot, *factor);
                 true
             }
@@ -423,7 +429,18 @@ impl Edit {
                 n.curve_mut(*dimension).splice(
                     lo,
                     hi,
-                    &[Point { t: lo, value: v, ..Point::default() }, Point { t: hi, value: v, ..Point::default() }],
+                    &[
+                        Point {
+                            t: lo,
+                            value: v,
+                            ..Point::default()
+                        },
+                        Point {
+                            t: hi,
+                            value: v,
+                            ..Point::default()
+                        },
+                    ],
                 );
                 true
             }
@@ -459,7 +476,9 @@ impl Edit {
                         let w = if *from_start { 1.0 - f } else { f };
                         Point {
                             t,
-                            value: dimension.clamp(curve.sample(t, default) + amount * w), ..Point::default() }
+                            value: dimension.clamp(curve.sample(t, default) + amount * w),
+                            ..Point::default()
+                        }
                     })
                     .collect();
                 n.curve_mut(dimension).splice(lo, hi, &pts);
@@ -540,7 +559,9 @@ impl Edit {
                     .zip(&values)
                     .map(|(&t, &v)| Point {
                         t,
-                        value: dimension.clamp(v), ..Point::default() })
+                        value: dimension.clamp(v),
+                        ..Point::default()
+                    })
                     .collect();
                 // Splice, so data outside the target range survives.
                 n.curve_mut(*dimension).splice(lo, hi, &points);
@@ -597,7 +618,8 @@ impl Edit {
                     *s = new_s + (*s - old_s) * scale;
                 }
                 for dimension in Dimension::ALL {
-                    n.curve_mut(dimension).remap_time(old_s, old_e, new_s, new_e);
+                    n.curve_mut(dimension)
+                        .remap_time(old_s, old_e, new_s, new_e);
                 }
                 n.start = new_s;
                 n.end = new_e;

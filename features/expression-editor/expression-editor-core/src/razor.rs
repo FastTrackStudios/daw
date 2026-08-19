@@ -13,7 +13,7 @@
 //! usable for comping and for rhythmic rearrangement, and it is why the
 //! area — not the note — is the unit of operation.
 
-use crate::doc::{ExpressionDoc, Dimension, Note, NoteId};
+use crate::doc::{Dimension, ExpressionDoc, Note, NoteId};
 
 /// Which axis a razor drag is locked to.
 ///
@@ -291,7 +291,10 @@ pub fn reverse_pitches(doc: &mut ExpressionDoc, area: RazorArea) -> bool {
         let (x, y) = (doc.note(*a).map(|n| n.start), doc.note(*b).map(|n| n.start));
         x.partial_cmp(&y).unwrap_or(core::cmp::Ordering::Equal)
     });
-    let rows: Vec<i32> = ids.iter().filter_map(|id| doc.note(*id).map(|n| n.row)).collect();
+    let rows: Vec<i32> = ids
+        .iter()
+        .filter_map(|id| doc.note(*id).map(|n| n.row))
+        .collect();
     if rows.len() != ids.len() {
         return false;
     }
@@ -321,7 +324,10 @@ pub fn invert_pitches(doc: &mut ExpressionDoc, area: RazorArea) -> bool {
     if ids.is_empty() {
         return false;
     }
-    let rows: Vec<i32> = ids.iter().filter_map(|id| doc.note(*id).map(|n| n.row)).collect();
+    let rows: Vec<i32> = ids
+        .iter()
+        .filter_map(|id| doc.note(*id).map(|n| n.row))
+        .collect();
     let (Some(&lo), Some(&hi)) = (rows.iter().min(), rows.iter().max()) else {
         return false;
     };

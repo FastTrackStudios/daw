@@ -8,7 +8,7 @@
 //! pointer.
 
 use crate::camera::{Camera, Viewport};
-use crate::doc::{ExpressionDoc, Dimension, NoteId, Target};
+use crate::doc::{Dimension, ExpressionDoc, NoteId, Target};
 
 /// The active drawing tool.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
@@ -174,7 +174,11 @@ pub enum Hit {
     /// A Q-zone split handle in the bottom strip or note body.
     ZoneSplit { id: NoteId, index: usize, t: f64 },
     /// A point on the active dimension's curve.
-    CurvePoint { id: NoteId, dimension: Dimension, t: f64 },
+    CurvePoint {
+        id: NoteId,
+        dimension: Dimension,
+        t: f64,
+    },
     /// Empty canvas at this time and pitch.
     Empty { t: f64, pitch: f64 },
 }

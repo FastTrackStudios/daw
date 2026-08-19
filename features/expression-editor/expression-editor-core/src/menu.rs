@@ -149,20 +149,33 @@ pub fn razor_menu(ed: &Editor) -> Vec<MenuItem> {
         .any(|a| !crate::razor::peek(&ed.doc, *a).is_empty());
 
     vec![
-        MenuItem::new("Delete Contents", Command::RazorDeleteContents, has_material).key("X"),
+        MenuItem::new(
+            "Delete Contents",
+            Command::RazorDeleteContents,
+            has_material,
+        )
+        .key("X"),
         MenuItem::new("Duplicate", Command::RazorDuplicate, has_material).key("D"),
         MenuItem::new("Split at Edges", Command::RazorSplit, has_material),
         MenuItem::new("Retrograde", Command::RazorReverse, has_material)
             .key("R")
             .group(),
-        MenuItem::new("Retrograde Pitches", Command::RazorReversePitches, has_material)
-            .key("Ctrl+R"),
+        MenuItem::new(
+            "Retrograde Pitches",
+            Command::RazorReversePitches,
+            has_material,
+        )
+        .key("Ctrl+R"),
         MenuItem::new("Invert Pitches", Command::RazorInvert, has_material).key("V"),
         MenuItem::new("Double Length", Command::RazorScale(2), has_material),
         MenuItem::new("Halve Length", Command::RazorScale(1), has_material),
-        MenuItem::new("Select Contents", Command::RazorSelectContents, has_material)
-            .key("S")
-            .group(),
+        MenuItem::new(
+            "Select Contents",
+            Command::RazorSelectContents,
+            has_material,
+        )
+        .key("S")
+        .group(),
         MenuItem::new("Clear This Lane", Command::RazorClearLane, has_material),
         MenuItem::new("Full-Lane Area", Command::RazorFullLane, true).key("F"),
         MenuItem::new("Drop Areas", Command::RazorClear, true)

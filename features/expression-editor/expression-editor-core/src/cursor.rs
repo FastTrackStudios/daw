@@ -243,8 +243,11 @@ impl Cursor {
 
             // ── selection ────────────────────────────────────────────
             Action::MarqueeSelect | Action::SelectTouched => Cursor::Crosshair,
-            Action::MarqueeAdd | Action::AddNoteToSelection | Action::SelectNoteAndLater
-            | Action::SelectNoteAndLaterSameRow | Action::SelectAllInMeasure => Cursor::MarqueeAdd,
+            Action::MarqueeAdd
+            | Action::AddNoteToSelection
+            | Action::SelectNoteAndLater
+            | Action::SelectNoteAndLaterSameRow
+            | Action::SelectAllInMeasure => Cursor::MarqueeAdd,
             Action::MarqueeToggle | Action::ToggleSelectTouched | Action::ToggleNoteSelection => {
                 Cursor::MarqueeToggle
             }
@@ -274,17 +277,29 @@ impl Cursor {
             Action::MoveNoteVertically | Action::TransposeSnapped => Cursor::MoveV,
             Action::CopyNote | Action::CopyNoteNoSnap => Cursor::Copy,
             Action::MoveNoteEdge | Action::MoveNoteEdgeNoSnap => {
-                if left { Cursor::EdgeLeft } else { Cursor::EdgeRight }
+                if left {
+                    Cursor::EdgeLeft
+                } else {
+                    Cursor::EdgeRight
+                }
             }
             // Length and position stretching both grab an end and pull
             // the whole selection with it, so both take the arrowed
             // bracket — the extra arrow is exactly the "this reaches
             // past the note you grabbed" warning.
             Action::StretchNotes | Action::StretchNotePositions => {
-                if left { Cursor::StretchLeft } else { Cursor::StretchRight }
+                if left {
+                    Cursor::StretchLeft
+                } else {
+                    Cursor::StretchRight
+                }
             }
             Action::DoubleNoteLength | Action::HalveNoteLength => {
-                if left { Cursor::EdgeLeft } else { Cursor::EdgeRight }
+                if left {
+                    Cursor::EdgeLeft
+                } else {
+                    Cursor::EdgeRight
+                }
             }
             Action::EditNoteVelocity | Action::EditNoteVelocityFine => Cursor::Velocity,
             Action::EraseNote | Action::EraseNotes => Cursor::NoteEraser,

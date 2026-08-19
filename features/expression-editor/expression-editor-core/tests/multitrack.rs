@@ -43,7 +43,12 @@ fn each_track_keeps_its_own_mode() {
     let modes: Vec<Mode> = ed.tracks.tracks().iter().map(|t| t.mode).collect();
     assert_eq!(
         modes,
-        vec![Mode::PitchedAudio, Mode::Midi, Mode::Guitar, Mode::UnpitchedAudio]
+        vec![
+            Mode::PitchedAudio,
+            Mode::Midi,
+            Mode::Guitar,
+            Mode::UnpitchedAudio
+        ]
     );
 }
 
@@ -177,7 +182,10 @@ fn a_floor_that_does_not_fit_overflows_and_scrolls() {
             .push(Track::in_mode(format!("T{i}"), doc(), Mode::Midi));
     }
     let rows = ed.tracks.stack(600.0, 1.0, 40.0);
-    assert!(rows.iter().all(|r| r.height >= 40.0 - 1e-3), "floor honoured");
+    assert!(
+        rows.iter().all(|r| r.height >= 40.0 - 1e-3),
+        "floor honoured"
+    );
     let total = rows.last().unwrap().y + rows.last().unwrap().height;
     assert!(total > 600.0, "and the stack is taller than the viewport");
 }
@@ -292,7 +300,10 @@ fn a_host_supplied_guid_is_kept_verbatim() {
     let ws = Workspace::single("x", doc());
     let mut ws = ws;
     ws.push(Track::with_guid(host, "Lead Vox", doc()));
-    assert_eq!(ws.track_by_guid(host).map(|t| t.name.as_str()), Some("Lead Vox"));
+    assert_eq!(
+        ws.track_by_guid(host).map(|t| t.name.as_str()),
+        Some("Lead Vox")
+    );
 }
 
 #[test]
@@ -335,7 +346,11 @@ fn ws_with(names: &[&str]) -> Workspace {
 #[test]
 fn a_new_track_arrives_in_a_lane_of_its_own() {
     let ws = ws_with(&["Lead Vox", "Ref MIDI", "Kit"]);
-    assert_eq!(ws.layout().len(), 3, "one lane each until something pairs them");
+    assert_eq!(
+        ws.layout().len(),
+        3,
+        "one lane each until something pairs them"
+    );
     for i in 0..3 {
         assert_eq!(ws.lane_tracks(i).len(), 1);
     }
@@ -591,10 +606,7 @@ fn pairing_places_the_lane_by_first_appearance() {
     ws.auto_pair();
 
     assert_eq!(ws.lane_tracks(0).len(), 2, "Zebra's lane came first");
-    assert_eq!(
-        ws.track(ws.lane_tracks(1)[0]).unwrap().name,
-        "Apple"
-    );
+    assert_eq!(ws.track(ws.lane_tracks(1)[0]).unwrap().name, "Apple");
 }
 
 // ── Per-lane vertical cameras ────────────────────────────────────────
@@ -1016,4 +1028,76 @@ fn scrolling_never_runs_past_the_ends() {
     let max = (ed.stack_height(Editor::ACTIVE_BOOST) as f64 - ed.viewport.h).max(0.0);
     assert!(ed.stack_scroll <= max + 0.01);
     assert!(ed.stack_scroll >= 0.0);
+}
+
+// r[verify drums.lanes.roles]
+// r[verify drums.lanes.heights]
+#[test]
+fn a_kit_folds_into_role_lanes_kick_at_the_bottom() {
+    use expression_editor_core::kit::{LaneRole, kit_role};
+    let mut ed = Editor::new(doc(), viewport());
+    ed.set_mode(Mode::UnpitchedAudio);
+    ed.tracks.rename(0, "In");
+    let kit = [
+        ("In", vec!["SUM", "Kick", "Drums"]),
+        ("Out", vec!["SUM", "Kick", "Drums"]),
+        ("Top", vec!["SUM", "Snare", "Drums"]),
+        ("Bottom", vec!["SUM", "Snare", "Drums"]),
+        ("T1 - Unused", vec!["Toms", "Drums"]),
+        ("T2", vec!["Toms", "Drums"]),
+        ("Hi-Hat", vec!["Drums"]),
+        ("Room", vec!["Drums"]),
+    ];
+    let mut members = Vec::new();
+    for (i, (name, folders)) in kit.iter().enumerate() {
+        let guid = if i == 0 {
+            ed.tracks.track(0).unwrap().guid.clone()
+        } else {
+            let t = Track::in_mode(*name, doc(), Mode::UnpitchedAudio);
+            let g = t.guid.clone();
+            ed.tracks.push(t);
+            g
+        };
+        members.push((guid, kit_role(name, folders)));
+    }
+    ed.tracks.fold_roles(&members);
+
+    let lanes = ed.tracks.layout().lanes();
+    let roles: Vec<_> = lanes.iter().map(|l| l.role).collect();
+    assert_eq!(
+        roles,
+        vec![
+            Some(LaneRole::Other),
+            Some(LaneRole::Toms),
+            Some(LaneRole::Snare),
+            Some(LaneRole::Kick)
+        ],
+        "top to bottom: Other, Toms, Snare, Kick"
+    );
+    assert_eq!(ed.tracks.role_members(LaneRole::Kick).len(), 2);
+    assert_eq!(ed.tracks.role_members(LaneRole::Snare).len(), 2);
+    assert_eq!(ed.tracks.role_members(LaneRole::Toms).len(), 2);
+    assert_eq!(ed.tracks.role_members(LaneRole::Other).len(), 2);
+    assert!(
+        lanes
+            .iter()
+            .find(|l| l.role == Some(LaneRole::Toms))
+            .unwrap()
+            .split
+    );
+    assert!(
+        !lanes
+            .iter()
+            .find(|l| l.role == Some(LaneRole::Kick))
+            .unwrap()
+            .split
+    );
+
+    // Equal heights for the four role lanes.
+    let rows = ed.tracks.stack(400.0, 1.0, 10.0);
+    assert_eq!(rows.len(), 4);
+    let h0 = rows[0].height;
+    assert!(rows.iter().all(|r| (r.height - h0).abs() < 1e-3));
+    // The fold is inference, not arrangement.
+    assert!(!ed.tracks.layout().is_arranged());
 }

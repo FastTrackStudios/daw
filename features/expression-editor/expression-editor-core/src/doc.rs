@@ -257,7 +257,14 @@ impl Curve {
     pub fn set(&mut self, t: f64, value: f64) {
         match self.index_of(t) {
             Ok(i) => self.points[i].value = value,
-            Err(i) => self.points.insert(i, Point { t, value, ..Point::default() }),
+            Err(i) => self.points.insert(
+                i,
+                Point {
+                    t,
+                    value,
+                    ..Point::default()
+                },
+            ),
         }
     }
 
@@ -790,7 +797,11 @@ impl ExpressionDoc {
             .iter()
             .filter(|n| n.grace_of == Some(id))
             .collect();
-        out.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(core::cmp::Ordering::Equal));
+        out.sort_by(|a, b| {
+            a.start
+                .partial_cmp(&b.start)
+                .unwrap_or(core::cmp::Ordering::Equal)
+        });
         out
     }
 

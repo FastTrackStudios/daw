@@ -119,15 +119,25 @@ pub enum Horizontal {
 pub enum Vertical {
     Keep,
     /// Fit the pitch range of the notes in `scope`.
-    FitNotes { scope: Scope },
+    FitNotes {
+        scope: Scope,
+    },
     /// Centre on the anchor row, clamped to the notes in `scope`.
-    ScrollToAnchor { scope: Option<Scope> },
+    ScrollToAnchor {
+        scope: Option<Scope>,
+    },
     /// Centre on the middle of the notes in `scope`.
-    Center { scope: Scope },
+    Center {
+        scope: Scope,
+    },
     /// Put the lowest note of `scope` in view.
-    Lowest { scope: Scope },
+    Lowest {
+        scope: Scope,
+    },
     /// Put the highest note of `scope` in view.
-    Highest { scope: Scope },
+    Highest {
+        scope: Scope,
+    },
 }
 
 /// Where the gesture is pointed, in document terms.

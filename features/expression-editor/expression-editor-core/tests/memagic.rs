@@ -152,7 +152,9 @@ fn an_empty_area_centres_on_middle_c() {
     let (lo, hi) = memagic::vertical_range(
         &doc,
         content,
-        Vertical::FitNotes { scope: Scope::InItem },
+        Vertical::FitNotes {
+            scope: Scope::InItem,
+        },
         Anchor { t: 0.0, row: None },
         (0.0, PPQ * 8.0),
         &cfg,

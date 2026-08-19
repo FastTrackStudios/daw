@@ -356,9 +356,8 @@ impl Camera {
         // ── pitch: fitted to the keys ────────────────────────────────
         // The rows the roll actually draws: the mode's range, less
         // whatever the fold collapses away.
-        let rows = ((bounds.row_max - bounds.row_min + 1.0)
-            - self.fold.hidden_count() as f64)
-            .max(1.0);
+        let rows =
+            ((bounds.row_max - bounds.row_min + 1.0) - self.fold.hidden_count() as f64).max(1.0);
         // Tall enough that `rows` of them always cover the lane. This is
         // the floor that stops a zoom-out leaving empty space where
         // there are no keys.
@@ -560,7 +559,10 @@ pub fn pitch_focus(
     if let Some(p) = local_pitch {
         out.push(Influence {
             camera: Camera {
-                vertical: VerticalCamera { center: p, ..base.vertical },
+                vertical: VerticalCamera {
+                    center: p,
+                    ..base.vertical
+                },
                 ..base
             },
             weight: local_weight,
@@ -568,7 +570,10 @@ pub fn pitch_focus(
     }
     out.push(Influence {
         camera: Camera {
-            vertical: VerticalCamera { center: mouse_pitch, ..base.vertical },
+            vertical: VerticalCamera {
+                center: mouse_pitch,
+                ..base.vertical
+            },
             ..base
         },
         weight: mouse_weight,

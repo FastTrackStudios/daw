@@ -142,10 +142,20 @@ impl ChordGun {
     /// Step the depth: triads → sevenths → ninths → … and round again.
     pub fn cycle_depth(&mut self, forward: bool) {
         use HarmonizationDepth as D;
-        const ALL: [D; 5] = [D::Triads, D::Sevenths, D::Ninths, D::Elevenths, D::Thirteenths];
+        const ALL: [D; 5] = [
+            D::Triads,
+            D::Sevenths,
+            D::Ninths,
+            D::Elevenths,
+            D::Thirteenths,
+        ];
         let i = ALL.iter().position(|d| *d == self.depth).unwrap_or(0);
         let n = ALL.len();
-        self.depth = ALL[if forward { (i + 1) % n } else { (i + n - 1) % n }];
+        self.depth = ALL[if forward {
+            (i + 1) % n
+        } else {
+            (i + n - 1) % n
+        }];
     }
 
     /// Step through the modes of the current family.
@@ -158,7 +168,11 @@ impl ChordGun {
         let modes = family_modes(self.mode);
         let i = modes.iter().position(|m| *m == self.mode).unwrap_or(0);
         let n = modes.len();
-        self.mode = modes[if forward { (i + 1) % n } else { (i + n - 1) % n }];
+        self.mode = modes[if forward {
+            (i + 1) % n
+        } else {
+            (i + n - 1) % n
+        }];
     }
 
     /// Move the tonic by a semitone.

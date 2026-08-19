@@ -424,9 +424,7 @@ impl MouseMap {
         mods: Mods,
         tool: crate::Tool,
     ) -> Action {
-        if ModKey::of(mods) == ModKey::NONE
-            && tool.claims().contains(&(context, gesture))
-        {
+        if ModKey::of(mods) == ModKey::NONE && tool.claims().contains(&(context, gesture)) {
             // `run_action` declines this one so the gesture reaches the
             // tool-driven path. The map says *whose* gesture it is; the
             // tool says what it does.
@@ -450,8 +448,6 @@ impl MouseMap {
             .find(|b| b.context == context && b.gesture == gesture && b.mods == mods)
             .map(|b| b.action)
     }
-
-
 
     pub fn bindings(&self) -> &[Binding] {
         &self.bindings

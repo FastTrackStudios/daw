@@ -24,6 +24,7 @@
 //! The Dioxus surface lives in `expression-editor-ui`; domain adapters
 //! (MIDI takes, `tune_dsp::PitchDoc`) live with their domains.
 
+pub mod actions;
 pub mod blob;
 pub mod camera;
 pub mod cc;
@@ -35,14 +36,14 @@ pub mod draft;
 pub mod edit;
 pub mod flam;
 pub mod handles;
+pub mod harmony;
+pub mod kit;
 pub mod memagic;
 pub mod menu;
 pub mod mode;
 pub mod modulation;
 pub mod mouse;
 pub mod multitool;
-pub mod actions;
-pub mod harmony;
 pub mod razor;
 pub mod reference;
 pub mod rows;
@@ -57,7 +58,9 @@ pub use camera::{Bounds, Camera, Content, VerticalCamera, Viewport};
 pub use cc::{CcDisplay, CcLane, CcSet};
 pub use chord::Chord;
 pub use cursor::{Aim, Cursor};
-pub use doc::{Curve, CurveShape, ExpressionDoc, Dimension, Marker, Note, NoteId, Point, Target, TimeBase};
+pub use doc::{
+    Curve, CurveShape, Dimension, ExpressionDoc, Marker, Note, NoteId, Point, Target, TimeBase,
+};
 pub use draft::PitchDraft;
 pub use edit::{Edit, History};
 pub use handles::{Handle, Scope};
@@ -266,7 +269,8 @@ pub struct Editor {
 impl Editor {
     pub fn new(doc: ExpressionDoc, viewport: Viewport) -> Self {
         let content = content_of(&doc);
-        let camera = camera::reset_view(content, viewport, CUSHION, PAD, camera::RowFold::default());
+        let camera =
+            camera::reset_view(content, viewport, CUSHION, PAD, camera::RowFold::default());
         let tracks = Workspace::single("Track 1", doc.clone());
         let mut editor = Self {
             doc,
@@ -994,7 +998,9 @@ impl Editor {
                 // A level, so it reads off the captured value at the
                 // scope's midpoint rather than restoring and shifting.
                 let mid = (t0 + t1) * 0.5;
-                let base = drag.base_of(dimension).sample(mid, dimension.default_value());
+                let base = drag
+                    .base_of(dimension)
+                    .sample(mid, dimension.default_value());
 
                 // Sibilant scope: the amplitude handle addresses only
                 // the unvoiced spans inside the scope. Each is written
@@ -1034,7 +1040,9 @@ impl Editor {
                         });
                         for (g0, g1) in [(a - eps * 2.0, a - eps), (b + eps, b + eps * 2.0)] {
                             if g0 > t0 && g1 < t1 {
-                                let held = drag.base_of(dimension).sample(g0, dimension.default_value());
+                                let held = drag
+                                    .base_of(dimension)
+                                    .sample(g0, dimension.default_value());
                                 self.apply_live(&Edit::SetDimensionLevel {
                                     note: id,
                                     dimension,
@@ -1392,7 +1400,11 @@ impl Editor {
     /// The grid step, or a beat when the grid is free.
     pub fn grid_step(&self) -> f64 {
         let step = self.grid.step(self.units_per_beat());
-        if step > 0.0 { step } else { self.units_per_beat() }
+        if step > 0.0 {
+            step
+        } else {
+            self.units_per_beat()
+        }
     }
 
     pub fn clear_time_selection(&mut self) -> bool {
@@ -1466,7 +1478,11 @@ impl Editor {
         let len = self.grid.step(self.units_per_beat());
         // A free grid has no step to take a length from; a beat is the
         // honest default rather than a zero-length note.
-        let len = if len > 0.0 { len } else { self.units_per_beat() };
+        let len = if len > 0.0 {
+            len
+        } else {
+            self.units_per_beat()
+        };
 
         self.begin_gesture();
         let mut ids = Vec::with_capacity(pitches.len());
@@ -1548,7 +1564,13 @@ impl Editor {
 
     /// The Reset View camera for the current content.
     pub fn reset_camera(&self) -> Camera {
-        camera::reset_view(self.content(), self.viewport, CUSHION, PAD, self.camera.fold)
+        camera::reset_view(
+            self.content(),
+            self.viewport,
+            CUSHION,
+            PAD,
+            self.camera.fold,
+        )
     }
 
     /// `V` — snap directly to Reset View, no interpolation, no magnets.
@@ -1588,9 +1610,9 @@ impl Editor {
         // Horizontal first: the vertical `InView` scope reads the time
         // window, so it has to see the one the gesture is producing
         // rather than the one it is replacing.
-        if let Some((t0, len)) = memagic::horizontal_span(
-            &self.doc, content, modes.horizontal, anchor, upb, view, cfg,
-        ) {
+        if let Some((t0, len)) =
+            memagic::horizontal_span(&self.doc, content, modes.horizontal, anchor, upb, view, cfg)
+        {
             self.camera.t0 = t0;
             self.camera.units_per_px = (len / self.viewport.w.max(1.0)).max(1e-9);
             moved = true;

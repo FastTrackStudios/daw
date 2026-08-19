@@ -119,9 +119,7 @@ impl Mode {
     /// Which family this mode belongs to, for grouping the switcher.
     pub fn family(&self) -> ModeFamily {
         match self {
-            Mode::Midi | Mode::Mpe | Mode::Vocals | Mode::Drums | Mode::Guitar => {
-                ModeFamily::Midi
-            }
+            Mode::Midi | Mode::Mpe | Mode::Vocals | Mode::Drums | Mode::Guitar => ModeFamily::Midi,
             Mode::PitchedAudio | Mode::UnpitchedAudio => ModeFamily::Audio,
         }
     }
