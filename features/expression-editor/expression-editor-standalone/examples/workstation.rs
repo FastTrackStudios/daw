@@ -52,6 +52,25 @@ fn main() {
         daw::service::Tracks::all(&standalone, daw::service::ProjectContext::Current).len();
     standalone.set_meters(daw::standalone::metering::Meters::new(track_count));
 
+    // Real playback: the audio engine renders the project graph into
+    // the default output (PipeWire on Linux) and drives the transport
+    // clock sample-accurately. Kept alive for the window's life —
+    // dropping it stops the stream. Failure is not fatal: the soft
+    // clock still moves the playhead, just silently, and a machine
+    // with no output device should still open the editor.
+    let project_guid = daw::service::Projects::info(
+        &standalone,
+        daw::service::ProjectContext::Current,
+    )
+    .map(|i| i.guid)
+    .unwrap_or_default();
+    match standalone.attach_audio_engine(&project_guid) {
+        Ok(engine) => {
+            Box::leak(Box::new(engine));
+        }
+        Err(e) => eprintln!("no audio engine ({e}); transport will run silent"),
+    }
+
     println!("{} — workstation", runner.label);
     stage_workstation(
         runner.loaded.into_editor(),
