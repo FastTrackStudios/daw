@@ -482,9 +482,10 @@ pub fn pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16) ->
     let context = context_at(ed, x, y);
     let action = ed.mouse.resolve_for(context, gesture, mods, ed.tool);
     if action != Action::None
-        && let Some(drag) = run_action(ed, action, x, y, mods) {
-            return drag;
-        }
+        && let Some(drag) = run_action(ed, action, x, y, mods)
+    {
+        return drag;
+    }
     legacy_pointer_down(ed, x, y, mods, button)
 }
 
@@ -809,7 +810,11 @@ fn run_action(ed: &mut Editor, action: Action, x: f64, y: f64, mods: Mods) -> Op
             }
             ed.apply_live(&Edit::NudgeChannel {
                 notes,
-                delta: if action == Action::SetNoteChannelHigher { 1 } else { -1 },
+                delta: if action == Action::SetNoteChannelHigher {
+                    1
+                } else {
+                    -1
+                },
             });
             Some(Drag::None)
         }
@@ -1185,10 +1190,7 @@ fn audition(ed: &Editor, x: f64, y: f64) {
         },
         // Off a note — the key gutter, or empty roll — sounds the row
         // itself at a nominal level.
-        _ => (
-            ed.camera.pitch_at(y, ed.viewport).round() as i32,
-            0.63,
-        ),
+        _ => (ed.camera.pitch_at(y, ed.viewport).round() as i32, 0.63),
     };
     if let Some(sink) = AUDITION.get() {
         sink(row, velocity);
@@ -1304,7 +1306,9 @@ fn cc_draw(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64) {
             let f = i as f64 / steps as f64;
             Point {
                 t: lo + (hi - lo) * f,
-                value: v_lo + (v_hi - v_lo) * f, ..Point::default() }
+                value: v_lo + (v_hi - v_lo) * f,
+                ..Point::default()
+            }
         })
         .collect();
     ed.apply_live(&Edit::DrawCc {
@@ -1394,16 +1398,17 @@ fn legacy_pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16)
     }
 
     if let Hit::NoteEdge { id, start_edge } = hit
-        && (ed.tool == Tool::NoteDraw || ed.tool == Tool::Select) {
-            let n = ed.doc.note(id).expect("hit test returned a live note");
-            let original = (n.start, n.end);
-            ed.begin_gesture();
-            return Drag::Resize {
-                note: id,
-                start_edge,
-                original,
-            };
-        }
+        && (ed.tool == Tool::NoteDraw || ed.tool == Tool::Select)
+    {
+        let n = ed.doc.note(id).expect("hit test returned a live note");
+        let original = (n.start, n.end);
+        ed.begin_gesture();
+        return Drag::Resize {
+            note: id,
+            start_edge,
+            original,
+        };
+    }
 
     let under = match hit {
         Hit::Note { id, zone } => {
@@ -1823,9 +1828,10 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
                             .abs()
                             .partial_cmp(&(*b - to).abs())
                             .unwrap_or(std::cmp::Ordering::Equal)
-                    }) {
-                        *from = s;
-                    }
+                    })
+                {
+                    *from = s;
+                }
             }
         }
         Drag::NoteErase => {
@@ -2039,8 +2045,8 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             // edge. That is why a zoom begun mid-height behaved and one
             // begun near the top or bottom lurched before it zoomed.
             ed.camera.t0 = *anchor_t - origin.0 * ed.camera.units_per_px;
-            ed.camera.vertical.center = *anchor_slot
-                - (ed.viewport.h * 0.5 - origin.1) / ed.camera.vertical.px_per_row;
+            ed.camera.vertical.center =
+                *anchor_slot - (ed.viewport.h * 0.5 - origin.1) / ed.camera.vertical.px_per_row;
             // `settle_camera`, not `camera.constrain` — the difference
             // is the grid. Constraining alone left the adaptive division
             // frozen at whatever the view was before the drag, so the
@@ -2206,7 +2212,9 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
                         (p + (pt.value - p) * factor).clamp(0.0, 1.0)
                     } else {
                         pt.value
-                    }, ..Point::default() })
+                    },
+                    ..Point::default()
+                })
                 .collect();
             ed.apply_live(&Edit::DrawCc {
                 number: *number,
@@ -2366,7 +2374,9 @@ fn write_pen(
                 };
                 Point {
                     t,
-                    value: dimension.clamp(value), ..Point::default() }
+                    value: dimension.clamp(value),
+                    ..Point::default()
+                }
             })
             .collect();
 
@@ -2442,11 +2452,7 @@ fn gesture_bounds(points: &[Point]) -> (f64, f64) {
         lo = lo.min(p.t);
         hi = hi.max(p.t);
     }
-    if lo > hi {
-        (0.0, 0.0)
-    } else {
-        (lo, hi)
-    }
+    if lo > hi { (0.0, 0.0) } else { (lo, hi) }
 }
 
 /// Restyle the most recent Curve gesture if there is one; otherwise the
@@ -2507,7 +2513,7 @@ pub fn apply_shape(ed: &mut Editor, drag: &Drag, shape: Shape) {
 /// raw delta moved the view a few pixels a notch and read as broken.
 /// Tuned by hand at the window rather than derived: the units differ per
 /// platform and input device, so there is no figure to compute.
-const PAN_GAIN: f64 = 140.0;
+pub(crate) const PAN_GAIN: f64 = 140.0;
 
 /// Wheel travel that doubles the zoom, near enough.
 ///
@@ -2515,7 +2521,7 @@ const PAN_GAIN: f64 = 140.0;
 /// zoom a percent or two, because winit's delta for one notch is around
 /// 1 rather than the ~100 px a browser reports — so the useful divisor
 /// is single digits, not hundreds.
-const ZOOM_DIVISOR: f64 = 3.0;
+pub(crate) const ZOOM_DIVISOR: f64 = 3.0;
 
 /// Wheel/trackpad routing. `(dx, dy)` are the raw deltas.
 ///

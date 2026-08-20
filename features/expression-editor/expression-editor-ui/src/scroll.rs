@@ -118,10 +118,38 @@ pub fn action_for(dx: f64, dy: f64, mods: Mods) -> Option<ActionId> {
 pub fn hint() -> String {
     let mut parts = Vec::new();
     for (label, mods) in [
-        ("scroll", Mods { ctrl: false, alt: false, shift: false }),
-        ("shift", Mods { ctrl: false, alt: false, shift: true }),
-        ("alt", Mods { ctrl: false, alt: true, shift: false }),
-        ("alt+shift", Mods { ctrl: false, alt: true, shift: true }),
+        (
+            "scroll",
+            Mods {
+                ctrl: false,
+                alt: false,
+                shift: false,
+            },
+        ),
+        (
+            "shift",
+            Mods {
+                ctrl: false,
+                alt: false,
+                shift: true,
+            },
+        ),
+        (
+            "alt",
+            Mods {
+                ctrl: false,
+                alt: true,
+                shift: false,
+            },
+        ),
+        (
+            "alt+shift",
+            Mods {
+                ctrl: false,
+                alt: true,
+                shift: true,
+            },
+        ),
     ] {
         let Some(action) = action_for(0.0, 1.0, mods) else {
             continue;
@@ -233,7 +261,11 @@ mod tests {
         // One notch of a mouse wheel.
         let mouse = notches(&WheelDelta::Lines(LinesVector::new(0.0, 1.0, 0.0)));
         // A touchpad flick of about one notch's worth of travel.
-        let pad = notches(&WheelDelta::Pixels(PixelsVector3D::new(0.0, PIXELS_PER_NOTCH, 0.0)));
+        let pad = notches(&WheelDelta::Pixels(PixelsVector3D::new(
+            0.0,
+            PIXELS_PER_NOTCH,
+            0.0,
+        )));
         assert!(
             (mouse.1 - pad.1).abs() < 1e-9,
             "a notch and {PIXELS_PER_NOTCH}px should agree: {mouse:?} vs {pad:?}"

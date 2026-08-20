@@ -164,6 +164,10 @@ pub fn ExpressionEditor(
     /// toolbar button only when present.
     #[props(default)]
     on_save: Option<EventHandler<()>>,
+    /// The transport's position, seconds — drawn as a playhead in the
+    /// stacked view when present.
+    #[props(default)]
+    playhead_secs: Option<Signal<f64>>,
     /// Anything the host wants at the top of the inspector.
     ///
     /// A slot, so a host can put its own controls inside the editor's
@@ -290,6 +294,7 @@ pub fn ExpressionEditor(
                             grid_secs: quantize
                                 .read()
                                 .grid_in(60.0 / editor.read().bpm.max(1.0)),
+                            playhead_secs,
                         }
                     } else {
                         Canvas { editor, drag, drawer, multi, menu_state, pending, draft }

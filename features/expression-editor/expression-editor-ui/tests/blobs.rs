@@ -49,9 +49,11 @@ fn audio_notes_draw_as_blobs_and_midi_notes_do_not() {
         );
     }
     // Vocals is the manual's own product, so it draws them too.
-    assert!(canvas::note_rects(&editor(Mode::Vocals, 0.0))[0]
-        .blob
-        .is_some());
+    assert!(
+        canvas::note_rects(&editor(Mode::Vocals, 0.0))[0]
+            .blob
+            .is_some()
+    );
 }
 
 #[test]
@@ -250,8 +252,8 @@ fn three_notes_on_one_row_separate_by_how_sharp_they_are() {
 
 // ── backdrop, unvoiced spans and sibilant scope ──────────────────────
 
-use expression_editor_core::handles::{Handle, HandleDrag, Scope};
 use expression_editor_core::Dimension;
+use expression_editor_core::handles::{Handle, HandleDrag, Scope};
 
 /// A note spanning a consonant: voiced, unvoiced, voiced.
 fn sibilant_editor() -> Editor {
@@ -333,8 +335,12 @@ fn the_sibilant_scope_rides_the_consonant_and_leaves_the_singing() {
     ed.drag_handle(&mut d, 150.0, false);
 
     let n = ed.doc.note(NoteId(1)).unwrap();
-    let in_consonant = n.pressure.sample(PPQ * 2.0, Dimension::Pressure.default_value());
-    let in_singing = n.pressure.sample(PPQ * 0.5, Dimension::Pressure.default_value());
+    let in_consonant = n
+        .pressure
+        .sample(PPQ * 2.0, Dimension::Pressure.default_value());
+    let in_singing = n
+        .pressure
+        .sample(PPQ * 0.5, Dimension::Pressure.default_value());
 
     assert!(
         in_consonant > before_voiced + 0.05,
@@ -355,8 +361,12 @@ fn the_whole_note_scope_still_moves_everything() {
     ed.drag_handle(&mut d, 150.0, false);
 
     let n = ed.doc.note(NoteId(1)).unwrap();
-    let a = n.pressure.sample(PPQ * 0.5, Dimension::Pressure.default_value());
-    let b = n.pressure.sample(PPQ * 2.0, Dimension::Pressure.default_value());
+    let a = n
+        .pressure
+        .sample(PPQ * 0.5, Dimension::Pressure.default_value());
+    let b = n
+        .pressure
+        .sample(PPQ * 2.0, Dimension::Pressure.default_value());
     assert!(
         (a - b).abs() < 1e-6,
         "one level across the note: {a} vs {b}"

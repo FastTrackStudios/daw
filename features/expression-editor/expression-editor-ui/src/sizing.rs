@@ -158,9 +158,7 @@ impl Chrome {
 
     /// Height taken by every row above and below the roll.
     pub fn stack_h(&self) -> f64 {
-        CHROME_HEIGHT
-            + if self.switcher { SWITCHER_H } else { 0.0 }
-            + self.lane_strip_h.max(0.0)
+        CHROME_HEIGHT + if self.switcher { SWITCHER_H } else { 0.0 } + self.lane_strip_h.max(0.0)
     }
 }
 

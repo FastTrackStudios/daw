@@ -24,19 +24,19 @@
 
 use dioxus::prelude::*;
 use dioxus_elements::input_data::MouseButton;
+use expression_editor_core::Editor;
 use expression_editor_core::memagic;
 use expression_editor_core::tools::Mods;
-use expression_editor_core::Editor;
 use input::InputCommand;
 use keyboard_types::Modifiers;
 
 use crate::interaction::{self, Drag};
 use crate::menu_ui::{self, ContextMenu};
 use crate::multitool_ui::{self, MultiTool};
+use crate::{BendFlow, draw_hint_of, velocity_ramp};
 use crate::{
     canvas, cursor, drawer, drawer::ModDrawer, keys, paint, roll_widget, scroll, text, theme,
 };
-use crate::{draw_hint_of, velocity_ramp, BendFlow};
 /// Pointer coordinates in **roll** space — element coordinates minus
 /// the keyboard gutter and timeline ruler.
 ///
@@ -71,7 +71,9 @@ fn memagic_at(ed: &Editor, hover: Option<(f64, f64)>) -> (memagic::Region, memag
         return (
             memagic::Region::Elsewhere,
             memagic::Anchor {
-                t: ed.playhead.unwrap_or_else(|| ed.camera.t_at(ed.viewport.w * 0.5)),
+                t: ed
+                    .playhead
+                    .unwrap_or_else(|| ed.camera.t_at(ed.viewport.w * 0.5)),
                 row: None,
             },
         );
@@ -172,7 +174,6 @@ pub fn Canvas(
     // a cycle. It is gesture state either way, which is what the other
     // signals here are.
     let mut ramp = use_signal(|| None::<crate::velocity_ramp::VelocityRamp>);
-
 
     // The viewport is followed by `ExpressionEditor`, which is the only
     // component that knows the whole chrome. See the effect there.
@@ -888,7 +889,8 @@ fn KeyPanel(title: String, rows: Vec<keys::Continuation>) -> Element {
             "display: block; padding: 2px 10px 5px; margin-bottom: 3px; \
              border-bottom: 1px solid {}; color: {}; \
              font-weight: 600; letter-spacing: 0.4px;",
-            theme::PANEL_BORDER, theme::TEXT_DIM,
+            theme::PANEL_BORDER,
+            theme::TEXT_DIM,
         )
     };
     let rows: Vec<(String, String, &'static str)> = rows
@@ -899,7 +901,11 @@ fn KeyPanel(title: String, rows: Vec<keys::Continuation>) -> Element {
             } else {
                 c.label
             };
-            let colour = if c.is_group { theme::TEXT_DIM } else { theme::TEXT };
+            let colour = if c.is_group {
+                theme::TEXT_DIM
+            } else {
+                theme::TEXT
+            };
             (c.key, label, colour)
         })
         .collect();

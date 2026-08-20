@@ -225,9 +225,10 @@ pub fn joins(ed: &Editor) -> Vec<Join> {
             let x1 = ed.camera.x(b.start);
             // Where each end of the join actually sits: the origin's
             // last bend value, the target's first.
-            let ya = ed
-                .camera
-                .y(a.row as f64 + 0.5 + a.pitch.sample(a.end, 0.0) / spr, ed.viewport);
+            let ya = ed.camera.y(
+                a.row as f64 + 0.5 + a.pitch.sample(a.end, 0.0) / spr,
+                ed.viewport,
+            );
             let yb = ed.camera.y(
                 b.row as f64 + 0.5 + b.pitch.sample(b.start, 0.0) / spr,
                 ed.viewport,

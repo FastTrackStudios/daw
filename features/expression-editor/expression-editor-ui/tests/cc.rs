@@ -295,8 +295,8 @@ fn the_map_owns_the_bindings_so_a_preset_can_disagree() {
 
 // ── mode-dependent keys ──────────────────────────────────────────────
 
-use expression_editor_core::doc::Note;
 use expression_editor_core::Mode;
+use expression_editor_core::doc::Note;
 
 fn two_track_editor(mode: Mode) -> Editor {
     let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);

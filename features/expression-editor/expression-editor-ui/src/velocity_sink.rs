@@ -23,11 +23,11 @@ use std::cell::RefCell;
 use dioxus::prelude::*;
 
 use crate::theme;
+use expression_editor_core::Editor;
 use expression_editor_core::doc::NoteId;
 use expression_editor_core::edit::Edit;
-use expression_editor_core::Editor;
-use expression_editor_tools::velocity::{Note as VNote, Session};
 use expression_editor_tools::VelocitySink;
+use expression_editor_tools::velocity::{Note as VNote, Session};
 
 /// A sink over a live [`Editor`] signal.
 pub struct EditorSink {

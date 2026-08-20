@@ -772,6 +772,11 @@ pub fn StackView(
     // r[impl drums.manual.nudge]
     #[props(default)]
     grid_secs: f64,
+    /// The transport's position, seconds, when a host has one — the
+    /// stack draws it as a playhead so "where am I" survives leaving
+    /// the arrangement. `None` (a demo scene, a test) draws nothing.
+    #[props(default)]
+    playhead_secs: Option<Signal<f64>>,
 ) -> Element {
     let mut editor = editor;
     // Where a middle-drag pan last was.
@@ -787,6 +792,10 @@ pub fn StackView(
     // The lane whose mic menu is open, by layout-lane index. One at a
     // time: a second chip click moves the menu rather than stacking.
     let mut mic_menu = use_signal(|| None::<usize>);
+    // Where the pointer last was, for anchoring wheel zoom. (Focus
+    // needs no handling: Blitz focuses the nearest focusable ancestor
+    // on pointer-down — an FTS patch in the fork.)
+    let mut wheel_anchor = use_signal(|| None::<(f64, f64)>);
     let ed = editor.read();
     let vp = ed.viewport;
     let lanes = lanes(&ed, ACTIVE_BOOST, ed.lane_floor().max(MIN_LANE));
@@ -861,6 +870,21 @@ pub fn StackView(
                 if e.is_auto_repeating() {
                     return;
                 }
+                // Zoom keys work with nothing selected — asking for a
+                // selection before you may look at something closer
+                // gets the order of operations backwards.
+                if let Key::Character(c) = e.key() {
+                    let factor = match c.as_str() {
+                        "+" | "=" => Some(1.4),
+                        "-" | "_" => Some(1.0 / 1.4),
+                        _ => None,
+                    };
+                    if let Some(f) = factor {
+                        editor.write().zoom_time_at(vp.w * 0.5, f);
+                        e.prevent_default();
+                        return;
+                    }
+                }
                 let Some(sel) = selected() else { return };
                 let shift = e.modifiers().contains(Modifiers::SHIFT);
                 match e.key() {
@@ -913,6 +937,10 @@ pub fn StackView(
             // fix was to make the shared answer right rather than to
             // keep a second one.
             onpointermove: move |e: PointerEvent| {
+                {
+                    let c = e.data().element_coordinates();
+                    wheel_anchor.set(Some((c.x, c.y)));
+                }
                 if let Some(mut s) = slipping() {
                     s.x = e.data().element_coordinates().x;
                     s.shift = e.data().modifiers().contains(Modifiers::SHIFT);
@@ -966,6 +994,46 @@ pub fn StackView(
             onpointerleave: move |_| {
                 slipping.set(None);
                 panning.set(None);
+            },
+            // The wheel, on the shared bindings (`scroll::action_for`)
+            // with the stack's meanings: horizontal zoom is the shared
+            // time camera, vertical scroll is the lane stack. Pitch
+            // zoom has no meaning over a stack of lanes and is ignored
+            // rather than remapped — a gesture that does something
+            // different per view is how schemes rot.
+            onwheel: move |e: WheelEvent| {
+                let (dx, dy) = crate::scroll::notches(&e.delta());
+                let m = e.data().modifiers();
+                let mods = expression_editor_core::Mods {
+                    ctrl: m.contains(Modifiers::CONTROL) || m.contains(Modifiers::META),
+                    shift: m.contains(Modifiers::SHIFT),
+                    alt: m.contains(Modifiers::ALT),
+                };
+                let Some(action) = crate::scroll::action_for(dx, dy, mods) else {
+                    return;
+                };
+                let (ax, _) =
+                    wheel_anchor().unwrap_or((canvas::GUTTER_W + vp.w * 0.5, vp.h * 0.5));
+                let x = (ax - canvas::GUTTER_W).max(0.0);
+                let travel = if dx.abs() > dy.abs() { dx } else { dy };
+                let factor = (travel.abs() / crate::interaction::ZOOM_DIVISOR).exp();
+                let zoom_in = travel < 0.0;
+                let mut ed = editor.write();
+                match action.as_str() {
+                    "view.hscroll" => {
+                        ed.pan_px(-travel * crate::interaction::PAN_GAIN, 0.0);
+                    }
+                    "view.vscroll" => {
+                        ed.stack_scroll =
+                            (ed.stack_scroll + dy * crate::interaction::PAN_GAIN).max(0.0);
+                    }
+                    "view.zoom_h" | "view.zoom_both" => {
+                        ed.zoom_time_at(x, if zoom_in { factor } else { 1.0 / factor });
+                    }
+                    _ => {}
+                }
+                drop(ed);
+                e.prevent_default();
             },
             onpointerdown: move |e: PointerEvent| {
                 let c = e.data().element_coordinates();
@@ -1529,6 +1597,21 @@ pub fn StackView(
                 }
             }
 
+            // The transport's playhead, over every lane. A leaf
+            // component: position ticks arrive many times a second
+            // while playing and must move one line, not re-render the
+            // stack.
+            if let Some(ph) = playhead_secs {
+                if px_per_sec > 0.0 {
+                    StackPlayhead {
+                        playhead: ph,
+                        view0,
+                        px_per_sec,
+                        height: vp.h,
+                    }
+                }
+            }
+
             // The selected hit — the unit of keyboard editing — marked
             // with a bracket at the lane's top edge so it reads against
             // the hit line without hiding it.
@@ -1579,6 +1662,26 @@ pub fn StackView(
                 }
             }
         }
+        }
+    }
+}
+
+/// The playhead line, isolated so a transport tick re-renders one
+/// element. Rendered inside the stack's svg, in content coordinates.
+#[component]
+fn StackPlayhead(playhead: Signal<f64>, view0: f64, px_per_sec: f64, height: f64) -> Element {
+    let x = canvas::GUTTER_W + (playhead() - view0) * px_per_sec;
+    if x < canvas::GUTTER_W {
+        return rsx! {};
+    }
+    rsx! {
+        line {
+            x1: "{x:.1}", x2: "{x:.1}",
+            y1: "{canvas::RULER_H}",
+            y2: "{canvas::RULER_H + height:.1}",
+            stroke: "#f8fafc",
+            stroke_width: 1,
+            opacity: "0.7",
         }
     }
 }

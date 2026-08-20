@@ -37,7 +37,7 @@ use std::cell::RefCell;
 
 use dioxus::prelude::*;
 use dioxus_test::keyboard_types::Modifiers;
-use dioxus_test::{by_testid, render, DocumentTester, ResolvedElement};
+use dioxus_test::{DocumentTester, ResolvedElement, by_testid, render};
 use expression_editor_core::doc::{Dimension, ExpressionDoc, Note, NoteId, TimeBase};
 use expression_editor_core::{Editor, Mode, Tool, Viewport};
 use expression_editor_ui::ExpressionEditor;
@@ -198,12 +198,7 @@ fn note_area(el: &ResolvedElement) -> (f64, f64, f64, f64) {
 
 /// Drag from `from` to `to`, both in fractions of the note area, and
 /// return the readout afterwards.
-async fn drag(
-    ed: Editor,
-    from: (f64, f64),
-    to: (f64, f64),
-    m: Mod,
-) -> dioxus_test::Result<String> {
+async fn drag(ed: Editor, from: (f64, f64), to: (f64, f64), m: Mod) -> dioxus_test::Result<String> {
     stage(ed);
     let tester = render(Surface).with_window_size(WINDOW.0, WINDOW.1).build();
     tester.drain();
@@ -217,7 +212,10 @@ async fn drag(
         m,
     )
     .await;
-    Ok(tester.query(by_testid("readout")).immediately()?.inner_html())
+    Ok(tester
+        .query(by_testid("readout"))
+        .immediately()?
+        .inner_html())
 }
 
 /// Sweep from the centre of the first note to the centre of the last.
@@ -250,7 +248,10 @@ async fn drag_across_notes(ed: Editor, m: Mod) -> dioxus_test::Result<String> {
         m,
     )
     .await;
-    Ok(tester.query(by_testid("readout")).immediately()?.inner_html())
+    Ok(tester
+        .query(by_testid("readout"))
+        .immediately()?
+        .inner_html())
 }
 
 /// Drag starting *on the first note*, offset by `delta` in fractions of
@@ -283,16 +284,14 @@ async fn drag_from_first_note(
         m,
     )
     .await;
-    Ok(tester.query(by_testid("readout")).immediately()?.inner_html())
+    Ok(tester
+        .query(by_testid("readout"))
+        .immediately()?
+        .inner_html())
 }
 
 /// Press, move in steps, release.
-async fn sweep(
-    tester: &DocumentTester,
-    (x0, y0): (f64, f64),
-    (x1, y1): (f64, f64),
-    m: Mod,
-) {
+async fn sweep(tester: &DocumentTester, (x0, y0): (f64, f64), (x1, y1): (f64, f64), m: Mod) {
     // Enough samples that the path is continuous over a note-width.
     // A real pointer emits dozens of moves across a drag; six skipped
     // straight over the notes a sweep was supposed to meet, which read
@@ -323,8 +322,8 @@ async fn the_roll_has_area_for_every_tool() -> dioxus_test::Result<()> {
     for tool in Tool::ALL {
         stage(editor_with_notes(tool, Mode::Midi));
         let tester = render(Surface).with_window_size(WINDOW.0, WINDOW.1).build();
-    tester.drain();
-    tester.relayout();
+        tester.drain();
+        tester.relayout();
         let el = tester.query(by_testid("roll")).immediately()?;
         let (w, h) = el.size();
         assert!(w > 0.0 && h > 0.0, "{tool:?}: roll has no area ({w}x{h})");
@@ -337,7 +336,11 @@ async fn a_plain_drag_marquees() -> dioxus_test::Result<()> {
     let before = editor_with_notes(Tool::Select, Mode::Midi);
     let notes = before.doc.notes.len();
     let html = drag(before, (0.02, 0.05), (0.98, 0.95), Mod::None).await?;
-    assert_eq!(field(&html, "notes"), notes, "a marquee must not edit notes");
+    assert_eq!(
+        field(&html, "notes"),
+        notes,
+        "a marquee must not edit notes"
+    );
     assert!(
         field(&html, "sel") > 0,
         "a box over every note selected none: {html}"
@@ -558,7 +561,11 @@ async fn alt_places_a_note_of_the_grid_length_and_carries_it() -> dioxus_test::R
     let notes = before.doc.notes.len();
 
     let html = drag(before, (0.1, 0.7), (0.6, 0.3), Mod::Alt).await?;
-    assert_eq!(field(&html, "notes"), notes + 1, "Alt+drag must insert one note");
+    assert_eq!(
+        field(&html, "notes"),
+        notes + 1,
+        "Alt+drag must insert one note"
+    );
     assert_eq!(
         field(&html, "cells"),
         1,
@@ -581,7 +588,11 @@ async fn alt_shift_sizes_the_note_instead_of_moving_it() -> dioxus_test::Result<
     let notes = before.doc.notes.len();
 
     let html = drag(before, (0.1, 0.5), (0.8, 0.5), Mod::ShiftAlt).await?;
-    assert_eq!(field(&html, "notes"), notes + 1, "still inserts exactly one");
+    assert_eq!(
+        field(&html, "notes"),
+        notes + 1,
+        "still inserts exactly one"
+    );
     assert!(
         field(&html, "cells") > 1,
         "a sized note should be longer than the cell it started as: {html}"

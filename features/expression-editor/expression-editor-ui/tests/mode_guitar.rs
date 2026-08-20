@@ -163,7 +163,10 @@ fn every_string_a_cycle_lands_on_can_actually_play_the_note() {
             (0..=tuning.frets as i32).contains(&fret),
             "cycled onto an unplayable position: fret {fret}"
         );
-        assert_eq!(ed.doc.notes[0].row, pitch, "the pitch drifted while cycling");
+        assert_eq!(
+            ed.doc.notes[0].row, pitch,
+            "the pitch drifted while cycling"
+        );
     }
 }
 
@@ -179,7 +182,11 @@ fn setting_a_fret_slides_up_the_neck() {
 
     let n = &ed.doc.notes[0];
     assert_eq!(n.string, Some(2), "the hand left the string");
-    assert_eq!(n.row, tuning.pitch(2, 9), "the pitch did not follow the fret");
+    assert_eq!(
+        n.row,
+        tuning.pitch(2, 9),
+        "the pitch did not follow the fret"
+    );
 }
 
 // ── on the real surface ──────────────────────────────────────────────
@@ -190,10 +197,17 @@ async fn the_string_roll_mounts_with_its_tuning_intact() -> dioxus_test::Result<
     let row = ed.doc.notes[0].row;
     stage(ed);
     let tester = render(Surface).with_window_size(1000, 620).build();
-    let html = tester.query(by_testid("readout")).immediately()?.inner_html();
+    let html = tester
+        .query(by_testid("readout"))
+        .immediately()?
+        .inner_html();
 
     assert_eq!(field(&html, "strings"), tuning.strings() as i64, "{html}");
-    assert_eq!(field(&html, "string"), 3, "the string annotation was lost: {html}");
+    assert_eq!(
+        field(&html, "string"),
+        3,
+        "the string annotation was lost: {html}"
+    );
     assert_eq!(
         field(&html, "row"),
         row as i64,

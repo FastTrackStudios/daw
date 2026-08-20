@@ -673,6 +673,7 @@ pub fn WorkstationApp() -> Element {
                         on_quantize_apply: on_apply,
                         on_hit,
                         on_save,
+                        playhead_secs: playhead,
                     }
                 }
             }
