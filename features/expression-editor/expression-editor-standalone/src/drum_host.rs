@@ -351,10 +351,9 @@ impl DrumHost {
                     }
                     members += 1;
                 }
-                docs.push((
-                    guid.clone(),
-                    crate::percussion_doc(&samples, self.sample_rate),
-                ));
+                let mut doc = crate::percussion_doc(&samples, self.sample_rate);
+                crate::attach_regions(&self.daw, &self.ctx, &mut doc);
+                docs.push((guid.clone(), doc));
             }
             new_sums.push(lane_sum.map(|mut sum| {
                 let scale = 1.0 / members.max(1) as f64;

@@ -695,6 +695,18 @@ pub struct Marker {
     pub label: Option<String>,
 }
 
+/// A read-only named span on the timeline — the song's sections
+/// (`INTRO`, `VS 1`, `CH 1`), supplied by the host, never edited here.
+/// Times are document time, the same axis notes live on.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Region {
+    pub start: f64,
+    pub end: f64,
+    pub label: String,
+    /// `#rrggbb`, when the host assigned one.
+    pub color: Option<String>,
+}
+
 /// The whole editable surface.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExpressionDoc {
@@ -707,6 +719,10 @@ pub struct ExpressionDoc {
     /// Must match, or pitch reads wrong on playback.
     pub bend_range: f64,
     pub markers: Vec<Marker>,
+    /// The song's sections, host-supplied and read-only — what the
+    /// ruler shows so "where am I" has an answer better than a bar
+    /// number.
+    pub regions: Vec<Region>,
     /// Document-level controller lanes. Not per-note: an orchestral
     /// part rides CC1/CC11 across a phrase regardless of where the note
     /// boundaries fall.
@@ -757,6 +773,7 @@ impl ExpressionDoc {
             end,
             bend_range: 48.0,
             markers: Vec::new(),
+            regions: Vec::new(),
             cc: crate::cc::CcSet::default(),
             row_space: crate::rows::RowSpace::Pitch,
             peaks: Vec::new(),

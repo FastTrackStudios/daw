@@ -751,6 +751,24 @@ pub fn StackView(
     let vp = ed.viewport;
     let lanes = lanes(&ed, ACTIVE_BOOST, ed.lane_floor().max(MIN_LANE));
     let ticks = canvas::ruler(&ed);
+    // The song's sections across the ruler — clipped to the view, with
+    // the label given only the room its span actually has.
+    let sections: Vec<(f64, f64, String, String)> = {
+        let (t0, t1) = ed.camera.time_span(ed.viewport);
+        ed.doc
+            .regions
+            .iter()
+            .filter(|r| r.end > t0 && r.start < t1)
+            .map(|r| {
+                let x0 = ed.camera.x(r.start.max(t0)).max(0.0);
+                let x1 = ed.camera.x(r.end.min(t1)).min(vp.w);
+                let fit = (((x1 - x0) - 6.0) / 5.5).max(0.0) as usize;
+                let label: String = r.label.chars().take(fit).collect();
+                let color = r.color.clone().unwrap_or_else(|| theme::SURFACE_BAR.into());
+                (x0, x1, label, color)
+            })
+            .collect()
+    };
     let (view0, px_per_sec) = view_span_secs(&ed)
         .map(|(v0, v1)| {
             if (v1 - v0).abs() < 1e-9 {
@@ -1070,6 +1088,32 @@ pub fn StackView(
             }
             g {
                 transform: "translate({canvas::GUTTER_W}, 0)",
+                // The section strip: the top half of the ruler is the
+                // song's own map — INTRO, VS 1, CH 1 — in the colours
+                // the arrange view already taught the band.
+                for (x0, x1, label, color) in sections.iter() {
+                    rect {
+                        x: "{x0:.1}", y: 0,
+                        width: "{(x1 - x0).max(0.0):.1}",
+                        height: "{canvas::RULER_H - 13.0}",
+                        fill: "{color}",
+                        opacity: "0.85",
+                    }
+                    line {
+                        x1: "{x0:.1}", x2: "{x0:.1}",
+                        y1: 0, y2: "{canvas::RULER_H - 13.0}",
+                        stroke: theme::GUTTER_BG,
+                        stroke_width: 1,
+                    }
+                    if !label.is_empty() {
+                        text {
+                            x: "{x0 + 4.0:.1}", y: 11,
+                            font_size: "8",
+                            fill: "#0b0b10",
+                            "{label}"
+                        }
+                    }
+                }
                 for t in ticks.iter() {
                     line {
                         x1: "{t.x:.1}", x2: "{t.x:.1}",
@@ -1131,6 +1175,19 @@ pub fn StackView(
                                     y1: "{lane.y:.1}", y2: "{lane.y + lane.h:.1}",
                                     stroke: if t.bar { theme::GRID_BEAT } else { theme::GRID_SUB },
                                     stroke_width: 1,
+                                }
+                            }
+                            // Section boundaries carry down through the
+                            // material, faintly, in the section's own
+                            // colour — the ruler says where you are,
+                            // these say it where you are looking.
+                            for (x0, _, _, color) in sections.iter() {
+                                line {
+                                    x1: "{x0:.1}", x2: "{x0:.1}",
+                                    y1: "{lane.y:.1}", y2: "{lane.y + lane.h:.1}",
+                                    stroke: "{color}",
+                                    stroke_width: 1,
+                                    opacity: "0.3",
                                 }
                             }
                             // A role lane's audio, behind everything

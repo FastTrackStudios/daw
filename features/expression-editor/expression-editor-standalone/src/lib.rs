@@ -605,12 +605,14 @@ impl Runner {
                 }
                 *count += 1;
             }
+            let mut doc = percussion_doc(&samples, rate);
+            attach_regions(&daw, &ctx, &mut doc);
             members.push(Member {
                 guid: track.guid.clone(),
                 name: track.name.clone(),
                 folder: chain.first().map(|s| s.to_string()),
                 role,
-                doc: percussion_doc(&samples, rate),
+                doc,
                 item: ItemRef::Guid(item_guid),
                 length_secs,
             });
@@ -1047,6 +1049,33 @@ pub(crate) fn read_take_mono(
 /// per transient.
 ///
 /// Deliberately **not** [`expression_editor_audio::analyze_percussive`]:
+/// Carry the project's regions onto a document, in its own time units.
+///
+/// The sections are how a player knows where they are — "bar 38" says
+/// nothing, "CH 1" says everything — so every lane's ruler shows them.
+/// Host colours come through as `#rrggbb`; REAPER's section colours are
+/// the ones the band already knows from the arrange view.
+pub(crate) fn attach_regions(
+    daw: &Standalone,
+    ctx: &ProjectContext,
+    doc: &mut expression_editor_core::ExpressionDoc,
+) {
+    use daw::service::Regions;
+    let ups = doc.time_base.units_per_second(120.0);
+    if ups <= 0.0 {
+        return;
+    }
+    doc.regions = Regions::all(daw, ctx.clone())
+        .into_iter()
+        .map(|r| expression_editor_core::doc::Region {
+            start: r.time_range.start_seconds() * ups,
+            end: r.time_range.end_seconds() * ups,
+            label: r.name,
+            color: r.color.map(|c| format!("#{c:06x}")),
+        })
+        .collect();
+}
+
 /// that segments by spectral flux over an STFT, which quantises every
 /// hit to a hop and costs a transform per mic. The envelope gate is the
 /// detector the quantize panel uses, sample-accurate and cheap — the
