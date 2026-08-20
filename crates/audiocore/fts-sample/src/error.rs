@@ -7,6 +7,12 @@ pub enum SamplerError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("audio probe: {0}")]
+    Probe(String),
+
+    #[error("audio decode: {0}")]
+    Decode(String),
+
     #[error("spec parse error: {0}")]
     SpecParse(String),
 

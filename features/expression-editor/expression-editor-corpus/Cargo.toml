@@ -18,8 +18,10 @@ publish = false
 # The detector under test. The corpus exists to measure this one thing.
 expression-editor-audio = { workspace = true }
 clap = { workspace = true }
-# Same versions the rest of the tree already uses (features/guide,
-# crates/keyflow/keyflow-midi) rather than a second opinion.
+# The shared header probe (no features: probe is always on); hound stays
+# for per-channel reading and rendering, same version the rest of the
+# tree already uses rather than a second opinion.
+fts-sample = { workspace = true }
 hound = "3.5"
 midly = "0.5"
 

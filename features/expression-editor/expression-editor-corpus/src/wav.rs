@@ -20,51 +20,26 @@
 //!    "sample" is a 15-channel object and the bleed is inside it; there
 //!    is no per-mic file to load in isolation.
 //!
-//! This module reads the header and nothing else — it never decodes
-//! audio — so probing a whole kit is a few thousand short seeks rather
-//! than gigabytes of I/O.
+//! The parser itself now lives in `fts_sample::probe` (it was ported
+//! there verbatim — chunk walk, `WAVE_FORMAT_EXTENSIBLE` resolution and
+//! all); this module keeps the corpus-shaped view of it: a fmt-only
+//! [`WavHeader`] that [`summarize`] can group on, plus per-channel
+//! reading. Probing reads headers and nothing else — never audio — so
+//! probing a whole kit is a few thousand short seeks rather than
+//! gigabytes of I/O.
 
-use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io;
 use std::path::{Path, PathBuf};
 
-/// How samples are encoded, as the `fmt ` chunk's format tag reports
-/// it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Format {
-    /// Tag 1 — integer PCM.
-    Pcm,
-    /// Tag 3 — IEEE float. What the DrumGizmo kits are.
-    Float,
-    /// Tag 0xFFFE — the real format hides in the extension's sub-format
-    /// GUID, whose first two bytes are one of the tags above.
-    Extensible(u16),
-    /// Anything else, reported rather than rejected: the point of a
-    /// probe is to say what is there.
-    Other(u16),
-}
-
-impl Format {
-    fn from_tag(tag: u16) -> Self {
-        match tag {
-            1 => Self::Pcm,
-            3 => Self::Float,
-            0xFFFE => Self::Extensible(0),
-            other => Self::Other(other),
-        }
-    }
-
-    /// The effective encoding, resolving an extensible header to the
-    /// sub-format it actually carries.
-    pub fn effective(self) -> Self {
-        match self {
-            Self::Extensible(sub) => Self::from_tag(sub),
-            other => other,
-        }
-    }
-}
+/// How samples are encoded — `fts_sample`'s tag enum (`Pcm`, `Float`,
+/// `Extensible`, `Other`), re-exported under the name the corpus API
+/// always had.
+pub use fts_sample::WavFormat as Format;
 
 /// What a WAV file's `fmt ` chunk says.
+///
+/// Deliberately excludes the data length: [`summarize`] groups files by
+/// this header, and every file in a kit has its own length.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WavHeader {
     pub channels: u16,
@@ -73,65 +48,17 @@ pub struct WavHeader {
     pub format: Format,
 }
 
-/// Read one file's header.
-///
-/// Walks the RIFF chunk list rather than assuming `fmt ` sits at byte
-/// 12. It usually does, but a file with a `JUNK` or `bext` chunk in
-/// front is perfectly legal and a fixed offset reads garbage from it.
+/// Read one file's header (via `fts_sample::probe` — no audio decode).
 pub fn probe(path: &Path) -> io::Result<WavHeader> {
-    let mut file = File::open(path)?;
-    let mut riff = [0u8; 12];
-    file.read_exact(&mut riff)?;
-    if &riff[0..4] != b"RIFF" || &riff[8..12] != b"WAVE" {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("{}: not a RIFF/WAVE file", path.display()),
-        ));
-    }
-
-    let mut header = [0u8; 8];
-    loop {
-        if file.read_exact(&mut header).is_err() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("{}: no fmt chunk", path.display()),
-            ));
-        }
-        let id = [header[0], header[1], header[2], header[3]];
-        let size = u32::from_le_bytes([header[4], header[5], header[6], header[7]]);
-        if &id == b"fmt " {
-            let mut fmt = vec![0u8; size as usize];
-            file.read_exact(&mut fmt)?;
-            return parse_fmt(&fmt, path);
-        }
-        // Chunks are word-aligned: an odd size is followed by a pad
-        // byte that is not counted in the size.
-        let skip = size as i64 + (size as i64 & 1);
-        file.seek(SeekFrom::Current(skip))?;
-    }
-}
-
-fn parse_fmt(fmt: &[u8], path: &Path) -> io::Result<WavHeader> {
-    if fmt.len() < 16 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("{}: fmt chunk is {} bytes, want 16", path.display(), fmt.len()),
-        ));
-    }
-    let tag = u16::from_le_bytes([fmt[0], fmt[1]]);
-    let mut format = Format::from_tag(tag);
-    // WAVE_FORMAT_EXTENSIBLE: the sub-format GUID starts at offset 24
-    // of the chunk and its first two bytes are the real format tag.
-    if let Format::Extensible(_) = format
-        && fmt.len() >= 26
-    {
-        format = Format::Extensible(u16::from_le_bytes([fmt[24], fmt[25]]));
-    }
+    let info = fts_sample::probe(path).map_err(|e| match e {
+        fts_sample::SamplerError::Io(e) => e,
+        other => io::Error::new(io::ErrorKind::InvalidData, other.to_string()),
+    })?;
     Ok(WavHeader {
-        channels: u16::from_le_bytes([fmt[2], fmt[3]]),
-        sample_rate: u32::from_le_bytes([fmt[4], fmt[5], fmt[6], fmt[7]]),
-        bits_per_sample: u16::from_le_bytes([fmt[14], fmt[15]]),
-        format: format.effective(),
+        channels: info.channels,
+        sample_rate: info.sample_rate,
+        bits_per_sample: info.bits_per_sample,
+        format: info.format,
     })
 }
 

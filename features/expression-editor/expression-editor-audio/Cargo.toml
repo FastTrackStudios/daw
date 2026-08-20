@@ -14,7 +14,7 @@ default = []
 render = ["tune-dsp/world"]
 # The DAW-facing session. Off by default so a wasm or offline consumer
 # gets the analysis without the facade.
-daw = ["dep:daw"]
+daw = ["dep:daw", "dep:fts-sample"]
 
 [dependencies]
 expression-editor-core = { workspace = true }
@@ -25,6 +25,8 @@ tune-dsp = { workspace = true }
 align-dsp = { workspace = true }
 realfft = { workspace = true }
 daw = { workspace = true, optional = true }
+# The shared WAV writer, only needed by the session's render path.
+fts-sample = { workspace = true, features = ["write"], optional = true }
 
 [dev-dependencies]
 # The round-trip and session tests render and drive the facade, so the

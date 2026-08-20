@@ -419,36 +419,16 @@ fn strip_render_suffix(stem: &str) -> &str {
     }
 }
 
-/// Write mono 32-bit float WAV.
+/// Write mono 32-bit float WAV via the shared `fts-sample` writer.
 ///
 /// Float rather than 16- or 24-bit int because this is an intermediate
 /// a later edit will read back: there is no headroom decision to make,
 /// nothing to dither, and a round trip costs nothing.
 fn write_wav_f32(path: &str, samples: &[f64], sample_rate: f64) -> std::io::Result<()> {
-    use std::io::Write;
-
     let rate = sample_rate.max(1.0) as u32;
-    let bytes = samples.len() as u32 * 4;
-    let mut out = Vec::with_capacity(44 + bytes as usize);
-    out.extend_from_slice(b"RIFF");
-    out.extend_from_slice(&(36 + bytes).to_le_bytes());
-    out.extend_from_slice(b"WAVE");
-    out.extend_from_slice(b"fmt ");
-    out.extend_from_slice(&16u32.to_le_bytes());
-    // 3 = IEEE float.
-    out.extend_from_slice(&3u16.to_le_bytes());
-    out.extend_from_slice(&1u16.to_le_bytes());
-    out.extend_from_slice(&rate.to_le_bytes());
-    out.extend_from_slice(&(rate * 4).to_le_bytes());
-    out.extend_from_slice(&4u16.to_le_bytes());
-    out.extend_from_slice(&32u16.to_le_bytes());
-    out.extend_from_slice(b"data");
-    out.extend_from_slice(&bytes.to_le_bytes());
-    for &s in samples {
-        out.extend_from_slice(&(s as f32).to_le_bytes());
-    }
-
-    let mut f = std::fs::File::create(path)?;
-    f.write_all(&out)?;
-    f.sync_all()
+    let mono: Vec<f32> = samples.iter().map(|&s| s as f32).collect();
+    fts_sample::write_wav_f32(std::path::Path::new(path), rate, &[mono]).map_err(|e| match e {
+        fts_sample::SamplerError::Io(e) => e,
+        other => std::io::Error::new(std::io::ErrorKind::InvalidData, other.to_string()),
+    })
 }
