@@ -52,6 +52,24 @@ use clack_host::utils::Cookie;
 
 use crate::plugin::PluginEvents;
 
+/// Whether this platform's CLAP GUI API measures sizes in **logical** pixels.
+///
+/// CLAP leaves the unit to the GUI API rather than fixing one: Cocoa (macOS)
+/// is logical, X11 and Win32 are physical. Every size crossing the plugin
+/// boundary — `gui.get_size`, `gui.set_size`, the size a plugin asks the host
+/// to resize to — is in that API's unit.
+///
+/// A host that assumes physical everywhere is correct on Linux and Windows
+/// and wrong on macOS by exactly the display's scale factor: on a 2x Retina
+/// panel the editor comes out half size, and any size reported back to the
+/// plugin is double what it should be. Embedders must ask this before
+/// converting.
+pub fn gui_api_uses_logical_size() -> bool {
+    GuiApiType::default_for_current_platform()
+        .map(|api| api.uses_logical_size())
+        .unwrap_or(false)
+}
+
 // ── Host handlers (minimal stubs) ────────────────────────────────────
 
 /// A resize the plugin has asked the host for, waiting to be applied.
@@ -716,9 +734,45 @@ impl LoadedClapPlugin {
         Ok(())
     }
 
+    /// Create the plugin's editor WITHOUT parenting or showing it, and report
+    /// the size it asks for. The editor is destroyed again before returning.
+    ///
+    /// CLAP allows `get_size` between `create` and `set_parent` — that is
+    /// exactly what a host does to size its frame before embedding — so this
+    /// answers "what size does this editor want" with no window, no parent,
+    /// and no display. That makes it runnable over SSH and in CI, where the
+    /// full embedded path cannot go.
+    ///
+    /// The size is in the platform GUI API's unit
+    /// ([`gui_api_uses_logical_size`]).
+    pub fn probe_gui_size(&mut self) -> Result<(u32, u32), ClapHostError> {
+        let mut handle = self.instance.plugin_handle();
+        let gui = handle
+            .get_extension::<PluginGui>()
+            .ok_or(ClapHostError::NoGuiExtension)?;
+        let api_type = GuiApiType::default_for_current_platform()
+            .ok_or(ClapHostError::GuiUnsupportedPlatform)?;
+        let config = GuiConfiguration {
+            api_type,
+            is_floating: false,
+        };
+        if !gui.is_api_supported(&mut handle, config) {
+            return Err(ClapHostError::GuiUnsupportedPlatform);
+        }
+        gui.create(&mut handle, config)
+            .map_err(|_| ClapHostError::GuiCreate)?;
+        let size = gui.get_size(&mut handle).map(|s| (s.width, s.height));
+        gui.destroy(&mut handle);
+        size.ok_or(ClapHostError::GuiCreate)
+    }
+
     /// Embed the plugin GUI into a host-supplied parent window and show
-    /// it. Returns the plugin's reported initial size in physical pixels
-    /// (falls back to 800x500 when the plugin doesn't report one).
+    /// it. Returns the plugin's reported initial size (falls back to 800x500
+    /// when the plugin doesn't report one).
+    ///
+    /// The size is in the unit this platform's GUI API uses — logical pixels
+    /// on macOS, physical elsewhere. Ask [`gui_api_uses_logical_size`] before
+    /// handing it to a windowing API that wants one specific unit.
     ///
     /// This is the path every FTS nice-plug plugin needs — they reject
     /// floating windows (`is_floating: false` only), exactly like when
@@ -769,7 +823,8 @@ impl LoadedClapPlugin {
         Ok(size)
     }
 
-    /// Current GUI size in physical pixels, if the plugin reports one.
+    /// Current GUI size, if the plugin reports one — logical pixels on
+    /// macOS, physical elsewhere ([`gui_api_uses_logical_size`]).
     pub fn gui_size(&mut self) -> Option<(u32, u32)> {
         let mut handle = self.instance.plugin_handle();
         let gui = handle.get_extension::<PluginGui>()?;
@@ -778,7 +833,8 @@ impl LoadedClapPlugin {
 
     /// A resize the plugin has asked for since this was last called, if any.
     ///
-    /// Logical pixels, as the plugin reported them. The embedder is expected to
+    /// In the platform GUI API's unit ([`gui_api_uses_logical_size`]), as the
+    /// plugin reported them. The embedder is expected to
     /// resize its window to match and then tell the plugin the new size with
     /// [`Self::gui_set_size`] — a host that only does the first half leaves the
     /// editor rendering at the old size inside a new frame.
@@ -786,7 +842,8 @@ impl LoadedClapPlugin {
         self.gui_resize.take()
     }
 
-    /// Ask the plugin to adopt a new GUI size (host-side resize). Returns
+    /// Ask the plugin to adopt a new GUI size (host-side resize), in the
+    /// platform GUI API's unit ([`gui_api_uses_logical_size`]). Returns
     /// `false` when the plugin refuses or has no GUI.
     pub fn gui_set_size(&mut self, width: u32, height: u32) -> bool {
         let mut handle = self.instance.plugin_handle();
