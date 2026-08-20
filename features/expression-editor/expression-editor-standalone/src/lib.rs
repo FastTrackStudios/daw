@@ -60,6 +60,7 @@ pub mod app;
 pub mod cli;
 pub mod drum_host;
 pub mod library;
+pub mod workstation;
 
 pub use app::{App, stage};
 pub use cli::Args;

@@ -121,27 +121,31 @@ fn refresh_docs(editor: &mut Signal<Editor>, host: &crate::drum_host::SharedDrum
 ///
 /// Better than panicking: a window that opens empty is diagnosable, and
 /// the runner has already printed what it loaded.
-fn fallback() -> Editor {
+pub(crate) fn fallback() -> Editor {
     let doc = ExpressionDoc::new(TimeBase::Ppq { ppq: 960.0 }, 0.0, 960.0 * 8.0);
     Editor::new(doc, Viewport::new(1100.0, 520.0))
 }
 
-/// The whole window: the editor, and nothing else.
-///
-/// No arrangement view, no mixer, no transport. The editor is the
-/// product being built here, and surrounding it with chrome that does
-/// not exist yet would make this runner a second app to maintain.
-#[component]
-pub fn App() -> Element {
-    let mut editor = use_signal(|| take_staged().unwrap_or_else(fallback));
-    let host = use_signal(take_staged_host);
-    // The panel's data channel: bins and previews recomputed by the
-    // host on every control change. Empty without a host — the panel
-    // is then purely visual, which is what a demo scene wants.
-    let mut bins = use_signal(Vec::new);
-    let mut previews = use_signal(Vec::new);
+/// The host-backed callbacks an [`ExpressionEditor`] mount takes — one
+/// bundle so the plain editor window and the workstation cannot wire
+/// them differently.
+pub(crate) struct HostCallbacks {
+    pub on_change: Option<EventHandler<expression_editor_ui::QuantizePanel>>,
+    pub on_apply: Option<EventHandler<expression_editor_ui::QuantizePanel>>,
+    pub on_save: Option<EventHandler<()>>,
+    pub on_hit: Option<EventHandler<expression_editor_ui::stack::HitGesture>>,
+}
 
-    let on_change = host.read().clone().map(|h| {
+/// Build the callbacks against a host, or all-`None` without one (a
+/// demo scene: the panel is then purely visual). Must be called from a
+/// component body — the handlers capture the caller's signals.
+pub(crate) fn host_callbacks(
+    mut editor: Signal<Editor>,
+    host: Option<SharedDrumHost>,
+    mut bins: Signal<Vec<expression_editor_ui::quantize_panel::Bin>>,
+    mut previews: Signal<Vec<expression_editor_ui::quantize_panel::HitPreview>>,
+) -> HostCallbacks {
+    let on_change = host.clone().map(|h| {
         EventHandler::new(move |p: expression_editor_ui::QuantizePanel| {
             let (b, pv) = h.preview(&p);
             bins.set(b);
@@ -149,7 +153,7 @@ pub fn App() -> Element {
         })
     });
     // r[impl drums.quantize.apply]
-    let on_apply = host.read().clone().map(|h| {
+    let on_apply = host.clone().map(|h| {
         EventHandler::new(
             move |p: expression_editor_ui::QuantizePanel| match h.apply(&p) {
                 Ok(done) => {
@@ -160,19 +164,19 @@ pub fn App() -> Element {
             },
         )
     });
-    // The hand gestures, all four, through one dispatcher — they share
-    // a host, a group and an undo discipline, so they share a handler.
-    // r[impl drums.manual.slip]
-    // r[impl drums.manual.stretch]
-    // r[impl drums.manual.add-remove]
     // r[impl drums.save.new-file]
-    let on_save = host.read().clone().map(|h| {
+    let on_save = host.clone().map(|h| {
         EventHandler::new(move |_| match h.save() {
             Ok(path) => tracing::info!(path = %path.display(), "saved as a new .rpp"),
             Err(e) => tracing::warn!(error = %e, "save failed"),
         })
     });
-    let on_hit = host.read().clone().map(|h| {
+    // The hand gestures, all four, through one dispatcher — they share
+    // a host, a group and an undo discipline, so they share a handler.
+    // r[impl drums.manual.slip]
+    // r[impl drums.manual.stretch]
+    // r[impl drums.manual.add-remove]
+    let on_hit = host.map(|h| {
         EventHandler::new(move |g: expression_editor_ui::stack::HitGesture| {
             use expression_editor_ui::stack::HitGesture as G;
             match g {
@@ -220,6 +224,34 @@ pub fn App() -> Element {
             }
         })
     });
+    HostCallbacks {
+        on_change,
+        on_apply,
+        on_save,
+        on_hit,
+    }
+}
+
+/// The whole window: the editor, and nothing else.
+///
+/// No arrangement view, no mixer, no transport. The editor is the
+/// product being built here; the composed window with the arrange view
+/// and the mixer is [`crate::workstation`].
+#[component]
+pub fn App() -> Element {
+    let editor = use_signal(|| take_staged().unwrap_or_else(fallback));
+    let host = use_signal(take_staged_host);
+    // The panel's data channel: bins and previews recomputed by the
+    // host on every control change. Empty without a host — the panel
+    // is then purely visual, which is what a demo scene wants.
+    let bins = use_signal(Vec::new);
+    let previews = use_signal(Vec::new);
+    let HostCallbacks {
+        on_change,
+        on_apply,
+        on_save,
+        on_hit,
+    } = host_callbacks(editor, host.read().clone(), bins, previews);
     rsx! {
         style {
             // Blitz sizes the root from these; without them the editor
