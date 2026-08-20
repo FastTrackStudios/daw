@@ -66,12 +66,17 @@ pub struct Drafts {
 impl Drafts {
     /// Must be called inside a component scope — it owns a Signal.
     pub fn new() -> Self {
-        Self { held: Signal::new(HashMap::new()) }
+        Self {
+            held: Signal::new(HashMap::new()),
+        }
     }
 
     /// The value to render for this track's `what`, if the UI is holding one.
     pub fn get(&self, guid: &str, what: Held) -> Option<f64> {
-        self.held.read().get(&(guid.to_string(), what)).map(|d| d.value)
+        self.held
+            .read()
+            .get(&(guid.to_string(), what))
+            .map(|d| d.value)
     }
 
     /// Is this value being held — and so should an inbound event for it be
@@ -105,7 +110,11 @@ impl Drafts {
                 d.dirty = true;
                 d.released = false;
             })
-            .or_insert(Draft { value, dirty: true, released: false });
+            .or_insert(Draft {
+                value,
+                dirty: true,
+                released: false,
+            });
     }
 
     /// Record where the user has just dragged this track's volume to.
@@ -178,7 +187,9 @@ mod tests {
         let mut dom = VirtualDom::new(|| rsx! { div {} });
         dom.rebuild_in_place();
         dom.in_runtime(|| {
-            f(Drafts { held: Signal::new_in_scope(HashMap::new(), ScopeId::ROOT) })
+            f(Drafts {
+                held: Signal::new_in_scope(HashMap::new(), ScopeId::ROOT),
+            })
         });
     }
 
@@ -188,7 +199,10 @@ mod tests {
             for v in [0.1, 0.2, 0.3, 0.4] {
                 drafts.set_volume("T1", v);
             }
-            assert_eq!(drafts.take_dirty(), vec![("T1".to_string(), Held::Volume, 0.4)]);
+            assert_eq!(
+                drafts.take_dirty(),
+                vec![("T1".to_string(), Held::Volume, 0.4)]
+            );
             // Nothing new since: the engine is not told the same value twice.
             assert!(drafts.take_dirty().is_empty());
         });
@@ -216,7 +230,10 @@ mod tests {
         with_runtime(|mut drafts| {
             drafts.set_volume("T1", 0.5);
             assert!(drafts.holds("T1", Held::Volume));
-            assert!(!drafts.holds("T2", Held::Volume), "another track is not suppressed");
+            assert!(
+                !drafts.holds("T2", Held::Volume),
+                "another track is not suppressed"
+            );
 
             drafts.release_volume("T1");
             // Still held: the final write has not gone out yet.
@@ -240,7 +257,10 @@ mod tests {
             // Second gesture starts before the retire pass.
             drafts.set_volume("T1", 0.9);
             drafts.retire();
-            assert!(drafts.holds("T1", Held::Volume), "suppression dropped mid-gesture");
+            assert!(
+                drafts.holds("T1", Held::Volume),
+                "suppression dropped mid-gesture"
+            );
             assert_eq!(drafts.volume("T1"), Some(0.9));
         });
     }

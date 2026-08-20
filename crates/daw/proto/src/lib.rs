@@ -24,7 +24,6 @@
 pub mod action_registry;
 pub mod actions;
 pub mod audio_accessor;
-pub mod stretch_marker;
 pub mod audio_engine;
 pub mod automation;
 pub mod batch;
@@ -61,6 +60,7 @@ pub mod region;
 pub mod resource;
 pub mod routing;
 pub mod screenset;
+pub mod stretch_marker;
 pub mod take;
 pub mod take_ranking;
 pub mod tempo_map;
@@ -84,7 +84,6 @@ pub use action_registry::{
 };
 pub use actions::*;
 pub use audio_accessor::*;
-pub use stretch_marker::*;
 pub use audio_engine::*;
 pub use automation::*;
 pub use batch::*;
@@ -98,6 +97,7 @@ pub use health::*;
 pub use input::*;
 pub use item::*;
 pub use live_midi::*;
+pub use stretch_marker::*;
 // Explicit re-exports rather than glob: the architect-emitted
 // `serve` / `descriptor` / `Dispatcher` aliases in `marker::*` and
 // `track::*` collide when glob-imported at the crate root. Callers

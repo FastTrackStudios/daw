@@ -195,19 +195,57 @@ mod tests {
             bpm: 120.0,
             time_sig: (4, 4),
             tracks: vec![
-                TrackSpec { name: "Keyflow".into(), color: None, folder: FolderRole::Start },
-                TrackSpec { name: "KEY".into(), color: None, folder: FolderRole::Child },
-                TrackSpec { name: "CHORD".into(), color: None, folder: FolderRole::Child },
-                TrackSpec { name: "MELODY".into(), color: None, folder: FolderRole::Child },
-                TrackSpec { name: "SCALE".into(), color: None, folder: FolderRole::End },
+                TrackSpec {
+                    name: "Keyflow".into(),
+                    color: None,
+                    folder: FolderRole::Start,
+                },
+                TrackSpec {
+                    name: "KEY".into(),
+                    color: None,
+                    folder: FolderRole::Child,
+                },
+                TrackSpec {
+                    name: "CHORD".into(),
+                    color: None,
+                    folder: FolderRole::Child,
+                },
+                TrackSpec {
+                    name: "MELODY".into(),
+                    color: None,
+                    folder: FolderRole::Child,
+                },
+                TrackSpec {
+                    name: "SCALE".into(),
+                    color: None,
+                    folder: FolderRole::End,
+                },
             ],
             sections: vec![
-                SectionSpec { name: "IN".into(), start_seconds: 0.0, end_seconds: 8.0 },
-                SectionSpec { name: "VS".into(), start_seconds: 8.0, end_seconds: 24.0 },
+                SectionSpec {
+                    name: "IN".into(),
+                    start_seconds: 0.0,
+                    end_seconds: 8.0,
+                },
+                SectionSpec {
+                    name: "VS".into(),
+                    start_seconds: 8.0,
+                    end_seconds: 24.0,
+                },
             ],
             key_sigs: vec![
-                KeySigSpec { measure: 0, root: 0, accidental: 1, scale_mask: SCALE_MASK_MAJOR },
-                KeySigSpec { measure: 8, root: 1, accidental: -1, scale_mask: SCALE_MASK_MAJOR },
+                KeySigSpec {
+                    measure: 0,
+                    root: 0,
+                    accidental: 1,
+                    scale_mask: SCALE_MASK_MAJOR,
+                },
+                KeySigSpec {
+                    measure: 8,
+                    root: 1,
+                    accidental: -1,
+                    scale_mask: SCALE_MASK_MAJOR,
+                },
             ],
         };
 

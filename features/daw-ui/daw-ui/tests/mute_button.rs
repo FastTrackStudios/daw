@@ -51,7 +51,10 @@ fn the_button_draws_as_vector_shapes() {
     assert!(html.contains(">M<"), "no legend:\n{html}");
     // A panel that blits has left the one-drawing-two-renderings deal.
     assert!(!html.contains("<img"), "the button is blitting:\n{html}");
-    assert!(!html.contains("url(data:"), "the button is blitting:\n{html}");
+    assert!(
+        !html.contains("url(data:"),
+        "the button is blitting:\n{html}"
+    );
 }
 
 /// `currentColor` inherits from CSS the exporter's rasteriser does not
@@ -173,7 +176,10 @@ fn re_pointing_the_button_at_another_track_re_reads_it() {
 
     // The same instance, a different track — not a fresh mount.
     dom.in_runtime(|| {
-        WHICH.with(|w| w.get()).expect("signal").set("MUTED".to_string());
+        WHICH
+            .with(|w| w.get())
+            .expect("signal")
+            .set("MUTED".to_string());
     });
     settle(&mut dom);
     let muted = dioxus_ssr::render(&dom);

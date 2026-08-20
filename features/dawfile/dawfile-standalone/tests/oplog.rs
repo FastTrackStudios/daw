@@ -54,7 +54,11 @@ fn two_divergent_offline_copies_merge() {
     oplog::merge(&alice, &oplog::export(&bob).unwrap()).unwrap();
 
     assert_eq!(read(&alice, "lead-vox").as_deref(), Some("Vocals"));
-    assert_eq!(read(&alice, "kit").as_deref(), Some("Drums"), "alice's edit");
+    assert_eq!(
+        read(&alice, "kit").as_deref(),
+        Some("Drums"),
+        "alice's edit"
+    );
     assert_eq!(read(&alice, "bass").as_deref(), Some("Bass"), "bob's edit");
 }
 
@@ -238,16 +242,12 @@ fn compaction_keeps_the_history_it_finds() {
         });
         project.save(&dir).expect("save");
     }
-    let before = std::fs::read_to_string(
-        dawfile_standalone::project::manifest_path(&dir, "Keep"),
-    )
-    .expect("read");
+    let before = std::fs::read_to_string(dawfile_standalone::project::manifest_path(&dir, "Keep"))
+        .expect("read");
 
     project.compact_on_disk(&dir, Some(1)).expect("compact");
-    let after = std::fs::read_to_string(
-        dawfile_standalone::project::manifest_path(&dir, "Keep"),
-    )
-    .expect("read");
+    let after = std::fs::read_to_string(dawfile_standalone::project::manifest_path(&dir, "Keep"))
+        .expect("read");
     assert_ne!(before, after, "compaction must have rewritten the manifest");
 
     let reopened = DawProject::load(&dir).expect("load");

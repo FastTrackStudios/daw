@@ -9,7 +9,7 @@
 //! - Track name + number
 
 use crate::controls::{
-    Caret, Collapse, EnvelopeButton, ControlSync, FxButton, IoButton, MeterFeed, MonitorButton,
+    Caret, Collapse, ControlSync, EnvelopeButton, FxButton, IoButton, MeterFeed, MonitorButton,
     MuteButton, PanAnchor, PanKnob, PhaseButton, RecordArmButton, RecordInputLabel, SoloButton,
     TrackMeter, TrackName, VolumeFader, VolumeWidget, record_input_name, use_daw_tracks,
     use_live_track, use_track_store,
@@ -182,9 +182,9 @@ pub fn ChannelStripPreview(
 // residual arithmetic disagreeing.
 use daw_theme_art::collapse::{BOTTOM_SECTION, FX_SECTION};
 use daw_theme_art::geometry::mcp::{
-    ARM_CELL_H, ARM_LEFT, ARM_OVERHANG, BUTTON_W, COLUMN, ENV_FROM_FLOOR, FX_PILL_TOP,
-    IN_FIELD_W, INPUT_FIELD_H, IO_FROM_SOLO, METER_W, MUTE_FROM_RECMON, NAME_PLATE, PAN_KNOB_W,
-    PHASE_FROM_ENV, PHASE_W, RECMON_FROM_ARM, SOLO_FROM_MUTE, STRIP_W,
+    ARM_CELL_H, ARM_LEFT, ARM_OVERHANG, BUTTON_W, COLUMN, ENV_FROM_FLOOR, FX_PILL_TOP, IN_FIELD_W,
+    INPUT_FIELD_H, IO_FROM_SOLO, METER_W, MUTE_FROM_RECMON, NAME_PLATE, PAN_KNOB_W, PHASE_FROM_ENV,
+    PHASE_W, RECMON_FROM_ARM, SOLO_FROM_MUTE, STRIP_W,
 };
 
 /// One control in the right-hand column.
@@ -271,11 +271,13 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
     let theme = daw_theme::Theme::default();
     let tint_colour = track
         .color
-        .map(|c| daw_theme_art::dress::panel_tint(daw_theme::Color::rgb(
-            (c >> 16) as u8,
-            (c >> 8) as u8,
-            c as u8,
-        )))
+        .map(|c| {
+            daw_theme_art::dress::panel_tint(daw_theme::Color::rgb(
+                (c >> 16) as u8,
+                (c >> 8) as u8,
+                c as u8,
+            ))
+        })
         .unwrap_or(theme.chrome.surface_raised);
     let tint = tint_colour.css();
     // The fields the input section holds, darkened out of the tint the way
@@ -602,4 +604,3 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
         }
     }
 }
-

@@ -19,8 +19,8 @@
 
 use std::path::Path;
 
-use dawfile_standalone::{DawProject, DocumentEdit, DocumentQuery, EntityId};
 use daw_proto::automation::{EnvelopePoint, EnvelopeType};
+use dawfile_standalone::{DawProject, DocumentEdit, DocumentQuery, EntityId};
 
 /// The four concerns scenario 1 generates, in the order the editor
 /// composites them.
@@ -78,7 +78,15 @@ fn the_daw_format_keeps_all_five() {
     // The baseline the exports are measured against: natively, nothing
     // is lost, which is why the native format exists.
     let (project, item) = scenario_one();
-    assert_eq!(project.document().item(&item).expect("item").envelopes.len(), 5);
+    assert_eq!(
+        project
+            .document()
+            .item(&item)
+            .expect("item")
+            .envelopes
+            .len(),
+        5
+    );
 }
 
 #[test]
@@ -165,7 +173,9 @@ fn dawproject_carries_the_composite_too() {
     let bytes = dawfile_dawproject::serialize_project_bytes(&dp).expect("write dawproject");
     let back = dawfile_dawproject::parse_project_bytes(&bytes).expect("read dawproject");
 
-    let arrangement = back.arrangement.expect("an arrangement carrying automation");
+    let arrangement = back
+        .arrangement
+        .expect("an arrangement carrying automation");
     let points: Vec<_> = arrangement
         .lanes
         .iter()
@@ -211,14 +221,17 @@ fn an_ambiguous_item_sends_no_automation_rather_than_a_guess() {
             let env = d
                 .add_item_envelope(&item, EnvelopeType::Volume, name)
                 .expect("source");
-            d.set_envelope_points(&env, vec![point(1.0, 0.5)]).expect("points");
+            d.set_envelope_points(&env, vec![point(1.0, 0.5)])
+                .expect("points");
         }
     });
 
     let dp = dawfile_standalone::dawproject::to_dawproject(project.document());
-    let automation = dp.arrangement.iter().flat_map(|a| &a.lanes).any(|l| {
-        matches!(l.content, LaneContent::Automation(_))
-    });
+    let automation = dp
+        .arrangement
+        .iter()
+        .flat_map(|a| &a.lanes)
+        .any(|l| matches!(l.content, LaneContent::Automation(_)));
     assert!(!automation, "an arbitrary source envelope was exported");
 }
 
@@ -296,7 +309,8 @@ fn one_lane_per_track_however_many_items_ride() {
             let env = d
                 .add_item_envelope(id, EnvelopeType::Volume, "VOLENV")
                 .expect("composite");
-            d.set_envelope_points(&env, vec![point(0.0, 0.7)]).expect("points");
+            d.set_envelope_points(&env, vec![point(0.0, 0.7)])
+                .expect("points");
         }
         ids.len()
     });

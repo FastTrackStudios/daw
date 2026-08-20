@@ -55,20 +55,20 @@
 use thiserror::Error;
 
 pub mod builder;
-pub mod scaffold;
 pub mod chunk_ops;
 pub mod compat;
 pub mod convert;
 pub mod diff;
 pub mod guide_gen;
 pub mod index;
+pub mod io;
 pub mod keysig;
 pub mod notation;
-pub mod io;
 pub mod primitives;
 /// REAPER `.reapeaks` peak-cache files (waveform mipmaps).
 pub mod reapeaks;
 pub mod rpp_tree;
+pub mod scaffold;
 pub mod setlist_rpp;
 pub mod stock_fx;
 pub mod toolbar_config;

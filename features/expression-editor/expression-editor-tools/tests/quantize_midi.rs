@@ -74,10 +74,14 @@ fn the_expression_a_note_owns_moves_with_it() {
     n.pitch = Curve::from_points(vec![
         Point {
             t: 26.0,
-            value: 0.0, ..Point::default() },
+            value: 0.0,
+            ..Point::default()
+        },
         Point {
             t: 38.0,
-            value: 1.5, ..Point::default() },
+            value: 1.5,
+            ..Point::default()
+        },
     ]);
     n.splits = vec![38.0];
     let mut notes = vec![n];

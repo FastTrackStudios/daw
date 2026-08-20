@@ -60,11 +60,27 @@ pub fn FxButton(
     // toggle: the join is arithmetically at 43 + the art's own leading
     // seam column, and placed at the join the strip shows through a bare
     // pixel between the halves.
-    let family = if panel.is_track() { art::FxFamily::TrackPanel } else { art::FxFamily::Mixer };
-    let toggle_w = if panel.is_track() { TRACK_TOGGLE_W } else { TOGGLE_W };
-    let w = width.unwrap_or(if panel.is_track() { TRACK_LABEL_W } else { LABEL_W });
+    let family = if panel.is_track() {
+        art::FxFamily::TrackPanel
+    } else {
+        art::FxFamily::Mixer
+    };
+    let toggle_w = if panel.is_track() {
+        TRACK_TOGGLE_W
+    } else {
+        TOGGLE_W
+    };
+    let w = width.unwrap_or(if panel.is_track() {
+        TRACK_LABEL_W
+    } else {
+        LABEL_W
+    });
     let h = (SRC_H * scale).round() as u32;
-    let chain = if has_fx { art::FxChain::Active } else { art::FxChain::Empty };
+    let chain = if has_fx {
+        art::FxChain::Active
+    } else {
+        art::FxChain::Empty
+    };
     let accent = daw_theme::Theme::default().chrome.accent.css();
 
     rsx! {
@@ -108,4 +124,3 @@ const TOGGLE_W: f32 = 28.0;
 const TRACK_LABEL_W: f32 = 22.0;
 const TRACK_TOGGLE_W: f32 = 14.0;
 const SRC_H: f32 = 22.0;
-

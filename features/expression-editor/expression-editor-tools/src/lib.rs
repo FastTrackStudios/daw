@@ -31,17 +31,17 @@
 //! assert_eq!((notes[1].start, notes[1].end), (48.0, 72.0));
 //! ```
 
-pub mod event;
 pub mod align;
+pub mod event;
 // Absorbed from the `midi-tools` crates (#153). Velocity and arp are
 // the same shape as the tools already here — an operation over selected
 // events with a config — so they belong beside them rather than in
 // three crates of their own.
 pub mod arp;
 pub mod note_shape;
+pub mod quantize;
 pub mod sink;
 pub mod velocity;
-pub mod quantize;
 
 pub use event::{Sustained, Timed, length_of};
 

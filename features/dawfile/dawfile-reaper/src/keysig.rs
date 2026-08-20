@@ -363,7 +363,12 @@ mod write_tests {
 
         assert_eq!(parse(&out), replacement, "the block is replaced");
         // Everything outside the block survives untouched.
-        for marker in ["<REAPER_PROJECT", "<TRACK", "IMGRESOURCEFLAGS", "<TEMPOENVEX"] {
+        for marker in [
+            "<REAPER_PROJECT",
+            "<TRACK",
+            "IMGRESOURCEFLAGS",
+            "<TEMPOENVEX",
+        ] {
             assert_eq!(
                 out.matches(marker).count(),
                 FIXTURE.matches(marker).count(),

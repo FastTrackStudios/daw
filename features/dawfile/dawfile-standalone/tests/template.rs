@@ -96,7 +96,8 @@ fn loading_the_same_template_twice_produces_two_distinct_sets() {
 
     assert_eq!(target.document().tracks.len(), 2);
     assert_ne!(
-        target.document().tracks[0].id, target.document().tracks[1].id,
+        target.document().tracks[0].id,
+        target.document().tracks[1].id,
         "a second load collided with the first"
     );
 }
@@ -163,7 +164,9 @@ fn a_template_is_inspectable_exactly_like_a_project() {
     let t = DawTemplate::from_tracks(&source, "Kit", &ids);
 
     let as_project = DawProject::new(t.document().clone(), t.objects().clone());
-    let text = as_project.to_text().expect("a template serializes as a project");
+    let text = as_project
+        .to_text()
+        .expect("a template serializes as a project");
     assert!(text.contains("Kit"));
 }
 

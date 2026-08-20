@@ -173,7 +173,12 @@ impl Automation for Standalone {
         location: EnvelopeLocation,
     ) -> Vec<AutomationItem> {
         read_envelope(self, &project, &location)
-            .map(|e| e.automation_items.iter().map(|(ai, _)| ai.clone()).collect())
+            .map(|e| {
+                e.automation_items
+                    .iter()
+                    .map(|(ai, _)| ai.clone())
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -184,7 +189,11 @@ impl Automation for Standalone {
         index: u32,
     ) -> Vec<EnvelopePoint> {
         read_envelope(self, &project, &location)
-            .and_then(|e| e.automation_items.get(index as usize).map(|(_, p)| p.clone()))
+            .and_then(|e| {
+                e.automation_items
+                    .get(index as usize)
+                    .map(|(_, p)| p.clone())
+            })
             .unwrap_or_default()
     }
 

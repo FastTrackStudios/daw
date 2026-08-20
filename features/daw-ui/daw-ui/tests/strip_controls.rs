@@ -72,17 +72,26 @@ fn each_control_follows_its_own_backend_event() {
         (
             "solo",
             || rsx! { SoloButton { track: "T1" } },
-            TrackEvent::SoloChanged { guid: "T1".into(), soloed: true },
+            TrackEvent::SoloChanged {
+                guid: "T1".into(),
+                soloed: true,
+            },
         ),
         (
             "record arm",
             || rsx! { RecordArmButton { track: "T1" } },
-            TrackEvent::ArmChanged { guid: "T1".into(), armed: true },
+            TrackEvent::ArmChanged {
+                guid: "T1".into(),
+                armed: true,
+            },
         ),
         (
             "phase",
             || rsx! { PhaseButton { track: "T1" } },
-            TrackEvent::PhaseInvertedChanged { guid: "T1".into(), inverted: true },
+            TrackEvent::PhaseInvertedChanged {
+                guid: "T1".into(),
+                inverted: true,
+            },
         ),
         (
             "input monitoring",
@@ -95,7 +104,10 @@ fn each_control_follows_its_own_backend_event() {
         (
             "name",
             || rsx! { TrackName { track: "T1" } },
-            TrackEvent::Renamed { guid: "T1".into(), name: "Snare".into() },
+            TrackEvent::Renamed {
+                guid: "T1".into(),
+                name: "Snare".into(),
+            },
         ),
         (
             // The colour lands on the index plate, not the name plate —
@@ -103,26 +115,41 @@ fn each_control_follows_its_own_backend_event() {
             // what has to notice a colour change.
             "colour",
             || rsx! { ChannelStripPreview { track: base(), index: 0 } },
-            TrackEvent::ColorChanged { guid: "T1".into(), color: Some(0xff8800) },
+            TrackEvent::ColorChanged {
+                guid: "T1".into(),
+                color: Some(0xff8800),
+            },
         ),
         (
             "parent send",
             || rsx! { IoButton { track: "T1" } },
-            TrackEvent::ParentSendChanged { guid: "T1".into(), enabled: false },
+            TrackEvent::ParentSendChanged {
+                guid: "T1".into(),
+                enabled: false,
+            },
         ),
         (
             "pan",
             || rsx! { PanKnob { track: "T1" } },
-            TrackEvent::PanChanged { guid: "T1".into(), pan: -0.8 },
+            TrackEvent::PanChanged {
+                guid: "T1".into(),
+                pan: -0.8,
+            },
         ),
     ];
 
     for (what, body, event) in cases {
         let mut dom = mount(base, body);
         let before = dioxus_ssr::render(&dom);
-        assert!(before.contains("<svg") || before.contains("Kick"), "{what} drew nothing");
+        assert!(
+            before.contains("<svg") || before.contains("Kick"),
+            "{what} drew nothing"
+        );
         assert!(!before.contains("<img"), "{what} is blitting:\n{before}");
-        assert!(!before.contains("currentColor"), "{what} left a colour to CSS");
+        assert!(
+            !before.contains("currentColor"),
+            "{what} left a colour to CSS"
+        );
 
         dom.in_runtime(|| store().apply(&event));
         settle(&mut dom);
@@ -145,13 +172,21 @@ fn the_name_plate_shows_the_track_name() {
 #[test]
 fn the_colour_lands_on_the_index_plate_and_not_the_name_plate() {
     fn coloured() -> Track {
-        Track { color: Some(0xff8800), ..base() }
+        Track {
+            color: Some(0xff8800),
+            ..base()
+        }
     }
     let name = dioxus_ssr::render(&mount(coloured, || rsx! { TrackName { track: "T1" } }));
-    let strip =
-        dioxus_ssr::render(&mount(coloured, || rsx! { ChannelStripPreview { track: coloured() } }));
+    let strip = dioxus_ssr::render(&mount(
+        coloured,
+        || rsx! { ChannelStripPreview { track: coloured() } },
+    ));
 
-    assert!(!name.contains("#ff8800"), "the name plate took the track colour:\n{name}");
+    assert!(
+        !name.contains("#ff8800"),
+        "the name plate took the track colour:\n{name}"
+    );
     assert!(
         name.contains(daw_theme::defaults::STRIP_BODY),
         "the name plate is not `mcp_namebg`'s token:\n{name}"
@@ -165,7 +200,10 @@ fn the_colour_lands_on_the_index_plate_and_not_the_name_plate() {
         "the strip did not paint the tinted colour ({}):\n{strip}",
         tinted.to_hex()
     );
-    assert!(!strip.contains("#ff8800"), "the strip painted the raw track colour");
+    assert!(
+        !strip.contains("#ff8800"),
+        "the strip painted the raw track colour"
+    );
 }
 
 /// The two reads that did not exist before this ticket. They are on the
@@ -196,7 +234,10 @@ fn the_bulk_read_carries_record_input_and_parent_send() {
 #[test]
 fn the_io_indicator_reflects_the_parent_send() {
     fn cut_off() -> Track {
-        Track { parent_send: false, ..base() }
+        Track {
+            parent_send: false,
+            ..base()
+        }
     }
     let sending = dioxus_ssr::render(&mount(base, || rsx! { IoButton { track: "T1" } }));
     let cut = dioxus_ssr::render(&mount(cut_off, || rsx! { IoButton { track: "T1" } }));
@@ -215,13 +256,19 @@ fn a_pan_drag_leads_the_engine_and_ignores_its_echo() {
         let mut drafts = store.drafts();
         drafts.set_pan("T1", 0.75);
         // The engine, still catching up, reports where it had got to.
-        store.apply(&TrackEvent::PanChanged { guid: "T1".into(), pan: 0.0 });
+        store.apply(&TrackEvent::PanChanged {
+            guid: "T1".into(),
+            pan: 0.0,
+        });
         assert_eq!(store.pan("T1"), 0.75, "the echo fought the finger");
 
         drafts.release_pan("T1");
         drafts.take_dirty();
         drafts.retire();
-        store.apply(&TrackEvent::PanChanged { guid: "T1".into(), pan: -0.5 });
+        store.apply(&TrackEvent::PanChanged {
+            guid: "T1".into(),
+            pan: -0.5,
+        });
         assert_eq!(store.pan("T1"), -0.5, "an idle knob ignored the engine");
     });
     settle(&mut dom);
@@ -236,7 +283,10 @@ fn holding_one_value_does_not_suppress_the_other() {
     dom.in_runtime(|| {
         let mut store = store();
         store.drafts().set_pan("T1", 0.5);
-        store.apply(&TrackEvent::VolumeChanged { guid: "T1".into(), volume: 0.9 });
+        store.apply(&TrackEvent::VolumeChanged {
+            guid: "T1".into(),
+            volume: 0.9,
+        });
         assert_eq!(store.volume("T1"), 0.9, "a pan drag suppressed volume");
         assert_eq!(store.pan("T1"), 0.5);
     });

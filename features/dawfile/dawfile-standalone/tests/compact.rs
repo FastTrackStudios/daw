@@ -148,7 +148,10 @@ fn trimming_the_history_is_what_makes_objects_collectable() {
     let removed = p.compact(Some(1));
     assert_eq!(removed, 1);
     assert!(!p.objects().contains(&old));
-    assert!(p.objects().contains(&new), "the retained save still holds it");
+    assert!(
+        p.objects().contains(&new),
+        "the retained save still holds it"
+    );
     assert_eq!(p.document().saves.len(), 1);
 }
 
@@ -156,9 +159,7 @@ fn trimming_the_history_is_what_makes_objects_collectable() {
 fn compact_never_touches_what_the_document_itself_references() {
     let mut p = project("Belief");
     let id = p.put_object(b"live fx chunk".to_vec());
-    p.edit(|d| {
-        d.tracks.push(track_with_fx(id.clone()))
-    });
+    p.edit(|d| d.tracks.push(track_with_fx(id.clone())));
     assert_eq!(p.compact(None), 0);
     assert!(p.objects().contains(&id));
 }
@@ -185,9 +186,7 @@ fn a_compacted_project_still_opens() {
     let dir = tmp("opens");
     let mut p = project("Belief");
     let live = p.put_object(b"live".to_vec());
-    p.edit(|d| {
-        d.tracks.push(track_with_fx(live.clone()))
-    });
+    p.edit(|d| d.tracks.push(track_with_fx(live.clone())));
     p.put_object(b"dead".to_vec());
     p.save(&dir).unwrap();
     p.compact_on_disk(&dir, Some(1)).unwrap();

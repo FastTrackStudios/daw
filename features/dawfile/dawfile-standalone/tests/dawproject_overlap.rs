@@ -16,11 +16,11 @@
 //! The contract pinned here: overlap exports no lane for that track,
 //! and each item's ride returns to unity at the item's end.
 
-use dawfile_standalone::{DawProject, DocumentEdit, EntityId};
-use dawfile_standalone::document::DawDocument;
-use dawfile_standalone::objects::ObjectStore;
 use daw_proto::automation::{EnvelopePoint, EnvelopeType};
 use dawfile_dawproject::types::LaneContent;
+use dawfile_standalone::document::DawDocument;
+use dawfile_standalone::objects::ObjectStore;
+use dawfile_standalone::{DawProject, DocumentEdit, EntityId};
 
 fn point(t: f64, v: f64) -> EnvelopePoint {
     EnvelopePoint {

@@ -67,7 +67,10 @@ fn write_varint(out: &mut Vec<u8>, mut v: u32) {
 /// has to know what division the file used.
 pub fn read(path: &str, track_index: usize) -> Option<MidiTakeSnapshot> {
     let mut data = Vec::new();
-    std::fs::File::open(path).ok()?.read_to_end(&mut data).ok()?;
+    std::fs::File::open(path)
+        .ok()?
+        .read_to_end(&mut data)
+        .ok()?;
     parse(&data, track_index)
 }
 
@@ -165,9 +168,7 @@ fn parse_track(body: &[u8], file_ppq: f64) -> MidiTakeSnapshot {
                 // running-status writer uses this.
                 let is_off = kind == 0x80 || d2 == 0;
                 if is_off {
-                    if let Some(pos) = open
-                        .iter()
-                        .position(|(c, p, ..)| *c == channel && *p == d1)
+                    if let Some(pos) = open.iter().position(|(c, p, ..)| *c == channel && *p == d1)
                     {
                         let (_, pitch, vel, start) = open.remove(pos);
                         notes.push(MidiNote {

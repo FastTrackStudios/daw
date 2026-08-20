@@ -56,8 +56,14 @@ fn the_button_is_lit_by_a_non_empty_chain() {
     let loaded = dioxus_ssr::render(&mount(2, 0));
     assert_ne!(empty, loaded, "an empty chain draws the same as a full one");
     assert!(empty.contains("<svg"), "nothing drawn:\n{empty}");
-    assert!(!loaded.contains("<img"), "the button is blitting:\n{loaded}");
-    assert!(!loaded.contains("currentColor"), "a colour is left to CSS:\n{loaded}");
+    assert!(
+        !loaded.contains("<img"),
+        "the button is blitting:\n{loaded}"
+    );
+    assert!(
+        !loaded.contains("currentColor"),
+        "a colour is left to CSS:\n{loaded}"
+    );
 }
 
 /// The input chain is a different chain, and gets its own mark rather than
@@ -69,7 +75,10 @@ fn the_input_chain_reads_separately_from_the_track_chain() {
     let both = dioxus_ssr::render(&mount(1, 1));
 
     assert_ne!(neither, input_only, "input FX went unreported");
-    assert_ne!(input_only, both, "the track chain did not light with input FX present");
+    assert_ne!(
+        input_only, both,
+        "the track chain did not light with input FX present"
+    );
 }
 
 /// The whole point. Adding a plugin arrives as an event, and the button
@@ -80,11 +89,14 @@ fn adding_fx_updates_the_button_without_a_refetch() {
     let before = dioxus_ssr::render(&dom);
 
     dom.in_runtime(|| {
-        STORE.with(|s| s.get()).expect("store").apply(&TrackEvent::FxCountChanged {
-            guid: "T1".into(),
-            fx_count: 1,
-            input_fx_count: 0,
-        });
+        STORE
+            .with(|s| s.get())
+            .expect("store")
+            .apply(&TrackEvent::FxCountChanged {
+                guid: "T1".into(),
+                fx_count: 1,
+                input_fx_count: 0,
+            });
     });
     settle(&mut dom);
     let after = dioxus_ssr::render(&dom);
@@ -92,14 +104,21 @@ fn adding_fx_updates_the_button_without_a_refetch() {
 
     // And back down again when the last plugin is removed.
     dom.in_runtime(|| {
-        STORE.with(|s| s.get()).expect("store").apply(&TrackEvent::FxCountChanged {
-            guid: "T1".into(),
-            fx_count: 0,
-            input_fx_count: 0,
-        });
+        STORE
+            .with(|s| s.get())
+            .expect("store")
+            .apply(&TrackEvent::FxCountChanged {
+                guid: "T1".into(),
+                fx_count: 0,
+                input_fx_count: 0,
+            });
     });
     settle(&mut dom);
-    assert_eq!(before, dioxus_ssr::render(&dom), "the button stayed lit on an empty chain");
+    assert_eq!(
+        before,
+        dioxus_ssr::render(&dom),
+        "the button stayed lit on an empty chain"
+    );
 }
 
 /// The pill drawn wider than its art grows the flat run before the seam.
@@ -156,12 +175,24 @@ fn the_pill_is_one_shape_drawn_at_its_asked_for_width() {
     let wide = render(43.0);
     assert_ne!(narrow, wide);
 
-    assert_eq!(wide.matches("<svg").count(), 1, "the pill is not one shape:\n{wide}");
+    assert_eq!(
+        wide.matches("<svg").count(),
+        1,
+        "the pill is not one shape:\n{wide}"
+    );
 
     // 43 of label plus `mcp.fxbyp`'s 28, and a viewBox to match — which is
     // what makes it 1:1.
-    assert!(wide.contains("width=\"71\""), "the pill did not take its width:\n{wide}");
-    assert!(wide.contains("viewBox=\"0 0 71 22\""), "the pill is being scaled:\n{wide}");
-    assert!(narrow.contains("viewBox=\"0 0 56 22\""), "the narrow pill is scaled:\n{narrow}");
+    assert!(
+        wide.contains("width=\"71\""),
+        "the pill did not take its width:\n{wide}"
+    );
+    assert!(
+        wide.contains("viewBox=\"0 0 71 22\""),
+        "the pill is being scaled:\n{wide}"
+    );
+    assert!(
+        narrow.contains("viewBox=\"0 0 56 22\""),
+        "the narrow pill is scaled:\n{narrow}"
+    );
 }
-

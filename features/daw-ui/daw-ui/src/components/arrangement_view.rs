@@ -57,7 +57,12 @@ pub fn waveform_from_peaks(data: &daw_proto::TakePeakData) -> Vec<f32> {
     let ch = data.num_channels.max(1) as usize;
     data.peaks
         .chunks(ch)
-        .map(|block| block.iter().fold(0.0f32, |a, v| a.max(v.abs() as f32)).min(1.0))
+        .map(|block| {
+            block
+                .iter()
+                .fold(0.0f32, |a, v| a.max(v.abs() as f32))
+                .min(1.0)
+        })
         .collect()
 }
 
@@ -125,7 +130,10 @@ pub struct AutomationItemView {
 pub enum ArrangeRowKind {
     Track(usize),
     /// `lane` indexes into the track's `EnvelopeLaneView` list.
-    EnvelopeLane { track: usize, lane: usize },
+    EnvelopeLane {
+        track: usize,
+        lane: usize,
+    },
 }
 
 /// The arrange's vertical plan: every row with its top and height, tracks
@@ -445,11 +453,13 @@ fn ArrangeItem(
     // The item's own colour beats the track's, as in REAPER.
     let colour = item.color.or(track_colour);
     let body = colour
-        .map(|c| daw_theme_art::dress::panel_tint(daw_theme::Color::rgb(
-            (c >> 16) as u8,
-            (c >> 8) as u8,
-            c as u8,
-        )))
+        .map(|c| {
+            daw_theme_art::dress::panel_tint(daw_theme::Color::rgb(
+                (c >> 16) as u8,
+                (c >> 8) as u8,
+                c as u8,
+            ))
+        })
         .unwrap_or(t.signal.neutral_track);
     let edge = if item.selected {
         t.chrome.selected.css()
@@ -583,8 +593,18 @@ pub fn NoteRoll(
     height: f32,
     colour: String,
 ) -> Element {
-    let lo = notes.iter().map(|n| n.pitch).min().unwrap_or(60).saturating_sub(1);
-    let hi = notes.iter().map(|n| n.pitch).max().unwrap_or(72).saturating_add(1);
+    let lo = notes
+        .iter()
+        .map(|n| n.pitch)
+        .min()
+        .unwrap_or(60)
+        .saturating_sub(1);
+    let hi = notes
+        .iter()
+        .map(|n| n.pitch)
+        .max()
+        .unwrap_or(72)
+        .saturating_add(1);
     let rows = (hi - lo + 1).max(2) as f32;
     let secs = length.max(0.001);
 
@@ -861,20 +881,22 @@ pub fn ArrangementView() -> Element {
                 let mut overlaid = HashMap::new();
                 let mut laned: HashMap<String, Vec<EnvelopeLaneView>> = HashMap::new();
                 for track in &track_list {
-                    let Ok(Some(handle)) = project.tracks().by_guid(&track.guid).await
-                    else {
+                    let Ok(Some(handle)) = project.tracks().by_guid(&track.guid).await else {
                         continue;
                     };
-                    let Ok(all) = handle.envelopes().all().await else { continue };
+                    let Ok(all) = handle.envelopes().all().await else {
+                        continue;
+                    };
                     let mut over = Vec::new();
                     let mut lanes = Vec::new();
                     for env in all.iter().filter(|e| e.visible) {
-                        let Ok(Some(eh)) =
-                            handle.envelopes().by_type(env.envelope_type).await
+                        let Ok(Some(eh)) = handle.envelopes().by_type(env.envelope_type).await
                         else {
                             continue;
                         };
-                        let Ok(points) = eh.points().await else { continue };
+                        let Ok(points) = eh.points().await else {
+                            continue;
+                        };
                         let preview = EnvelopePreview {
                             name: env.name.clone(),
                             points: points
@@ -910,10 +932,7 @@ pub fn ArrangementView() -> Element {
                                             points: pts
                                                 .iter()
                                                 .map(|p| {
-                                                    (
-                                                        p.time.as_seconds() as f32,
-                                                        p.value as f32,
-                                                    )
+                                                    (p.time.as_seconds() as f32, p.value as f32)
                                                 })
                                                 .collect(),
                                         });
@@ -1076,7 +1095,10 @@ mod tests {
     use super::*;
 
     fn track(guid: &str) -> Track {
-        Track { guid: guid.into(), ..Default::default() }
+        Track {
+            guid: guid.into(),
+            ..Default::default()
+        }
     }
 
     /// A resize drag reports heights clamped to the envcp floor, and
@@ -1097,7 +1119,10 @@ mod tests {
         let lanes = HashMap::from([(
             "a".to_string(),
             vec![EnvelopeLaneView {
-                envelope: EnvelopePreview { name: "Volume".into(), points: vec![] },
+                envelope: EnvelopePreview {
+                    name: "Volume".into(),
+                    points: vec![],
+                },
                 height: settled,
                 automation_items: Vec::new(),
             }],
@@ -1113,7 +1138,10 @@ mod tests {
     fn the_plan_interleaves_and_holds_the_floor() {
         let tracks = vec![track("a"), track("b")];
         let lane = |h: f32| EnvelopeLaneView {
-            envelope: EnvelopePreview { name: "Volume".into(), points: vec![] },
+            envelope: EnvelopePreview {
+                name: "Volume".into(),
+                points: vec![],
+            },
             height: h,
             automation_items: Vec::new(),
         };
@@ -1125,11 +1153,22 @@ mod tests {
         let plan = plan_rows(&tracks, &lanes, 70.0);
         assert_eq!(plan.len(), 4);
         assert_eq!(plan[0], (ArrangeRowKind::Track(0), 0.0, 70.0));
-        assert_eq!(plan[1], (ArrangeRowKind::EnvelopeLane { track: 0, lane: 0 }, 71.0, 40.0));
+        assert_eq!(
+            plan[1],
+            (
+                ArrangeRowKind::EnvelopeLane { track: 0, lane: 0 },
+                71.0,
+                40.0
+            )
+        );
         // The 10-tall lane is held at the envcp floor.
         assert_eq!(
             plan[2],
-            (ArrangeRowKind::EnvelopeLane { track: 0, lane: 1 }, 112.0, ENVELOPE_LANE_MIN_H)
+            (
+                ArrangeRowKind::EnvelopeLane { track: 0, lane: 1 },
+                112.0,
+                ENVELOPE_LANE_MIN_H
+            )
         );
         // And track b starts below it, divider counted.
         assert_eq!(plan[3], (ArrangeRowKind::Track(1), 140.0, 70.0));

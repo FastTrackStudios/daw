@@ -109,7 +109,11 @@ impl Cursor {
             }
             Direction::Down => {
                 let i = self.at;
-                self.at = if self.at == 0 { self.len - 1 } else { self.at - 1 };
+                self.at = if self.at == 0 {
+                    self.len - 1
+                } else {
+                    self.at - 1
+                };
                 i
             }
             Direction::UpDown | Direction::DownUp => {
@@ -122,7 +126,11 @@ impl Cursor {
                 } else if !self.ascending && self.at == 0 {
                     self.ascending = true;
                 }
-                self.at = if self.ascending { self.at + 1 } else { self.at - 1 };
+                self.at = if self.ascending {
+                    self.at + 1
+                } else {
+                    self.at - 1
+                };
                 i
             }
             Direction::Random => {
@@ -162,12 +170,18 @@ mod tests {
 
     #[test]
     fn updown_plays_the_turnaround_note_once() {
-        assert_eq!(take(Direction::UpDown, 4, 10), [0, 1, 2, 3, 2, 1, 0, 1, 2, 3]);
+        assert_eq!(
+            take(Direction::UpDown, 4, 10),
+            [0, 1, 2, 3, 2, 1, 0, 1, 2, 3]
+        );
     }
 
     #[test]
     fn downup_starts_at_the_top() {
-        assert_eq!(take(Direction::DownUp, 4, 10), [3, 2, 1, 0, 1, 2, 3, 2, 1, 0]);
+        assert_eq!(
+            take(Direction::DownUp, 4, 10),
+            [3, 2, 1, 0, 1, 2, 3, 2, 1, 0]
+        );
     }
 
     #[test]

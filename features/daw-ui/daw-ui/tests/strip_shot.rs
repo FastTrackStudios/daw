@@ -108,7 +108,10 @@ fn crop_to_strip_sized(path: &std::path::Path, width: u32, height: u32) {
         Ok(s) if s.success() => {}
         // No ImageMagick is not a test failure: the PNG is still written,
         // just with its margin on.
-        _ => eprintln!("note: `magick` unavailable, {} keeps its margin", path.display()),
+        _ => eprintln!(
+            "note: `magick` unavailable, {} keeps its margin",
+            path.display()
+        ),
     }
 }
 
@@ -238,12 +241,25 @@ fn paint_the_panels() {
             ..tcp_kick()
         };
         vec![
-            Track { armed: true, ..t("kick", "Kick", 0xe0_56_7a, 0) },
-            Track { armed: true, soloed: true, ..t("snare", "Snare", 0xe0_56_7a, 1) },
+            Track {
+                armed: true,
+                ..t("kick", "Kick", 0xe0_56_7a, 0)
+            },
+            Track {
+                armed: true,
+                soloed: true,
+                ..t("snare", "Snare", 0xe0_56_7a, 1)
+            },
             t("oh", "OH", 0xe0_56_7a, 2),
-            Track { muted: true, ..t("bass", "Bass", 0x55_88_e0, 3) },
+            Track {
+                muted: true,
+                ..t("bass", "Bass", 0x55_88_e0, 3)
+            },
             t("gtr", "Gtr", 0x42_c8_e0, 4),
-            Track { fx_count: 2, ..t("keys", "Keys", 0xe0_a8_42, 5) },
+            Track {
+                fx_count: 2,
+                ..t("keys", "Keys", 0xe0_a8_42, 5)
+            },
         ]
     }
 

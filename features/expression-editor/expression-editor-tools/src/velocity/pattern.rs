@@ -159,8 +159,20 @@ mod tests {
         ns[3].selected = true;
         let out = Pattern::new([10, 20, 30, 40]).apply(&ns, 1.0, Range::default());
         assert_eq!(out.len(), 2);
-        assert_eq!(out[0], VelocityEdit { index: 2, velocity: 30 });
-        assert_eq!(out[1], VelocityEdit { index: 3, velocity: 40 });
+        assert_eq!(
+            out[0],
+            VelocityEdit {
+                index: 2,
+                velocity: 30
+            }
+        );
+        assert_eq!(
+            out[1],
+            VelocityEdit {
+                index: 3,
+                velocity: 40
+            }
+        );
     }
 
     #[test]

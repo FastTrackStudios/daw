@@ -18,14 +18,14 @@ use std::collections::HashMap;
 use crate::components::arrangement_view::{
     ArrangePreview, ArrangeRowKind, EnvelopeLaneView, EnvelopePreview, ItemPreview, plan_rows,
 };
-use crate::components::tcp::EnvcpRow;
 use crate::components::media_browser::{MediaBrowserPanel, MediaEntry};
 use crate::components::mixer::ChannelStripPreview;
-use crate::controls::FxSlotStack;
-use daw_proto::Fx;
+use crate::components::tcp::EnvcpRow;
 use crate::components::tcp::TrackRow;
+use crate::controls::FxSlotStack;
 use crate::panels::native::NativeTransportBar;
 use crate::prelude::*;
+use daw_proto::Fx;
 use daw_proto::{Item, Track};
 use daw_theme_art::geometry::tcp::{ROW_H, ROW_W};
 
@@ -88,7 +88,11 @@ pub fn MainWindowPreview(
 
     let playing = use_signal(|| false);
 
-    let fx_band = if fx.values().any(|c| !c.is_empty()) { FX_BAND_H } else { 0.0 };
+    let fx_band = if fx.values().any(|c| !c.is_empty()) {
+        FX_BAND_H
+    } else {
+        0.0
+    };
     let middle_h = height - TRANSPORT_H - MIXER_H - fx_band;
     // The browser takes its column off the project area, full height
     // under the transport — a sidebar, not a fourth dock row.

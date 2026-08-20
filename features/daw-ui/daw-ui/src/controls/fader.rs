@@ -68,7 +68,10 @@ pub fn VolumeFader(
     let (rail_w, _) = rail.source;
     let (cap_w, cap_h) = cap.source;
     let w = (rail_w * scale).round() as u32;
-    let cap_px = ((cap_w * scale).round() as u32, (cap_h * scale).round() as u32);
+    let cap_px = (
+        (cap_w * scale).round() as u32,
+        (cap_h * scale).round() as u32,
+    );
 
     let guid = track.clone();
     let value = use_memo(use_reactive!(|guid| store.volume(&guid)));
@@ -79,8 +82,11 @@ pub fn VolumeFader(
     // Four places: enough that a pixel of travel is never lost on a tall
     // fader, few enough that the style string does not churn on float noise
     // every render.
-    let travel =
-        format!("calc((100% - {}px) * {:.4})", cap_px.1, 1.0 - position(value()));
+    let travel = format!(
+        "calc((100% - {}px) * {:.4})",
+        cap_px.1,
+        1.0 - position(value())
+    );
 
     let guid = track.clone();
     let press = move |e: MouseEvent| {
@@ -200,7 +206,9 @@ pub fn fader_position(gain: f64) -> f64 {
 }
 
 fn position(gain: f64) -> f64 {
-    (gain.max(0.0) / taper::TOP).powf(1.0 / taper::CURVE).clamp(0.0, 1.0)
+    (gain.max(0.0) / taper::TOP)
+        .powf(1.0 / taper::CURVE)
+        .clamp(0.0, 1.0)
 }
 
 /// The inverse, for a drag — which moves the cap, not the gain.

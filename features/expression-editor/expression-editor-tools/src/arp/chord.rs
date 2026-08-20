@@ -131,11 +131,7 @@ mod tests {
 
     #[test]
     fn simultaneous_notes_form_one_chord() {
-        let notes = [
-            note(0.0, PPQ, 60),
-            note(0.0, PPQ, 64),
-            note(0.0, PPQ, 67),
-        ];
+        let notes = [note(0.0, PPQ, 60), note(0.0, PPQ, 64), note(0.0, PPQ, 67)];
         let chords = group_chords(&notes, DEFAULT_GAP_PPQ);
         assert_eq!(chords.len(), 1);
         assert_eq!(
@@ -160,11 +156,7 @@ mod tests {
     #[test]
     fn a_played_chord_with_sloppy_timing_still_groups() {
         // Attacks smeared over ~30 ticks — well inside a 32nd of slop.
-        let notes = [
-            note(0.0, PPQ, 60),
-            note(11.0, PPQ, 64),
-            note(29.0, PPQ, 67),
-        ];
+        let notes = [note(0.0, PPQ, 60), note(11.0, PPQ, 64), note(29.0, PPQ, 67)];
         assert_eq!(group_chords(&notes, DEFAULT_GAP_PPQ).len(), 1);
     }
 

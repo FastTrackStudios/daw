@@ -198,7 +198,11 @@ mod tests {
     fn targets_keep_their_position_in_the_full_note_list() {
         // The ordinal matters: `pattern` indexes its steps by it, so a
         // selection must not renumber from zero.
-        let notes = [Note::new(0, 64), Note::selected(1, 64), Note::selected(2, 64)];
+        let notes = [
+            Note::new(0, 64),
+            Note::selected(1, 64),
+            Note::selected(2, 64),
+        ];
         let ordinals: Vec<usize> = targets(&notes).map(|(i, _)| i).collect();
         assert_eq!(ordinals, [1, 2]);
     }

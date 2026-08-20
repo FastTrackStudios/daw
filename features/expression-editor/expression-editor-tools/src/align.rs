@@ -51,11 +51,7 @@ impl Default for AlignConfig {
 /// A target with no reference inside the window is reported in
 /// `unmatched` rather than dragged somewhere: "why did that not move" is
 /// the first question a user asks.
-pub fn plan_align<T: Timed, R: Timed>(
-    targets: &[T],
-    reference: &[R],
-    cfg: AlignConfig,
-) -> Plan {
+pub fn plan_align<T: Timed, R: Timed>(targets: &[T], reference: &[R], cfg: AlignConfig) -> Plan {
     let mut plan = Plan::default();
     if targets.is_empty() || reference.is_empty() {
         plan.unmatched = targets.iter().map(|t| t.onset()).collect();

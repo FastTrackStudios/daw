@@ -26,7 +26,11 @@ fn the_transport_bar_draws_its_buttons() {
     let html = render(app);
 
     // Seven buttons, each an <svg> of its own.
-    assert_eq!(html.matches("<svg").count(), 7, "one svg per button:\n{html}");
+    assert_eq!(
+        html.matches("<svg").count(),
+        7,
+        "one svg per button:\n{html}"
+    );
     // Glyphs are drawn, not typed and not blitted.
     assert!(html.contains("<path"), "no vector glyph:\n{html}");
     // Lit, because `playing` is true: the plate carries the blue bevel.

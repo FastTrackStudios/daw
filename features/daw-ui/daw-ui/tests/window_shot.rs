@@ -9,13 +9,13 @@
 use std::collections::HashMap;
 
 use daw_proto::{Fx, Item, Track};
-use daw_ui::controls::{EmbeddedFx, use_embedded_fx_guis};
 use daw_ui::components::arrangement_view::{
     AutomationItemView, EnvelopeLaneView, EnvelopePreview, ItemPreview, NotePreview,
 };
 use daw_ui::components::main_window::MainWindowPreview;
 use daw_ui::components::media_browser::{MediaEntry, MediaKind};
 use daw_ui::controls::TrackStore;
+use daw_ui::controls::{EmbeddedFx, use_embedded_fx_guis};
 use dioxus::prelude::*;
 
 const BODY_MARGIN: u32 = 8;
@@ -33,12 +33,24 @@ fn tracks() -> Vec<Track> {
         ..Default::default()
     };
     vec![
-        Track { armed: true, ..t("kick", "Kick", 0xe0_56_7a, 0) },
-        Track { soloed: true, ..t("snare", "Snare", 0xe0_56_7a, 1) },
+        Track {
+            armed: true,
+            ..t("kick", "Kick", 0xe0_56_7a, 0)
+        },
+        Track {
+            soloed: true,
+            ..t("snare", "Snare", 0xe0_56_7a, 1)
+        },
         t("oh", "OH", 0xe0_56_7a, 2),
-        Track { muted: true, ..t("bass", "Bass", 0x55_88_e0, 3) },
+        Track {
+            muted: true,
+            ..t("bass", "Bass", 0x55_88_e0, 3)
+        },
         t("gtr", "Gtr", 0x42_c8_e0, 4),
-        Track { fx_count: 2, ..t("keys", "Keys", 0xe0_a8_42, 5) },
+        Track {
+            fx_count: 2,
+            ..t("keys", "Keys", 0xe0_a8_42, 5)
+        },
     ]
 }
 
@@ -57,9 +69,15 @@ fn items() -> Vec<Item> {
         item("i2", "snare", 1.0, 7.0, "Snare"),
         item("i3", "oh", 0.0, 8.0, "OH"),
         item("i4", "bass", 0.0, 4.0, "Bass A"),
-        Item { muted: true, ..item("i5", "bass", 4.0, 4.0, "Bass B") },
+        Item {
+            muted: true,
+            ..item("i5", "bass", 4.0, 4.0, "Bass B")
+        },
         item("i6", "gtr", 2.0, 3.0, "Gtr"),
-        Item { selected: true, ..item("i7", "gtr", 5.0, 3.0, "Gtr dbl") },
+        Item {
+            selected: true,
+            ..item("i7", "gtr", 5.0, 3.0, "Gtr dbl")
+        },
         item("i8", "keys", 4.0, 4.0, "Keys"),
     ]
 }
@@ -87,12 +105,36 @@ fn previews() -> HashMap<String, ItemPreview> {
             .collect()
     };
     let riff = vec![
-        NotePreview { pitch: 60, start: 0.0, length: 0.9 },
-        NotePreview { pitch: 64, start: 1.0, length: 0.9 },
-        NotePreview { pitch: 67, start: 2.0, length: 0.9 },
-        NotePreview { pitch: 72, start: 3.0, length: 0.9 },
-        NotePreview { pitch: 67, start: 4.0, length: 1.9 },
-        NotePreview { pitch: 64, start: 6.0, length: 1.9 },
+        NotePreview {
+            pitch: 60,
+            start: 0.0,
+            length: 0.9,
+        },
+        NotePreview {
+            pitch: 64,
+            start: 1.0,
+            length: 0.9,
+        },
+        NotePreview {
+            pitch: 67,
+            start: 2.0,
+            length: 0.9,
+        },
+        NotePreview {
+            pitch: 72,
+            start: 3.0,
+            length: 0.9,
+        },
+        NotePreview {
+            pitch: 67,
+            start: 4.0,
+            length: 1.9,
+        },
+        NotePreview {
+            pitch: 64,
+            start: 6.0,
+            length: 1.9,
+        },
     ];
 
     HashMap::from([
@@ -127,12 +169,36 @@ fn media() -> Vec<MediaEntry> {
         preview: Some(ItemPreview::Waveform(wave(160, seed))),
     };
     let riff = vec![
-        NotePreview { pitch: 57, start: 0.0, length: 0.4 },
-        NotePreview { pitch: 60, start: 0.5, length: 0.4 },
-        NotePreview { pitch: 64, start: 1.0, length: 0.4 },
-        NotePreview { pitch: 65, start: 1.5, length: 0.4 },
-        NotePreview { pitch: 64, start: 2.0, length: 0.9 },
-        NotePreview { pitch: 60, start: 3.0, length: 0.9 },
+        NotePreview {
+            pitch: 57,
+            start: 0.0,
+            length: 0.4,
+        },
+        NotePreview {
+            pitch: 60,
+            start: 0.5,
+            length: 0.4,
+        },
+        NotePreview {
+            pitch: 64,
+            start: 1.0,
+            length: 0.4,
+        },
+        NotePreview {
+            pitch: 65,
+            start: 1.5,
+            length: 0.4,
+        },
+        NotePreview {
+            pitch: 64,
+            start: 2.0,
+            length: 0.9,
+        },
+        NotePreview {
+            pitch: 60,
+            start: 3.0,
+            length: 0.9,
+        },
     ];
     vec![
         audio("Am_140_groove.wav", "Loops", 6.9, 3),
@@ -236,7 +302,13 @@ fn fx() -> HashMap<String, Vec<Fx>> {
             "keys".to_string(),
             vec![
                 fx("fx-eq", "FTS EQ", "CLAP: FTS EQ (FastTrackStudio)", true, 0),
-                fx("fx-comp", "FTS Comp", "CLAP: FTS Comp (FastTrackStudio)", true, 1),
+                fx(
+                    "fx-comp",
+                    "FTS Comp",
+                    "CLAP: FTS Comp (FastTrackStudio)",
+                    true,
+                    1,
+                ),
             ],
         ),
         (
@@ -350,6 +422,9 @@ fn crop(path: &std::path::Path, width: u32, height: u32) {
         .status();
     match status {
         Ok(s) if s.success() => {}
-        _ => eprintln!("note: `magick` unavailable, {} keeps its margin", path.display()),
+        _ => eprintln!(
+            "note: `magick` unavailable, {} keeps its margin",
+            path.display()
+        ),
     }
 }

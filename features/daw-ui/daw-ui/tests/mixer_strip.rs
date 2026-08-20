@@ -57,7 +57,10 @@ fn strip_at(height: f32) -> String {
 /// actually asks it.
 fn sweeps(at: f32, present: impl Fn(&str) -> bool, what: &str) {
     assert!(present(&strip_at(at)), "{what} missing at {at}");
-    assert!(!present(&strip_at(at - 1.0)), "{what} still there below {at}");
+    assert!(
+        !present(&strip_at(at - 1.0)),
+        "{what} still there below {at}"
+    );
 }
 
 /// The strip, mounted with **no stylesheet** — which is how a REAPER panel
@@ -87,7 +90,9 @@ fn strip_html(tracks: &[Track]) -> String {
                 }
             }
         },
-        P { tracks: tracks.to_vec() },
+        P {
+            tracks: tracks.to_vec(),
+        },
     );
     dom.rebuild_in_place();
     dioxus_ssr::render(&dom)
@@ -116,7 +121,10 @@ fn the_strip_carries_its_sections_in_reapers_order() {
 
     // The fader region is the one that absorbs the strip's height — that
     // is what gives the fader's stretch band something to stretch into.
-    assert!(html.contains("flex-1"), "nothing takes the strip's height:\n{html}");
+    assert!(
+        html.contains("flex-1"),
+        "nothing takes the strip's height:\n{html}"
+    );
 }
 
 /// The whole point of the boundary: no layout depends on CSS reaching
@@ -150,7 +158,10 @@ fn the_strip_renders_with_the_sheet_absent() {
     assert!(html.contains("Kick"), "no track name:\n{html}");
     // And nothing blits.
     assert!(!html.contains("<img"), "the strip is blitting:\n{html}");
-    assert!(!html.contains("url(data:"), "the strip is blitting:\n{html}");
+    assert!(
+        !html.contains("url(data:"),
+        "the strip is blitting:\n{html}"
+    );
 }
 
 /// Several strips side by side are a mixer: each gets its own controls,
@@ -171,7 +182,6 @@ fn several_strips_read_as_a_mixer() {
     // silently renders its neighbour's controls.
     assert_eq!(html.matches(">M<").count(), 3, "not one mute per strip");
 }
-
 
 /// Each container-height threshold hides its element at REAPER's value.
 #[test]
@@ -197,11 +207,20 @@ fn pan_re_anchors_rather_than_disappearing() {
 
     // The knob is drawn either way: its art is the one with a 24x25 box.
     let knobs = |h: &str| h.matches("viewBox=\"0 0 24 25\"").count();
-    assert!(knobs(&tall) >= 1, "no pan knob above the threshold:\n{tall}");
-    assert!(knobs(&short) >= 1, "the pan control vanished with its section");
+    assert!(
+        knobs(&tall) >= 1,
+        "no pan knob above the threshold:\n{tall}"
+    );
+    assert!(
+        knobs(&short) >= 1,
+        "the pan control vanished with its section"
+    );
 
     // And the pan label is gone with the section it belonged to.
-    assert!(!short.contains(">pan<"), "the pan section's label survived it");
+    assert!(
+        !short.contains(">pan<"),
+        "the pan section's label survived it"
+    );
 }
 
 /// Below the swap the fader is not a short fader — it is a different
@@ -229,7 +248,10 @@ fn the_fader_becomes_a_knob_when_its_area_runs_out() {
         .find(|h| !rail(&strip_at(*h as f32)))
         .expect("the fader swaps somewhere") as f32;
 
-    assert!(area(flip) < T.fader_swap, "swapped while the area still had room");
+    assert!(
+        area(flip) < T.fader_swap,
+        "swapped while the area still had room"
+    );
     assert!(area(flip + 1.0) >= T.fader_swap, "swapped a row late");
     // And the reference screenshot's strip really does carry a fader.
     assert!(rail(&strip_at(228.0)), "no fader on a 228-row strip");
@@ -281,7 +303,10 @@ fn padding_steps_down_in_three_stages() {
         "the mute→solo step does not walk padding's three stages: {steps:?}"
     );
     // 21 plus a padding of 2, 3 or 4.
-    assert_eq!(steps, ["23", "24", "25"].map(str::to_string).into_iter().collect());
+    assert_eq!(
+        steps,
+        ["23", "24", "25"].map(str::to_string).into_iter().collect()
+    );
 }
 
 /// The app's mixer draws vectors and blits nothing — the guarantee #147
@@ -295,7 +320,10 @@ fn padding_steps_down_in_three_stages() {
 fn the_apps_mixer_never_blits_at_any_height() {
     for height in (120..=760).step_by(20) {
         let html = strip_at(height as f32);
-        assert!(!html.contains("<img"), "an <img> appeared at height {height}");
+        assert!(
+            !html.contains("<img"),
+            "an <img> appeared at height {height}"
+        );
         assert!(
             !html.contains("url(data:"),
             "a data-URI background appeared at height {height}"
@@ -324,7 +352,10 @@ fn the_strip_states_the_height_it_collapsed_by() {
             html.contains(&format!("height:{h}px")),
             "the strip at {h} does not state its height:\n{html}"
         );
-        assert!(!html.contains("h-full"), "the strip at {h} still stretches to its parent");
+        assert!(
+            !html.contains("h-full"),
+            "the strip at {h} still stretches to its parent"
+        );
     }
 }
 
@@ -343,8 +374,15 @@ fn the_meter_and_the_fader_share_the_stretch_band() {
             .filter(|b| b.top == Some(4.0))
             .filter_map(|b| b.height)
             .collect();
-        assert_eq!(heights.len(), 2, "meter and fader do not both state a height at {h}:\n{html}");
-        assert_eq!(heights[0], heights[1], "the fader is not as tall as the meter at {h}");
+        assert_eq!(
+            heights.len(),
+            2,
+            "meter and fader do not both state a height at {h}:\n{html}"
+        );
+        assert_eq!(
+            heights[0], heights[1],
+            "the fader is not as tall as the meter at {h}"
+        );
     }
 }
 
@@ -369,7 +407,10 @@ fn the_record_arm_sinks_its_base_into_the_dark() {
         "the arm does not hang by its base's height ({wanted}):\n{html}"
     );
     // And it hangs, rather than sitting inside the band.
-    assert!(!html.contains("bottom:2px"), "the arm is back inside the band");
+    assert!(
+        !html.contains("bottom:2px"),
+        "the arm is back inside the band"
+    );
 }
 
 /// The record arm and the button column stand on one axis.
@@ -385,13 +426,18 @@ fn the_record_arm_and_the_button_column_share_an_axis() {
 
     // The column is as wide as the buttons it holds, not as wide as the
     // one that deliberately overhangs them.
-    assert!(html.contains("width:21px"), "the button column shrink-wraps:\n{html}");
+    assert!(
+        html.contains("width:21px"),
+        "the button column shrink-wraps:\n{html}"
+    );
 
     // And the arm is placed from the same axis rather than by eye — the
     // geometry constant itself, not a pasted rendering of it.
     let arm = daw_theme_art::geometry::mcp::ARM_LEFT;
     assert!(
-        abs_boxes(&html).iter().any(|b| b.left.is_some_and(|l| (l - arm).abs() < 0.01)),
+        abs_boxes(&html)
+            .iter()
+            .any(|b| b.left.is_some_and(|l| (l - arm).abs() < 0.01)),
         "the arm is not on the column's axis ({arm}):\n{html}"
     );
 }
@@ -413,8 +459,14 @@ fn the_band_is_painted_at_reapers_tint() {
     // tinted, is in the markup and the raw colour is not.
     let html = strip_at(371.0);
     let raw = Color::rgb(0x88, 0x44, 0xcc);
-    assert!(html.contains(&panel_tint(raw).to_hex()), "the band is not tinted");
-    assert!(!html.contains(&raw.to_hex()), "the band painted the raw track colour");
+    assert!(
+        html.contains(&panel_tint(raw).to_hex()),
+        "the band is not tinted"
+    );
+    assert!(
+        !html.contains(&raw.to_hex()),
+        "the band painted the raw track colour"
+    );
 }
 
 /// The track panel draws its own family of every shared control.
@@ -454,7 +506,10 @@ fn the_track_panel_asks_for_its_own_images() {
 
     // `track_fx_norm` is 36 wide where `mcp_fx_norm` is 86, and the pill
     // is drawn 1:1, so its viewBox is the tell.
-    assert!(html.contains("viewBox=\"0 0 36 22\""), "the mixer's pill is in the row:\n{html}");
+    assert!(
+        html.contains("viewBox=\"0 0 36 22\""),
+        "the mixer's pill is in the row:\n{html}"
+    );
     // And the routing lanes lie in a row rather than stacked: the track
     // image is wider than it is tall, the mixer's the other way round.
     assert!(!html.contains("<img"), "the row is blitting:\n{html}");
@@ -480,7 +535,10 @@ fn the_band_is_fixed_and_the_stretch_takes_the_height() {
         (tall.pan_band, tall.input_band),
         "the band grew with the strip"
     );
-    assert!(tall.stretch - short.stretch >= 399.0, "the stretch did not take the height");
+    assert!(
+        tall.stretch - short.stretch >= 399.0,
+        "the stretch did not take the height"
+    );
     assert!(
         tall.pan_band + tall.input_band < 0.12 * 900.0,
         "the band is most of a tall strip"
@@ -532,7 +590,10 @@ fn the_rows_corner_controls_need_the_height() {
             |height: f32| {
                 let mut store = use_hook(TrackStore::new);
                 use_hook(|| {
-                    store.seed([Track { guid: "T".into(), ..Default::default() }]);
+                    store.seed([Track {
+                        guid: "T".into(),
+                        ..Default::default()
+                    }]);
                     provide_context(store);
                 });
                 rsx! {

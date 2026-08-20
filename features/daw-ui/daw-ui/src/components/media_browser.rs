@@ -571,9 +571,14 @@ pub fn MediaBrowser() -> Element {
                         .map(|d| d.as_seconds() as f32)
                         .unwrap_or(item.length.as_seconds() as f32);
                     let preview =
-                        crate::components::arrangement_view::fetch_preview(&project, item)
-                            .await;
-                    entries.push(MediaEntry { name, folder, kind, duration, preview });
+                        crate::components::arrangement_view::fetch_preview(&project, item).await;
+                    entries.push(MediaEntry {
+                        name,
+                        folder,
+                        kind,
+                        duration,
+                        preview,
+                    });
                 }
                 project_files.set(entries);
             }
@@ -672,7 +677,10 @@ mod tests {
         assert!(entry_matches(&e, "loops"));
         assert!(entry_matches(&e, "midi"));
         assert!(!entry_matches(&e, "am"), "F#m is not A minor");
-        assert!(!entry_matches(&e, "shark 93"), "one dead term kills the match");
+        assert!(
+            !entry_matches(&e, "shark 93"),
+            "one dead term kills the match"
+        );
     }
 
     /// Shelving filters then groups, keeping folder first-appearance

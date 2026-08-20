@@ -50,8 +50,8 @@
 //!   climb. Per-step [`Step::octave`] covers deliberate jumps.
 
 mod chord;
-mod session;
 mod cursor;
+mod session;
 
 pub use chord::{Chord, ChordNote, DEFAULT_GAP_PPQ, TimedNote, group_chords};
 pub use cursor::{Cursor, Direction};
@@ -393,8 +393,16 @@ mod tests {
     fn steps_cycle_in_order() {
         let arp = Arp {
             steps: vec![
-                Step { rate_ppq: PPQ / 2.0, velocity: Some(100), ..Step::default() },
-                Step { rate_ppq: PPQ / 2.0, velocity: Some(40), ..Step::default() },
+                Step {
+                    rate_ppq: PPQ / 2.0,
+                    velocity: Some(100),
+                    ..Step::default()
+                },
+                Step {
+                    rate_ppq: PPQ / 2.0,
+                    velocity: Some(40),
+                    ..Step::default()
+                },
             ],
             ..Arp::default()
         };
@@ -421,7 +429,10 @@ mod tests {
     #[test]
     fn a_zero_rate_terminates_instead_of_spinning() {
         let arp = Arp {
-            steps: vec![Step { rate_ppq: 0.0, ..Step::default() }],
+            steps: vec![Step {
+                rate_ppq: 0.0,
+                ..Step::default()
+            }],
             ..Arp::default()
         };
         assert!(arp.arpeggiate_chord(&c_major_bar()).is_empty());
@@ -443,10 +454,7 @@ mod tests {
 
     #[test]
     fn chords_are_arpeggiated_independently_and_in_order() {
-        let chords = [
-            chord(0.0, PPQ, &[60, 64]),
-            chord(PPQ, PPQ * 2.0, &[62, 65]),
-        ];
+        let chords = [chord(0.0, PPQ, &[60, 64]), chord(PPQ, PPQ * 2.0, &[62, 65])];
         let out = Arp::uniform(Direction::Up, PPQ / 2.0).arpeggiate(&chords);
         let pitches: Vec<u8> = out.iter().map(|n| n.pitch).collect();
         assert_eq!(pitches, [60, 64, 62, 65]);

@@ -222,7 +222,11 @@ impl Shape {
     /// Curve height at note `i` of `n`, in 0.0..=1.0.
     fn at_note(&self, i: usize, n: usize) -> f64 {
         let last = n.saturating_sub(1);
-        let t = if last == 0 { 0.0 } else { i as f64 / last as f64 };
+        let t = if last == 0 {
+            0.0
+        } else {
+            i as f64 / last as f64
+        };
         self.curve.evaluate(t).1
     }
 
@@ -522,7 +526,10 @@ mod tests {
             panic!("wrong lane");
         };
         let last = points.last().unwrap().position_ppq;
-        assert!(last <= ns[1].end_ppq() + 1.0, "ran past the selection: {last}");
+        assert!(
+            last <= ns[1].end_ppq() + 1.0,
+            "ran past the selection: {last}"
+        );
     }
 
     #[test]
@@ -535,7 +542,9 @@ mod tests {
             Lane::PitchBend,
         ] {
             assert!(
-                Shape::new(CurvePreset::Rise.curve(), lane).apply(&[]).is_empty(),
+                Shape::new(CurvePreset::Rise.curve(), lane)
+                    .apply(&[])
+                    .is_empty(),
                 "{lane:?}"
             );
         }

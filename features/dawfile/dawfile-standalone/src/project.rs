@@ -247,7 +247,11 @@ impl DawProject {
 
     /// Write the compacted store back over `dir`, removing deleted blobs
     /// from disk as well as from memory.
-    pub fn compact_on_disk(&mut self, dir: impl AsRef<Path>, keep_saves: Option<usize>) -> DawResult<usize> {
+    pub fn compact_on_disk(
+        &mut self,
+        dir: impl AsRef<Path>,
+        keep_saves: Option<usize>,
+    ) -> DawResult<usize> {
         let dir = dir.as_ref();
         let removed = self.compact(keep_saves);
         let objects_dir = dir.join(OBJECTS_DIR);

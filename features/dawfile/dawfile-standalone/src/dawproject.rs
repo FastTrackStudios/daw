@@ -54,8 +54,8 @@
 use crate::document::{DawDocument, MarkerNode, TrackNode};
 use crate::error::DawResult;
 use crate::id::EntityId;
-use dawfile_dawproject::types as dp;
 use daw_proto::automation::EnvelopeType;
+use dawfile_dawproject::types as dp;
 
 /// Convert a `.daw` document into a DAWproject.
 pub fn to_dawproject(document: &DawDocument) -> dp::DawProject {
@@ -88,7 +88,12 @@ pub fn to_dawproject(document: &DawDocument) -> dp::DawProject {
                 name: node.track.name.clone(),
                 // Ours is a packed RGB integer; theirs is a hex string.
                 color: node.track.color.map(|c| {
-                    format!("#{:02X}{:02X}{:02X}", (c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF)
+                    format!(
+                        "#{:02X}{:02X}{:02X}",
+                        (c >> 16) & 0xFF,
+                        (c >> 8) & 0xFF,
+                        c & 0xFF
+                    )
                 }),
                 comment: None,
                 content_types: Vec::new(),
@@ -259,7 +264,10 @@ fn composite_of(item: &crate::document::ItemNode) -> Option<&crate::document::En
 /// Entities get fresh ids: DAWproject's ids are XML cross-reference
 /// strings scoped to one file, not stable identities we may adopt as our
 /// own. Adopting them would make two imports of the same file collide.
-pub fn from_dawproject(project: &dp::DawProject, name: impl Into<String>) -> DawResult<DawDocument> {
+pub fn from_dawproject(
+    project: &dp::DawProject,
+    name: impl Into<String>,
+) -> DawResult<DawDocument> {
     let mut document = DawDocument::new(name);
 
     document.tempo_map = vec![daw_proto::tempo_map::TempoPoint {

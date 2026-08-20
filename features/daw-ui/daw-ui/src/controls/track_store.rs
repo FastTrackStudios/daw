@@ -110,7 +110,8 @@ impl TrackStore {
             .map(|t| (t.index, t.guid.clone()))
             .collect();
         by_index.sort_unstable();
-        self.order.set(by_index.into_iter().map(|(_, g)| g).collect());
+        self.order
+            .set(by_index.into_iter().map(|(_, g)| g).collect());
     }
 
     /// The values the UI is holding. A control writes its drag here and
@@ -181,7 +182,9 @@ impl TrackStore {
             // index and the sort deciding between them alphabetically: the
             // meters shifted by one and kept running, which is exactly the
             // silent failure this ordering exists to prevent.
-            TrackEvent::Moved { guid, new_index, .. } => {
+            TrackEvent::Moved {
+                guid, new_index, ..
+            } => {
                 drop(tracks);
                 self.move_track(guid, *new_index as usize);
                 return;
@@ -190,13 +193,13 @@ impl TrackStore {
             TrackEvent::MuteChanged { guid, muted } => (guid, &|t| t.muted = *muted),
             TrackEvent::SoloChanged { guid, soloed } => (guid, &|t| t.soloed = *soloed),
             TrackEvent::ArmChanged { guid, armed } => (guid, &|t| t.armed = *armed),
-            TrackEvent::SelectionChanged { guid, selected } => {
-                (guid, &|t| t.selected = *selected)
-            }
+            TrackEvent::SelectionChanged { guid, selected } => (guid, &|t| t.selected = *selected),
             // Dropped while the UI holds this track: it is the echo of a
             // drag still in progress, and obeying it would drag the cap
             // backwards under the pointer.
-            TrackEvent::VolumeChanged { guid, volume } if !self.drafts.holds(guid, Held::Volume) => {
+            TrackEvent::VolumeChanged { guid, volume }
+                if !self.drafts.holds(guid, Held::Volume) =>
+            {
                 (guid, &|t| t.volume = *volume)
             }
             TrackEvent::VolumeChanged { .. } => return,
@@ -217,7 +220,11 @@ impl TrackStore {
             // The event that did not exist until #142: without it a
             // mixer's FX buttons were right when it opened and wrong from
             // the first plugin the user added.
-            TrackEvent::FxCountChanged { guid, fx_count, input_fx_count } => (guid, &|t| {
+            TrackEvent::FxCountChanged {
+                guid,
+                fx_count,
+                input_fx_count,
+            } => (guid, &|t| {
                 t.fx_count = *fx_count;
                 t.input_fx_count = *input_fx_count;
             }),
@@ -235,7 +242,6 @@ impl TrackStore {
     pub fn track(&self, guid: &str) -> Option<Track> {
         self.tracks.read().get(guid).cloned()
     }
-
 }
 
 /// The store from context, creating and providing one if this is the first

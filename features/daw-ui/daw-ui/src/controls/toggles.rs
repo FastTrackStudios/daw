@@ -10,10 +10,10 @@
 //! state the track model cannot express, and input monitoring cycles rather
 //! than toggles.
 
+use daw_proto::track::InputMonitoringMode;
 use daw_theme_art::dress::Panel;
 use daw_theme_art::slice;
 use daw_theme_art::vector_controls as art;
-use daw_proto::track::InputMonitoringMode;
 
 use crate::controls::reach::write_track;
 use crate::controls::use_track;
@@ -146,7 +146,11 @@ pub fn PhaseButton(
     let info = use_track(track.clone());
     let inverted = info.read().as_ref().is_some_and(|t| t.phase_inverted);
 
-    let named = slice::expect_art(if inverted { "mcp_phase_inv" } else { "mcp_phase_norm" });
+    let named = slice::expect_art(if inverted {
+        "mcp_phase_inv"
+    } else {
+        "mcp_phase_norm"
+    });
     let (w, h) = px(named, scale);
     let guid = track.clone();
 
@@ -353,9 +357,7 @@ fn px(art: slice::NamedArt, scale: f32) -> (u32, u32) {
 /// Explicit pixels, inline: no stylesheet is assumed to arrive, because
 /// Blitz — which renders the REAPER panels — does not reliably load one.
 fn box_style(w: u32, h: u32) -> String {
-    format!(
-        "display:inline-block; line-height:0; width:{w}px; height:{h}px; cursor:pointer;"
-    )
+    format!("display:inline-block; line-height:0; width:{w}px; height:{h}px; cursor:pointer;")
 }
 
 /// The envelope button — `mcp.env` and `tcp.env`.

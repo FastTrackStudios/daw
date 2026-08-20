@@ -163,7 +163,11 @@ impl Curve {
             .map(|(i, (index, was))| {
                 // A single note sits at the curve's start, not at a
                 // 0/0 division.
-                let t = if last == 0 { 0.0 } else { i as f64 / last as f64 };
+                let t = if last == 0 {
+                    0.0
+                } else {
+                    i as f64 / last as f64
+                };
                 let target = self.velocity_at(t);
                 VelocityEdit {
                     index,
@@ -286,8 +290,8 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(k, p)| {
-                    let comb = factorial(n as u32)
-                        / (factorial(k as u32) * factorial((n - k) as u32));
+                    let comb =
+                        factorial(n as u32) / (factorial(k as u32) * factorial((n - k) as u32));
                     comb * t.powi(k as i32) * (1.0 - t).powi((n - k) as i32) * p.y
                 })
                 .sum();
@@ -303,7 +307,9 @@ mod tests {
 
     #[test]
     fn a_rise_ends_higher_than_it_starts_and_never_backtracks() {
-        let out = CurvePreset::Rise.curve().apply(&notes(16), Range::default());
+        let out = CurvePreset::Rise
+            .curve()
+            .apply(&notes(16), Range::default());
         let vels: Vec<u8> = out.iter().map(|e| e.velocity).collect();
         assert_eq!(vels.first(), Some(&1)); // clamped off zero
         assert_eq!(vels.last(), Some(&127));
@@ -312,7 +318,9 @@ mod tests {
 
     #[test]
     fn a_fall_is_the_mirror_of_a_rise() {
-        let out = CurvePreset::Fall.curve().apply(&notes(16), Range::default());
+        let out = CurvePreset::Fall
+            .curve()
+            .apply(&notes(16), Range::default());
         let vels: Vec<u8> = out.iter().map(|e| e.velocity).collect();
         assert_eq!(vels.first(), Some(&127));
         assert!(vels.windows(2).all(|w| w[0] >= w[1]), "{vels:?}");
@@ -331,7 +339,9 @@ mod tests {
         // Same shape, different note counts: the endpoints must still
         // land on the curve's endpoints.
         for count in [2, 5, 40] {
-            let out = CurvePreset::Rise.curve().apply(&notes(count), Range::default());
+            let out = CurvePreset::Rise
+                .curve()
+                .apply(&notes(count), Range::default());
             assert_eq!(out.len(), count);
             assert_eq!(out.last().unwrap().velocity, 127);
         }
@@ -345,7 +355,9 @@ mod tests {
 
     #[test]
     fn the_range_compresses_the_whole_ramp() {
-        let out = CurvePreset::Rise.curve().apply(&notes(16), Range::new(50, 90));
+        let out = CurvePreset::Rise
+            .curve()
+            .apply(&notes(16), Range::new(50, 90));
         assert!(out.iter().all(|e| (50..=90).contains(&e.velocity)));
     }
 

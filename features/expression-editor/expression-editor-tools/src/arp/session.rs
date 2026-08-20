@@ -88,7 +88,11 @@ impl ArpSession {
     }
 
     pub fn rate_ppq(&self) -> f64 {
-        self.arp.steps.first().map(|s| s.rate_ppq).unwrap_or(super::PPQ / 4.0)
+        self.arp
+            .steps
+            .first()
+            .map(|s| s.rate_ppq)
+            .unwrap_or(super::PPQ / 4.0)
     }
 
     /// Set the rate on every step, preserving each step's other fields.
@@ -115,7 +119,11 @@ impl ArpSession {
     }
 
     pub fn ratchet(&self) -> u8 {
-        self.arp.steps.first().map(|s| s.ratchet.max(1)).unwrap_or(1)
+        self.arp
+            .steps
+            .first()
+            .map(|s| s.ratchet.max(1))
+            .unwrap_or(1)
     }
 
     pub fn set_ratchet(&mut self, ratchet: u8) {
@@ -155,7 +163,10 @@ mod tests {
                 end_ppq: PPQ * 4.0,
                 notes: [60, 64, 67]
                     .into_iter()
-                    .map(|pitch| ChordNote { pitch, velocity: 96 })
+                    .map(|pitch| ChordNote {
+                        pitch,
+                        velocity: 96,
+                    })
                     .collect(),
             }],
             vec![0, 1, 2],
@@ -174,7 +185,11 @@ mod tests {
         let eighths = s.resolve().len();
         s.set_rate_ppq(PPQ / 4.0);
         s.set_rate_ppq(PPQ / 2.0);
-        assert_eq!(s.resolve().len(), eighths, "the source chords are untouched");
+        assert_eq!(
+            s.resolve().len(),
+            eighths,
+            "the source chords are untouched"
+        );
     }
 
     #[test]

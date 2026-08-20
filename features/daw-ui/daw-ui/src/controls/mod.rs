@@ -32,35 +32,36 @@
 mod collapse;
 mod combo;
 mod drafts;
-mod fx_slots;
 mod fader;
 mod fx;
+mod fx_slots;
 mod meters;
 mod mute;
 mod pan;
 pub(crate) mod reach;
-mod toggles;
 mod sync;
+mod toggles;
 mod track_store;
 
+pub use collapse::{
+    Bands, Collapse, PanAnchor, REAPER as REAPER_THRESHOLDS, REAPER_BANDS, Thresholds, VolumeWidget,
+};
+pub use combo::{Caret, record_input_name};
 /// Which of REAPER's two control families to draw — re-exported from the
 /// art layer, which owns the distinction because it is a fact about the
 /// images (different boxes, different measurements), not about the wrapper.
 pub use daw_theme_art::dress::Panel;
-pub use collapse::{
-    Bands, Collapse, PanAnchor, Thresholds, VolumeWidget, REAPER as REAPER_THRESHOLDS,
-    REAPER_BANDS,
-};
-pub use combo::{Caret, record_input_name};
 pub use drafts::{Drafts, Held};
+pub use fader::{VolumeFader, fader_position};
+pub use fx::FxButton;
 pub use fx_slots::{
     EMBED_H, EmbeddedFx, EmbeddedFxGuis, EmbeddedFxRenderer, FxSlotStack, use_embedded_fx_guis,
 };
-pub use fader::{VolumeFader, fader_position};
-pub use fx::FxButton;
 pub use meters::{MeterFeed, Meters, TrackMeter, use_meters};
 pub use mute::MuteButton;
 pub use pan::{PanKnob, RecordInputLabel, TrackName};
-pub use toggles::{EnvelopeButton, IoButton, MonitorButton, PhaseButton, RecordArmButton, SoloButton};
 pub use sync::ControlSync;
+pub use toggles::{
+    EnvelopeButton, IoButton, MonitorButton, PhaseButton, RecordArmButton, SoloButton,
+};
 pub use track_store::{TrackStore, use_daw_tracks, use_live_track, use_track, use_track_store};

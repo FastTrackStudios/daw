@@ -39,11 +39,11 @@
 //! it testable by sweeping a height across a boundary, which is the only way
 //! to prove a threshold fires where REAPER's does.
 
-pub use daw_theme_art::collapse::{Bands, Thresholds, REAPER, REAPER_BANDS};
 use daw_theme_art::collapse::{
     BOTTOM_SECTION, FX_SECTION, INPUT_SECTION_FULL, INPUT_SECTION_MINIMAL, INPUT_SECTION_NO_FX,
     PAN_SECTION_COLLAPSED, PAN_SECTION_UNLABELLED,
 };
+pub use daw_theme_art::collapse::{Bands, REAPER, REAPER_BANDS, Thresholds};
 
 /// Where the pan control lives at a given height.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -148,7 +148,11 @@ impl Collapse {
             show_record_mode: show_pan_section,
             pan_band,
             input_band,
-            pan: if show_pan_section { PanAnchor::PanSection } else { PanAnchor::InputArea },
+            pan: if show_pan_section {
+                PanAnchor::PanSection
+            } else {
+                PanAnchor::InputArea
+            },
             // Asked of the fader area, which is what REAPER asks it of.
             volume: if daw_theme_art::collapse::fader_area(
                 stretch,
@@ -211,15 +215,16 @@ mod tests {
             .expect("the fader swaps somewhere");
         let area = |h: f32| {
             let c = Collapse::at(h);
-            daw_theme_art::collapse::fader_area(
-                c.stretch,
-                c.show_io,
-                c.show_envelope,
-                c.show_phase,
-            )
+            daw_theme_art::collapse::fader_area(c.stretch, c.show_io, c.show_envelope, c.show_phase)
         };
-        assert!(area(flip as f32) < REAPER.fader_swap, "swapped with room to spare");
-        assert!(area(flip as f32 + 1.0) >= REAPER.fader_swap, "swapped a row late");
+        assert!(
+            area(flip as f32) < REAPER.fader_swap,
+            "swapped with room to spare"
+        );
+        assert!(
+            area(flip as f32 + 1.0) >= REAPER.fader_swap,
+            "swapped a row late"
+        );
     }
 
     /// The re-anchor: the pan section goes, the pan control does not, and
@@ -231,8 +236,15 @@ mod tests {
         assert!(tall.show_record_mode);
 
         let short = Collapse::at(REAPER.pan_section - 1.0);
-        assert_eq!(short.pan, PanAnchor::InputArea, "the pan control vanished with its section");
-        assert!(!short.show_record_mode, "record mode kept a place it had given away");
+        assert_eq!(
+            short.pan,
+            PanAnchor::InputArea,
+            "the pan control vanished with its section"
+        );
+        assert!(
+            !short.show_record_mode,
+            "record mode kept a place it had given away"
+        );
     }
 
     /// The residual-driven collapses key off the stretch section, not the
@@ -255,7 +267,11 @@ mod tests {
                 c.stretch >= REAPER.envelope,
                 "envelope disagreed at h={h}"
             );
-            assert_eq!(c.show_phase, c.stretch >= REAPER.phase, "phase disagreed at h={h}");
+            assert_eq!(
+                c.show_phase,
+                c.stretch >= REAPER.phase,
+                "phase disagreed at h={h}"
+            );
         }
     }
 

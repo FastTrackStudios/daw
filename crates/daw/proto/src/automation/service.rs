@@ -21,12 +21,18 @@ pub struct LaneParams {
 impl LaneParams {
     /// A lane of its own, at `height`.
     pub fn own(height: u32) -> Self {
-        Self { in_own_lane: true, height }
+        Self {
+            in_own_lane: true,
+            height,
+        }
     }
 
     /// Folded back over the track's lane.
     pub fn overlaid() -> Self {
-        Self { in_own_lane: false, height: 0 }
+        Self {
+            in_own_lane: false,
+            height: 0,
+        }
     }
 }
 
@@ -43,13 +49,21 @@ pub struct AddAutomationItemParams {
 impl AddAutomationItemParams {
     /// A new, unpooled item over a range.
     pub fn new(position: PositionInSeconds, length: Duration) -> Self {
-        Self { pool_id: -1, position, length }
+        Self {
+            pool_id: -1,
+            position,
+            length,
+        }
     }
 
     /// Another instance of an existing pool — edits propagate between
     /// instances, which is the point of pooling.
     pub fn pooled(pool_id: i32, position: PositionInSeconds, length: Duration) -> Self {
-        Self { pool_id, position, length }
+        Self {
+            pool_id,
+            position,
+            length,
+        }
     }
 }
 
@@ -73,7 +87,10 @@ pub struct SetAutomationItemParams {
 impl SetAutomationItemParams {
     /// Address an item, changing nothing yet.
     pub fn at(index: u32) -> Self {
-        Self { index, ..Default::default() }
+        Self {
+            index,
+            ..Default::default()
+        }
     }
 
     pub fn position(mut self, position: PositionInSeconds) -> Self {

@@ -67,10 +67,13 @@ pub fn tops_at(html: &str, left: f32) -> Vec<f32> {
 fn style_px(style: &str, name: &str) -> Option<f32> {
     // Matched as a declaration, not a substring: `top` alone would also
     // find `margin-top`.
-    style
-        .split(';')
-        .map(str::trim)
-        .find_map(|decl| decl.strip_prefix(name)?.strip_prefix(':')?.strip_suffix("px")?.parse().ok())
+    style.split(';').map(str::trim).find_map(|decl| {
+        decl.strip_prefix(name)?
+            .strip_prefix(':')?
+            .strip_suffix("px")?
+            .parse()
+            .ok()
+    })
 }
 
 /// A mark inside an SVG — a `<rect>` or `<text>`, by its attributes.
@@ -89,7 +92,10 @@ pub fn svg_rects(html: &str) -> Vec<SvgMark> {
 
 /// The x anchor of every `<text>` in the HTML, in document order.
 pub fn svg_text_anchors(html: &str) -> Vec<f32> {
-    svg_marks(html, "<text ").into_iter().filter_map(|m| m.x).collect()
+    svg_marks(html, "<text ")
+        .into_iter()
+        .filter_map(|m| m.x)
+        .collect()
 }
 
 fn svg_marks(html: &str, open: &str) -> Vec<SvgMark> {

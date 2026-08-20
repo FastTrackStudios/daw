@@ -11,8 +11,8 @@
 //! blend stays a pure function of `amount`.
 
 use rand::Rng;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 use super::{Note, Range, VelocityEdit, lerp, targets};
 
@@ -68,8 +68,11 @@ impl Randomize {
                 let target = *self.dealt.get(ordinal)?;
                 Some(VelocityEdit {
                     index: note.index,
-                    velocity: range
-                        .clamp(lerp(f64::from(note.velocity), f64::from(target), amount)),
+                    velocity: range.clamp(lerp(
+                        f64::from(note.velocity),
+                        f64::from(target),
+                        amount,
+                    )),
                 })
             })
             .collect()

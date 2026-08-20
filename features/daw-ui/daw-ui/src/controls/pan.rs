@@ -43,8 +43,15 @@ pub fn PanKnob(
     let guid = track.clone();
     let pan = use_memo(use_reactive!(|guid| store.pan(&guid)));
 
-    let (src_w, src_h) = if large { (28.0f32, 29.0f32) } else { (24.0f32, 25.0f32) };
-    let (w, h) = ((src_w * scale).round() as u32, (src_h * scale).round() as u32);
+    let (src_w, src_h) = if large {
+        (28.0f32, 29.0f32)
+    } else {
+        (24.0f32, 25.0f32)
+    };
+    let (w, h) = (
+        (src_w * scale).round() as u32,
+        (src_h * scale).round() as u32,
+    );
 
     let guid = track.clone();
     let press = move |e: MouseEvent| {
@@ -112,8 +119,12 @@ pub fn RecordInputLabel(
         None | Some(RecordInput::None) => "in —".to_string(),
         Some(RecordInput::Audio { channel }) => format!("in {}", channel + 1),
         Some(RecordInput::Midi { device_id, channel }) => {
-            let dev = device_id.map(|d| d.to_string()).unwrap_or_else(|| "all".into());
-            let ch = channel.map(|c| (c + 1).to_string()).unwrap_or_else(|| "all".into());
+            let dev = device_id
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "all".into());
+            let ch = channel
+                .map(|c| (c + 1).to_string())
+                .unwrap_or_else(|| "all".into());
             format!("midi {dev}/{ch}")
         }
         Some(RecordInput::Raw(v)) => format!("in #{v}"),
@@ -162,8 +173,7 @@ pub fn TrackName(
     // `mcp_namebg` — a shade darker than the raised surface the plate
     // used, which read as a light bar across the bottom of every strip
     // next to REAPER's. The measured value lives in the token.
-    let plate = daw_theme::Color::hex(daw_theme::defaults::STRIP_BODY)
-        .expect("token is valid hex");
+    let plate = daw_theme::Color::hex(daw_theme::defaults::STRIP_BODY).expect("token is valid hex");
     let _ = colour;
     // Black text on a light colour, white on a dark one — a track painted
     // yellow is unreadable otherwise. Rec. 601 luma, which is what a

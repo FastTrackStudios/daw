@@ -53,7 +53,11 @@ fn the_rail_is_a_stack_of_bands_and_only_the_middle_grows() {
     let html = dioxus_ssr::render(&dom);
 
     // Three rail bands plus the cap.
-    assert_eq!(html.matches("<svg").count(), 4, "not one svg per band:\n{html}");
+    assert_eq!(
+        html.matches("<svg").count(),
+        4,
+        "not one svg per band:\n{html}"
+    );
     // Each band draws its own slice of the groove in its own coordinates,
     // rather than windowing one drawing through a viewBox offset: Blitz
     // ignores a viewBox's min-y and clips nothing to it, so windowing made
@@ -64,7 +68,10 @@ fn the_rail_is_a_stack_of_bands_and_only_the_middle_grows() {
         2,
         "the caps are not drawn at their own origin:\n{html}"
     );
-    assert!(html.contains(r#"viewBox="0 0 23 23""#), "no stretch band:\n{html}");
+    assert!(
+        html.contains(r#"viewBox="0 0 23 23""#),
+        "no stretch band:\n{html}"
+    );
 
     // And the slices reassemble the traced groove: 2 rows in the top cap,
     // 23 in the run, 2 in the bottom — the 27 rows `mcp_volbg` traces.
@@ -82,8 +89,14 @@ fn the_rail_is_a_stack_of_bands_and_only_the_middle_grows() {
     );
     // Still a drawing, not a picture of one.
     assert!(!html.contains("<img"), "the fader is blitting:\n{html}");
-    assert!(!html.contains("url(data:"), "the fader is blitting:\n{html}");
-    assert!(!html.contains("currentColor"), "a colour is left to CSS:\n{html}");
+    assert!(
+        !html.contains("url(data:"),
+        "the fader is blitting:\n{html}"
+    );
+    assert!(
+        !html.contains("currentColor"),
+        "a colour is left to CSS:\n{html}"
+    );
 }
 
 /// At the source box the decomposition is the identity: three bands of
@@ -135,7 +148,10 @@ fn an_echo_is_ignored_during_the_drag_and_obeyed_after_it() {
         drafts.set_volume("T1", 0.9);
 
         // The engine, still catching up, reports where it had got to.
-        store.apply(&TrackEvent::VolumeChanged { guid: "T1".into(), volume: 0.5 });
+        store.apply(&TrackEvent::VolumeChanged {
+            guid: "T1".into(),
+            volume: 0.5,
+        });
         assert_eq!(store.volume("T1"), 0.9, "the echo fought the finger");
 
         // Drag ends; the sync loop writes the last value, then retires.
@@ -144,7 +160,10 @@ fn an_echo_is_ignored_during_the_drag_and_obeyed_after_it() {
         drafts.retire();
 
         // Now a change made anywhere else reaches the fader normally.
-        store.apply(&TrackEvent::VolumeChanged { guid: "T1".into(), volume: 0.25 });
+        store.apply(&TrackEvent::VolumeChanged {
+            guid: "T1".into(),
+            volume: 0.25,
+        });
         assert_eq!(store.volume("T1"), 0.25, "an idle fader ignored the engine");
     });
 }
@@ -160,7 +179,10 @@ fn suppression_is_per_track() {
         store.seed([track("T1", 0.5), track("T2", 0.5)]);
         store.drafts().set_volume("T1", 0.9);
 
-        store.apply(&TrackEvent::VolumeChanged { guid: "T2".into(), volume: 0.2 });
+        store.apply(&TrackEvent::VolumeChanged {
+            guid: "T2".into(),
+            volume: 0.2,
+        });
         assert_eq!(store.volume("T2"), 0.2, "an untouched track was suppressed");
         assert_eq!(store.volume("T1"), 0.9);
     });

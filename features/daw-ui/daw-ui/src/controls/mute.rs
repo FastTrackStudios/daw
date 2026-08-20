@@ -45,7 +45,11 @@ pub fn MuteButton(
     let guid = track.clone();
     let press = move |_| {
         at.set(art::Interaction::Pressed);
-        write_track(guid.clone(), "mute", |t| async move { t.toggle_mute().await });
+        write_track(
+            guid.clone(),
+            "mute",
+            |t| async move { t.toggle_mute().await },
+        );
     };
 
     rsx! {
@@ -71,4 +75,3 @@ pub fn MuteButton(
         }
     }
 }
-

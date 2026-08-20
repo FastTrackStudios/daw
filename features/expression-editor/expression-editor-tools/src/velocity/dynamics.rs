@@ -89,8 +89,9 @@ impl Dynamics {
         match self.pivot {
             Pivot::Fixed(v) => f64::from(v.clamp(MIN_VELOCITY, MAX_VELOCITY)),
             Pivot::Mean => {
-                let (sum, count) = targets(notes)
-                    .fold((0.0, 0u32), |(s, c), (_, n)| (s + f64::from(n.velocity), c + 1));
+                let (sum, count) = targets(notes).fold((0.0, 0u32), |(s, c), (_, n)| {
+                    (s + f64::from(n.velocity), c + 1)
+                });
                 if count == 0 {
                     f64::from(MIN_VELOCITY)
                 } else {

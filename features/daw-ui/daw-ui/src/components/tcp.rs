@@ -72,11 +72,13 @@ pub fn TrackRow(
     let theme = daw_theme::Theme::default();
     let tint = track
         .color
-        .map(|c| daw_theme_art::dress::panel_tint(daw_theme::Color::rgb(
-            (c >> 16) as u8,
-            (c >> 8) as u8,
-            c as u8,
-        )))
+        .map(|c| {
+            daw_theme_art::dress::panel_tint(daw_theme::Color::rgb(
+                (c >> 16) as u8,
+                (c >> 8) as u8,
+                c as u8,
+            ))
+        })
         .unwrap_or(theme.chrome.surface_raised);
     // The fields are the track colour, darkened — not a flat grey. Measured
     // against the tint in REAPER's own render: the input combo is 0.75 of

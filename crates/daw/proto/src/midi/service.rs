@@ -302,7 +302,6 @@ pub trait Midi {
     /// Write a snapshot out as a standard MIDI file.
     fn write_midi_file(&self, path: String, content: MidiTakeContent, ppq: f64) -> bool;
 
-
     // ── Notes ──────────────────────────────────────────────────────
 
     fn notes(&self, location: MidiTakeLocation) -> Vec<MidiNote>;

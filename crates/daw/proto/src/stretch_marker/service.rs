@@ -26,11 +26,8 @@ pub trait StretchMarkers {
     /// The host keeps markers sorted by position, so the index a marker
     /// lands at is not necessarily the last — which is why this returns
     /// it rather than leaving the caller to assume.
-    fn add_stretch_marker(
-        &self,
-        location: StretchTakeRef,
-        marker: StretchMarker,
-    ) -> DawResult<u32>;
+    fn add_stretch_marker(&self, location: StretchTakeRef, marker: StretchMarker)
+    -> DawResult<u32>;
 
     /// Replace the marker at `index`.
     fn set_stretch_marker(
