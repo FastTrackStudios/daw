@@ -203,6 +203,10 @@ pub struct Lane {
     /// Draw each member in its own sub-row of the lane rather than
     /// summed/overlaid — the `Toms` lane, one row per tom.
     pub split: bool,
+    /// Draw only the active member's waveform instead of the members'
+    /// sum — "let me see just this mic". A view flag, not an audio
+    /// solo: detection and every edit still treat the lane whole.
+    pub solo_mic: bool,
 }
 
 impl Lane {
@@ -214,6 +218,7 @@ impl Lane {
             default_weight: weight,
             role: None,
             split: false,
+            solo_mic: false,
         }
     }
 
@@ -225,6 +230,7 @@ impl Lane {
             default_weight: weight,
             role: Some(role),
             split: role.splits_members(),
+            solo_mic: false,
         }
     }
 

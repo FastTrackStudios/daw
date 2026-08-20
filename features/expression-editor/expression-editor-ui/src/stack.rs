@@ -69,6 +69,8 @@ pub struct LaneView {
     /// The lane's member tracks: `(track index, name, is_active)`, in
     /// draw order. What the gutter's mic selector offers.
     pub members: Vec<(usize, String, bool)>,
+    /// Whether the lane draws only its current mic instead of the sum.
+    pub solo_mic: bool,
     /// The summed waveform of a role lane (kick, snare, other), as
     /// mirrored polygon points — the same shape
     /// [`canvas::take_waveform`] builds for the roll. `None` when the
@@ -328,8 +330,15 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
         let count = (ed.viewport.w.ceil() as usize).clamp(2, 2048);
         if role.is_some() && !role_split {
             // r[impl drums.lanes.summed]
+            //
+            // Solo-mic shows just the lane's current mic — the one the
+            // gutter chip names — instead of the members' mean. A view
+            // choice only: detection and edits still take the lane
+            // whole.
+            let solo = lane_def.is_some_and(|l| l.solo_mic);
             let mems: Vec<(&[f32], f64, f64)> = members
                 .iter()
+                .filter(|&&i| !solo || i == track_index)
                 .filter_map(|&i| {
                     let d = doc_for(ed, i)?;
                     let (s, e) = doc_span_secs(ed, d)?;
@@ -449,6 +458,7 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
                 Some((i, t.name.clone(), i == ed.tracks.active()))
             })
             .collect(),
+        solo_mic: lane_def.is_some_and(|l| l.solo_mic),
         waveform,
         sub_lanes,
     })
@@ -977,19 +987,35 @@ pub fn StackView(
                     drop(ed);
                     let ly = c.y - canvas::RULER_H;
                     if let Some(open) = mic_menu() {
+                        enum Pick {
+                            Mic(usize),
+                            Solo,
+                        }
                         let picked = views.iter().find(|l| l.lane == open).and_then(|l| {
-                            l.members.iter().enumerate().find_map(|(i, (ti, ..))| {
-                                let iy = l.y + MIC_MENU_TOP + i as f64 * MIC_ITEM_H;
-                                (c.x >= 4.0
-                                    && c.x <= 4.0 + MIC_MENU_W
-                                    && ly >= iy
-                                    && ly < iy + MIC_ITEM_H)
-                                    .then_some(*ti)
-                            })
+                            let row = |i: usize| l.y + MIC_MENU_TOP + i as f64 * MIC_ITEM_H;
+                            if c.x < 4.0 || c.x > 4.0 + MIC_MENU_W {
+                                return None;
+                            }
+                            for (i, (ti, ..)) in l.members.iter().enumerate() {
+                                if ly >= row(i) && ly < row(i) + MIC_ITEM_H {
+                                    return Some(Pick::Mic(*ti));
+                                }
+                            }
+                            let solo_row = row(l.members.len());
+                            (ly >= solo_row && ly < solo_row + MIC_ITEM_H).then_some(Pick::Solo)
                         });
                         mic_menu.set(None);
-                        if let Some(track) = picked {
-                            editor.write().switch_track(track);
+                        match picked {
+                            Some(Pick::Mic(track)) => {
+                                editor.write().switch_track(track);
+                            }
+                            Some(Pick::Solo) => {
+                                let mut ed = editor.write();
+                                if let Some(l) = ed.tracks.layout_mut().lane_mut(open) {
+                                    l.solo_mic = !l.solo_mic;
+                                }
+                            }
+                            None => {}
                         }
                         return;
                     }
@@ -1458,7 +1484,7 @@ pub fn StackView(
                         rect {
                             x: 4, y: "{lane.y + MIC_MENU_TOP - 2.0:.1}",
                             width: "{MIC_MENU_W}",
-                            height: "{lane.members.len() as f64 * MIC_ITEM_H + 4.0:.1}",
+                            height: "{(lane.members.len() + 1) as f64 * MIC_ITEM_H + 4.0:.1}",
                             rx: 3,
                             fill: theme::PANEL,
                             stroke: theme::BORDER_STRONG,
@@ -1478,6 +1504,25 @@ pub fn StackView(
                                 font_size: "9",
                                 fill: if *active { theme::TEXT_BRIGHT } else { theme::TEXT },
                                 "{name}"
+                            }
+                        }
+                        // The footer: draw only this mic's waveform,
+                        // instead of the members' sum. A view flag —
+                        // detection and edits still take the lane whole.
+                        {
+                            let sy = lane.y + MIC_MENU_TOP + lane.members.len() as f64 * MIC_ITEM_H;
+                            rsx! {
+                                line {
+                                    x1: 5, x2: "{2.0 + MIC_MENU_W}",
+                                    y1: "{sy:.1}", y2: "{sy:.1}",
+                                    stroke: theme::PANEL_BORDER, stroke_width: 1,
+                                }
+                                text {
+                                    x: 12, y: "{sy + 11.0:.1}",
+                                    font_size: "9",
+                                    fill: if lane.solo_mic { theme::TEXT_BRIGHT } else { theme::TEXT_DIM },
+                                    if lane.solo_mic { "✓ solo this mic" } else { "solo this mic" }
+                                }
                             }
                         }
                     }
