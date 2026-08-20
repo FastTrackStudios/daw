@@ -63,6 +63,19 @@ impl LaneRole {
         matches!(self, LaneRole::Kick | LaneRole::Snare)
     }
 
+    /// The role's hue — the drum map's own kit palette, so a kick is
+    /// red whether it is a MIDI row or an audio lane. `Other` takes the
+    /// hat cyan: hats and cymbals are most of what lives there.
+    pub fn color(self) -> &'static str {
+        use crate::rows;
+        match self {
+            LaneRole::Kick => rows::DRUM_KICK_COLOR,
+            LaneRole::Snare => rows::DRUM_SNARE_COLOR,
+            LaneRole::Toms => rows::DRUM_TOM_COLOR,
+            LaneRole::Other => rows::DRUM_HAT_COLOR,
+        }
+    }
+
     /// Every role, top to bottom.
     pub const ALL: [LaneRole; 4] = [
         LaneRole::Other,

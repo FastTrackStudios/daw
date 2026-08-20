@@ -818,6 +818,17 @@ pub const STRING_COLORS: [&str; 8] = [
     "#a78bfa", "#f472b6",
 ];
 
+/// The kit-section palette. One set of hues for a drum wherever it
+/// appears — a MIDI map row, an audio role lane, a legend — so "the
+/// kick is red" is a fact about the editor, not about one view.
+pub const DRUM_KICK_COLOR: &str = "#ef4444";
+pub const DRUM_SNARE_COLOR: &str = "#f59e0b";
+pub const DRUM_TOM_COLOR: &str = "#a3e635";
+pub const DRUM_HAT_COLOR: &str = "#22d3ee";
+pub const DRUM_RIDE_COLOR: &str = "#60a5fa";
+pub const DRUM_CYMBAL_COLOR: &str = "#f472b6";
+pub const DRUM_OTHER_COLOR: &str = "#c084fc";
+
 /// Kit-section colour, so a groove reads at a glance.
 fn drum_color(name: &str) -> &'static str {
     let n = name.to_ascii_lowercase();
@@ -829,27 +840,27 @@ fn drum_color(name: &str) -> &'static str {
     // kit came out one colour the first time it was drawn.
     let head = n.split([' ', '-']).next().unwrap_or("");
     match head {
-        "k" | "kl" => return "#ef4444",
-        "s" | "sr" => return "#f59e0b",
-        "t1" | "t2" | "t3" | "t4" => return "#a3e635",
-        "h" => return "#22d3ee",
-        "r" => return "#60a5fa",
-        "c" => return "#f472b6",
+        "k" | "kl" => return DRUM_KICK_COLOR,
+        "s" | "sr" => return DRUM_SNARE_COLOR,
+        "t1" | "t2" | "t3" | "t4" => return DRUM_TOM_COLOR,
+        "h" => return DRUM_HAT_COLOR,
+        "r" => return DRUM_RIDE_COLOR,
+        "c" => return DRUM_CYMBAL_COLOR,
         _ => {}
     }
 
     if n.contains("kick") {
-        "#ef4444"
+        DRUM_KICK_COLOR
     } else if n.contains("snare") || n.contains("stick") || n.contains("clap") {
-        "#f59e0b"
+        DRUM_SNARE_COLOR
     } else if n.contains("hh") || n.contains("hat") {
-        "#22d3ee"
+        DRUM_HAT_COLOR
     } else if n.contains("tom") {
-        "#a3e635"
+        DRUM_TOM_COLOR
     } else if n.contains("ride") {
-        "#60a5fa"
+        DRUM_RIDE_COLOR
     } else {
-        "#c084fc"
+        DRUM_OTHER_COLOR
     }
 }
 

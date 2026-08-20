@@ -59,6 +59,10 @@ pub struct LaneView {
     /// Whether this lane is a folded role lane (kick, snare, toms,
     /// other) — the lanes whose hits take the slip drag.
     pub is_role: bool,
+    /// The role's hue, when the lane has one — the drum map's kit
+    /// palette, tinting waveform, hits and label alike so the lane
+    /// reads as one thing.
+    pub role_color: Option<&'static str>,
     /// The summed waveform of a role lane (kick, snare, other), as
     /// mirrored polygon points — the same shape
     /// [`canvas::take_waveform`] builds for the roll. `None` when the
@@ -350,13 +354,21 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
     // In a role lane the audio is the content and a hit is a *marker*
     // on it: full-height trigger lines with a small onset flag, the way
     // a drum editor draws them — not band-height wedges, which at this
-    // lane height bury the waveform they annotate.
+    // lane height bury the waveform they annotate. The markers take the
+    // role's hue, brighter on the armed lane, so "red line" *means*
+    // kick from across the room.
     // r[impl drums.lanes.hits]
-    if role.is_some() {
+    if let Some(role) = role {
+        let color = role.color();
         for n in &mut notes {
             n.hit_line = true;
             n.y = y0;
             n.h = h;
+            n.fill = if active {
+                color.to_string()
+            } else {
+                format!("{color}b0")
+            };
         }
     }
 
@@ -409,6 +421,7 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
         two_handed_row,
         split,
         is_role: role.is_some(),
+        role_color: role.map(|r| r.color()),
         waveform,
         sub_lanes,
     })
@@ -1103,7 +1116,7 @@ pub fn StackView(
                                 x: 0, y: "{lane.y:.1}",
                                 width: 3,
                                 height: "{lane.h:.1}",
-                                fill: theme::ACCENT,
+                                fill: lane.role_color.unwrap_or(theme::ACCENT),
                             }
                         }
                         g {
@@ -1121,13 +1134,17 @@ pub fn StackView(
                                 }
                             }
                             // A role lane's audio, behind everything
-                            // else — the hits draw over it.
+                            // else — the hits draw over it, in the
+                            // same hue: the lane is one thing, and its
+                            // colour says which drum from across the
+                            // room. Lanes without a role keep the
+                            // neutral peaks blue.
                             // r[impl drums.lanes.summed]
                             if let Some(w) = lane.waveform.as_ref() {
                                 polygon {
                                     points: "{w}",
-                                    fill: theme::PEAKS,
-                                    opacity: if lane.active { "0.55" } else { "0.35" },
+                                    fill: lane.role_color.unwrap_or(theme::PEAKS),
+                                    opacity: if lane.active { "0.5" } else { "0.32" },
                                 }
                             }
                             // r[impl drums.lanes.toms-split]
@@ -1135,8 +1152,8 @@ pub fn StackView(
                                 if let Some(p) = s.points.as_ref() {
                                     polygon {
                                         points: "{p}",
-                                        fill: theme::PEAKS,
-                                        opacity: if s.faded { "0.12" } else { "0.35" },
+                                        fill: lane.role_color.unwrap_or(theme::PEAKS),
+                                        opacity: if s.faded { "0.10" } else { "0.32" },
                                     }
                                 }
                             }
@@ -1222,7 +1239,10 @@ pub fn StackView(
                                 x: 7, y: "{lane.y + 12.0:.1}",
                                 font_size: "8",
                                 letter_spacing: "2",
-                                fill: if lane.active { theme::TEXT_BRIGHT } else { theme::TEXT_DIM },
+                                fill: lane
+                                    .role_color
+                                    .unwrap_or(if lane.active { theme::TEXT_BRIGHT } else { theme::TEXT_DIM }),
+                                opacity: if lane.active { "1" } else { "0.75" },
                                 {lane.name.to_uppercase()}
                             }
                         } else {
