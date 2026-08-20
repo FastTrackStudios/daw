@@ -1,16 +1,14 @@
-//! Audio file decoding via Symphonia.
+//! Audio file decoding — a thin wrapper over `fts_sample::decode_bytes`.
 //!
 //! Decodes audio files into interleaved f32 PCM buffers that the mixer
-//! can play back. Supports WAV, MP3, OGG/Vorbis, FLAC, and AAC.
+//! can play back. Supports WAV, MP3, OGG/Vorbis, FLAC, and AAC (the
+//! fts-sample `decode-compressed` set).
+//!
+//! Every decoded buffer is charged against the process-wide preload RAM
+//! budget ([`fts_sample::budget`]) so the DAW's resident decodes share
+//! one ceiling with the sampler engine.
 
-use std::io::Cursor;
-use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::DecoderOptions;
-use symphonia::core::formats::FormatOptions;
-use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
-use tracing::{debug, info};
+use tracing::debug;
 
 /// Decoded audio data: interleaved f32 PCM samples.
 #[derive(Clone)]
@@ -21,9 +19,54 @@ pub struct DecodedAudio {
     pub channels: u16,
     /// Sample rate in Hz (e.g., 44100, 48000)
     pub sample_rate: u32,
+    /// RAM-budget charge for `samples`, released when the last clone
+    /// drops. `None` for synthesized buffers (test tones, click tracks).
+    charge: Option<fts_sample::budget::Charge>,
 }
 
 impl DecodedAudio {
+    /// A buffer that does NOT count against the preload budget —
+    /// synthesized audio (test tones, clicks) whose size the caller
+    /// already controls.
+    pub fn new(samples: Vec<f32>, channels: u16, sample_rate: u32) -> Self {
+        Self {
+            samples,
+            channels,
+            sample_rate,
+            charge: None,
+        }
+    }
+
+    /// A buffer charged against the process-wide preload RAM budget
+    /// (released when the last clone drops) — every decode of project
+    /// media goes through here. `src` labels the origin for the
+    /// over-budget warning (an extension or a short tag, never a full
+    /// path).
+    ///
+    /// When the budget would be exceeded the buffer still loads —
+    /// playback must not silently fail; the DAW has no streaming
+    /// fallback for compressed media yet (the future butler/streaming
+    /// seam) — but the overrun gets one alertable warning.
+    pub fn charged(samples: Vec<f32>, channels: u16, sample_rate: u32, src: &str) -> Self {
+        let bytes = samples.len() * core::mem::size_of::<f32>();
+        if (bytes as u64) > fts_sample::budget::remaining_bytes() {
+            tracing::warn!(
+                bytes,
+                src,
+                used_mb = fts_sample::budget::used_bytes() / (1024 * 1024),
+                budget_mb = fts_sample::budget::limit_bytes() / (1024 * 1024),
+                "daw: decoded audio exceeds the preload budget — loading anyway \
+                 (no compressed streaming fallback yet)"
+            );
+        }
+        Self {
+            samples,
+            channels,
+            sample_rate,
+            charge: Some(fts_sample::budget::Charge::now(bytes)),
+        }
+    }
+
     /// Total number of sample frames (samples per channel).
     pub fn frame_count(&self) -> usize {
         if self.channels == 0 {
@@ -51,86 +94,44 @@ impl DecodedAudio {
 /// The format is auto-detected from the data (no file extension needed).
 /// Returns `None` if the data cannot be decoded.
 pub fn decode_audio(data: &[u8]) -> Option<DecodedAudio> {
-    decode_audio_with_hint(data, &Hint::new())
+    from_loaded(fts_sample::decode_bytes(data, None).ok()?, "?")
 }
 
 /// Decode audio from raw bytes with a format hint.
 ///
-/// Use this when you know the file extension (e.g., "mp3", "wav").
+/// Use this when you know the file extension (e.g., "mp3", "wav"). The
+/// extension is a hint only: the content is probed, and a file named
+/// `.wav` that is really a FLAC still decodes.
 pub fn decode_audio_with_extension(data: &[u8], extension: &str) -> Option<DecodedAudio> {
-    let mut hint = Hint::new();
-    hint.with_extension(extension);
-    decode_audio_with_hint(data, &hint)
+    from_loaded(fts_sample::decode_bytes(data, Some(extension)).ok()?, extension)
 }
 
-fn decode_audio_with_hint(data: &[u8], hint: &Hint) -> Option<DecodedAudio> {
-    let cursor = Cursor::new(data.to_vec());
-    let source = MediaSourceStream::new(Box::new(cursor), Default::default());
-
-    let probed = symphonia::default::get_probe()
-        .format(
-            hint,
-            source,
-            &FormatOptions::default(),
-            &MetadataOptions::default(),
-        )
-        .ok()?;
-
-    let mut format = probed.format;
-
-    // Find the first audio track
-    let track = format.default_track()?;
-    let track_id = track.id;
-    let channels = track.codec_params.channels?.count() as u16;
-    let sample_rate = track.codec_params.sample_rate?;
-
-    info!("Decoding audio: {} channels, {} Hz", channels, sample_rate);
-
-    let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())
-        .ok()?;
-
-    let mut all_samples: Vec<f32> = Vec::new();
-
-    loop {
-        let packet = match format.next_packet() {
-            Ok(packet) => packet,
-            Err(symphonia::core::errors::Error::IoError(ref e))
-                if e.kind() == std::io::ErrorKind::UnexpectedEof =>
-            {
-                break; // End of stream
-            }
-            Err(_) => break,
-        };
-
-        if packet.track_id() != track_id {
-            continue;
+/// Interleave fts-sample's planar channels into the mixer's layout and
+/// attach the budget charge.
+fn from_loaded(loaded: fts_sample::LoadedAudio, src: &str) -> Option<DecodedAudio> {
+    let channels = loaded.num_channels();
+    if channels == 0 {
+        return None;
+    }
+    let frames = loaded.num_frames();
+    let mut samples = vec![0.0f32; frames * channels];
+    for (c, ch) in loaded.channels.iter().enumerate() {
+        for (frame, &s) in ch.iter().enumerate() {
+            samples[frame * channels + c] = s;
         }
-
-        let decoded = match decoder.decode(&packet) {
-            Ok(decoded) => decoded,
-            Err(_) => continue,
-        };
-
-        let spec = *decoded.spec();
-        let num_frames = decoded.capacity();
-
-        let mut sample_buf = SampleBuffer::<f32>::new(num_frames as u64, spec);
-        sample_buf.copy_interleaved_ref(decoded);
-        all_samples.extend_from_slice(sample_buf.samples());
     }
 
     debug!(
-        "Decoded {} frames ({:.2}s) of {}-channel audio at {} Hz",
-        all_samples.len() / channels as usize,
-        all_samples.len() as f64 / channels as f64 / sample_rate as f64,
+        frames,
         channels,
-        sample_rate
+        sample_rate = loaded.sample_rate,
+        "decoded audio"
     );
 
-    Some(DecodedAudio {
-        samples: all_samples,
-        channels,
-        sample_rate,
-    })
+    Some(DecodedAudio::charged(
+        samples,
+        channels as u16,
+        loaded.sample_rate,
+        src,
+    ))
 }

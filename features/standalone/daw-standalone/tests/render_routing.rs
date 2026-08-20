@@ -33,11 +33,7 @@ fn seeded() -> (Standalone, String) {
 /// Synth a 1s constant-amplitude mono buffer at value `v`.
 fn const_audio(v: f32) -> DecodedAudio {
     let frames = SAMPLE_RATE as usize;
-    DecodedAudio {
-        samples: vec![v; frames],
-        channels: 1,
-        sample_rate: SAMPLE_RATE,
-    }
+    DecodedAudio::new(vec![v; frames], 1, SAMPLE_RATE)
 }
 
 fn create_item_with_audio(
@@ -937,11 +933,7 @@ fn channel_modes_remap_source_channels() {
             samples.push(l);
             samples.push(r);
         }
-        DecodedAudio {
-            samples,
-            channels: 2,
-            sample_rate: SAMPLE_RATE,
-        }
+        DecodedAudio::new(samples, 2, SAMPLE_RATE)
     };
     // L = 0.8, R = 0.2.
     let run = |mode: u32| -> (f32, f32) {
@@ -1157,11 +1149,11 @@ fn recarm_group_arms_followers() {
 /// A source whose value IS its time: sample i = i / SAMPLE_RATE (1 s).
 fn ramp_audio() -> DecodedAudio {
     let frames = SAMPLE_RATE as usize;
-    DecodedAudio {
-        samples: (0..frames).map(|i| i as f32 / SAMPLE_RATE as f32).collect(),
-        channels: 1,
-        sample_rate: SAMPLE_RATE,
-    }
+    DecodedAudio::new(
+        (0..frames).map(|i| i as f32 / SAMPLE_RATE as f32).collect(),
+        1,
+        SAMPLE_RATE,
+    )
 }
 
 // r[verify drums.open.playback-warped]

@@ -54,11 +54,7 @@ fn synth_440hz_wav_1s() -> Vec<u8> {
 fn attach_audio_source_directly_round_trips() {
     let (daw, guid) = seeded();
     let take_guid = "synth-take";
-    let decoded = DecodedAudio {
-        samples: vec![0.1, -0.1, 0.2, -0.2],
-        channels: 1,
-        sample_rate: 48_000,
-    };
+    let decoded = DecodedAudio::new(vec![0.1, -0.1, 0.2, -0.2], 1, 48_000);
     attach_audio_source(&daw, &guid, take_guid, decoded);
 
     let got = daw.audio_source(&guid, take_guid).expect("attached");

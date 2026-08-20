@@ -52,6 +52,38 @@ pub fn load_planar_f32(
     })
 }
 
+/// Decode a whole in-memory audio file (any container/codec the enabled
+/// symphonium features cover — `decode-compressed` adds mp3/ogg/flac/aac)
+/// to planar `f32` at its native rate.
+///
+/// `ext_hint` is a file-extension hint only: the content is probed, and a
+/// file named `.wav` that is really a FLAC still decodes. This is the
+/// resident path for bytes that never had a stable on-disk home (project
+/// containers, browser uploads); on-disk files use [`load_planar_f32`].
+pub fn decode_bytes(data: &[u8], ext_hint: Option<&str>) -> Result<LoadedAudio, SamplerError> {
+    let mut hint = symphonium::symphonia::core::probe::Hint::new();
+    if let Some(ext) = ext_hint {
+        hint.with_extension(ext);
+    }
+    let cursor = std::io::Cursor::new(data.to_vec());
+    let mut loader = SymphoniumLoader::new();
+    let decoded = loader
+        .load_f32_from_source(
+            Box::new(cursor),
+            Some(hint),
+            None,
+            ResampleQuality::default(),
+            // No RAM cap here: the caller owns the budget accounting, and a
+            // long take must decode rather than error.
+            Some(usize::MAX),
+        )
+        .map_err(|e| SamplerError::Decode(format!("{} bytes: {e}", data.len())))?;
+    Ok(LoadedAudio {
+        channels: decoded.data,
+        sample_rate: decoded.sample_rate,
+    })
+}
+
 /// Load an audio file as mono `f32` (downmix by averaging channels),
 /// returning the samples and the rate they are at.
 ///

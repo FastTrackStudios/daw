@@ -8,15 +8,32 @@ description = "Shared audio sample loading utilities for FTS plugins"
 
 [features]
 default = ["load", "write", "engine"]
-# Resident symphonium loads (`load_audio`, `load_mono_f32`, `load_planar_f32`).
-# `probe` needs no feature — it is header-only std I/O.
+# Resident symphonium loads (`load_audio`, `load_mono_f32`, `load_planar_f32`,
+# `decode_bytes`). `probe` needs no feature — it is header-only std I/O.
 load = ["dep:symphonium", "dep:crossbeam-channel"]
+# Extra symphonium codecs/containers for `load`/`decode_bytes` beyond the
+# workspace baseline (wav/pcm): mp3, ogg/vorbis, flac, aac — the DAW's
+# resident-decode format set.
+decode-compressed = [
+    "load",
+    "symphonium/mp3",
+    "symphonium/ogg",
+    "symphonium/vorbis",
+    "symphonium/flac",
+    "symphonium/aac",
+]
 # The shared 32-bit-float WAV writer (`write_wav_f32`).
 write = ["dep:hound"]
+# The process-wide preload RAM budget (`budget::*`) — std-only, no deps.
+budget = []
+# Memory-mapped PCM file source (`mapped::PcmFile`) — memmap2 only, none of
+# the `engine` codecs. The DAW's streaming WAV path.
+mapped = ["dep:memmap2"]
 # The pack/cache/stream engine — the heavy half (FLAC/Vorbis codecs, rayon,
 # memmap2). Lean consumers (e.g. the iOS-clean session-guide) take only
 # `load`/`write`.
 engine = [
+    "budget",
     "dep:arc-swap",
     "dep:hound",
     "dep:claxon",

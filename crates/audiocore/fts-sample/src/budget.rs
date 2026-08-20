@@ -167,6 +167,44 @@ pub fn release(bytes: usize) {
     }
 }
 
+/// RAII charge: holds `bytes` against the budget for as long as the guard
+/// lives, releasing on drop. Cloning charges again — each clone owns its
+/// own share, so a guard embedded in a cloneable buffer stays balanced.
+///
+/// For callers whose buffer lifetime IS the charge lifetime (the DAW's
+/// resident take decodes); caches with explicit eviction keep calling
+/// [`charge`]/[`release`] directly.
+#[derive(Debug)]
+pub struct Charge(usize);
+
+impl Charge {
+    /// Charge `bytes` unconditionally (on-demand loads must not fail on
+    /// the ceiling). Callers that can degrade instead should check
+    /// [`try_reserve`]/[`remaining_bytes`] before decoding.
+    pub fn now(bytes: usize) -> Self {
+        charge(bytes);
+        Self(bytes)
+    }
+
+    /// The bytes this guard holds.
+    pub fn bytes(&self) -> usize {
+        self.0
+    }
+}
+
+impl Clone for Charge {
+    fn clone(&self) -> Self {
+        charge(self.0);
+        Self(self.0)
+    }
+}
+
+impl Drop for Charge {
+    fn drop(&mut self) {
+        release(self.0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,6 +216,19 @@ mod tests {
         charge(4096);
         assert!(used_bytes() >= before + 4096);
         release(4096);
+        assert!(used_bytes() < before + 4096);
+    }
+
+    #[test]
+    fn charge_guard_balances_across_clone_and_drop() {
+        // Deltas, not absolutes: other tests in this binary share the counter.
+        let before = used_bytes();
+        let g = Charge::now(2048);
+        let g2 = g.clone();
+        assert_eq!(g2.bytes(), 2048);
+        assert!(used_bytes() >= before + 4096);
+        drop(g);
+        drop(g2);
         assert!(used_bytes() < before + 4096);
     }
 

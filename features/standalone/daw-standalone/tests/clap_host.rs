@@ -312,11 +312,7 @@ fn clap_plugin_processes_in_render_pipeline() {
         &daw,
         "p",
         &active.guid,
-        DecodedAudio {
-            samples: vec![0.3f32; sample_rate as usize],
-            channels: 1,
-            sample_rate,
-        },
+        DecodedAudio::new(vec![0.3f32; sample_rate as usize], 1, sample_rate),
     );
 
     let block = ProjectRenderer::new(&daw, "p", sample_rate).render_block(0, frames);

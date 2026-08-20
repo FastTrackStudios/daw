@@ -1384,11 +1384,7 @@ mod folder_routing_tests {
                 &daw,
                 &guid,
                 &tg,
-                DecodedAudio {
-                    samples: vec![0.5; 4096],
-                    channels: 1,
-                    sample_rate: 48_000,
-                },
+                DecodedAudio::new(vec![0.5; 4096], 1, 48_000),
             );
         }
         (daw, guid)

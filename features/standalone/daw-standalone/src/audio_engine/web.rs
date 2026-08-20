@@ -180,11 +180,12 @@ impl WebRenderer {
             &self.daw,
             &self.current(),
             take_guid,
-            DecodedAudio {
-                samples: interleaved_pcm.to_vec(),
-                channels: channels.max(1) as u16,
-                sample_rate: sample_rate.max(1),
-            },
+            DecodedAudio::charged(
+                interleaved_pcm.to_vec(),
+                channels.max(1) as u16,
+                sample_rate.max(1),
+                "web-pcm",
+            ),
         );
     }
 
@@ -203,11 +204,12 @@ impl WebRenderer {
             &self.daw,
             project,
             take_guid,
-            DecodedAudio {
-                samples: interleaved_pcm.to_vec(),
-                channels: channels.max(1) as u16,
-                sample_rate: self.sample_rate.max(1),
-            },
+            DecodedAudio::charged(
+                interleaved_pcm.to_vec(),
+                channels.max(1) as u16,
+                self.sample_rate.max(1),
+                "web-pcm",
+            ),
         );
     }
 

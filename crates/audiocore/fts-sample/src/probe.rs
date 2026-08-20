@@ -56,6 +56,10 @@ pub struct AudioInfo {
     /// Frames in the `data` chunk — 0 when the chunk is absent or the
     /// header gives no usable frame size.
     pub num_frames: u64,
+    /// Byte offset of the `data` chunk's samples within the file — 0 when
+    /// the chunk is absent (sample data can never start at byte 0). This
+    /// is what a memory-mapper needs to address samples directly.
+    pub data_offset: u64,
     /// The effective encoding (extensible headers resolved to their
     /// sub-format).
     pub format: WavFormat,
@@ -86,6 +90,7 @@ pub fn probe(path: &Path) -> Result<AudioInfo, SamplerError> {
 
     let mut fmt: Option<Vec<u8>> = None;
     let mut data_size: Option<u64> = None;
+    let mut data_offset: u64 = 0;
     let mut header = [0u8; 8];
     loop {
         if file.read_exact(&mut header).is_err() {
@@ -106,6 +111,7 @@ pub fn probe(path: &Path) -> Result<AudioInfo, SamplerError> {
             }
             b"data" => {
                 data_size = Some(u64::from(size));
+                data_offset = file.stream_position()?;
                 file.seek(SeekFrom::Current(size as i64 + (size as i64 & 1)))?;
             }
             _ => {
@@ -123,10 +129,15 @@ pub fn probe(path: &Path) -> Result<AudioInfo, SamplerError> {
             path.display()
         )));
     };
-    parse_fmt(&fmt, data_size.unwrap_or(0), path)
+    parse_fmt(&fmt, data_size.unwrap_or(0), data_offset, path)
 }
 
-fn parse_fmt(fmt: &[u8], data_size: u64, path: &Path) -> Result<AudioInfo, SamplerError> {
+fn parse_fmt(
+    fmt: &[u8],
+    data_size: u64,
+    data_offset: u64,
+    path: &Path,
+) -> Result<AudioInfo, SamplerError> {
     if fmt.len() < 16 {
         return Err(SamplerError::Probe(format!(
             "{}: fmt chunk is {} bytes, want 16",
@@ -163,6 +174,7 @@ fn parse_fmt(fmt: &[u8], data_size: u64, path: &Path) -> Result<AudioInfo, Sampl
         sample_rate: u32::from_le_bytes([fmt[4], fmt[5], fmt[6], fmt[7]]),
         bits_per_sample,
         num_frames,
+        data_offset,
         format: format.effective(),
     })
 }
@@ -228,6 +240,7 @@ mod tests {
         assert_eq!(info.sample_rate, 48_000);
         assert_eq!(info.bits_per_sample, 24);
         assert_eq!(info.num_frames, 48_000);
+        assert_eq!(info.data_offset, 44); // 12 RIFF + 8+16 fmt + 8 data header
         assert_eq!(info.format, WavFormat::Pcm);
         assert!((info.duration_secs() - 1.0).abs() < 1e-9);
     }
@@ -244,6 +257,8 @@ mod tests {
         assert_eq!(info.sample_rate, 44_100);
         assert_eq!(info.format, WavFormat::Float);
         assert_eq!(info.num_frames, 22_050);
+        // 12 RIFF + (8 + 37 + 1 pad) JUNK + (8 + 16) fmt + 8 data header.
+        assert_eq!(info.data_offset, 90);
     }
 
     #[test]

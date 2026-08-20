@@ -1,8 +1,9 @@
 //! Cross-platform multi-track audio engine.
 //!
-//! Decodes audio files with Symphonia, mixes multiple tracks with per-track
-//! gain/mute/solo, and outputs via cpal. Works on native (macOS/Windows/Linux/
-//! iOS/Android) and WASM (via cpal's wasm-bindgen backend).
+//! Decodes audio files via fts-sample (symphonium), mixes multiple tracks
+//! with per-track gain/mute/solo, and outputs via cpal. Works on native
+//! (macOS/Windows/Linux/iOS/Android) and WASM (via cpal's wasm-bindgen
+//! backend).
 //!
 //! # Architecture
 //!

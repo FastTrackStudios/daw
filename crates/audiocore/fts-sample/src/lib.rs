@@ -11,6 +11,11 @@
 //!   [`load_audio`] (interleaved stereo `f64`), [`load_mono_f32`],
 //!   [`load_planar_f32`].
 //! - `write` — [`write_wav_f32`], the shared 32-bit-float WAV writer.
+//! - `mapped` — [`mapped::PcmFile`], the memory-mapped uncompressed-PCM
+//!   source (header parse only; samples convert to f32 per read) — the
+//!   DAW's streaming WAV path. memmap2 only, none of the `engine` codecs.
+//! - `budget` — the process-wide preload RAM budget (std-only; `engine`
+//!   implies it).
 //! - `engine` — the sample-engine file layer (RAM budgeting, the
 //!   decoded-sample cache + .signalpack access, FLAC seek index, chunked
 //!   streaming, on-disk stream cache), re-exported by signal-sampler as
@@ -34,6 +39,8 @@ pub mod probe;
 
 #[cfg(feature = "load")]
 mod load;
+#[cfg(feature = "mapped")]
+pub mod mapped;
 #[cfg(feature = "write")]
 mod write;
 
@@ -44,7 +51,7 @@ mod write;
 // on-disk stream cache. Voice/playback types stay in signal-sampler; these
 // modules are re-exported there as `signal_sampler::engine::{budget, cache,
 // flac_index, stream, stream_cache}`.
-#[cfg(feature = "engine")]
+#[cfg(feature = "budget")]
 pub mod budget;
 #[cfg(feature = "engine")]
 pub mod cache;
@@ -62,8 +69,10 @@ pub use probe::{AudioInfo, WavFormat, probe};
 
 #[cfg(feature = "load")]
 pub use load::{
-    AudioData, LoadedAudio, ResampleQuality, load_audio, load_audio_async, load_mono_f32,
-    load_planar_f32,
+    AudioData, LoadedAudio, ResampleQuality, decode_bytes, load_audio, load_audio_async,
+    load_mono_f32, load_planar_f32,
 };
+#[cfg(feature = "mapped")]
+pub use mapped::{PcmFile, PcmFormat};
 #[cfg(feature = "write")]
 pub use write::write_wav_f32;

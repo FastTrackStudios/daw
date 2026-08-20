@@ -17,11 +17,7 @@ pub fn sine_wave(frequency: f32, duration_seconds: f32, sample_rate: u32) -> Dec
         samples.push(sample * 0.5); // -6dB to avoid clipping when mixing
     }
 
-    DecodedAudio {
-        samples,
-        channels: 1,
-        sample_rate,
-    }
+    DecodedAudio::new(samples, 1, sample_rate)
 }
 
 /// Generate a stereo sine wave panned to a position (-1.0 = left, 0.0 = center, 1.0 = right).
@@ -46,11 +42,7 @@ pub fn sine_wave_stereo(
         samples.push(sample * right_gain);
     }
 
-    DecodedAudio {
-        samples,
-        channels: 2,
-        sample_rate,
-    }
+    DecodedAudio::new(samples, 2, sample_rate)
 }
 
 /// Generate a rhythmic, metering-friendly tone: a sine carrier shaped by a
@@ -75,11 +67,7 @@ pub fn pulse_tone(
         let env = (std::f32::consts::PI * phase).sin().max(0.0);
         samples.push(carrier * env * gain);
     }
-    DecodedAudio {
-        samples,
-        channels: 1,
-        sample_rate,
-    }
+    DecodedAudio::new(samples, 1, sample_rate)
 }
 
 /// Generate a chord (multiple frequencies mixed together).
@@ -95,11 +83,7 @@ pub fn chord(frequencies: &[f32], duration_seconds: f32, sample_rate: u32) -> De
         }
     }
 
-    DecodedAudio {
-        samples,
-        channels: 1,
-        sample_rate,
-    }
+    DecodedAudio::new(samples, 1, sample_rate)
 }
 
 /// Generate a click track: short clicks at regular intervals.
@@ -117,11 +101,7 @@ pub fn click_track(bpm: f32, duration_seconds: f32, sample_rate: u32) -> Decoded
         }
     }
 
-    DecodedAudio {
-        samples,
-        channels: 1,
-        sample_rate,
-    }
+    DecodedAudio::new(samples, 1, sample_rate)
 }
 
 /// Create a multi-track test set: bass, chords, melody, and click.

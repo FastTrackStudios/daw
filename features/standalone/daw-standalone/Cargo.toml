@@ -36,7 +36,11 @@ eyre = { workspace = true, optional = true }
 
 # Audio engine (feature-gated)
 cpal = { version = "0.18", optional = true, features = ["wasm-bindgen"] }
-symphonia = { version = "0.5", optional = true, features = ["mp3", "ogg", "flac", "wav", "pcm", "aac"] }
+# Shared audio-file layer: header probe always; the `decode` feature adds
+# resident symphonium decodes (wav/mp3/ogg/flac/aac) + the preload RAM
+# budget; native (below) adds the mmap'd PCM source. Wasm-clean at this
+# feature set (no `engine`).
+fts-sample = { workspace = true }
 
 # RPP project loading
 dawfile-reaper = { workspace = true, optional = true }
@@ -63,8 +67,9 @@ libloading = { workspace = true, optional = true }
 base64 = "0.22"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# mmap-backed PCM streaming (native only; WASM falls back to decode).
-memmap2 = { workspace = true }
+# mmap-backed PCM streaming (native only; WASM falls back to decode) —
+# fts-sample's `mapped` feature (memmap2 only, none of the engine codecs).
+fts-sample = { workspace = true, features = ["mapped"] }
 tokio = { workspace = true }
 # Shared device-selection / open-stream plumbing + lock-free input ring.
 # Native-only (cpal device streams); pulled in by the `audio` feature.
@@ -85,9 +90,10 @@ base64 = "0.22"
 dawfile-reaper = { workspace = true }
 
 [features]
-# Symphonia-backed source decoding without cpal. WASM-compatible —
-# the decoder is pure Rust and doesn't touch the audio device.
-decode = ["dep:symphonia"]
+# Resident source decoding (fts-sample/symphonium) without cpal.
+# WASM-compatible — the decoder is pure Rust and doesn't touch the audio
+# device. `budget` bounds the decoded-bytes accounting (see materialize).
+decode = ["fts-sample/load", "fts-sample/decode-compressed", "fts-sample/budget"]
 # Full audio engine = decode + cpal output stream. Native-only audio
 # output (cpal+wasm-bindgen on WASM, but cpal pulls JS bindings).
 # `daw-audio-io` + `rtrb` are native-only (`cfg(not(wasm32))` target

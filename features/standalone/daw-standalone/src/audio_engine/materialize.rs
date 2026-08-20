@@ -3,7 +3,7 @@
 //!
 //! The function takes a caller-supplied resolver closure so the same
 //! code works on native (read from disk) and WASM (file bytes
-//! provided via browser upload / fetch). Decoding is via Symphonia
+//! provided via browser upload / fetch). Decoding is via fts-sample
 //! (`feature = "decode"` or `feature = "audio"`).
 //!
 //! Typical use:
@@ -108,6 +108,11 @@ where
             }
         };
         let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+        // Resident decode: the whole file lands in RAM, charged against the
+        // process-wide preload budget inside `DecodedAudio::charged` (over
+        // budget still loads — playback must not silently fail). FUTURE
+        // SEAM: compressed timeline streaming (a butler thread over
+        // fts-sample's stream layer) replaces this eager decode.
         let decoded = match decode_audio_with_extension(&bytes, &ext) {
             Some(d) => d,
             None => {
