@@ -44,6 +44,13 @@ pub mod widgets;
 #[cfg(feature = "reaper-test-panels")]
 pub mod test_panels;
 
+/// The compiled Tailwind chrome classes some `components` panels use
+/// (mixer, TCP). Exported so a host window can embed it with
+/// `document::Style` — a cross-crate `include_str!` of the asset would
+/// break at the repo boundary, and a linked stylesheet never loads
+/// under Blitz.
+pub const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
+
 // Re-exports for desktop app
 pub use components::arrangement_view::ArrangementView;
 pub use components::fx_chain_tree::FxChainTree;

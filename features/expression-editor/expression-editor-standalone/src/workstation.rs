@@ -8,42 +8,67 @@
 //! +--------------------+-------+
 //! ```
 //!
-//! Left column: daw-ui's `ArrangeView` (its `tcp_width` is the TCP) over
-//! the expression editor; right column: the `MixerControlPanel`, full
-//! height. Everything under one `ThemeProvider`.
+//! The panels are daw-ui's **native components family** — the traced
+//! vector TCP, arrangement and mixer that the REAPER theme's art is
+//! exported from (`daw_ui::components`, PR #279's main window). Not the
+//! WALTER `panels` family: that one executes theme images, and a window
+//! is not a theme editor. Composition follows
+//! `daw_ui::components::main_window` — the same row pitch
+//! (`geometry::tcp::ROW_H` + 1px divider), the same ruler spacer in the
+//! TCP column — with the mixer moved to a full-height right column and
+//! the expression editor docked under the arrangement.
 //!
-//! The panels are daw-ui's **view-model family** (`daw_ui::panels`):
-//! Blitz-safe inline styles, fed `TrackView`s this module builds from
-//! the in-process daw facade — the same `Standalone` the drum host
-//! edits, served over a vox memory link by
+//! Data comes through the in-process daw facade — the same `Standalone`
+//! the drum host edits, served over a vox memory link by
 //! [`daw::standalone::bootstrap::build_in_process_daw`]. One backend,
-//! three faces: the arrange view shows the items the quantizer cuts,
-//! the mixer moves the faders the renderer reads, and the editor writes
-//! the edits — all visibly the same project.
+//! three faces: the arrangement shows the items the quantizer cuts, the
+//! mixer moves the faders the renderer reads, and the editor writes the
+//! edits — all visibly the same project.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use dioxus::prelude::*;
 
-use daw::service::Track;
+use daw::service::{Fx, Item, Track};
 use daw::standalone::Standalone;
-use daw_ui::panels::{
-    ArrangeEdit, ArrangeView, ClipView, MarkerView, MixerControlPanel, RegionView, TrackView,
+use daw_theme_art::geometry::mcp::STRIP_W;
+use daw_theme_art::geometry::tcp::{ROW_H, ROW_W};
+use daw_ui::components::arrangement_view::{
+    ArrangePreview, ArrangeRowKind, ItemPreview, plan_rows, waveform_from_peaks,
 };
-use daw_ui::theming::{ThemeContext, ThemeProvider};
+use daw_ui::components::mixer::ChannelStripPreview;
+use daw_ui::components::tcp::TrackRow;
+use daw_ui::controls::{ControlSync, FxSlotStack, MeterFeed, use_daw_tracks, use_track_store};
+use daw_ui::panels::native::NativeTransportBar;
+
 use expression_editor_core::Editor;
 use expression_editor_ui::ExpressionEditor;
 
 use crate::app::{HostCallbacks, host_callbacks};
 use crate::drum_host::SharedDrumHost;
 
-/// The mixer column's width. A constant for now; a draggable divider is
-/// chrome the window can grow later.
-pub const MIXER_W: f64 = 360.0;
+/// The mixer column's width — four native strips before scrolling.
+pub const MIXER_W: f64 = (STRIP_W as f64 + 1.0) * 4.0 + 2.0;
 /// The arrange pane's share of the left column.
 pub const ARRANGE_FRACTION: f64 = 0.45;
-/// The arrange view's TCP width.
-pub const TCP_W: u32 = 300;
+/// The transport band, per the main window.
+const TRANSPORT_H: f64 = 40.0;
+/// The section strip over the arrangement.
+const REGION_H: f64 = 18.0;
+/// The arrange view's own ruler — the TCP column's spacer must match it
+/// exactly, per the main window's alignment contract.
+const ARR_RULER_H: f32 = 26.0;
+/// The FX insert band over the mixer strips, when any track has a chain.
+const FX_BAND_H: f64 = 144.0;
+
+/// The Blitz cursor/scheme fixes every native window embeds (the same
+/// three lines the REAPER test panels carry).
+const BLITZ_FIXES: &str = r#"
+input, textarea, select, button { cursor: auto !important; }
+input:disabled, textarea:disabled, button:disabled { cursor: not-allowed !important; }
+:root { color-scheme: dark; }
+"#;
 
 /// What the window mounts, staged like [`crate::app::stage`] and for
 /// the same reason: `dioxus_native::launch_cfg` takes a bare
@@ -102,42 +127,24 @@ pub fn bootstrap_daw_blocking(standalone: &Standalone) -> eyre::Result<()> {
     Ok(())
 }
 
-/// One themed `TrackView` from a daw `Track` + its clips.
-fn track_view(id: usize, t: &Track, clips: Vec<ClipView>) -> TrackView {
-    let hex = t.color.map(|c| format!("#{:06x}", c & 0x00FF_FFFF));
-    let mut tv = TrackView::new(id, t.name.clone(), hex.as_deref())
-        .fader(t.volume as f32)
-        .depth(t.folder_depth.max(0) as u32)
-        .clips(clips);
-    if t.is_folder {
-        tv = tv.folder();
-    }
-    *tv.mute.write() = t.muted;
-    *tv.solo.write() = t.soloed;
-    *tv.pan.write() = (0.5 + t.pan as f32 / 2.0).clamp(0.0, 1.0);
-    tv
+/// One song section for the strip over the arrangement.
+#[derive(Clone, PartialEq)]
+struct Section {
+    start: f64,
+    end: f64,
+    name: String,
+    color: Option<String>,
 }
 
-/// `(max, min)` pairs for a clip, from the take's first channel.
-///
-/// The standalone backend serves real peaks now (r[drums.open.peaks]),
-/// interleaved `[ch0_min, ch0_max, ch1_min, …]` per block.
-fn clip_peaks(data: &daw::service::TakePeakData) -> Vec<(f32, f32)> {
-    let stride = (data.num_channels.max(1) as usize) * 2;
-    data.peaks
-        .chunks(stride)
-        .filter(|b| b.len() >= 2)
-        .map(|b| (b[1] as f32, b[0] as f32))
-        .collect()
-}
-
-/// Everything the arrange + mixer need, fetched in one pass.
+/// Everything the native panels need, fetched in one pass. The
+/// components take the facade's own types — no view-model translation.
 #[derive(Default, Clone)]
 struct ProjectShape {
-    guid: String,
-    entries: Vec<(String, TrackView)>,
-    regions: Vec<RegionView>,
-    markers: Vec<MarkerView>,
+    tracks: Vec<Track>,
+    items: Vec<Item>,
+    previews: HashMap<String, ItemPreview>,
+    fx: HashMap<String, Vec<Fx>>,
+    sections: Vec<Section>,
     bpm: f64,
     /// End of the last item, so the timeline spans the material.
     length_secs: f64,
@@ -150,77 +157,52 @@ async fn fetch_project() -> Option<ProjectShape> {
     let items = project.items().all().await.ok()?;
 
     let mut length = 0.0f64;
-    let mut entries = Vec::with_capacity(tracks.len());
-    for (i, t) in tracks.iter().enumerate() {
-        let mut clips = Vec::new();
-        for item in items.iter().filter(|i| i.track_guid == t.guid) {
-            let start = item.position.as_seconds();
-            let len = item.length.as_seconds();
-            length = length.max(start + len);
-            // ~12 peaks a second at 48k: the arrange draws whole songs,
-            // not sample detail; the editor below has the close view.
-            let peaks = match project.items().by_guid(&item.guid).await {
-                Ok(Some(h)) => h
-                    .active_take()
-                    .peaks(4096)
-                    .await
-                    .map(|d| clip_peaks(&d))
-                    .unwrap_or_default(),
-                _ => Vec::new(),
-            };
-            clips.push(ClipView {
-                start,
-                length: len,
-                name: String::new(),
-                color: item.color.map(|c| format!("#{:06x}", c & 0x00FF_FFFF)),
-                peaks,
-                peaks_right: Vec::new(),
-                fade_in: item.fade_in_length.as_seconds(),
-                fade_out: item.fade_out_length.as_seconds(),
-                selected: false,
-                muted: item.muted,
-                lane: item.fixed_lane,
-            });
+    let mut previews = HashMap::new();
+    for item in &items {
+        length = length.max(item.position.as_seconds() + item.length.as_seconds());
+        // ~86 peaks a second at 44.1k — the same block the live
+        // arrangement fetches; the editor below has the close view.
+        if let Ok(Some(handle)) = project.items().by_guid(&item.guid).await
+            && let Ok(data) = handle.active_take().peaks(512).await
+        {
+            let amps = waveform_from_peaks(&data);
+            if !amps.is_empty() {
+                previews.insert(item.guid.clone(), ItemPreview::Waveform(amps));
+            }
         }
-        entries.push((t.guid.clone(), track_view(i, t, clips)));
     }
 
-    let regions = project
+    let mut fx = HashMap::new();
+    for t in &tracks {
+        if let Ok(Some(handle)) = project.tracks().by_guid(&t.guid).await
+            && let Ok(chain) = handle.fx_chain().all().await
+            && !chain.is_empty()
+        {
+            fx.insert(t.guid.clone(), chain);
+        }
+    }
+
+    let sections = project
         .regions()
         .all()
         .await
         .unwrap_or_default()
         .iter()
-        .enumerate()
-        .map(|(i, r)| RegionView {
+        .map(|r| Section {
             start: r.time_range.start_seconds(),
             end: r.time_range.end_seconds(),
             name: r.name.clone(),
             color: r.color.map(|c| format!("#{c:06x}")),
-            idx: r.id.unwrap_or(i as u32),
-        })
-        .collect();
-    let markers = project
-        .markers()
-        .all()
-        .await
-        .unwrap_or_default()
-        .iter()
-        .enumerate()
-        .map(|(i, m)| MarkerView {
-            time: m.position.seconds().unwrap_or_default(),
-            name: m.name.clone(),
-            color: m.color.map(|c| format!("#{c:06x}")),
-            idx: m.id.unwrap_or(i as u32),
         })
         .collect();
     let bpm = project.transport().get_tempo().await.unwrap_or(120.0);
 
     Some(ProjectShape {
-        guid: project.guid().to_string(),
-        entries,
-        regions,
-        markers,
+        tracks,
+        items,
+        previews,
+        fx,
+        sections,
         bpm,
         length_secs: length.max(60.0),
     })
@@ -243,7 +225,7 @@ pub fn WorkstationApp() -> Element {
         )
     });
     let (win_w, win_h) = staged.size;
-    let arrange_h = ((win_h) * ARRANGE_FRACTION).round();
+    let arrange_h = (win_h * ARRANGE_FRACTION).round();
     let left_w = (win_w - MIXER_W).max(200.0);
     // The editor's cell is everything under the arrange pane. It
     // subtracts its own chrome from what we report here.
@@ -256,17 +238,22 @@ pub fn WorkstationApp() -> Element {
     });
     let host = use_signal(|| staged.host.clone());
     let bins = use_signal(Vec::new);
-    let previews = use_signal(Vec::new);
+    let previews_sig = use_signal(Vec::new);
     let HostCallbacks {
         on_change,
         on_apply,
         on_save,
         on_hit,
-    } = host_callbacks(editor, host.read().clone(), bins, previews);
+    } = host_callbacks(editor, host.read().clone(), bins, previews_sig);
 
-    // The project, fetched once through the facade. A refetch key can
-    // arrive later (an item-stream subscription); the drum host already
-    // refreshes the editor's own lanes after every write.
+    // One store + meter bank for every panel in the window: the TCP
+    // rows, the strips and the sync/feed components must share them, so
+    // they are provided here rather than self-provided per subtree.
+    let store = use_track_store();
+    use_daw_tracks(store);
+
+    // The project, fetched once through the facade. The drum host
+    // already refreshes the editor's own lanes after every write.
     let mut shape = use_signal(ProjectShape::default);
     use_effect(move || {
         spawn(async move {
@@ -276,7 +263,8 @@ pub fn WorkstationApp() -> Element {
         });
     });
 
-    // The playhead, driven by the backend's ~30 Hz position ticks.
+    // Transport: the native bar's signals, wired to the facade.
+    let mut playing = use_signal(|| false);
     let mut playhead = use_signal(|| 0.0f64);
     use_future(move || async move {
         loop {
@@ -291,229 +279,256 @@ pub fn WorkstationApp() -> Element {
             let guid = project.guid().to_string();
             let mut stream = project.transport().events();
             while let Ok(Some(ev)) = stream.recv().await {
-                if let daw::service::transport::TransportStreamEvent::Position(tick) = ev.get()
-                    && tick.project_guid == guid
-                {
-                    if let Some(s) = tick.playhead.seconds() {
-                        playhead.set(s);
+                match ev.get() {
+                    daw::service::transport::TransportStreamEvent::Position(tick)
+                        if tick.project_guid == guid =>
+                    {
+                        if let Some(s) = tick.playhead.seconds() {
+                            playhead.set(s);
+                        }
                     }
+                    daw::service::transport::TransportStreamEvent::State(
+                        daw::service::transport::TransportEvent::PlayStateChanged {
+                            project_guid,
+                            play_state,
+                        },
+                    ) if *project_guid == guid => {
+                        playing.set(matches!(
+                            play_state,
+                            daw::service::transport::PlayState::Playing
+                                | daw::service::transport::PlayState::Recording
+                        ));
+                    }
+                    _ => {}
                 }
             }
             futures_timer::Delay::new(std::time::Duration::from_millis(500)).await;
         }
     });
-
-    // Meters for the mixer: one subscription for every strip.
-    {
-        let entries_sig = shape;
-        use_future(move || async move {
-            loop {
-                let Some(daw) = daw::get() else {
-                    futures_timer::Delay::new(std::time::Duration::from_millis(250)).await;
-                    continue;
-                };
-                let mut stream = daw.meter_events();
-                while let Ok(Some(frame)) = stream.recv().await {
-                    let frame = frame.get();
-                    let s = entries_sig.peek();
-                    if frame.project_guid != s.guid {
-                        continue;
-                    }
-                    type MeterSigs = Vec<(usize, Signal<f32>, Signal<f32>, Signal<f32>)>;
-                    let sigs: MeterSigs = s
-                        .entries
-                        .iter()
-                        .enumerate()
-                        .map(|(i, (_, tv))| (i, tv.level, tv.level_right, tv.peak))
-                        .collect();
-                    drop(s);
-                    for (i, mut level, mut right, mut peak) in sigs {
-                        if let Some(t) = frame.tracks.get(i) {
-                            level.set(t.peak_left.clamp(0.0, 1.0));
-                            right.set(t.peak_right.clamp(0.0, 1.0));
-                            peak.set(t.hold_left.max(t.hold_right).clamp(0.0, 1.0));
-                        }
-                    }
-                }
-                futures_timer::Delay::new(std::time::Duration::from_millis(500)).await;
+    let on_play = EventHandler::new(move |_| {
+        playing.set(true);
+        spawn(async move {
+            if let Some(daw) = daw::get()
+                && let Ok(project) = daw.current_project().await
+            {
+                let _ = project.transport().play().await;
             }
         });
-    }
-
-    let on_edit = EventHandler::new(move |edit: ArrangeEdit| {
-        if let ArrangeEdit::Seek(t) = edit {
-            playhead.set(t);
-            spawn(async move {
-                if let Some(daw) = daw::get()
-                    && let Ok(project) = daw.current_project().await
-                {
-                    let _ = project.transport().set_position(t).await;
-                }
-            });
-        }
+    });
+    let on_stop = EventHandler::new(move |_| {
+        playing.set(false);
+        spawn(async move {
+            if let Some(daw) = daw::get()
+                && let Ok(project) = daw.current_project().await
+            {
+                let _ = project.transport().stop().await;
+            }
+        });
     });
 
     let s = shape.read();
-    let tracks: Vec<TrackView> = s.entries.iter().map(|(_, tv)| tv.clone()).collect();
-    let entries_now = s.entries.clone();
-    let regions = s.regions.clone();
-    let markers = s.markers.clone();
+    let tracks = s.tracks.clone();
+    let items = s.items.clone();
+    let item_previews = s.previews.clone();
+    let fx = s.fx.clone();
+    let sections = s.sections.clone();
     let bpm = s.bpm;
     let seconds = s.length_secs;
     drop(s);
-    // Fit the whole song into the arrange pane's width.
-    let pps = ((left_w - TCP_W as f64) / seconds.max(1.0)).max(1.0);
+
+    let t = daw_theme::Theme::default();
+    let ground = t.chrome.surface.css();
+    let bar_bg = t.chrome.surface_sunken.shade(-0.05).css();
+    let rule = t.chrome.surface_sunken.shade(-0.25).css();
+
+    // The arrangement zooms to readable bars — 40 px a bar keeps the
+    // ruler's numbers apart at any tempo — and scrolls horizontally;
+    // the section strip above stays a whole-song map.
+    let arrange_w = (left_w - ROW_W as f64).max(100.0) as f32;
+    let pps = (40.0 * bpm as f32 / 240.0).max(4.0);
+    let content_w = (seconds as f32 * pps).max(arrange_w);
+    let overview_pps = arrange_w as f64 / seconds.max(1.0);
+    // The lanes' full content height: ruler + one pitch per row, the
+    // pitch both columns share. The pane scrolls; the columns cannot
+    // drift because they scroll together.
+    let env_lanes: HashMap<String, Vec<daw_ui::components::arrangement_view::EnvelopeLaneView>> =
+        HashMap::new();
+    let rows = plan_rows(&tracks, &env_lanes, ROW_H);
+    let content_h = ARR_RULER_H + 1.0 + rows.iter().map(|(_, _, h)| h + 1.0).sum::<f32>();
+    let lanes_h = (arrange_h - TRANSPORT_H - REGION_H).max(60.0);
+    let playhead_x = playhead() * pps as f64;
+
+    // The mixer column: an FX band when any strip has a chain, strips
+    // below it, one horizontal scroll for both.
+    let fx_band = if fx.is_empty() { 0.0 } else { FX_BAND_H };
+    let strip_h = (win_h - fx_band).max(200.0) as f32;
 
     rsx! {
         style {
             "html, body {{ width: 100%; height: 100%; margin: 0; padding: 0; \
-              overflow: hidden; background: #101016; }}"
+              overflow: hidden; background: {ground}; }}"
         }
-        ThemeProvider {
-            theme: ThemeContext::new(),
+        document::Style { {daw_ui::TAILWIND_CSS} }
+        document::Style { {BLITZ_FIXES} }
+        // The engine sync pair, once for the whole window: drafts flush
+        // to the facade at 30 Hz, meter frames feed every strip.
+        ControlSync {}
+        MeterFeed {}
+        div {
+            style: "display: flex; flex-direction: row; width: 100vw; height: 100vh; \
+                    min-height: 0; min-width: 0;",
+            // ── Left column: transport, sections, TCP | arrangement,
+            // and the editor under them. ──
             div {
-                style: "display: flex; flex-direction: row; width: 100vw; height: 100vh; \
-                        min-height: 0; min-width: 0;",
-                // Left column: arrange over the editor.
+                style: "flex: 1 1 auto; min-width: 0; display: flex; \
+                        flex-direction: column; min-height: 0;",
                 div {
-                    style: "flex: 1 1 auto; min-width: 0; display: flex; \
-                            flex-direction: column; min-height: 0;",
+                    style: "height: {TRANSPORT_H}px; flex: 0 0 auto; display: flex; \
+                            align-items: center; padding-left: 8px; \
+                            background: {bar_bg}; border-bottom: 1px solid {rule};",
+                    NativeTransportBar { playing, bpm, position: playhead, on_play, on_stop }
+                }
+                // The song's sections — click seeks, like the ruler.
+                div {
+                    style: "height: {REGION_H}px; flex: 0 0 auto; position: relative; \
+                            background: {bar_bg}; border-bottom: 1px solid {rule}; \
+                            margin-left: {ROW_W}px; overflow: hidden;",
+                    "data-testid": "workstation-sections",
+                    for sec in sections.iter() {
+                        {
+                            let x = sec.start * overview_pps;
+                            let w = ((sec.end - sec.start) * overview_pps).max(1.0);
+                            let bg = sec.color.clone().unwrap_or_else(|| rule.clone());
+                            let name = sec.name.clone();
+                            let to = sec.start;
+                            rsx! {
+                                div {
+                                    style: "position: absolute; left: {x}px; top: 0; \
+                                            width: {w}px; height: 100%; background: {bg}; \
+                                            border-right: 1px solid {ground}; \
+                                            font-size: 9px; color: #101014; \
+                                            padding-left: 3px; overflow: hidden;",
+                                    onclick: move |_| {
+                                        playhead.set(to);
+                                        spawn(async move {
+                                            if let Some(daw) = daw::get()
+                                                && let Ok(p) = daw.current_project().await
+                                            {
+                                                let _ = p.transport().set_position(to).await;
+                                            }
+                                        });
+                                    },
+                                    "{name}"
+                                }
+                            }
+                        }
+                    }
+                }
+                // TCP | arrangement, one shared vertical scroll.
+                div {
+                    style: "height: {lanes_h}px; flex: 0 0 auto; overflow-y: scroll; \
+                            overflow-x: hidden;",
+                    "data-testid": "workstation-arrange",
                     div {
-                        style: "flex: 0 0 {arrange_h}px; min-height: 0; overflow: hidden;",
-                        "data-testid": "workstation-arrange",
+                        style: "position: relative; display: flex; \
+                                width: {left_w}px; height: {content_h}px;",
+                        div {
+                            style: "width: {ROW_W}px; flex: 0 0 auto; overflow: hidden;",
+                            // The ruler's height in empty panel, so row
+                            // one starts where lane one does.
+                            div { style: "height: {ARR_RULER_H + 1.0}px;" }
+                            for (kind, _, _) in rows.iter() {
+                                if let ArrangeRowKind::Track(i) = kind {
+                                    TrackRow {
+                                        key: "{tracks[*i].guid}",
+                                        track: tracks[*i].clone(),
+                                        index: *i as u32,
+                                    }
+                                }
+                            }
+                        }
                         if tracks.is_empty() {
                             div {
                                 style: "padding: 16px; color: #7b7b7b; font-size: 12px;",
                                 "Loading project…"
                             }
                         } else {
-                            ArrangeView {
-                                tracks: tracks.clone(),
-                                pps,
-                                tcp_width: TCP_W,
-                                seconds,
-                                playhead,
-                                markers,
-                                regions,
-                                bpm: Some(bpm),
-                                on_edit,
+                            // The lanes' own horizontal scroll — the
+                            // TCP column stays put, the timeline pans.
+                            div {
+                                style: "width: {arrange_w}px; flex: 0 0 auto; \
+                                        overflow-x: scroll; overflow-y: hidden;",
+                                div {
+                                    style: "position: relative; width: {content_w}px; \
+                                            height: {content_h}px;",
+                                    ArrangePreview {
+                                        tracks: tracks.clone(),
+                                        items,
+                                        previews: item_previews,
+                                        width: content_w,
+                                        height: content_h,
+                                        pixels_per_second: pps,
+                                        bpm,
+                                    }
+                                    // The playhead, inside the timeline's
+                                    // content so it pans and scrolls with
+                                    // the lanes.
+                                    div {
+                                        style: "position: absolute; left: {playhead_x}px; \
+                                                top: 0; width: 1px; height: {content_h}px; \
+                                                background: #f8fafc; opacity: 0.8;",
+                                    }
+                                }
                             }
                         }
                     }
+                }
+                div {
+                    style: "flex: 1 1 auto; min-height: 0; border-top: 1px solid {rule};",
+                    "data-testid": "workstation-editor",
+                    ExpressionEditor {
+                        editor,
+                        quantize_bins: bins(),
+                        quantize_previews: previews_sig(),
+                        on_quantize_change: on_change,
+                        on_quantize_apply: on_apply,
+                        on_hit,
+                        on_save,
+                    }
+                }
+            }
+            // ── Right column: the mixer, full height. One horizontal
+            // scroll carries each track's FX slots and strip together,
+            // so a chain never drifts off its channel. ──
+            div {
+                style: "flex: 0 0 {MIXER_W}px; width: {MIXER_W}px; min-height: 0; \
+                        overflow-x: scroll; overflow-y: hidden; display: flex; \
+                        border-left: 1px solid {rule}; background: {bar_bg};",
+                "data-testid": "workstation-mixer",
+                for (i, track) in tracks.iter().enumerate() {
                     div {
-                        style: "flex: 1 1 auto; min-height: 0;",
-                        "data-testid": "workstation-editor",
-                        ExpressionEditor {
-                            editor,
-                            quantize_bins: bins(),
-                            quantize_previews: previews(),
-                            on_quantize_change: on_change,
-                            on_quantize_apply: on_apply,
-                            on_hit,
-                            on_save,
+                        key: "{track.guid}",
+                        style: "width: {STRIP_W}px; flex: 0 0 auto; display: flex; \
+                                flex-direction: column; overflow: hidden;",
+                        if fx_band > 0.0 {
+                            div {
+                                style: "height: {FX_BAND_H}px; flex: 0 0 auto; \
+                                        display: flex; align-items: flex-end; \
+                                        overflow: hidden;",
+                                FxSlotStack {
+                                    fx: fx.get(&track.guid).cloned().unwrap_or_default(),
+                                    width: STRIP_W,
+                                }
+                            }
                         }
-                    }
-                }
-                // Right column: the mixer, full height. Width twice —
-                // Blitz collapses a flex-basis column whose content is
-                // still loading, and a mixer that appears out of
-                // nowhere would reflow both panes to its left.
-                div {
-                    style: "flex: 0 0 {MIXER_W}px; width: {MIXER_W}px; min-height: 0; \
-                            overflow: hidden; border-left: 1px solid #323232; \
-                            background: #131319;",
-                    "data-testid": "workstation-mixer",
-                    if tracks.is_empty() {
-                        div {
-                            style: "padding: 16px; color: #7b7b7b; font-size: 12px;",
-                            "Mixer — loading…"
+                        ChannelStripPreview {
+                            track: track.clone(),
+                            index: i as u32,
+                            height: strip_h,
                         }
-                    } else {
-                        MixerControlPanel { tracks }
-                    }
-                }
-                // Invisible engine-sync siblings, one per strip.
-                div {
-                    style: "display: none;",
-                    for (guid, tv) in entries_now.iter() {
-                        TrackSync { key: "{guid}", guid: guid.clone(), tv: tv.clone() }
                     }
                 }
             }
         }
     }
-}
-
-/// Push a strip's mute/solo/fader/pan intents to the engine, by GUID.
-/// The MCP stays a pure view; this sibling is where UI becomes state.
-#[component]
-fn TrackSync(guid: String, tv: TrackView) -> Element {
-    let mute = tv.mute;
-    let solo = tv.solo;
-    let fader = tv.fader;
-    let pan = tv.pan;
-
-    async fn with_track<F, Fut>(guid: String, op: F)
-    where
-        F: FnOnce(daw::rpc::TrackHandle) -> Fut,
-        Fut: std::future::Future<Output = Result<(), daw::rpc::Error>>,
-    {
-        if let Some(daw) = daw::get()
-            && let Ok(project) = daw.current_project().await
-            && let Ok(Some(handle)) = project.tracks().by_guid(&guid).await
-        {
-            let _ = op(handle).await;
-        }
-    }
-
-    {
-        let guid = guid.clone();
-        use_effect(move || {
-            let muted = *mute.read();
-            let guid = guid.clone();
-            spawn(with_track(guid, move |h| async move {
-                if muted {
-                    h.mute().await
-                } else {
-                    h.unmute().await
-                }
-            }));
-        });
-    }
-    {
-        let guid = guid.clone();
-        use_effect(move || {
-            let soloed = *solo.read();
-            let guid = guid.clone();
-            spawn(with_track(guid, move |h| async move {
-                if soloed {
-                    h.solo().await
-                } else {
-                    h.unsolo().await
-                }
-            }));
-        });
-    }
-    {
-        let guid = guid.clone();
-        use_effect(move || {
-            let vol = *fader.read() as f64;
-            let guid = guid.clone();
-            spawn(with_track(
-                guid,
-                move |h| async move { h.set_volume(vol).await },
-            ));
-        });
-    }
-    {
-        let guid = guid.clone();
-        use_effect(move || {
-            let pan_val = (*pan.read() as f64) * 2.0 - 1.0;
-            let guid = guid.clone();
-            spawn(with_track(guid, move |h| async move {
-                h.set_pan(pan_val).await
-            }));
-        });
-    }
-    rsx! {}
 }
