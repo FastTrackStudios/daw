@@ -264,19 +264,28 @@ async fn stream_previews(
     let Ok(project) = daw.current_project().await else {
         return;
     };
-    pending.set(items.len());
+    let total = items.len();
+    pending.set(total);
+    // Batched: a signal write re-renders the whole timeline, and four
+    // hundred single-item writes would freeze the window it exists to
+    // fill. A batch per ~2 dozen items is sixteen redraws for a big
+    // session — invisible.
+    let mut batch: HashMap<String, ItemPreview> = HashMap::new();
+    let mut done = 0usize;
     for item in items {
         if let Ok(Some(handle)) = project.items().by_guid(&item.guid).await
             && let Ok(data) = handle.active_take().peaks(2048).await
         {
             let amps = waveform_from_peaks(&data);
             if !amps.is_empty() {
-                previews
-                    .write()
-                    .insert(item.guid.clone(), ItemPreview::Waveform(amps));
+                batch.insert(item.guid.clone(), ItemPreview::Waveform(amps));
             }
         }
-        pending.set(pending().saturating_sub(1));
+        done += 1;
+        if batch.len() >= 24 || done == total {
+            previews.write().extend(batch.drain());
+            pending.set(total - done);
+        }
     }
 }
 
@@ -407,7 +416,6 @@ pub fn WorkstationApp() -> Element {
     let s = shape.read();
     let tracks = s.tracks.clone();
     let items = s.items.clone();
-    let item_previews = item_previews_sig();
     let fx = s.fx.clone();
     let sections = s.sections.clone();
     let marker_flags = s.markers.clone();
@@ -441,7 +449,6 @@ pub fn WorkstationApp() -> Element {
     let arr_h = ARR_RULER_H + 1.0 + rows.iter().map(|(_, _, h)| h + 1.0).sum::<f32>();
     let content_h = ruler_block_h as f32 + arr_h;
     let lanes_h = (arrange_h - TRANSPORT_H).max(60.0);
-    let playhead_x = playhead() * pps as f64;
 
     // The mixer column: an FX band when any strip has a chain, strips
     // below it, one horizontal scroll for both.
@@ -462,6 +469,40 @@ pub fn WorkstationApp() -> Element {
         div {
             style: "display: flex; flex-direction: row; width: 100vw; height: 100vh; \
                     min-height: 0; min-width: 0;",
+            // The window's transport keys, REAPER's: Space plays and
+            // pauses, Home returns to zero. On the root and focused at
+            // mount, so they work before anything is clicked. (The full
+            // keymap layer — crates/input's profiles — is the follow-up;
+            // these two are the ones hands expect on minute one.)
+            tabindex: 0,
+            autofocus: true,
+            onkeydown: move |e: KeyboardEvent| {
+                use dioxus::prelude::Key;
+                match e.key() {
+                    Key::Character(c) if c == " " => {
+                        e.prevent_default();
+                        playing.set(!playing());
+                        spawn(async move {
+                            if let Some(daw) = daw::get()
+                                && let Ok(p) = daw.current_project().await
+                            {
+                                let _ = p.transport().play_pause().await;
+                            }
+                        });
+                    }
+                    Key::Home => {
+                        playhead.set(0.0);
+                        spawn(async move {
+                            if let Some(daw) = daw::get()
+                                && let Ok(p) = daw.current_project().await
+                            {
+                                let _ = p.transport().set_position(0.0).await;
+                            }
+                        });
+                    }
+                    _ => {}
+                }
+            },
             // ── Left column: transport, sections, TCP | arrangement,
             // and the editor under them. ──
             div {
@@ -472,12 +513,7 @@ pub fn WorkstationApp() -> Element {
                             align-items: center; padding-left: 8px; \
                             background: {bar_bg}; border-bottom: 1px solid {rule};",
                     NativeTransportBar { playing, bpm, position: playhead, on_play, on_stop }
-                    if previews_pending() > 0 {
-                        span {
-                            style: "margin-left: 12px; font-size: 10px; color: #7b7b7b;",
-                            "waveforms… {previews_pending()} left"
-                        }
-                    }
+                    StreamBadge { pending: previews_pending }
                 }
                 // TCP | arrangement, one shared vertical scroll.
                 div {
@@ -607,22 +643,19 @@ pub fn WorkstationApp() -> Element {
                                             }
                                         }
                                     }
-                                    ArrangePreview {
+                                    TimelineItems {
                                         tracks: tracks.clone(),
                                         items,
-                                        previews: item_previews,
+                                        previews: item_previews_sig,
                                         width: content_w,
                                         height: arr_h,
                                         pixels_per_second: pps,
                                         bpm,
                                     }
-                                    // The playhead, inside the timeline's
-                                    // content so it pans and scrolls with
-                                    // the lanes.
-                                    div {
-                                        style: "position: absolute; left: {playhead_x}px; \
-                                                top: 0; width: 1px; height: {content_h}px; \
-                                                background: #f8fafc; opacity: 0.8;",
+                                    PlayheadLine {
+                                        playhead,
+                                        pps: pps as f64,
+                                        height: content_h as f64,
                                     }
                                 }
                             }
@@ -675,6 +708,62 @@ pub fn WorkstationApp() -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+/// The timeline's items, isolated so a preview batch re-renders this
+/// subtree and nothing else. The whole app reading the previews signal
+/// was the freeze: every arriving waveform re-laid-out the editor and
+/// the mixer too.
+#[component]
+fn TimelineItems(
+    tracks: Vec<Track>,
+    items: Vec<Item>,
+    previews: Signal<HashMap<String, ItemPreview>>,
+    width: f32,
+    height: f32,
+    pixels_per_second: f32,
+    bpm: f64,
+) -> Element {
+    rsx! {
+        ArrangePreview {
+            tracks,
+            items,
+            previews: previews(),
+            width,
+            height,
+            pixels_per_second,
+            bpm,
+        }
+    }
+}
+
+/// The playhead line, isolated for the same reason: a position tick
+/// arrives many times a second while playing, and it must move one
+/// 1px div, not re-render the window.
+#[component]
+fn PlayheadLine(playhead: Signal<f64>, pps: f64, height: f64) -> Element {
+    let x = playhead() * pps;
+    rsx! {
+        div {
+            style: "position: absolute; left: {x}px; top: 0; width: 1px; \
+                    height: {height}px; background: #f8fafc; opacity: 0.8;",
+        }
+    }
+}
+
+/// The waveform-streaming readout. Its own component so the countdown
+/// re-renders a span, not the app.
+#[component]
+fn StreamBadge(pending: Signal<usize>) -> Element {
+    if pending() == 0 {
+        return rsx! {};
+    }
+    rsx! {
+        span {
+            style: "margin-left: 12px; font-size: 10px; color: #7b7b7b;",
+            "waveforms… {pending()} left"
         }
     }
 }
