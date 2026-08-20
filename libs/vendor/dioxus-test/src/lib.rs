@@ -145,6 +145,7 @@ mod screenshot;
 
 /// Re-exported for tests that build key events (FTS extension).
 pub use keyboard_types;
+pub use keyboard_types::{Key, Modifiers};
 
 pub use condition::{AllElementsCondition, ElementCondition, MAX_TRIES};
 pub use document::{DocumentTester, by_testid, render};
