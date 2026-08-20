@@ -45,6 +45,8 @@ pub struct Entry {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
+    /// A job — the list a person is handed, before the fixtures.
+    Workflow,
     Scene,
     Midi,
     Rpp,
@@ -67,6 +69,7 @@ impl Kind {
 
     pub fn label(self) -> &'static str {
         match self {
+            Kind::Workflow => "job",
             Kind::Scene => "scene",
             Kind::Midi => "midi",
             Kind::Rpp => "rpp",
@@ -92,6 +95,23 @@ pub fn root() -> PathBuf {
 /// Listed first because they are the answer to "I just want to see the
 /// editor" — a runner whose list is empty on a machine with no material
 /// should still open something.
+/// The workflows, which are what the chooser should offer first: a job
+/// with its surface and material already chosen, rather than a fixture
+/// named after the behaviour it demonstrates.
+pub fn workflows() -> Vec<Entry> {
+    expression_editor_ui::workflow::Workflow::ALL
+        .into_iter()
+        .map(|w| Entry {
+            label: match w.note() {
+                Some(note) => format!("{} ({note})", w.label()),
+                None => w.label().to_string(),
+            },
+            arg: w.slug().to_string(),
+            kind: Kind::Workflow,
+        })
+        .collect()
+}
+
 pub fn scenes() -> Vec<Entry> {
     scene_names()
         .into_iter()

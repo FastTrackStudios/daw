@@ -70,7 +70,11 @@ pub fn cursor_at(ed: &Editor, x: f64, y: f64, mods: Mods, locked: bool) -> Curso
             .iter()
             .any(|s| (s.x - x).abs() <= grab)
         {
-            return if locked { Cursor::Forbidden } else { Cursor::Split };
+            return if locked {
+                Cursor::Forbidden
+            } else {
+                Cursor::Split
+            };
         }
     }
 
@@ -94,7 +98,12 @@ pub fn cursor_at(ed: &Editor, x: f64, y: f64, mods: Mods, locked: bool) -> Curso
     // time, and the drag binding is the one with consequences.
     let action = ed.mouse.resolve_for(context, Gesture::Drag, mods, ed.tool);
 
-    if locked && action.is_edit() {
+    // A *view* tool is never forbidden. `is_edit` is asked of the
+    // resolved action, and an armed tool resolves to `ActiveTool` — one
+    // answer for all seven tools, which is right for six of them and
+    // wrong for zoom. The lock exists to stop you changing the material
+    // while a preview is up; looking around is not that.
+    if locked && action.is_edit() && !ed.tool.is_view() {
         return Cursor::Forbidden;
     }
 
@@ -278,7 +287,9 @@ fn shape(scene: &mut Scene, cursor: Cursor, at: Affine, color: Color, w: f64) {
             }
         }
 
-        Cursor::Hand | Cursor::HandClosed => hand(scene, at, color, w, cursor == Cursor::HandClosed),
+        Cursor::Hand | Cursor::HandClosed => {
+            hand(scene, at, color, w, cursor == Cursor::HandClosed)
+        }
         Cursor::Zoom => {
             scene.stroke(&s, at, color, None, &Circle::new(Point::new(9.0, 9.0), 6.0));
             scene.stroke(
@@ -357,13 +368,7 @@ fn shape(scene: &mut Scene, cursor: Cursor, at: Affine, color: Color, w: f64) {
         }
         Cursor::Razor => {
             // A blade: the rectangle is the handle, the line is the cut.
-            scene.stroke(
-                &s,
-                at,
-                color,
-                None,
-                &Rect::new(6.0, 4.0, SIZE - 3.0, 11.0),
-            );
+            scene.stroke(&s, at, color, None, &Rect::new(6.0, 4.0, SIZE - 3.0, 11.0));
             scene.stroke(
                 &s,
                 at,
@@ -399,7 +404,13 @@ fn handle_glyph(scene: &mut Scene, at: Affine, color: Color, w: f64, handle: Han
     match handle {
         // Coarse pitch: the note, moving between rows.
         Handle::Pitch => {
-            scene.stroke(&s, at, color, None, &Rect::new(5.0, c - 2.5, SIZE - 5.0, c + 2.5));
+            scene.stroke(
+                &s,
+                at,
+                color,
+                None,
+                &Rect::new(5.0, c - 2.5, SIZE - 5.0, c + 2.5),
+            );
             arrow_line(scene, at, color, w, (c, c - 4.0), (c, 2.0), 3.0);
             arrow_line(scene, at, color, w, (c, c + 4.0), (c, SIZE - 2.0), 3.0);
         }
@@ -416,7 +427,15 @@ fn handle_glyph(scene: &mut Scene, at: Affine, color: Color, w: f64, handle: Han
                 );
             }
             arrow_line(scene, at, color, w, (c + 5.0, c - 3.0), (c + 5.0, 3.0), 2.5);
-            arrow_line(scene, at, color, w, (c + 5.0, c + 3.0), (c + 5.0, SIZE - 3.0), 2.5);
+            arrow_line(
+                scene,
+                at,
+                color,
+                w,
+                (c + 5.0, c + 3.0),
+                (c + 5.0, SIZE - 3.0),
+                2.5,
+            );
         }
         // The slopes: the transition tilting in or out.
         Handle::LeftSlope | Handle::RightSlope => {
@@ -442,7 +461,13 @@ fn handle_glyph(scene: &mut Scene, at: Affine, color: Color, w: f64, handle: Han
         }
         // Formant: the note with a shifted overtone above it.
         Handle::Formant => {
-            scene.stroke(&s, at, color, None, &Rect::new(5.0, c + 2.0, SIZE - 5.0, c + 6.0));
+            scene.stroke(
+                &s,
+                at,
+                color,
+                None,
+                &Rect::new(5.0, c + 2.0, SIZE - 5.0, c + 6.0),
+            );
             scene.stroke(
                 &s,
                 at,
@@ -459,7 +484,10 @@ fn handle_glyph(scene: &mut Scene, at: Affine, color: Color, w: f64, handle: Han
                 at,
                 color,
                 None,
-                &Line::new(Point::new(6.0, SIZE - 4.0), Point::new(SIZE - 6.0, SIZE - 4.0)),
+                &Line::new(
+                    Point::new(6.0, SIZE - 4.0),
+                    Point::new(SIZE - 6.0, SIZE - 4.0),
+                ),
             );
             scene.fill(
                 Fill::NonZero,
@@ -674,13 +702,24 @@ pub fn CursorLayer(
         dioxus_native_dom::CustomWidgetAttr::new(crate::roll_widget::SceneWidget::new(slot.clone()))
     });
 
-    let Some((x, y)) = hover() else {
-        // Nothing drawn and nothing positioned: the glyph must not be
-        // left stranded at the last position the pointer had.
-        return rsx! {};
-    };
+    // Mounted unconditionally, from the very first render.
+    //
+    // This used to return an empty `rsx!` until the pointer arrived, and
+    // that is what made the roll go blank: `CustomWidgetAttr` is
+    // write-once — the DOM takes the widget out of it on the first
+    // mutation — so an `<object>` created on a *later* render gets no
+    // `data` attribute at all. With no widget it is a replaced element
+    // with no intrinsic size, so it lays out 0x0, and blitz-paint skips
+    // a zero-box widget silently. The roll's own object carries a
+    // comment about exactly this trap; the cursor walked into it.
+    //
+    // So the node is permanent and only its *style* changes. Before the
+    // pointer has ever been over the roll there is nothing to draw, and
+    // `visibility: hidden` says so without disturbing the box — a
+    // `display: none` toggle would put the same relayout back.
+    let hovering = hover();
 
-    let cursor = {
+    let cursor = hovering.map(|(x, y)| {
         let ed = editor.read();
         let resolved = cursor_at(&ed, x, y, mods(), locked);
         if drag.read().is_active() {
@@ -688,24 +727,36 @@ pub fn CursorLayer(
         } else {
             resolved
         }
-    };
+    });
 
     let mut scene = Scene::new();
-    draw(&mut scene, cursor, SIZE, SIZE);
+    if let Some(cursor) = cursor {
+        draw(&mut scene, cursor, SIZE, SIZE);
+    }
     slot.put(scene);
 
-    // The box is 2×SIZE so a glyph whose hotspot is at a corner still
+    // The box is 2xSIZE so a glyph whose hotspot is at a corner still
     // has room to draw in every direction from it; the drawing above is
     // centred on (SIZE, SIZE) to match.
     let box_ = SIZE * 2.0;
-    let left = x + canvas::GUTTER_W - SIZE;
-    let top = y + canvas::RULER_H - SIZE;
+    let (left, top) = match hovering {
+        Some((x, y)) => (x + canvas::GUTTER_W - SIZE, y + canvas::RULER_H - SIZE),
+        None => (0.0, 0.0),
+    };
+    let visibility = if hovering.is_some() {
+        "visible"
+    } else {
+        "hidden"
+    };
+    let label = cursor.map(|c| c.label()).unwrap_or("none");
+
     rsx! {
         object {
             "data-testid": "cursor",
-            "data-cursor": cursor.label(),
+            "data-cursor": "{label}",
             "data": widget,
             style: "position: absolute; pointer-events: none; display: block; \
+                    visibility: {visibility}; \
                     left: {left:.1}px; top: {top:.1}px; \
                     width: {box_}px; height: {box_}px;",
         }

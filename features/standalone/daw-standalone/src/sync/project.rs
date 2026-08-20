@@ -184,6 +184,24 @@ impl Projects for Standalone {
             {
                 let summary =
                     crate::project_loader::load_rpp_text(self, &name, path, &text).ok()?;
+                // r[impl drums.open.rpp]
+                // Media resolves against the file's directory, as REAPER
+                // does; a source that cannot be found is a per-take entry
+                // in the materialize report, never a failed open.
+                #[cfg(feature = "decode")]
+                {
+                    let dir = std::path::Path::new(path)
+                        .parent()
+                        .map(|d| d.to_path_buf())
+                        .unwrap_or_default();
+                    self.media_bay().set_file_resolver(Box::new(
+                        crate::media_bay::ProjectRelativeResolver::new(dir),
+                    ));
+                    let _ = crate::audio_engine::materialize::materialize_via_bay(
+                        self,
+                        &summary.project_guid,
+                    );
+                }
                 let s = self.state.lock().ok()?;
                 s.projects
                     .get(&summary.project_guid)
@@ -231,24 +249,109 @@ impl Projects for Standalone {
         }
     }
 
-    fn begin_undo_block(&self, _project: ProjectContext, _label: &str) {
-        // Undo is a planned subsystem — for now we accept calls so
-        // tests don't have to skip the begin/end ceremony. The
-        // `last_*_label` accessors return None so any client that
-        // checks gets a consistent "no undo history" signal.
+    /// Snapshot-based undo over the project's edit surface.
+    ///
+    /// `begin` captures what the edit is about to change; `end` commits
+    /// that capture as one undo step under its label. Everything a block
+    /// does — a whole group split across seven mics — is then one step,
+    /// which is the semantics REAPER's block gives and the reason the
+    /// facade has the begin/end ceremony at all.
+    // r[impl drums.quantize.undo]
+    fn begin_undo_block(&self, project: ProjectContext, label: &str) {
+        let Some(guid) = resolve_ctx_guid(self, &project) else {
+            return;
+        };
+        let Ok(mut s) = self.state.lock() else {
+            return;
+        };
+        let Some(p) = s.projects.get(&guid) else {
+            return;
+        };
+        let step = crate::sync::daw::UndoStep {
+            label: label.to_string(),
+            snapshot: crate::sync::daw::EditSnapshot::capture(p),
+        };
+        // A begin with no end is abandoned, not stacked.
+        s.pending_undo.insert(guid, step);
     }
-    fn end_undo_block(&self, _project: ProjectContext, _label: &str, _scope: Option<UndoScope>) {}
-    fn undo(&self, _project: ProjectContext) -> bool {
-        false
+
+    fn end_undo_block(&self, project: ProjectContext, label: &str, _scope: Option<UndoScope>) {
+        let Some(guid) = resolve_ctx_guid(self, &project) else {
+            return;
+        };
+        let Ok(mut s) = self.state.lock() else {
+            return;
+        };
+        let Some(mut step) = s.pending_undo.remove(&guid) else {
+            return;
+        };
+        if !label.is_empty() {
+            step.label = label.to_string();
+        }
+        let stack = s.undo.entry(guid.clone()).or_default();
+        stack.push(step);
+        if stack.len() > crate::sync::daw::UNDO_LIMIT {
+            stack.remove(0);
+        }
+        // A new edit invalidates the redo branch, as everywhere.
+        s.redo.remove(&guid);
     }
-    fn redo(&self, _project: ProjectContext) -> bool {
-        false
+
+    // r[impl drums.quantize.undo]
+    fn undo(&self, project: ProjectContext) -> bool {
+        let Some(guid) = resolve_ctx_guid(self, &project) else {
+            return false;
+        };
+        let Ok(mut s) = self.state.lock() else {
+            return false;
+        };
+        let Some(step) = s.undo.get_mut(&guid).and_then(Vec::pop) else {
+            return false;
+        };
+        let Some(p) = s.projects.get_mut(&guid) else {
+            return false;
+        };
+        let redo_step = crate::sync::daw::UndoStep {
+            label: step.label.clone(),
+            snapshot: crate::sync::daw::EditSnapshot::capture(p),
+        };
+        step.snapshot.restore(p);
+        s.redo.entry(guid).or_default().push(redo_step);
+        true
     }
-    fn last_undo_label(&self, _project: ProjectContext) -> Option<String> {
-        None
+
+    fn redo(&self, project: ProjectContext) -> bool {
+        let Some(guid) = resolve_ctx_guid(self, &project) else {
+            return false;
+        };
+        let Ok(mut s) = self.state.lock() else {
+            return false;
+        };
+        let Some(step) = s.redo.get_mut(&guid).and_then(Vec::pop) else {
+            return false;
+        };
+        let Some(p) = s.projects.get_mut(&guid) else {
+            return false;
+        };
+        let undo_step = crate::sync::daw::UndoStep {
+            label: step.label.clone(),
+            snapshot: crate::sync::daw::EditSnapshot::capture(p),
+        };
+        step.snapshot.restore(p);
+        s.undo.entry(guid).or_default().push(undo_step);
+        true
     }
-    fn last_redo_label(&self, _project: ProjectContext) -> Option<String> {
-        None
+
+    fn last_undo_label(&self, project: ProjectContext) -> Option<String> {
+        let guid = resolve_ctx_guid(self, &project)?;
+        let s = self.state.lock().ok()?;
+        s.undo.get(&guid)?.last().map(|u| u.label.clone())
+    }
+
+    fn last_redo_label(&self, project: ProjectContext) -> Option<String> {
+        let guid = resolve_ctx_guid(self, &project)?;
+        let s = self.state.lock().ok()?;
+        s.redo.get(&guid)?.last().map(|u| u.label.clone())
     }
     fn run_command(&self, _project: ProjectContext, _command: &str) -> bool {
         // No REAPER action registry on standalone; commands no-op
@@ -257,13 +360,31 @@ impl Projects for Standalone {
         false
     }
 
+    /// With `rpp-save` on, saving writes a **new** `.rpp` beside the
+    /// original — never over it — and remembers where it went (see
+    /// [`crate::save::save_project_as`], `last_saved_path`). Without
+    /// the feature the call is accepted and does nothing, keeping the
+    /// trait surface usable.
+    // r[impl drums.save.new-file]
     fn save(&self, project: ProjectContext) {
-        // Standalone has no persistent backing — the project lives
-        // in memory only. `save` accepts the call to keep the trait
-        // surface usable. Writing back to an .rpp file would be a
-        // dawfile-reaper serialize round-trip + std::fs::write; not
-        // wired in yet because the standalone test surface focuses
-        // on read-side parity.
+        #[cfg(feature = "rpp-save")]
+        {
+            let Some(guid) = resolve_ctx_guid(self, &project) else {
+                return;
+            };
+            match crate::save::save_project_as(self, &guid) {
+                Ok(path) => {
+                    let written = path.to_string_lossy().into_owned();
+                    let _ = self.with_project_mut(&guid, |p| {
+                        p.project_ext_state
+                            .insert((String::new(), "LAST_SAVED_PATH".into()), written.clone());
+                    });
+                    tracing::info!(path = %written, "saved project as a new file");
+                }
+                Err(e) => tracing::warn!(error = %e, "save failed"),
+            }
+        }
+        #[cfg(not(feature = "rpp-save"))]
         let _ = project;
     }
     fn save_all(&self) {}

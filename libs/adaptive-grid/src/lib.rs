@@ -137,9 +137,22 @@ pub struct Adaptive {
 }
 
 impl Default for Adaptive {
+    /// Adaptive, at the middle density.
+    ///
+    /// It was `Fixed` — the grid did nothing until asked — which is the
+    /// safe default and the wrong one. A fixed grid is *always* wrong at
+    /// some zoom: at 1/16 the lines become a grey wash the moment you
+    /// zoom out to look at a section, and coarse enough to read a whole
+    /// arrangement is useless the moment you go back in. Following the
+    /// zoom is what makes the grid mean the same thing at every scale,
+    /// and the setting people reach for is the division they want when
+    /// zoomed *in* — which is exactly what this keeps as the ceiling.
+    ///
+    /// Only ever coarsens, never past the setting, so nothing here can
+    /// snap a note somewhere finer than was asked for.
     fn default() -> Self {
         Self {
-            density: Density::Fixed,
+            density: Density::Medium,
             min_px: DEFAULT_MIN_PX,
             factor: 2.0,
             // A 4096th and eight whole notes: REAPER's own limits, which

@@ -329,16 +329,30 @@ impl Takes for Standalone {
         take: TakeRef,
         path: String,
     ) -> DawResult<()> {
+        let mut changed_take: Option<(String, String)> = None;
         self.mutate_take_evt(&project, &item, &take, |pg, ig, t| {
             t.source_file_path = Some(path.clone());
             t.source_type = SourceType::Audio;
+            changed_take = Some((pg.to_string(), t.guid.clone()));
             TakeEvent::SourceChanged {
                 project_guid: pg.to_string(),
                 item_guid: ig.to_string(),
                 take_guid: t.guid.clone(),
                 source_path: Some(path),
             }
-        })
+        })?;
+        // The materialized audio belongs to the *old* source; keeping it
+        // would make every placement-aware reader (accessor, peaks, the
+        // renderer) play the file the take no longer points at.
+        #[cfg(any(feature = "audio", feature = "decode"))]
+        if let Some((pg, tg)) = changed_take {
+            let _ = self.with_project_mut(&pg, |p| {
+                p.audio_sources.remove(&tg);
+            });
+        }
+        #[cfg(not(any(feature = "audio", feature = "decode")))]
+        let _ = changed_take;
+        Ok(())
     }
 
     fn get_source_type(&self, project: ProjectContext, item: ItemRef, take: TakeRef) -> SourceType {

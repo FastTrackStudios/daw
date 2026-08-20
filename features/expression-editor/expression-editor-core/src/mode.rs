@@ -119,9 +119,7 @@ impl Mode {
     /// Which family this mode belongs to, for grouping the switcher.
     pub fn family(&self) -> ModeFamily {
         match self {
-            Mode::Midi | Mode::Mpe | Mode::Vocals | Mode::Drums | Mode::Guitar => {
-                ModeFamily::Midi
-            }
+            Mode::Midi | Mode::Mpe | Mode::Vocals | Mode::Drums | Mode::Guitar => ModeFamily::Midi,
             Mode::PitchedAudio | Mode::UnpitchedAudio => ModeFamily::Audio,
         }
     }
@@ -261,7 +259,11 @@ impl Mode {
             Mode::Drums => MouseMap::drums(),
             Mode::Guitar => MouseMap::riffer(),
             Mode::Vocals => MouseMap::lyrics(),
-            _ => MouseMap::reaper_like(),
+            // FTS, not REAPER-like — the same change of default that
+            // `MouseMap::default` made. A mode switch used to hand the
+            // REAPER map back, so the new scheme lasted exactly until
+            // the user picked a mode.
+            _ => MouseMap::fts(),
         }
     }
 }

@@ -125,7 +125,10 @@ async fn the_roll_is_reachable_by_a_pointer() -> dioxus_test::Result<()> {
     let tester = render(PitchSurface).with_window_size(1000, 620).build();
     let el = tester.query(by_testid("roll")).immediately()?;
     let (w, h) = el.size();
-    assert!(w > 0.0 && h > 0.0, "the roll rendered with no area: {w}x{h}");
+    assert!(
+        w > 0.0 && h > 0.0,
+        "the roll rendered with no area: {w}x{h}"
+    );
     Ok(())
 }
 

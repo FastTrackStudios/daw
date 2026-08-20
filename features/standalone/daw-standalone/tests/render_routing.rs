@@ -1153,3 +1153,65 @@ fn recarm_group_arms_followers() {
     assert!(!tracks[3].armed, "non-member untouched");
     let _ = (a, b, c);
 }
+
+/// A source whose value IS its time: sample i = i / SAMPLE_RATE (1 s).
+fn ramp_audio() -> DecodedAudio {
+    let frames = SAMPLE_RATE as usize;
+    DecodedAudio {
+        samples: (0..frames).map(|i| i as f32 / SAMPLE_RATE as f32).collect(),
+        channels: 1,
+        sample_rate: SAMPLE_RATE,
+    }
+}
+
+// r[verify drums.open.playback-warped]
+#[test]
+fn stretch_markers_warp_playback() {
+    use daw_proto::{StretchMarker, StretchMarkers, StretchTakeRef, TakeRef};
+    let (daw, guid) = seeded();
+    let ctx = ProjectContext::Project(guid.clone());
+    let t = Tracks::add(&daw, ctx.clone(), "T", None).unwrap();
+    let (item_guid, _) = create_item_with_audio(&daw, &guid, &t, 0.0, 1.0, ramp_audio());
+    // No fades, so the rendered value is the source value × pan law.
+    let none = ProtoDuration::from_seconds(0.0);
+    let shape = daw_proto::item::FadeShape::Linear;
+    Items::set_fade_in(
+        &daw,
+        ctx.clone(),
+        ItemRef::Guid(item_guid.clone()),
+        none,
+        shape,
+    )
+    .unwrap();
+    Items::set_fade_out(
+        &daw,
+        ctx.clone(),
+        ItemRef::Guid(item_guid.clone()),
+        none,
+        shape,
+    )
+    .unwrap();
+
+    // Play 0.5 s of take time over 0.25 s of source (rate ½... i.e. slowed):
+    // take 0.5 → source 0.25, then unstretched on.
+    StretchMarkers::set_stretch_markers(
+        &daw,
+        StretchTakeRef {
+            project: ctx.clone(),
+            item: ItemRef::Guid(item_guid.clone()),
+            take: TakeRef::Active,
+        },
+        vec![StretchMarker::new(0.0, 0.0), StretchMarker::new(0.5, 0.25)],
+    )
+    .expect("markers");
+
+    let pan = (0.5_f32).sqrt();
+    let r = ProjectRenderer::new(&daw, &guid, SAMPLE_RATE);
+    let block = r.render_block(0, SAMPLE_RATE as usize);
+    let at = |secs: f64| block.samples[(secs * SAMPLE_RATE as f64) as usize * 2] / pan;
+    // Inside the stretched span: source time = take time / 2.
+    assert!((at(0.2) - 0.1).abs() < 1e-3, "at 0.2 s got {}", at(0.2));
+    assert!((at(0.4) - 0.2).abs() < 1e-3, "at 0.4 s got {}", at(0.4));
+    // After the last marker: rate 1 again, continuing from source 0.25.
+    assert!((at(0.75) - 0.5).abs() < 1e-3, "at 0.75 s got {}", at(0.75));
+}

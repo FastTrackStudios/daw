@@ -115,7 +115,10 @@ async fn every_mode_keeps_the_row_space_it_asked_for() -> dioxus_test::Result<()
         let want = mode.default_row_space();
         stage(editor_in(mode));
         let tester = render(Surface).with_window_size(1000, 620).build();
-        let html = tester.query(by_testid("readout")).immediately()?.inner_html();
+        let html = tester
+            .query(by_testid("readout"))
+            .immediately()?
+            .inner_html();
         let is_pitch = field(&html, "rows") == 1;
         assert_eq!(
             is_pitch,
@@ -166,16 +169,18 @@ async fn a_plain_drag_does_the_mode_s_own_thing() -> dioxus_test::Result<()> {
         tester.pointer_up_mods(x1, y1, Modifiers::empty());
         let _ = tester.pump().await;
 
-        let html = tester.query(by_testid("readout")).immediately()?.inner_html();
+        let html = tester
+            .query(by_testid("readout"))
+            .immediately()?
+            .inner_html();
         // The invariant that actually holds across all seven: the sweep
         // *reached* the surface. What it did is the mode's business —
         // most select, Drums paints its kit lanes, Guitar inserts on the
         // string roll — and pinning each of those belongs in that mode's
         // own tests, not in a loop that would have to special-case its
         // way through the list.
-        let touched = field(&html, "sel") > 0
-            || field(&html, "notes") != 4
-            || field(&html, "undo") == 1;
+        let touched =
+            field(&html, "sel") > 0 || field(&html, "notes") != 4 || field(&html, "undo") == 1;
         assert!(
             touched,
             "{mode:?}: a sweep across the whole roll did nothing at all ({html})"

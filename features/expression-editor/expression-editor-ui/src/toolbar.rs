@@ -11,7 +11,7 @@
 
 use dioxus::prelude::*;
 use expression_editor_core::doc::Dimension;
-use expression_editor_core::{chord, Editor, ModeFamily, Shape, StripLane, Tool};
+use expression_editor_core::{Editor, Shape, StripLane, Tool, chord};
 
 use crate::drawer::ModDrawer;
 use crate::interaction::{self, Drag};
@@ -25,6 +25,9 @@ fn tool_glyph(tool: Tool) -> &'static str {
         Tool::Eraser => "⌫",
         Tool::NoteDraw => "▤",
         Tool::NoteErase => "✕",
+        Tool::Razor => "⌗",
+        Tool::Velocity => "⇅",
+        Tool::Zoom => "⌕",
     }
 }
 
@@ -73,7 +76,8 @@ fn Seg(
     /// the button is the element with the click handler, and a testid on
     /// a plain child names a node the harness cannot dispatch to
     /// ("Expected element to have a Dioxus ID").
-    #[props(default)] testid: Option<String>,
+    #[props(default)]
+    testid: Option<String>,
     onclick: EventHandler<MouseEvent>,
     children: Element,
 ) -> Element {
@@ -103,6 +107,10 @@ fn Seg(
                     white-space: nowrap;",
             title: "{title}",
             "data-testid": testid,
+            // The highlight is a background colour, and a test that
+            // asserts on one is really asserting on the theme. This
+            // says the same thing in a form that survives a repaint.
+            "data-active": "{active}",
             onclick: move |e| onclick.call(e),
             {children}
         }
@@ -121,12 +129,30 @@ fn divider() -> Element {
 // ── top bar ──────────────────────────────────────────────────────────
 
 #[component]
-pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>) -> Element {
+pub fn Toolbar(
+    editor: Signal<Editor>,
+    drag: Signal<Drag>,
+    drawer: Signal<ModDrawer>,
+    /// The quantize drawer's visibility. Owned by the host component —
+    /// the toolbar only toggles it.
+    quantize_open: Signal<bool>,
+    /// Save, when the host has somewhere to save to. Standalone writes
+    /// a *new* `.rpp` beside the original; absent (REAPER hosts, demo
+    /// scenes) the button is not drawn at all — a dead Save button
+    /// reads as a bug.
+    #[props(default)]
+    on_save: Option<EventHandler<()>>,
+) -> Element {
     let mut editor = editor;
     let mut drawer = drawer;
+    let mut quantize_open = quantize_open;
 
     let ed = editor.read();
-    let tool = ed.tool;
+    // What the modifiers say, falling back to what is armed. Holding
+    // Ctrl lights the razor and Alt lights note-draw, the same way
+    // holding `z` lights zoom — the surface's other previews all promise
+    // this and the tool buttons were the ones staying quiet.
+    let tool = ed.shown_tool();
     let dimension = ed.dimension;
     let overlays = ed.overlays.clone();
     let shape = ed.shape;
@@ -141,24 +167,19 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
     rsx! {
         div {
             "data-testid": "toolbar",
-            // A fixed height that scrolls, not a wrapping one that grows.
+            // One row, and a fixed height that scrolls rather than wraps.
             //
-            // **Two rows, on purpose.**
+            // A wrapping bar's height is a function of the window
+            // *width*, and the roll is sized by subtracting this bar — so
+            // a narrow window silently stole a row from the music. It was
+            // briefly two rows, because pinning the height with `nowrap`
+            // meant the `margin-left: auto` group had no free space to be
+            // pushed into and fell off the right edge, taking undo, Mod,
+            // Zoom, Fit and the frame meter with it.
             //
-            // It used to be one row that wrapped, which made its height a
-            // function of the window *width* — a narrow window silently
-            // stole a row from the roll, and the roll is sized by
-            // subtracting this bar. Pinning the height with `nowrap`
-            // fixed that and broke something worse: with no free space
-            // left, the `margin-left: auto` group stopped being pushed
-            // anywhere and simply fell off the right edge, taking undo,
-            // redo, Mod, Zoom, Fit and the frame meter with it. Controls
-            // you cannot see are worse than a bar that moves.
-            //
-            // Two fixed rows keep the height constant *and* everything
-            // reachable, and the split is meaningful rather than
-            // wherever the text happened to run out: what you are editing
-            // on top, how you are editing it underneath.
+            // With the modes moved to the panel there is only one row of
+            // material left, and the group after the verbs is pinned
+            // rather than pushed, so neither failure is reachable.
             //
             // `border-box`, so the constant is the bar's *total* height.
             style: "display: flex; flex-direction: column; flex: 0 0 auto; \
@@ -167,99 +188,10 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
                     border-bottom: 1px solid {theme::PANEL_BORDER}; \
                     font-family: system-ui, sans-serif;",
 
-            // ── what you are editing ─────────────────────────────────
-            div {
-                style: "display: flex; flex: 0 0 auto; align-items: center; \
-                        gap: 5px; height: 29px; padding: 0 8px; \
-                        overflow-x: auto; overflow-y: hidden;",
-
-            // The mode leads: everything after it is conditional on
-            // what the editor currently is.
-            //
-            // One segment per family, so the switcher reads as "which
-            // kind of material is this" before "which surface" — the
-            // MIDI-shaped modes on the left, the two analysed-audio
-            // ones on the right.
-            for (i, family) in ModeFamily::ALL.into_iter().enumerate() {
-                // Separator *between* groups, not after each: a
-                // trailing divider would collide with the fixed one
-                // below and read as a double rule.
-                if i > 0 {
-                    {divider()}
-                }
-                Segment {
-                    for m in family.modes().iter().copied() {
-                        Seg {
-                            key: "m{m:?}",
-                            active: mode == m,
-                            accent: true,
-                            title: format!("{} mode ({} family)", m.label(), family.label()),
-                            onclick: move |_| editor.write().set_mode(m),
-                            span {
-                                style: "display: flex; align-items: center; gap: 5px;",
-                                svg {
-                                    view_box: "0 0 16 16",
-                                    style: "width: 13px; height: 13px; flex: 0 0 auto;",
-                                    path {
-                                        d: theme::mode_icon(m),
-                                        fill: "none",
-                                        stroke: "currentColor",
-                                        stroke_width: "1.3",
-                                        stroke_linecap: "round",
-                                        stroke_linejoin: "round",
-                                    }
-                                }
-                                "{m.label()}"
-                            }
-                        }
-                    }
-                }
-            }
-
-            {divider()}
-
-            // Stack toggle. Next to the mode buttons because it answers
-            // the same question from the other side: those pick how one
-            // track is drawn, this shows every track drawn its own way.
-            // Hidden with one track, where a stack of one is just the
-            // roll with less room.
-            if editor.read().tracks.len() > 1 {
-                Segment {
-                    Seg {
-                        active: stacked,
-                        accent: true,
-                        title: "Show every track on one timeline".to_string(),
-                        onclick: move |_| {
-                            let now = editor.read().stacked;
-                            editor.write().stacked = !now;
-                        },
-                        // Icon only. The toolbar is already full at the
-                        // width a plugin window gets, and this is a view
-                        // toggle rather than something you hunt for by
-                        // name.
-                        svg {
-                            view_box: "0 0 16 16",
-                            style: "width: 13px; height: 13px; flex: 0 0 auto;",
-                            path {
-                                // Three stacked lanes.
-                                d: "M2 4h12 M2 8h12 M2 12h12",
-                                fill: "none",
-                                stroke: "currentColor",
-                                stroke_width: "1.3",
-                                stroke_linecap: "round",
-                            }
-                        }
-                    }
-                }
-
-                {divider()}
-            }
-            }
-
             // ── how you are editing it ───────────────────────────────
             div {
                 style: "display: flex; flex: 0 0 auto; align-items: center; \
-                        gap: 5px; height: 29px; padding: 0 8px; \
+                        gap: 5px; height: 100%; padding: 0 8px; \
                         overflow: hidden;",
 
             // The verbs scroll; the group after them does not.
@@ -286,6 +218,12 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
                 for t in Tool::ALL {
                     Seg {
                         key: "{t:?}",
+                        // `format!` rather than an rsx literal: rsx
+                        // interpolates `"tool-{t:?}"` only when it is
+                        // the whole value, and `.to_lowercase()` on the
+                        // end makes it an ordinary method call on an
+                        // ordinary string — which shipped the braces.
+                        testid: format!("tool-{t:?}").to_lowercase(),
                         active: tool == t,
                         accent: true,
                         title: t.label().to_string(),
@@ -436,6 +374,39 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
             div {
                 style: "flex: 0 0 auto; display: flex; align-items: center; gap: 5px; \
                         padding-left: 6px;",
+
+                // Stack: every track on one timeline. It sat beside the
+                // mode buttons, which was right when those were here —
+                // it answers the same question from the other side. With
+                // the modes moved to the panel it belongs with the other
+                // view toggles instead, because that is what it is.
+                // Hidden with one track, where a stack of one is the roll
+                // with less room.
+                if editor.read().tracks.len() > 1 {
+                    Segment {
+                        Seg {
+                            active: stacked,
+                            accent: true,
+                            title: "Show every track on one timeline".to_string(),
+                            onclick: move |_| {
+                                let now = editor.read().stacked;
+                                editor.write().stacked = !now;
+                            },
+                            svg {
+                                view_box: "0 0 16 16",
+                                style: "width: 13px; height: 13px; flex: 0 0 auto;",
+                                path {
+                                    // Three stacked lanes.
+                                    d: "M2 4h12 M2 8h12 M2 12h12",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "1.3",
+                                    stroke_linecap: "round",
+                                }
+                            }
+                        }
+                    }
+                }
                 Segment {
                     Seg {
                         active: false,
@@ -448,6 +419,41 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
                         title: "Redo".to_string(),
                         onclick: move |_| { editor.write().redo(); },
                         span { style: if can_redo { "" } else { "opacity: 0.3;" }, "↷" }
+                    }
+                }
+                // The quantize drawer, where the mode edits audio hits
+                // on a waveform. A tool on the toolbar rather than a
+                // status-bar setting because opening it changes what the
+                // surface is *for* — the engine was complete and there
+                // was no way to reach it.
+                // r[impl drums.quantize.panel]
+                if mode.draws_slices() {
+                    Segment {
+                        Seg {
+                            active: quantize_open(),
+                            accent: true,
+                            testid: "tool-quantize".to_string(),
+                            title: "Quantize — detect hits and put them on the grid".to_string(),
+                            onclick: move |_| {
+                                let open = quantize_open();
+                                quantize_open.set(!open);
+                            },
+                            "Quantize"
+                        }
+                    }
+                }
+                // r[impl drums.save.new-file]
+                if let Some(save) = on_save {
+                    Segment {
+                        Seg {
+                            active: false,
+                            accent: false,
+                            testid: "tool-save".to_string(),
+                            title: "Save as a new .rpp beside the original — never over it"
+                                .to_string(),
+                            onclick: move |_| save.call(()),
+                            "Save"
+                        }
                     }
                 }
                 Segment {
@@ -595,11 +601,27 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
     let strip_on = ed.lane_strip_h > 0.0;
     let count = ed.selection.notes.len();
     let ambiguous = ed.doc.notes.iter().filter(|n| n.ambiguous).count();
+    // The sticky razor modes, as the letters that set them.
+    let razor_modes = {
+        use expression_editor_core::razor::RazorAxis;
+        let mut s = String::new();
+        if ed.razor_insert {
+            s.push_str(" I");
+        }
+        match ed.razor_axis {
+            Some(RazorAxis::Horizontal) => s.push_str(" H"),
+            Some(RazorAxis::Vertical) => s.push_str(" L"),
+            None => {}
+        }
+        s
+    };
     let razors = ed.razor.areas.len();
     let mouse_preset = ed.mouse.name;
     let density = ed.grid.adaptive.density;
     let adaptive_on = ed.grid.adaptive.is_adaptive();
     let coarsened = ed.grid.is_coarsened();
+    // What was asked for, as opposed to what the zoom is allowing.
+    let ceiling_label = ed.grid.ceiling_label();
     // The setting, spelled out, so the readout can show what is in use
     // while the tooltip says what was asked for — the two differ exactly
     // when the zoom is holding the grid back.
@@ -667,6 +689,26 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
                             if coarsened { theme::GOLD } else { theme::TEXT },
                         ),
                         "{grid_label}"
+                    }
+                    // The ceiling, spelled out beside it while the zoom
+                    // is holding the grid back.
+                    //
+                    // This used to live only in the `title`, and Blitz
+                    // draws no tooltips — so the one moment the readout
+                    // is not the setting was also the one moment nothing
+                    // said so, and the number looked like it had changed
+                    // itself. Two numbers is the whole explanation:
+                    // what you get, and what you asked for.
+                    if coarsened {
+                        span {
+                            "data-testid": "grid-ceiling",
+                            style: format!(
+                                "font-family: ui-monospace, monospace; font-size: 9px; \
+                                 color: {}; margin-left: 3px;",
+                                theme::TEXT_DIM,
+                            ),
+                            "≤{ceiling_label}"
+                        }
                     }
                 }
                 Seg {
@@ -782,13 +824,30 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
                 style: "margin-left: auto; display: flex; align-items: center; gap: 12px; \
                         font-family: ui-monospace, monospace; flex: 0 0 auto;",
                 ChordBox { editor }
+                // The razor's own state, spelled out.
+                //
+                // `I`, `H` and `L` are sticky, and sticky state that
+                // nothing displays is the mode you forget you are in.
+                // The area count alone did not say why the next drag was
+                // about to behave differently from the last one.
                 if razors > 0 {
-                    span { style: "color: {theme::RAZOR};", "razor {razors}" }
+                    span {
+                        style: "color: {theme::RAZOR};",
+                        "razor {razors}{razor_modes}"
+                    }
                 }
+                // Names the mark, not just the count.
+                //
+                // The roll flags these notes and this line explains
+                // them, and for a long time neither said so — you got a
+                // red something on a note and a red something in the
+                // corner and no reason to connect them. "Red bar" is the
+                // whole fix: it is the one word that turns two unrelated
+                // warnings into one.
                 if ambiguous > 0 {
                     span {
                         style: "color: {theme::ZONE};",
-                        "⚠ {ambiguous} share a channel — writes blocked"
+                        "⚠ red bar: {ambiguous} overlap on one MIDI channel — per-note expression can't be told apart"
                     }
                 }
                 span { "{count} selected" }

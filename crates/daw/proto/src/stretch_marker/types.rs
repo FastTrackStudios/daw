@@ -77,6 +77,36 @@ impl StretchMarker {
         let source = next.source_position - self.source_position;
         (source.abs() > f64::EPSILON).then(|| played / source)
     }
+
+    /// Where in the source a take-playback position is heard, given a
+    /// take's markers (sorted by position) — the piecewise-linear map
+    /// every reader of a warped take needs: the renderer, an audio
+    /// accessor, a peaks builder. Slope is ignored (linear segments).
+    ///
+    /// Outside the marker span the rate is 1: before the first marker
+    /// the source runs back from it unstretched, after the last it
+    /// runs on unstretched. With no markers it is the identity (the
+    /// caller adds the start offset itself, since markers already
+    /// carry it).
+    // r[impl drums.open.accessor-placement]
+    pub fn source_position_at(markers: &[StretchMarker], position: f64) -> Option<f64> {
+        let (first, last) = (markers.first()?, markers.last()?);
+        if position <= first.position {
+            return Some(first.source_position - (first.position - position));
+        }
+        if position >= last.position {
+            return Some(last.source_position + (position - last.position));
+        }
+        let i = markers.partition_point(|m| m.position <= position);
+        let (a, b) = (&markers[i - 1], &markers[i]);
+        let span = b.position - a.position;
+        let t = if span > f64::EPSILON {
+            (position - a.position) / span
+        } else {
+            0.0
+        };
+        Some(a.source_position + t * (b.source_position - a.source_position))
+    }
 }
 
 /// How the host resamples between markers.
@@ -100,4 +130,23 @@ pub enum StretchMode {
     Transient = 4,
     /// Avoids pre-echo before transients, at some cost elsewhere.
     NoPreEcho = 5,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // r[verify drums.open.accessor-placement]
+    #[test]
+    fn source_position_follows_the_marker_map() {
+        // 1s of take time plays 2s of source between the markers (rate ½),
+        // unstretched on either side.
+        let m = [StretchMarker::new(1.0, 1.0), StretchMarker::new(2.0, 3.0)];
+        assert_eq!(StretchMarker::source_position_at(&m, 0.5), Some(0.5));
+        assert_eq!(StretchMarker::source_position_at(&m, 1.0), Some(1.0));
+        assert_eq!(StretchMarker::source_position_at(&m, 1.5), Some(2.0));
+        assert_eq!(StretchMarker::source_position_at(&m, 2.0), Some(3.0));
+        assert_eq!(StretchMarker::source_position_at(&m, 3.0), Some(4.0));
+        assert_eq!(StretchMarker::source_position_at(&[], 3.0), None);
+    }
 }

@@ -6,10 +6,10 @@
 //! longer performs — and that failure is silent on screen, which is
 //! exactly what a test is for.
 
+use expression_editor_core::Tool;
 use expression_editor_core::cursor::{Aim, Cursor};
 use expression_editor_core::mouse::{Action, Context, Gesture, ModKey, MouseMap};
 use expression_editor_core::tools::Mods;
-use expression_editor_core::Tool;
 
 fn mods(shift: bool, ctrl: bool, alt: bool) -> Mods {
     Mods { shift, ctrl, alt }
@@ -25,11 +25,21 @@ fn glyph(map: &MouseMap, context: Context, m: Mods, aim: Aim) -> Cursor {
 fn note_ends_get_their_bracket() {
     let map = MouseMap::reaper_like();
     assert_eq!(
-        glyph(&map, Context::NoteEdge, mods(false, false, false), Aim::edge(true)),
+        glyph(
+            &map,
+            Context::NoteEdge,
+            mods(false, false, false),
+            Aim::edge(true)
+        ),
         Cursor::EdgeLeft,
     );
     assert_eq!(
-        glyph(&map, Context::NoteEdge, mods(false, false, false), Aim::edge(false)),
+        glyph(
+            &map,
+            Context::NoteEdge,
+            mods(false, false, false),
+            Aim::edge(false)
+        ),
         Cursor::EdgeRight,
     );
 }
@@ -53,8 +63,18 @@ fn the_brackets_are_not_interchangeable() {
 #[test]
 fn stretch_is_distinguishable_from_resize() {
     let map = MouseMap::reaper_like();
-    let resize = glyph(&map, Context::NoteEdge, mods(false, false, false), Aim::edge(false));
-    let stretch = glyph(&map, Context::NoteEdge, mods(true, false, false), Aim::edge(false));
+    let resize = glyph(
+        &map,
+        Context::NoteEdge,
+        mods(false, false, false),
+        Aim::edge(false),
+    );
+    let stretch = glyph(
+        &map,
+        Context::NoteEdge,
+        mods(true, false, false),
+        Aim::edge(false),
+    );
     assert_eq!(resize, Cursor::EdgeRight);
     assert_eq!(stretch, Cursor::StretchRight);
 }
@@ -76,7 +96,12 @@ fn rebinding_moves_the_cursor_with_it() {
     let alt_drag = |map: &MouseMap| glyph(map, Context::Note, mods(false, false, true), Aim::NONE);
 
     assert_eq!(alt_drag(&map), Cursor::Copy);
-    map.set(Context::Note, Gesture::Drag, ModKey::ALT, Action::EraseNotes);
+    map.set(
+        Context::Note,
+        Gesture::Drag,
+        ModKey::ALT,
+        Action::EraseNotes,
+    );
     assert_eq!(alt_drag(&map), Cursor::NoteEraser);
 }
 
@@ -88,7 +113,12 @@ fn a_preset_brings_its_own_cursors() {
     let plain = mods(false, false, false);
     // Drums paint on a plain roll drag where the REAPER map marquees.
     assert_eq!(
-        glyph(&MouseMap::reaper_like(), Context::PianoRoll, plain, Aim::NONE),
+        glyph(
+            &MouseMap::reaper_like(),
+            Context::PianoRoll,
+            plain,
+            Aim::NONE
+        ),
         Cursor::Crosshair,
     );
     assert_eq!(
@@ -143,7 +173,11 @@ fn the_armed_tool_supplies_its_own_glyph() {
         (Tool::NoteErase, Cursor::NoteEraser),
     ] {
         let action = map.resolve_for(Context::PianoRoll, Gesture::Drag, plain, tool);
-        assert_eq!(action, Action::ActiveTool, "{tool:?} should claim a plain roll drag");
+        assert_eq!(
+            action,
+            Action::ActiveTool,
+            "{tool:?} should claim a plain roll drag"
+        );
         assert_eq!(Cursor::for_tool(tool, Context::PianoRoll), want, "{tool:?}");
     }
     // Select claims nothing, so the map answers and the roll stays a
@@ -163,7 +197,12 @@ fn the_armed_tool_supplies_its_own_glyph() {
 fn the_hand_closes_while_panning() {
     assert_eq!(Cursor::Hand.while_dragging(), Cursor::HandClosed);
     // Nothing else flinches mid-drag.
-    for c in [Cursor::EdgeLeft, Cursor::Move, Cursor::Pencil, Cursor::Velocity] {
+    for c in [
+        Cursor::EdgeLeft,
+        Cursor::Move,
+        Cursor::Pencil,
+        Cursor::Velocity,
+    ] {
         assert_eq!(c.while_dragging(), c);
     }
 }
@@ -173,8 +212,19 @@ fn the_hand_closes_while_panning() {
 #[test]
 fn css_fallbacks_are_real_keywords() {
     const KNOWN: [&str; 13] = [
-        "default", "crosshair", "ew-resize", "ns-resize", "col-resize", "move", "copy", "cell",
-        "grab", "grabbing", "zoom-in", "pointer", "text",
+        "default",
+        "crosshair",
+        "ew-resize",
+        "ns-resize",
+        "col-resize",
+        "move",
+        "copy",
+        "cell",
+        "grab",
+        "grabbing",
+        "zoom-in",
+        "pointer",
+        "text",
     ];
     let mut all = vec![
         Cursor::Arrow,

@@ -185,7 +185,11 @@ fn measure_the_chrome() {
         "inspector",
     ] {
         match doc.query(by_testid(id)).immediately() {
-            Ok(el) => println!("  {id:>16}: size {:?} origin {:?}", el.size(), el.document_origin()),
+            Ok(el) => println!(
+                "  {id:>16}: size {:?} origin {:?}",
+                el.size(),
+                el.document_origin()
+            ),
             Err(_) => println!("  {id:>16}: (no data-testid)"),
         }
     }
@@ -284,7 +288,9 @@ fn editor_viewport(doc: &dioxus_test::DocumentTester) -> (f64, f64) {
         .expect("no roll")
         .attribute("data-viewport")
         .expect("roll carries no data-viewport");
-    let (w, h) = raw.split_once('x').unwrap_or_else(|| panic!("bad readout {raw:?}"));
+    let (w, h) = raw
+        .split_once('x')
+        .unwrap_or_else(|| panic!("bad readout {raw:?}"));
     (
         w.trim().parse().expect("width"),
         h.trim().parse().expect("height"),
@@ -451,30 +457,136 @@ fn the_status_bar_carries_the_grid_and_its_adaptive_setting() {
     // markup rather than the bare word.
     assert!(
         read("grid-adaptive").contains("AUTO"),
-        "adaptive should start off, readout is {:?}",
+        "the adaptive control is missing, readout is {:?}",
         read("grid-adaptive")
     );
     let fixed = read("grid-division");
     assert!(fixed.starts_with("1/"), "grid readout is {fixed:?}");
 
-    // Turn it on: the widest density, which at this zoom must coarsen
-    // the grid rather than leave it alone.
-    doc.query(by_testid("grid-adaptive"))
-        .immediately()
-        .expect("no adaptive toggle")
-        .click();
-    doc.drain();
+    // Click round to the widest density rather than assuming where the
+    // cycle starts. This used to click once and expect `WIDE+`, which
+    // was only true while `Fixed` was the default — the claim is that
+    // the control *reaches* every density and that the widest coarsens
+    // the grid, not that it is one press away.
+    // Six densities plus Fixed, so seven presses is a full lap and one
+    // more proves it is a cycle rather than a dead end.
+    for _ in 0..8 {
+        if read("grid-adaptive").contains("WIDE+") {
+            break;
+        }
+        doc.query(by_testid("grid-adaptive"))
+            .immediately()
+            .expect("no adaptive toggle")
+            .click();
+        doc.drain();
+    }
 
     assert!(
         read("grid-adaptive").contains("WIDE+"),
-        "one click should reach the widest density, readout is {:?}",
+        "the cycle never reached the widest density, readout is {:?}",
         read("grid-adaptive")
     );
     let adaptive = read("grid-division");
-    let denom = |s: &str| s.trim_start_matches("1/").trim_end_matches('T').parse::<f64>().unwrap();
+    let denom = |s: &str| {
+        s.trim_start_matches("1/")
+            .trim_end_matches('T')
+            .parse::<f64>()
+            .unwrap()
+    };
     assert!(
         denom(&adaptive) <= denom(&fixed),
         "the widest adaptive grid should be no finer than the fixed one: \
          {adaptive} vs {fixed}"
+    );
+}
+
+/// The mode picker offers every mode, grouped by family.
+///
+/// It is one line until you ask, so this is the test that clicks. The
+/// grouping is checked positionally because that is the whole point of
+/// it: the two families differ in what an edit writes back — note events
+/// on one side, stretch markers and envelope points on the other — and a
+/// list that interleaved them would say the choice was arbitrary.
+#[test]
+fn the_mode_picker_offers_every_mode_grouped_by_family() {
+    use expression_editor_core::{Mode, ModeFamily};
+
+    let doc = mounted();
+    // Closed: only the current mode is named.
+    assert!(
+        doc.query(by_testid("mode-list")).immediately().is_err(),
+        "the list should start closed"
+    );
+
+    doc.query(by_testid("mode-current"))
+        .immediately()
+        .expect("no mode picker")
+        .click();
+    doc.drain();
+    doc.relayout();
+
+    let list = doc
+        .query(by_testid("mode-list"))
+        .immediately()
+        .expect("the list did not open")
+        .inner_html();
+
+    for mode in Mode::ALL {
+        assert!(
+            list.contains(mode.label()),
+            "missing mode: {}",
+            mode.label()
+        );
+    }
+
+    let at = |label: &str| list.find(label).expect("just checked");
+    let last_midi = ModeFamily::Midi
+        .modes()
+        .iter()
+        .map(|m| at(m.label()))
+        .max()
+        .unwrap();
+    let first_audio = ModeFamily::Audio
+        .modes()
+        .iter()
+        .map(|m| at(m.label()))
+        .min()
+        .unwrap();
+    assert!(
+        last_midi < first_audio,
+        "the families must read as two runs, MIDI first"
+    );
+}
+
+/// Middle-drag pans, on every surface that shows the timeline.
+///
+/// Not a piano-roll feature — it is how you get around. The roll
+/// honoured it and the lane strip did not, which is the kind of gap
+/// nobody reports because it reads as "that view is just like that".
+#[test]
+fn the_middle_button_pans_the_strip_too() {
+    use dioxus_test::keyboard_types::Modifiers;
+
+    let doc = mounted();
+    let before = editor_viewport(&doc);
+
+    let strip = doc
+        .query(by_testid("lane-strip"))
+        .immediately()
+        .expect("no lane strip");
+    let (ox, oy) = strip.document_origin();
+    let (w, h) = strip.size();
+    let (x, y) = (ox + w as f64 * 0.5, oy + h as f64 * 0.5);
+
+    // The strip's own gesture is a velocity write, so a *left* drag here
+    // must not pan — which is the other half of the claim.
+    doc.pointer_down_mods(x, y, Modifiers::empty());
+    doc.pointer_move_mods(x - 120.0, y, true, Modifiers::empty());
+    doc.pointer_up_mods(x - 120.0, y, Modifiers::empty());
+    doc.drain();
+    assert_eq!(
+        editor_viewport(&doc),
+        before,
+        "a left drag in the strip must edit, not pan"
     );
 }

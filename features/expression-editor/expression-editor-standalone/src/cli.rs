@@ -30,18 +30,6 @@ pub struct Args {
 pub const DEFAULT_WIDTH: u32 = 1200;
 pub const DEFAULT_HEIGHT: u32 = 760;
 
-/// The roll's own height inside the window: the chrome above and below
-/// it (toolbar, switcher, chord row, lane strip, status bar) takes the
-/// rest. The canvas sizes itself from its intrinsic aspect ratio, so
-/// asking for the full window height here pushes the status bar out of
-/// frame rather than shrinking the roll.
-///
-/// Measured off a rendered shot rather than derived: the chrome is
-/// several components' own padding and there is no one number to read
-/// it off. Re-measure it with `--example shot` if the toolbar grows a
-/// row.
-pub const CHROME_HEIGHT: f64 = 224.0;
-
 /// What `--help` prints.
 pub const USAGE: &str = "\
 The expression editor, standalone.
@@ -58,6 +46,10 @@ SOURCE:
 OPTIONS:
     --track <name|N> pick a track by name (substring) or 1-based index
     --item <N>       pick the Nth item (0-based) among the candidates
+    --drums [folder] open a .rpp as a drum workspace: every track under the
+                     kit folder, folded into role lanes. The optional value
+                     names the folder (put it after the source); without it
+                     the first folder named like a kit (Drums, Kit) is used
     --mode <mode>    midi | mpe | vocals | drums | guitar | pitched-audio | unpitched-audio
     --size <WxH>     window size (default 1200x760)
     --out <path>     PNG destination (--example shot only)
@@ -118,10 +110,10 @@ impl Args {
                 "--track" => target.track = Some(value("--track")?),
                 "--item" => {
                     let v = value("--item")?;
-                    target.item = Some(
-                        v.parse()
-                            .map_err(|_| ArgsError::Bad(format!("--item {v:?} is not a number")))?,
-                    );
+                    target.item =
+                        Some(v.parse().map_err(|_| {
+                            ArgsError::Bad(format!("--item {v:?} is not a number"))
+                        })?);
                 }
                 "--mode" => {
                     let v = value("--mode")?;
@@ -139,6 +131,21 @@ impl Args {
                     })?;
                     width = w;
                     height = h;
+                }
+                // r[impl drums.open.runner]
+                "--drums" => {
+                    // The value is optional: bare `--drums` means "find
+                    // the kit folder yourself". A following token is the
+                    // folder name only when the source has already been
+                    // given — otherwise `--drums song.rpp` would eat the
+                    // source as a folder name, which is the likelier typo.
+                    let folder = match it.peek() {
+                        Some(next) if !next.starts_with('-') && positional.is_some() => {
+                            Some(it.next().expect("peeked"))
+                        }
+                        _ => None,
+                    };
+                    target.drums = Some(folder);
                 }
                 "--out" => out = Some(PathBuf::from(value("--out")?)),
                 other if other.starts_with('-') => {
@@ -173,11 +180,14 @@ impl Args {
     }
 
     /// The viewport the document is laid out against.
+    ///
+    /// The UI crate owns its chrome arithmetic — asking it keeps the
+    /// runner honest when a bar is added or removed. The old local
+    /// constant here (224 px) was measured against a two-row toolbar
+    /// that no longer exists, and every headless shot carried ~120 px
+    /// of dead canvas at the bottom because of it.
     pub fn viewport(&self) -> Viewport {
-        Viewport::new(
-            self.width as f64,
-            (self.height as f64 - CHROME_HEIGHT).max(160.0),
-        )
+        expression_editor_ui::viewport_in(self.width as f64, self.height as f64)
     }
 }
 

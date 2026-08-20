@@ -420,6 +420,83 @@ impl ProjectState {
     }
 }
 
+/// The part of a project an *edit* touches, cloned whole for undo.
+///
+/// Not the whole [`ProjectState`]: transport, FX chains, routing and the
+/// bay are not edit targets and some of them are not `Clone`. Everything
+/// here is maps of plain data plus `Arc`s, so a snapshot is cheap — the
+/// audio itself is refcounted, never copied.
+#[derive(Clone)]
+pub struct EditSnapshot {
+    tracks: Vec<Track>,
+    items: HashMap<String, ItemEntry>,
+    items_by_track: HashMap<String, Vec<String>>,
+    takes: HashMap<String, TakeList>,
+    stretch_markers: HashMap<String, Vec<daw_proto::StretchMarker>>,
+    stretch_modes: HashMap<String, daw_proto::StretchMode>,
+    take_markers: HashMap<String, Vec<daw_proto::TakeMarker>>,
+    midi_notes: HashMap<String, Vec<MidiNote>>,
+    midi_ccs: HashMap<String, Vec<daw_proto::midi::MidiCC>>,
+    envelopes: HashMap<(String, EnvelopeKey), EnvelopeData>,
+    #[cfg(any(feature = "audio", feature = "decode"))]
+    audio_sources: HashMap<String, std::sync::Arc<crate::audio_engine::AudioSource>>,
+    next_item_counter: u64,
+    next_take_counter: u64,
+}
+
+impl EditSnapshot {
+    pub fn capture(p: &ProjectState) -> Self {
+        Self {
+            tracks: p.tracks.clone(),
+            items: p.items.clone(),
+            items_by_track: p.items_by_track.clone(),
+            takes: p.takes.clone(),
+            stretch_markers: p.stretch_markers.clone(),
+            stretch_modes: p.stretch_modes.clone(),
+            take_markers: p.take_markers.clone(),
+            midi_notes: p.midi_notes.clone(),
+            midi_ccs: p.midi_ccs.clone(),
+            envelopes: p.envelopes.clone(),
+            #[cfg(any(feature = "audio", feature = "decode"))]
+            audio_sources: p.audio_sources.clone(),
+            next_item_counter: p.next_item_counter,
+            next_take_counter: p.next_take_counter,
+        }
+    }
+
+    pub fn restore(self, p: &mut ProjectState) {
+        p.tracks = self.tracks;
+        p.items = self.items;
+        p.items_by_track = self.items_by_track;
+        p.takes = self.takes;
+        p.stretch_markers = self.stretch_markers;
+        p.stretch_modes = self.stretch_modes;
+        p.take_markers = self.take_markers;
+        p.midi_notes = self.midi_notes;
+        p.midi_ccs = self.midi_ccs;
+        p.envelopes = self.envelopes;
+        #[cfg(any(feature = "audio", feature = "decode"))]
+        {
+            p.audio_sources = self.audio_sources;
+        }
+        p.next_item_counter = self.next_item_counter;
+        p.next_take_counter = self.next_take_counter;
+        // The renderer caches against the revision; a restore is a
+        // mutation like any other.
+        p.revision = p.revision.wrapping_add(1);
+    }
+}
+
+/// One undo step: what the project looked like before the block ran.
+pub struct UndoStep {
+    pub label: String,
+    pub snapshot: EditSnapshot,
+}
+
+/// Undo depth per project. An edit session is drags and applies, not a
+/// text editor; 32 steps of maps-and-Arcs is small.
+pub const UNDO_LIMIT: usize = 32;
+
 /// Aggregate state for the standalone sync backend.
 pub struct StandaloneState {
     pub projects: HashMap<String, ProjectState>,
@@ -430,6 +507,11 @@ pub struct StandaloneState {
     pub last_touched_fx: Option<LastTouchedFx>,
     /// Buffered console output (for tests).
     pub console_log: Vec<String>,
+    /// Undo stacks per project guid, most recent last.
+    pub undo: HashMap<String, Vec<UndoStep>>,
+    pub redo: HashMap<String, Vec<UndoStep>>,
+    /// A `begin_undo_block` whose `end` has not arrived yet.
+    pub pending_undo: HashMap<String, UndoStep>,
 }
 
 impl StandaloneState {
@@ -440,6 +522,9 @@ impl StandaloneState {
             global_ext_state: HashMap::new(),
             last_touched_fx: None,
             console_log: Vec::new(),
+            undo: HashMap::new(),
+            redo: HashMap::new(),
+            pending_undo: HashMap::new(),
         }
     }
 }

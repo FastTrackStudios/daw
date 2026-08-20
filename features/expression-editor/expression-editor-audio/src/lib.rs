@@ -46,15 +46,21 @@ pub mod detect;
 pub mod dynamics;
 pub mod frames;
 pub mod gate;
+pub mod group_detect;
 pub mod lanes;
 pub mod onsets;
+pub mod panel_bridge;
 pub mod percussive;
 pub mod quantize;
 #[cfg(feature = "daw")]
 pub mod retime;
 #[cfg(feature = "daw")]
 pub mod session;
+#[cfg(feature = "daw")]
+pub mod slip;
 pub mod spans;
+#[cfg(feature = "daw")]
+pub mod stretch;
 #[cfg(feature = "daw")]
 pub mod write_dynamics;
 
@@ -69,6 +75,7 @@ pub use frames::{FrameFeature, frame_features};
 pub use gate::{GateConfig, Hit};
 pub use lanes::{DynamicsLane, Lanes};
 pub use onsets::{Onset, OnsetConfig, detect as detect_onsets};
+pub use panel_bridge::{HitPreview, PanelDetect, PanelTarget, PanelWrite};
 pub use percussive::{Percussion, PercussiveConfig, analyze_percussive, looks_percussive};
 pub use quantize::{Move, Piece, Plan, QuantizeConfig, SplitConfig, plan};
 #[cfg(feature = "daw")]

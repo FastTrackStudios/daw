@@ -180,6 +180,57 @@ pub enum Action {
 }
 
 impl Action {
+    /// The tool this action *is*, for the toolbar to light up.
+    ///
+    /// Holding Ctrl means the next drag razors, and the surface should
+    /// say so before you commit to it. The painted cursor already makes
+    /// that promise; the tool buttons did not, so the one place that
+    /// names the verbs of the surface stayed silent about the modifier
+    /// that had just changed them.
+    ///
+    /// Keyed on the resolved [`Action`], never on the modifiers, for the
+    /// reason [`crate::cursor`] gives at length: rebind `Ctrl+drag` and
+    /// the highlight follows on its own. A modifier table here would be
+    /// a second authority on the same question, and the day it fell out
+    /// of step the toolbar would start lying — which is worse than the
+    /// silence it replaced, because a highlight is a claim.
+    ///
+    /// `None` where no armed tool means the same thing: a marquee is
+    /// Select, which is already the resting state, and there is no tool
+    /// for "move this note".
+    pub fn tool_preview(&self) -> Option<crate::Tool> {
+        use crate::Tool;
+        Some(match self {
+            Action::RazorCreate
+            | Action::RazorAddArea
+            | Action::RazorMoveContents
+            | Action::RazorMoveContentsNoSnap
+            | Action::RazorCopyContents
+            | Action::RazorMoveAreaOnly
+            | Action::RazorMoveVertically
+            | Action::RazorMoveHorizontally
+            | Action::RazorStretchContents
+            | Action::RazorResizeArea
+            | Action::RazorDeleteContents
+            | Action::RazorRemoveArea
+            | Action::RazorClearAll => Tool::Razor,
+
+            Action::InsertNote
+            | Action::InsertNoteNoSnap
+            | Action::InsertNoteDragToExtend
+            | Action::InsertNoteDragToExtendNoSnap
+            | Action::InsertNoteDragToMove
+            | Action::InsertNoteDragToEditVelocity
+            | Action::PaintNotes
+            | Action::PaintNotesNoSnap => Tool::NoteDraw,
+
+            Action::PenOverride => Tool::Pen,
+            Action::ZoomAnchored => Tool::Zoom,
+
+            _ => return None,
+        })
+    }
+
     /// Actions that must snapshot history before the drag starts, so
     /// the whole gesture collapses into one undo step.
     pub fn is_edit(&self) -> bool {
@@ -302,7 +353,10 @@ pub struct MouseMap {
 
 impl Default for MouseMap {
     fn default() -> Self {
-        host_overlay(Self::reaper_like())
+        // FTS, not REAPER-like. The REAPER map stays available by name
+        // for anyone whose hands already know it — this is a change of
+        // default, not a removal.
+        host_overlay(Self::fts())
     }
 }
 
@@ -370,9 +424,7 @@ impl MouseMap {
         mods: Mods,
         tool: crate::Tool,
     ) -> Action {
-        if ModKey::of(mods) == ModKey::NONE
-            && tool.claims().contains(&(context, gesture))
-        {
+        if ModKey::of(mods) == ModKey::NONE && tool.claims().contains(&(context, gesture)) {
             // `run_action` declines this one so the gesture reaches the
             // tool-driven path. The map says *whose* gesture it is; the
             // tool says what it does.
@@ -396,8 +448,6 @@ impl MouseMap {
             .find(|b| b.context == context && b.gesture == gesture && b.mods == mods)
             .map(|b| b.action)
     }
-
-
 
     pub fn bindings(&self) -> &[Binding] {
         &self.bindings
@@ -604,14 +654,87 @@ impl MouseMap {
         m
     }
 
-    pub const PRESETS: [&'static str; 4] = ["REAPER-like", "Drums", "Riffer (Ample)", "Lyrics"];
+    /// The FTS scheme: one meaning per modifier, and none of them
+    /// navigation.
+    ///
+    /// The REAPER map spreads a modifier's meaning across unrelated
+    /// jobs — `Ctrl` is the pen, `Alt` paints notes, `Ctrl+Alt` zooms,
+    /// `Ctrl+Shift` pans — so what a key *means* depends on which other
+    /// key is down with it. That is learnable, and REAPER users have
+    /// learned it, but it is not derivable.
+    ///
+    /// Here each modifier is one idea, and sub-modifiers refine it
+    /// rather than replacing it:
+    ///
+    /// - nothing — **select**
+    /// - `Alt` — **create**. Shift and Ctrl pick which kind.
+    /// - `Ctrl` — **razor**. Shift and Alt pick which kind.
+    ///
+    /// Navigation is deliberately absent from all of it. Panning is the
+    /// middle button and zooming is the `Z` tool, so no modifier ever has
+    /// to double as "move the view" — which is what forced the old map to
+    /// overload `Ctrl+Alt` and `Ctrl+Shift` in the first place.
+    pub fn fts() -> Self {
+        use Context as C;
+        use Gesture as G;
+        const N: ModKey = ModKey::NONE;
+        const S: ModKey = ModKey::SHIFT;
+        const CT: ModKey = ModKey::CTRL;
+        const AL: ModKey = ModKey::ALT;
+        const SC: ModKey = ModKey(3);
+        const CA: ModKey = ModKey(6);
+        const SA: ModKey = ModKey(5);
+        const ALL3: ModKey = ModKey(7);
+
+        let b = |context, gesture, mods, action| Binding {
+            context,
+            gesture,
+            mods,
+            action,
+        };
+
+        let mut map = Self::reaper_like();
+        map.name = "FTS";
+        // Only the empty-canvas drags differ. Everything the REAPER map
+        // says about notes, edges, handles and the strip is right, and
+        // rewriting it would be change for its own sake.
+        map.bindings
+            .retain(|x| !(x.context == C::PianoRoll && x.gesture == G::Drag));
+        map.bindings.extend([
+            // Select.
+            b(C::PianoRoll, G::Drag, N, Action::MarqueeSelect),
+            b(C::PianoRoll, G::Drag, S, Action::MarqueeAdd),
+            // Create. Alt alone places a note of the current grid length
+            // and lets you carry it; Shift sizes it instead. The two are
+            // phases of one gesture rather than separate bindings — hold
+            // Shift part way through and the note pins where it is so you
+            // can pull out its length, let go and you are carrying it
+            // again at that length.
+            b(C::PianoRoll, G::Drag, AL, Action::InsertNote),
+            b(C::PianoRoll, G::Drag, SA, Action::InsertNoteDragToExtend),
+            b(C::PianoRoll, G::Drag, CA, Action::InsertNoteNoSnap),
+            // Razor. Ctrl alone cuts an area; Shift adds to it.
+            b(C::PianoRoll, G::Drag, CT, Action::RazorCreate),
+            b(C::PianoRoll, G::Drag, SC, Action::RazorAddArea),
+            // The last combination belongs to the razor tree, as the
+            // odd one out has to belong to something — an unbound
+            // three-modifier drag is a gesture that silently does
+            // nothing.
+            b(C::PianoRoll, G::Drag, ALL3, Action::RazorMoveContentsNoSnap),
+        ]);
+        map
+    }
+
+    pub const PRESETS: [&'static str; 5] =
+        ["FTS", "REAPER-like", "Drums", "Riffer (Ample)", "Lyrics"];
 
     pub fn preset(name: &str) -> Self {
         match name {
             "Drums" => Self::drums(),
             "Riffer (Ample)" => Self::riffer(),
             "Lyrics" => Self::lyrics(),
-            _ => Self::reaper_like(),
+            "REAPER-like" => Self::reaper_like(),
+            _ => Self::fts(),
         }
     }
 }

@@ -192,7 +192,13 @@ fn patch_track(chunk: &mut RChunk, node: &TrackNode, report: &mut ExportReport) 
                 "SEL" => set_bool(line, 1, track.selected, &label, "SEL", report),
                 "PEAKCOL" => {
                     if let Some(color) = track.color {
-                        set_number(line, 1, color as f64, &label, "PEAKCOL", report);
+                        // REAPER writes PEAKCOL as a *signed* 32-bit
+                        // value; the document stores the same bits
+                        // unsigned (see the importer's `as u32`).
+                        // Writing the unsigned reading back would flag
+                        // every coloured track as changed and flip the
+                        // token's text form.
+                        set_number(line, 1, color as i32 as f64, &label, "PEAKCOL", report);
                     }
                 }
                 "REC" => set_bool(line, 1, track.armed, &label, "REC", report),
@@ -383,6 +389,89 @@ fn patch_item(chunk: &mut RChunk, node: &ItemNode, report: &mut ExportReport) {
                 }
             }
         }
+    }
+
+    reconcile_stretch_markers(chunk, node, &label, report);
+}
+
+/// Rewrite each take's `SM` lines to match the document.
+///
+/// Stretch markers are a *list the edit owns*, like envelope points:
+/// there is no honest way to patch one marker against another, so the
+/// take's whole set is replaced whenever it differs — deleted when the
+/// document has none, inserted (before the take's `<SOURCE`, where
+/// REAPER writes them) when the file had none. A take whose markers
+/// already match is left byte-for-byte alone.
+fn reconcile_stretch_markers(
+    chunk: &mut RChunk,
+    node: &ItemNode,
+    label: &str,
+    report: &mut ExportReport,
+) {
+    let runs = take_runs(chunk);
+    // Reverse order, so earlier runs' indices survive later edits.
+    for (run_index, (start, end, guid)) in runs.iter().enumerate().rev() {
+        let take_node = guid
+            .as_ref()
+            .and_then(|g| node.takes.iter().find(|t| t.id.as_str() == g))
+            .or_else(|| node.takes.get(run_index));
+        let want: Vec<[String; 3]> = take_node
+            .map(|t| {
+                t.stretch_markers
+                    .iter()
+                    .map(|m| {
+                        [
+                            format_f64(m.position),
+                            format_f64(m.source_position),
+                            format_f64(m.slope),
+                        ]
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let existing: Vec<usize> = (*start..*end)
+            .filter(|&i| matches!(&chunk.children[i], RNodeTree::Node(line) if key(line) == "SM"))
+            .collect();
+        let have: Vec<Vec<String>> = existing
+            .iter()
+            .map(|&i| match &chunk.children[i] {
+                RNodeTree::Node(line) => (1..=3).filter_map(|n| param(line, n)).collect(),
+                _ => unreachable!(),
+            })
+            .collect();
+        let unchanged = have.len() == want.len()
+            && have
+                .iter()
+                .zip(&want)
+                .all(|(h, w)| h.len() == 3 && h.iter().zip(w.iter()).all(|(a, b)| a == b));
+        if unchanged {
+            continue;
+        }
+
+        // Where the new set goes: where the old one was, else just
+        // before the run's first chunk child (the `<SOURCE`), else the
+        // run's end.
+        let insert_at = existing.first().copied().unwrap_or_else(|| {
+            (*start..*end)
+                .find(|&i| matches!(&chunk.children[i], RNodeTree::Chunk(_)))
+                .unwrap_or(*end)
+        });
+        for &i in existing.iter().rev() {
+            chunk.children.remove(i);
+        }
+        let insert_at = insert_at - existing.iter().filter(|&&i| i < insert_at).count();
+        for (offset, m) in want.iter().enumerate() {
+            chunk
+                .children
+                .insert(insert_at + offset, node_line(&["SM", &m[0], &m[1], &m[2]]));
+        }
+        report.changes.push(format!(
+            "{label} take {}: SM {} → {}",
+            guid.as_deref().unwrap_or("?"),
+            have.len(),
+            want.len()
+        ));
     }
 }
 

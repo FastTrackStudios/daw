@@ -6,7 +6,7 @@
 //! this asserts the view actually reaches the screen.
 
 use dioxus::prelude::*;
-use expression_editor_core::doc::{ExpressionDoc, Dimension, Note, NoteId, TimeBase};
+use expression_editor_core::doc::{Dimension, ExpressionDoc, Note, NoteId, TimeBase};
 use expression_editor_core::{Editor, Viewport};
 use expression_editor_ui::ExpressionEditor;
 
@@ -81,7 +81,7 @@ fn the_editor_renders_its_toolbar_canvas_and_status_bar() {
 
 #[test]
 fn the_top_bar_follows_the_mode() {
-    use expression_editor_core::{Mode, ModeFamily};
+    use expression_editor_core::Mode;
 
     let mut mpe = demo_editor(false, false);
     mpe.set_mode(Mode::Mpe);
@@ -102,38 +102,15 @@ fn the_top_bar_follows_the_mode() {
         !midi_html.contains(">Pressure<"),
         "nor the per-note expression lanes"
     );
-    // The mode switcher itself is always present.
-    for mode in Mode::ALL {
-        assert!(
-            midi_html.contains(mode.label()),
-            "missing mode: {}",
-            mode.label()
-        );
-    }
-    // And it is grouped by family rather than one flat run. The check
-    // is positional because that is the whole point of the grouping:
-    // every MIDI-family label must come before every audio-family one,
-    // so the bar reads "which kind of material" left to right.
-    let at = |label: &str| {
-        midi_html
-            .find(label)
-            .unwrap_or_else(|| panic!("missing mode: {label}"))
-    };
-    let last_midi = ModeFamily::Midi
-        .modes()
-        .iter()
-        .map(|m| at(m.label()))
-        .max()
-        .unwrap();
-    let first_audio = ModeFamily::Audio
-        .modes()
-        .iter()
-        .map(|m| at(m.label()))
-        .min()
-        .unwrap();
+    // The mode switcher names the mode you are in.
+    //
+    // Only that one: the picker is a line in the panel that opens a list
+    // when asked, so the other six are not in the markup until it does.
+    // That the list offers all of them, grouped by family, is
+    // `tests/geometry.rs` — it needs a click, which SSR cannot give.
     assert!(
-        last_midi < first_audio,
-        "the two families must render as separate runs, MIDI first"
+        midi_html.contains(Mode::Midi.label()),
+        "the picker must name the current mode"
     );
 }
 
@@ -163,10 +140,15 @@ fn every_note_reaches_the_canvas() {
     let mut empty = demo_editor(false, false);
     empty.doc.notes.clear();
     empty.selection.notes.clear();
-    let without =
-        paint::roll_scene(&empty, 900.0, 480.0, &paint::Overlay::default(), &mut labels)
-            .commands
-            .len();
+    let without = paint::roll_scene(
+        &empty,
+        900.0,
+        480.0,
+        &paint::Overlay::default(),
+        &mut labels,
+    )
+    .commands
+    .len();
 
     assert!(
         with_notes >= without + notes,
@@ -194,25 +176,48 @@ fn a_non_equal_tuning_is_visibly_flagged() {
     );
 }
 
+/// A Q split adds structure to the drawing, and says so in the panel.
+///
+/// Asserted against the scene rather than the markup: the roll is
+/// painted, so its zone dividers are draw commands and there is no
+/// coloured element in the DOM left to count. The panel half is what
+/// survives in the html, and between them they cover the claim — the
+/// split is visible, and its count is legible.
 #[test]
-fn zone_structure_draws_in_red() {
-    let plain = render(demo_editor(false, false));
-    let zoned = render(demo_editor(false, true));
-    let count = |h: &str| h.matches(expression_editor_ui::theme::ZONE).count();
+fn zone_structure_is_drawn_and_reported() {
+    use expression_editor_ui::paint;
+
+    let mut labels = expression_editor_ui::text::Labeller::new();
+    let mut commands = |ed| {
+        paint::roll_scene(&ed, 900.0, 480.0, &paint::Overlay::default(), &mut labels)
+            .commands
+            .len()
+    };
+    let plain = commands(demo_editor(false, false));
+    let zoned = commands(demo_editor(false, true));
     assert!(
-        count(&zoned) > count(&plain),
-        "a Q split must add visible red structure"
+        zoned > plain,
+        "a Q split must add structure to the drawing: {zoned} commands vs {plain}"
     );
+
+    let html = render(demo_editor(false, true));
+    assert!(html.contains("Q zones"), "the panel must report the split");
 }
 
+/// The selected note's analysis reaches the screen — in the panel.
+///
+/// It used to be read off the chord row, which repeated the inspector
+/// and cost the roll 30px for the privilege. The row is gone; these are
+/// the inspector's own labels, which is now the single place any of it
+/// is said.
 #[test]
-fn the_status_bar_reports_the_selected_notes_analysis() {
+fn the_selected_notes_analysis_is_reported() {
     let html = render(demo_editor(false, false));
-    assert!(html.contains("1 selected"));
-    assert!(html.contains("vib"), "the vibrato readout");
-    assert!(html.contains("drift"), "the drift readout");
+    assert!(html.contains("1 selected"), "the status bar's count");
+    assert!(html.contains("Vibrato"), "the vibrato readout");
+    assert!(html.contains("Drift"), "the drift readout");
     assert!(html.contains("Robot"), "the flatten button");
-    assert!(html.contains("ch 3"), "the MPE member channel");
+    assert!(html.contains("Channel"), "the MPE member channel");
 }
 
 #[test]

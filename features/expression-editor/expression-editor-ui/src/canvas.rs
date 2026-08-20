@@ -1090,21 +1090,23 @@ pub struct RazorRect {
 /// where notes get sliced, so they have to read as exact boundaries
 /// rather than as a soft highlight.
 pub fn razor_rects(ed: &Editor) -> Vec<RazorRect> {
-    let h = ed.camera.vertical.px_per_row;
-    ed.razor
-        .areas
-        .iter()
-        .map(|a| {
-            let x = ed.camera.x(a.t0);
-            let top = ed.camera.y(a.row_hi as f64 + 0.5, ed.viewport);
-            RazorRect {
-                x,
-                y: top,
-                w: (ed.camera.x(a.t1) - x).max(1.0),
-                h: h * a.rows() as f64,
-            }
-        })
-        .collect()
+    ed.razor.areas.iter().map(|a| razor_rect(ed, a)).collect()
+}
+
+/// One area's rectangle.
+///
+/// Split out so a razor still being swept draws with exactly the
+/// geometry a committed one does — the preview is the same rectangle,
+/// not a second calculation that has to be kept in step.
+pub fn razor_rect(ed: &Editor, a: &expression_editor_core::razor::RazorArea) -> RazorRect {
+    let x = ed.camera.x(a.t0);
+    let top = ed.camera.y(a.row_hi as f64 + 0.5, ed.viewport);
+    RazorRect {
+        x,
+        y: top,
+        w: (ed.camera.x(a.t1) - x).max(1.0),
+        h: ed.camera.vertical.px_per_row * a.rows() as f64,
+    }
 }
 
 // ── velocity / CC lane strip ─────────────────────────────────────────
@@ -1243,7 +1245,8 @@ pub fn cc_paths(ed: &Editor) -> Vec<CcPath> {
 
             let mut ts: Vec<f64> = vec![t0];
             ts.extend(
-                dimension.curve
+                dimension
+                    .curve
                     .points()
                     .iter()
                     .map(|p| p.t)

@@ -54,10 +54,13 @@ use expression_editor_audio::{AudioSession, TakeConfig};
 use expression_editor_core::{Editor, Mode, Viewport};
 use expression_editor_daw::Session;
 use expression_editor_ui::demo::{self, Scene};
+use expression_editor_ui::workflow::Workflow;
 
 pub mod app;
 pub mod cli;
+pub mod drum_host;
 pub mod library;
+pub mod workstation;
 
 pub use app::{App, stage};
 pub use cli::Args;
@@ -78,6 +81,9 @@ pub enum Source {
     /// documents the screenshot tests mount, so a scene shown here
     /// cannot drift from the committed pictures.
     Scene(Scene),
+    /// A job rather than a fixture — the list a person is handed. See
+    /// `expression_editor_ui::workflow`.
+    Workflow(Workflow),
     /// A REAPER project. Loaded through `daw-standalone`, so items,
     /// takes, tempo and markers all arrive as facade types.
     Rpp(PathBuf),
@@ -101,6 +107,12 @@ impl Source {
     /// recognised extension is an error here rather than a confusing
     /// failure three layers down.
     pub fn parse(arg: &str) -> Result<Self, LoadError> {
+        // Workflows first: they are the list a person is handed, and a
+        // name collision should resolve to the job rather than to the
+        // fixture that happens to share its material.
+        if let Some(w) = Workflow::by_slug(arg) {
+            return Ok(Source::Workflow(w));
+        }
         if let Some(scene) = scene_by_name(arg) {
             return Ok(Source::Scene(scene));
         }
@@ -118,8 +130,9 @@ impl Source {
             // guessed length would analyse minutes of silence and open
             // on a document that is mostly empty. Put the file in a
             // project and point at that.
-            Some("wav") | Some("flac") | Some("aif") | Some("aiff") | Some("ogg")
-            | Some("mp3") => Err(LoadError::BareAudio(path)),
+            Some("wav") | Some("flac") | Some("aif") | Some("aiff") | Some("ogg") | Some("mp3") => {
+                Err(LoadError::BareAudio(path))
+            }
             _ => Err(LoadError::Unrecognised(arg.to_string())),
         }
     }
@@ -168,9 +181,17 @@ pub enum LoadError {
     Read(PathBuf, String),
     Rpp(String),
     /// The project loaded but held nothing this editor can open.
-    NoEditableItem { project: String, items: usize },
+    NoEditableItem {
+        project: String,
+        items: usize,
+    },
     /// A track or item was asked for by name or index and is not there.
     NoSuchTarget(String),
+    /// `--drums` was asked for and no folder track qualifies as the kit.
+    NoKitFolder {
+        project: String,
+        wanted: Option<String>,
+    },
     /// A `.mid` the facade's reader declined.
     MidiFile(PathBuf),
 }
@@ -198,6 +219,14 @@ impl std::fmt::Display for LoadError {
                  a MIDI take, or an audio take whose source file resolves"
             ),
             LoadError::NoSuchTarget(what) => write!(f, "no such {what}"),
+            LoadError::NoKitFolder { project, wanted } => match wanted {
+                Some(name) => write!(f, "{project} has no folder track named {name:?}"),
+                None => write!(
+                    f,
+                    "{project} has no folder track named like a kit \
+                     (Drums, Kit) — name one with --drums <folder>"
+                ),
+            },
             LoadError::MidiFile(p) => write!(f, "{} is not a readable MIDI file", p.display()),
         }
     }
@@ -215,6 +244,15 @@ pub struct Target {
     /// no track was named. Zero-based, because it addresses a list
     /// rather than naming a thing a user sees numbered.
     pub item: Option<usize>,
+    /// `Some` opens a `.rpp` as a drum workspace instead of a single
+    /// item: every track under the kit folder becomes a
+    /// [`Mode::UnpitchedAudio`] track, folded into role lanes. The inner
+    /// value names the kit folder; `Some(None)` means "find the first
+    /// folder named like a kit".
+    ///
+    /// On `Target` rather than a parameter because it narrows *what in
+    /// the project to open*, which is exactly what a target is.
+    pub drums: Option<Option<String>>,
 }
 
 /// A loaded document and everything that has to stay alive behind it.
@@ -229,6 +267,10 @@ pub struct Runner {
     pub loaded: Loaded,
     /// What to show in the window title: enough to tell two runs apart.
     pub label: String,
+    /// The drum workspace's write half — `Some` only for
+    /// [`Loaded::DrumWorkspace`], where the panel's Apply and the slip
+    /// drag land through it.
+    pub host: Option<drum_host::SharedDrumHost>,
 }
 
 /// The document, and the shape of the round trip behind it.
@@ -240,6 +282,14 @@ pub enum Loaded {
     Midi(Box<Session>),
     /// An analysed audio take.
     Audio(Box<AudioSession>),
+    /// A whole kit folder loaded as one workspace: one track per mic,
+    /// folded into role lanes and shown stacked.
+    ///
+    /// Its own variant rather than `Scene` because a scene's contract is
+    /// "nothing to write back to" — a drum workspace has a live project
+    /// behind it, and a later write-back path must be able to tell them
+    /// apart without re-deriving it from `daw.is_some()`.
+    DrumWorkspace(Box<Editor>),
 }
 
 /// What a runner holds, without printing a whole document to say it.
@@ -265,6 +315,7 @@ impl Loaded {
             Loaded::Scene(_) => "scene",
             Loaded::Midi(_) => "midi",
             Loaded::Audio(_) => "audio",
+            Loaded::DrumWorkspace(_) => "drums",
         }
     }
 
@@ -273,6 +324,7 @@ impl Loaded {
             Loaded::Scene(e) => e,
             Loaded::Midi(s) => &s.editor,
             Loaded::Audio(s) => &s.editor,
+            Loaded::DrumWorkspace(e) => e,
         }
     }
 
@@ -281,6 +333,7 @@ impl Loaded {
             Loaded::Scene(e) => e,
             Loaded::Midi(s) => &mut s.editor,
             Loaded::Audio(s) => &mut s.editor,
+            Loaded::DrumWorkspace(e) => e,
         }
     }
 
@@ -289,6 +342,7 @@ impl Loaded {
             Loaded::Scene(e) => *e,
             Loaded::Midi(s) => s.editor,
             Loaded::Audio(s) => s.editor,
+            Loaded::DrumWorkspace(e) => *e,
         }
     }
 }
@@ -314,8 +368,18 @@ impl Runner {
                 daw: None,
                 loaded: Loaded::Scene(Box::new(demo::editor(*scene, viewport))),
                 label: format!("scene: {}", scene.label()),
+                host: None,
             },
-            Source::Rpp(path) => Self::open_rpp(path, target, viewport)?,
+            Source::Workflow(w) => Runner {
+                daw: None,
+                loaded: Loaded::Scene(Box::new(w.editor(viewport))),
+                label: w.label().to_string(),
+                host: None,
+            },
+            Source::Rpp(path) => match &target.drums {
+                Some(folder) => Self::open_rpp_drums(path, folder.as_deref(), viewport)?,
+                None => Self::open_rpp(path, target, viewport)?,
+            },
             Source::Midi(path) => Self::open_midi(path, target, viewport)?,
             Source::GuitarPro(path) => Self::open_guitar_pro(path, viewport)?,
         };
@@ -349,6 +413,7 @@ impl Runner {
                 path.file_name().unwrap_or_default().to_string_lossy(),
                 notes,
             ),
+            host: None,
         })
     }
 
@@ -369,51 +434,50 @@ impl Runner {
             Session::from_file(&daw, &text, track, location, DEFAULT_BEND_RANGE, viewport)
                 .ok_or_else(|| LoadError::MidiFile(path.to_path_buf()))?;
         Ok(Runner {
-            label: format!("{} — {} notes", file_label(path), session.editor.doc.notes.len()),
+            label: format!(
+                "{} — {} notes",
+                file_label(path),
+                session.editor.doc.notes.len()
+            ),
             daw: Some(daw),
             loaded: Loaded::Midi(Box::new(session)),
+            host: None,
         })
     }
-/// Which track of a standard MIDI file to open.
-///
-/// `--track N` wins, as an index. Otherwise the first track that has any
-/// notes in it.
-///
-/// Not simply track 0, which is what this used to do: an SMF **format 1**
-/// file — which is nearly every file anyone has — puts tempo, time
-/// signature and the sequence name in track 0 and the music in track 1
-/// onward. So opening a real `.mid` showed an empty roll saying "No
-/// notes" while the notes sat one track over.
-///
-/// Falls back to 0 when nothing has notes, so an genuinely empty file
-/// still opens (empty) rather than refusing.
-fn midi_track_to_open<D: daw::service::midi::Midi>(daw: &D, path: &str, target: &Target) -> u32 {
-    if let Some(want) = target.track.as_ref().and_then(|t| t.parse::<u32>().ok()) {
-        return want;
+    /// Which track of a standard MIDI file to open.
+    ///
+    /// `--track N` wins, as an index. Otherwise the first track that has any
+    /// notes in it.
+    ///
+    /// Not simply track 0, which is what this used to do: an SMF **format 1**
+    /// file — which is nearly every file anyone has — puts tempo, time
+    /// signature and the sequence name in track 0 and the music in track 1
+    /// onward. So opening a real `.mid` showed an empty roll saying "No
+    /// notes" while the notes sat one track over.
+    ///
+    /// Falls back to 0 when nothing has notes, so an genuinely empty file
+    /// still opens (empty) rather than refusing.
+    fn midi_track_to_open<D: daw::service::midi::Midi>(
+        daw: &D,
+        path: &str,
+        target: &Target,
+    ) -> u32 {
+        if let Some(want) = target.track.as_ref().and_then(|t| t.parse::<u32>().ok()) {
+            return want;
+        }
+        // Bounded: a file with this many empty tracks is not one we are
+        // going to find music in by looking further.
+        const MAX_PROBE: u32 = 64;
+        (0..MAX_PROBE)
+            .find(|&t| {
+                daw.read_midi_file(path.to_string(), t)
+                    .is_some_and(|s| !s.notes.is_empty())
+            })
+            .unwrap_or(0)
     }
-    // Bounded: a file with this many empty tracks is not one we are
-    // going to find music in by looking further.
-    const MAX_PROBE: u32 = 64;
-    (0..MAX_PROBE)
-        .find(|&t| {
-            daw.read_midi_file(path.to_string(), t)
-                .is_some_and(|s| !s.notes.is_empty())
-        })
-        .unwrap_or(0)
-}
 
     fn open_rpp(path: &Path, target: &Target, viewport: Viewport) -> Result<Self, LoadError> {
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| LoadError::Read(path.to_path_buf(), e.to_string()))?;
-        let daw = Standalone::new();
-        // Sources are ordinary files on disk here, so the bay resolves
-        // them from the filesystem. A browser host would install a
-        // JS-backed resolver instead; the loader below is the same.
-        daw.media_bay()
-            .set_file_resolver(Box::new(daw::standalone::media_bay::FsFileResolver));
-        let name = file_label(path);
-        let summary = load_rpp_text(&daw, &name, &path.to_string_lossy(), &text)
-            .map_err(LoadError::Rpp)?;
+        let (daw, name, summary) = open_project(path)?;
         let ctx = ProjectContext::Project(summary.project_guid.clone());
 
         let candidates = candidate_items(&daw, &ctx, target)?;
@@ -424,12 +488,267 @@ fn midi_track_to_open<D: daw::service::midi::Midi>(daw: &D, path: &str, target: 
                     label: format!("{name} — {}", cand.describe()),
                     daw: Some(daw),
                     loaded: runner,
+                    host: None,
                 });
             }
         }
         Err(LoadError::NoEditableItem {
             project: name,
             items: total,
+        })
+    }
+
+    /// Open a project as a drum workspace: every non-folder audio track
+    /// under the kit folder becomes an [`Mode::UnpitchedAudio`] track —
+    /// its longest playing audio item read through the accessor, gated
+    /// into one note per transient — folded into role lanes and shown
+    /// stacked.
+    // r[impl drums.open.runner]
+    fn open_rpp_drums(
+        path: &Path,
+        kit_folder: Option<&str>,
+        viewport: Viewport,
+    ) -> Result<Self, LoadError> {
+        let (daw, name, summary) = open_project(path)?;
+        let ctx = ProjectContext::Project(summary.project_guid.clone());
+
+        let tracks = Tracks::all(&daw, ctx.clone());
+
+        // The kit folder: named wins (case-insensitively, exact then
+        // substring), otherwise the first folder whose name classifies
+        // as a kit.
+        let kit = match kit_folder {
+            Some(want) => {
+                let w = want.to_ascii_lowercase();
+                tracks
+                    .iter()
+                    .find(|t| t.is_folder && t.name.to_ascii_lowercase() == w)
+                    .or_else(|| {
+                        tracks
+                            .iter()
+                            .find(|t| t.is_folder && t.name.to_ascii_lowercase().contains(&w))
+                    })
+            }
+            None => tracks
+                .iter()
+                .find(|t| t.is_folder && expression_editor_core::kit::is_kit_folder(&t.name)),
+        }
+        .ok_or_else(|| LoadError::NoKitFolder {
+            project: name.clone(),
+            wanted: kit_folder.map(str::to_string),
+        })?;
+
+        let by_guid: std::collections::HashMap<&str, &daw::service::Track> =
+            tracks.iter().map(|t| (t.guid.as_str(), t)).collect();
+
+        struct Member {
+            guid: String,
+            name: String,
+            folder: Option<String>,
+            role: expression_editor_core::kit::LaneRole,
+            doc: expression_editor_core::ExpressionDoc,
+            item: ItemRef,
+            length_secs: f64,
+        }
+
+        // The kit's member tracks, with their folder chains — cheap
+        // metadata, gathered sequentially.
+        struct Job {
+            guid: String,
+            name: String,
+            folder: Option<String>,
+            role: expression_editor_core::kit::LaneRole,
+            item_guid: String,
+            length_secs: f64,
+            volume: f64,
+        }
+        let mut jobs: Vec<Job> = Vec::new();
+        let mut items_seen = 0usize;
+        for track in &tracks {
+            if track.is_folder {
+                continue;
+            }
+            // Folder chain, nearest first, walked over `parent_guid` —
+            // depth-capped so a cyclic project cannot hang the load.
+            let mut chain: Vec<&str> = Vec::new();
+            let mut under_kit = false;
+            let mut cur = track.parent_guid.as_deref();
+            for _ in 0..64 {
+                let Some(parent) = cur.and_then(|g| by_guid.get(g)) else {
+                    break;
+                };
+                chain.push(parent.name.as_str());
+                if parent.guid == kit.guid {
+                    under_kit = true;
+                }
+                cur = parent.parent_guid.as_deref();
+            }
+            if !under_kit {
+                continue;
+            }
+            let role = expression_editor_core::kit::kit_role(&track.name, &chain);
+            let (seen, pick) = edit_item(&daw, &ctx, track);
+            items_seen += seen;
+            let Some((item_guid, length_secs, volume)) = pick else {
+                continue;
+            };
+            jobs.push(Job {
+                guid: track.guid.clone(),
+                name: track.name.clone(),
+                folder: chain.first().map(|s| s.to_string()),
+                role,
+                item_guid,
+                length_secs,
+                volume,
+            });
+        }
+
+        // The expensive half — reading each mic's audio and finding its
+        // hits — is per-mic independent, so it runs one thread per mic.
+        // A kit is a dozen tracks; this is the difference between a
+        // multi-second open and about the longest single mic.
+        let analysed: Vec<Option<(Job, Vec<f64>, f64, expression_editor_core::ExpressionDoc)>> =
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = jobs
+                    .into_iter()
+                    .map(|job| {
+                        let daw = daw.clone();
+                        let ctx = ctx.clone();
+                        scope.spawn(move || {
+                            let (samples, rate) = read_take_mono(
+                                &daw,
+                                &ctx,
+                                &job.item_guid,
+                                job.length_secs,
+                                job.volume,
+                            )?;
+                            let mut doc = percussion_doc(&samples, rate);
+                            attach_regions(&daw, &ctx, &mut doc);
+                            Some((job, samples, rate, doc))
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|h| h.join().unwrap_or(None))
+                    .collect()
+            });
+
+        // The trigger lanes' running sums (mean of the members), built
+        // while the samples are in hand — the host detects on these.
+        // r[impl drums.group.detection-source]
+        let mut members: Vec<Member> = Vec::new();
+        let mut sums: std::collections::HashMap<
+            expression_editor_core::kit::LaneRole,
+            (Vec<f64>, usize),
+        > = std::collections::HashMap::new();
+        let mut sample_rate = 0.0f64;
+        for (job, samples, rate, doc) in analysed.into_iter().flatten() {
+            if sample_rate <= 0.0 {
+                sample_rate = rate;
+            }
+            if job.role.is_detection_source() {
+                let (sum, count) = sums.entry(job.role).or_default();
+                if sum.len() < samples.len() {
+                    sum.resize(samples.len(), 0.0);
+                }
+                for (o, v) in sum.iter_mut().zip(samples.iter()) {
+                    *o += v;
+                }
+                *count += 1;
+            }
+            members.push(Member {
+                guid: job.guid,
+                name: job.name,
+                folder: job.folder,
+                role: job.role,
+                doc,
+                item: ItemRef::Guid(job.item_guid),
+                length_secs: job.length_secs,
+            });
+        }
+
+        if members.is_empty() {
+            return Err(LoadError::NoEditableItem {
+                project: name,
+                items: items_seen,
+            });
+        }
+
+        let mics = members.len();
+        let take_secs = members.iter().map(|m| m.length_secs).fold(0.0f64, f64::max);
+        // The kit group's items, by role — the host edits all of them
+        // for every gesture. r[impl drums.group.kit]
+        let host_lanes: Vec<drum_host::HostLane> = expression_editor_core::kit::LaneRole::ALL
+            .into_iter()
+            .filter_map(|role| {
+                let items: Vec<ItemRef> = members
+                    .iter()
+                    .filter(|m| m.role == role)
+                    .map(|m| m.item.clone())
+                    .collect();
+                if items.is_empty() {
+                    return None;
+                }
+                let summed = sums.remove(&role).map(|(mut sum, count)| {
+                    let scale = 1.0 / count.max(1) as f64;
+                    for v in &mut sum {
+                        *v *= scale;
+                    }
+                    sum
+                });
+                Some(drum_host::HostLane {
+                    role,
+                    items,
+                    summed,
+                })
+            })
+            .collect();
+
+        let mut it = members.into_iter();
+        let first = it.next().expect("checked non-empty");
+        let mut editor = Editor::new(first.doc, viewport);
+        editor.set_mode(Mode::UnpitchedAudio);
+        let mut roles = vec![(first.guid.clone(), first.role)];
+        if let Some(t) = editor.tracks.track_mut(0) {
+            t.guid = first.guid;
+            t.name = first.name;
+            t.folder = first.folder;
+        }
+        for m in it {
+            let i = editor.add_track_with_guid(m.guid.clone(), m.name, m.doc);
+            if let Some(t) = editor.tracks.track_mut(i) {
+                t.set_mode(Mode::UnpitchedAudio);
+                t.folder = m.folder;
+            }
+            roles.push((m.guid, m.role));
+        }
+        editor.tracks.fold_roles(&roles);
+        // The stack *is* the drum workspace view; the roll is one click
+        // away per lane.
+        editor.stacked = true;
+        // Grid targets come from the project's tempo, not a default —
+        // a hit quantized against 120 in an 84 bpm session lands
+        // nowhere musical.
+        // r[impl drums.group.tempo]
+        let bpm = daw::service::tempo_map::TempoMap::get_tempo_at(&daw, ctx.clone(), 0.0);
+        if bpm > 0.0 {
+            editor.bpm = bpm;
+        }
+
+        let host = drum_host::DrumHost::new(
+            daw.clone(),
+            ctx,
+            host_lanes,
+            sample_rate,
+            take_secs,
+            60.0 / editor.bpm.max(1.0),
+        );
+        Ok(Runner {
+            label: format!("{name} — drums: {} ({mics} mics)", kit.name),
+            daw: Some(daw),
+            loaded: Loaded::DrumWorkspace(Box::new(editor)),
+            host: Some(std::sync::Arc::new(host)),
         })
     }
 
@@ -555,7 +874,11 @@ fn candidate_items(
 
     let mut out = Vec::new();
     for track in &tracks {
-        for item in Items::get_items(daw, ctx.clone(), daw::service::TrackRef::Guid(track.guid.clone())) {
+        for item in Items::get_items(
+            daw,
+            ctx.clone(),
+            daw::service::TrackRef::Guid(track.guid.clone()),
+        ) {
             let take = Takes::get_active_take(daw, ctx.clone(), ItemRef::Guid(item.guid.clone()));
             let (kind, take_name) = match &take {
                 Some(t) => {
@@ -592,6 +915,259 @@ fn candidate_items(
     Ok(out)
 }
 
+/// The analysis hop for a drum mic, in samples: the document's frame is
+/// `sample_rate / DRUM_HOP`. 512 matches the onset analyser's usual hop,
+/// so a peak bin here is the same width a percussive doc draws.
+const DRUM_HOP: usize = 512;
+
+/// The item worth editing on a drum mic: the **longest** audio item on
+/// the track whose fixed lane — when the track shows lanes at all — is
+/// playing. Returns how many items were looked at, and the pick as
+/// `(item guid, length secs, item volume)`.
+// r[impl drums.open.runner]
+fn edit_item(
+    daw: &Standalone,
+    ctx: &ProjectContext,
+    track: &daw::service::Track,
+) -> (usize, Option<(String, f64, f64)>) {
+    let items = Items::get_items(
+        daw,
+        ctx.clone(),
+        daw::service::TrackRef::Guid(track.guid.clone()),
+    );
+    let seen = items.len();
+    let mut best: Option<(String, f64, f64)> = None;
+    for item in items {
+        let is_audio = Takes::get_active_take(daw, ctx.clone(), ItemRef::Guid(item.guid.clone()))
+            .is_some_and(|t| t.source_type == daw::service::SourceType::Audio);
+        if !is_audio {
+            continue;
+        }
+        // A take parked on a muted lane is an alternate, not the
+        // performance; an item with no fixed lane is on whatever the
+        // track plays.
+        if track.lane_count > 0
+            && let Some(lane) = item.fixed_lane
+            && (lane >= 64 || track.lane_play_mask & (1u64 << lane) == 0)
+        {
+            continue;
+        }
+        let length = item.length.as_seconds();
+        if best.as_ref().is_none_or(|(_, l, _)| length > *l) {
+            best = Some((item.guid.clone(), length, item.volume));
+        }
+    }
+    (seen, best)
+}
+
+/// Compose one track's *playing* audio into a single timeline buffer —
+/// every playing-lane audio item read through the accessor and placed
+/// at its position, out to `take_secs`. This is what a lane draws
+/// after an edit landed on the daw: the split pieces where they now
+/// sit, not where the take was when it loaded.
+pub(crate) fn track_timeline(
+    daw: &Standalone,
+    ctx: &ProjectContext,
+    track: &daw::service::Track,
+    take_secs: f64,
+    sample_rate: f64,
+) -> Vec<f64> {
+    let mut out = vec![0.0f64; (take_secs * sample_rate).ceil().max(0.0) as usize];
+    let items = Items::get_items(
+        daw,
+        ctx.clone(),
+        daw::service::TrackRef::Guid(track.guid.clone()),
+    );
+    let mut placed: Vec<_> = items
+        .into_iter()
+        .filter(|item| {
+            if track.lane_count > 0
+                && let Some(lane) = item.fixed_lane
+                && (lane >= 64 || track.lane_play_mask & (1u64 << lane) == 0)
+            {
+                return false;
+            }
+            Takes::get_active_take(daw, ctx.clone(), ItemRef::Guid(item.guid.clone()))
+                .is_some_and(|t| t.source_type == daw::service::SourceType::Audio)
+        })
+        .collect();
+    // Ascending position: a later piece's attack overwrites the
+    // previous piece's crossfade tail, which is what detection needs.
+    placed.sort_by(|a, b| a.position.as_seconds().total_cmp(&b.position.as_seconds()));
+    for item in placed {
+        let Some((samples, rate)) =
+            read_take_mono(daw, ctx, &item.guid, item.length.as_seconds(), item.volume)
+        else {
+            continue;
+        };
+        let at = (item.position.as_seconds() * sample_rate).round().max(0.0) as usize;
+        if (rate - sample_rate).abs() < 1e-6 {
+            for (i, s) in samples.iter().enumerate() {
+                if at + i < out.len() {
+                    out[at + i] = *s;
+                }
+            }
+        } else {
+            // Rates differing inside one kit is unusual; nearest-
+            // neighbour is fine for drawing and detection.
+            let n = (samples.len() as f64 * sample_rate / rate) as usize;
+            for i in 0..n {
+                let src = (i as f64 * rate / sample_rate) as usize;
+                if at + i < out.len() && src < samples.len() {
+                    out[at + i] = samples[src];
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Pull one take's audio through the accessor, chunked, mono, at the
+/// source rate — the same read [`AudioSession::load`] does, capped at
+/// the item length. Returns `(samples, sample_rate)`.
+// r[impl drums.open.runner]
+pub(crate) fn read_take_mono(
+    daw: &Standalone,
+    ctx: &ProjectContext,
+    item_guid: &str,
+    length_secs: f64,
+    volume: f64,
+) -> Option<(Vec<f64>, f64)> {
+    use daw::service::audio_accessor::{AudioAccessors, GetSamplesRequest};
+
+    let accessor = daw.create_take_accessor(
+        ctx.clone(),
+        ItemRef::Guid(item_guid.to_string()),
+        TakeRef::Active,
+    )?;
+    // Probe for the source's own rate and channel count: asking for a
+    // rate the host does not have would resample, and a resampled
+    // analysis puts every hit slightly off.
+    let probe = daw.get_samples(GetSamplesRequest {
+        accessor_id: accessor.clone(),
+        sample_rate: 0.0,
+        num_channels: 0,
+        start_time: 0.0,
+        num_samples: 1,
+    });
+    let sample_rate = if probe.sample_rate > 0.0 {
+        probe.sample_rate
+    } else {
+        48_000.0
+    };
+    let channels = probe.num_channels.max(1);
+
+    // Chunked, because a whole multitrack take in one call makes the
+    // host allocate all of it before returning any — same bound the
+    // audio session reads at.
+    const CHUNK: u32 = 1 << 16;
+    let total = (length_secs.max(0.0) * sample_rate).ceil() as u32;
+    let mut interleaved = Vec::with_capacity(total as usize * channels as usize);
+    let mut done = 0u32;
+    while done < total {
+        let want = CHUNK.min(total - done);
+        let chunk = daw.get_samples(GetSamplesRequest {
+            accessor_id: accessor.clone(),
+            sample_rate,
+            num_channels: channels,
+            start_time: done as f64 / sample_rate,
+            num_samples: want,
+        });
+        if chunk.samples.is_empty() {
+            break;
+        }
+        interleaved.extend_from_slice(&chunk.samples);
+        done += want;
+    }
+    daw.destroy_accessor(&accessor);
+
+    let mut samples = expression_editor_audio::to_mono(&interleaved, channels.max(1) as usize);
+    if samples.is_empty() {
+        return None;
+    }
+    // The accessor hands back source audio; the item's own gain is on
+    // top, and detection thresholds are absolute.
+    if volume != 1.0 && volume > 0.0 {
+        for s in &mut samples {
+            *s *= volume;
+        }
+    }
+    Some((samples, sample_rate))
+}
+
+/// One drum mic as a percussive document: per-hop peaks behind one note
+/// per transient.
+///
+/// Deliberately **not** [`expression_editor_audio::analyze_percussive`]:
+/// Carry the project's regions onto a document, in its own time units.
+///
+/// The sections are how a player knows where they are — "bar 38" says
+/// nothing, "CH 1" says everything — so every lane's ruler shows them.
+/// Host colours come through as `#rrggbb`; REAPER's section colours are
+/// the ones the band already knows from the arrange view.
+pub(crate) fn attach_regions(
+    daw: &Standalone,
+    ctx: &ProjectContext,
+    doc: &mut expression_editor_core::ExpressionDoc,
+) {
+    use daw::service::Regions;
+    let ups = doc.time_base.units_per_second(120.0);
+    if ups <= 0.0 {
+        return;
+    }
+    doc.regions = Regions::all(daw, ctx.clone())
+        .into_iter()
+        .map(|r| expression_editor_core::doc::Region {
+            start: r.time_range.start_seconds() * ups,
+            end: r.time_range.end_seconds() * ups,
+            label: r.name,
+            color: r.color.map(|c| format!("#{c:06x}")),
+        })
+        .collect();
+}
+
+/// that segments by spectral flux over an STFT, which quantises every
+/// hit to a hop and costs a transform per mic. The envelope gate is the
+/// detector the quantize panel uses, sample-accurate and cheap — the
+/// price is that it measures no centroid, so every hit lands in the
+/// middle band rather than being sorted by brightness.
+// r[impl drums.open.runner]
+pub(crate) fn percussion_doc(
+    samples: &[f64],
+    sample_rate: f64,
+) -> expression_editor_core::ExpressionDoc {
+    use expression_editor_audio::{DetectConfig, transients};
+    use expression_editor_core::rows::SliceBands;
+    use expression_editor_core::{ExpressionDoc, Note, NoteId, RowSpace, TimeBase};
+
+    let frame_rate = sample_rate / DRUM_HOP as f64;
+    let total_frames = samples.len() as f64 / DRUM_HOP as f64;
+    let mut doc = ExpressionDoc::new(TimeBase::Frames { frame_rate }, 0.0, total_frames);
+    doc.row_space = RowSpace::Bands(SliceBands::default());
+    // The backdrop is the whole recording, hits and gaps alike — the
+    // only way to see a missed ghost note is to see past the notes.
+    doc.peaks = samples
+        .chunks(DRUM_HOP)
+        .map(|c| c.iter().fold(0.0f64, |m, v| m.max(v.abs())).min(1.0) as f32)
+        .collect();
+
+    let hits = transients(samples, sample_rate, DetectConfig::default());
+    for (i, hit) in hits.iter().enumerate() {
+        let start = hit.at * frame_rate;
+        // A slice runs to the next hit, so the slices tile the take and
+        // can be selected and levelled like notes.
+        let end = hits
+            .get(i + 1)
+            .map(|next| next.at * frame_rate)
+            .unwrap_or(total_frames);
+        let mut note = Note::new(NoteId(i as u64 + 1), start, end.max(start + 1.0), 1);
+        note.velocity = hit.loudness.clamp(0.0, 1.0);
+        note.weight = note.velocity;
+        doc.push(note);
+    }
+    doc
+}
+
 /// A project with nothing in it, so a file-backed session has a context
 /// to name.
 fn seed_empty_project(daw: &Standalone, path: &Path) -> String {
@@ -602,6 +1178,48 @@ fn seed_empty_project(daw: &Standalone, path: &Path) -> String {
         path: path.to_string_lossy().into_owned(),
     });
     guid
+}
+
+/// Load an `.rpp` into a fresh backend with its media resolved and
+/// materialized, the way `Projects::open` does it: sources resolve
+/// against the file's directory (REAPER stores them relative to the
+/// project), and uncompressed PCM is mmap'd rather than decoded. A
+/// source that cannot be found is a per-take warning inside the
+/// materialize report, never a failed open.
+// r[impl drums.open.rpp]
+fn open_project(
+    path: &Path,
+) -> Result<
+    (
+        Standalone,
+        String,
+        daw::standalone::project_loader::LoadedProject,
+    ),
+    LoadError,
+> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| LoadError::Read(path.to_path_buf(), e.to_string()))?;
+    let daw = Standalone::new();
+    let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    daw.media_bay().set_file_resolver(Box::new(
+        daw::standalone::media_bay::ProjectRelativeResolver::new(dir),
+    ));
+    let name = file_label(path);
+    let summary =
+        load_rpp_text(&daw, &name, &path.to_string_lossy(), &text).map_err(LoadError::Rpp)?;
+    let audio = daw::standalone::audio_engine::materialize::materialize_via_bay(
+        &daw,
+        &summary.project_guid,
+    )
+    .map_err(LoadError::Rpp)?;
+    if !audio.failed.is_empty() {
+        tracing::warn!(
+            failed = audio.failed.len(),
+            loaded = audio.loaded,
+            "some sources did not materialize"
+        );
+    }
+    Ok((daw, name, summary))
 }
 
 fn file_label(path: &Path) -> String {

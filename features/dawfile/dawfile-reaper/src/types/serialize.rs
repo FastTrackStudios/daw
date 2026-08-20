@@ -393,6 +393,20 @@ impl Take {
         if let Some(source) = &self.source {
             source.write_rpp(out, indent);
         }
+        // Stretch markers of a non-first take. The first take's markers are
+        // written from `Item::stretch_markers` by the item serializer.
+        if emit_marker {
+            for sm in &self.stretch_markers {
+                out.push_str(&format!(
+                    "{}SM {} {}",
+                    indent, sm.position, sm.source_position
+                ));
+                if let Some(rate) = sm.rate {
+                    out.push_str(&format!(" {}", rate));
+                }
+                out.push('\n');
+            }
+        }
     }
 }
 

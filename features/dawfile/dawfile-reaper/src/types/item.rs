@@ -419,6 +419,10 @@ pub struct Take {
     pub take_guid: Option<String>,          // GUID - Take GUID
     pub rec_pass: Option<i32>,              // RECPASS - Recording pass number
     pub source: Option<SourceBlock>,        // SOURCE block
+    /// `SM` lines read under this take. REAPER keys stretch markers per
+    /// take; the first take's markers are also mirrored on
+    /// `Item::stretch_markers` for callers that predate this field.
+    pub stretch_markers: Vec<StretchMarker>,
 }
 
 impl Default for Take {
@@ -434,6 +438,7 @@ impl Default for Take {
             take_guid: None,
             rec_pass: None,
             source: None,
+            stretch_markers: Vec::new(),
         }
     }
 }
@@ -708,6 +713,7 @@ impl Item {
             take_guid: None,
             rec_pass: None,
             source: None,
+            stretch_markers: Vec::new(),
         }
     }
 
@@ -970,7 +976,7 @@ impl Item {
                 }
             }
             "SM" if tokens.len() >= 3 => {
-                item.stretch_markers.push(StretchMarker {
+                let sm = StretchMarker {
                     position: Self::parse_float(&tokens[1])?,
                     source_position: Self::parse_float(&tokens[2])?,
                     rate: if tokens.len() > 3 {
@@ -978,7 +984,16 @@ impl Item {
                     } else {
                         None
                     },
-                });
+                };
+                // Markers belong to the take they were read under. Before
+                // the first `TAKE` line that is the implicit first take,
+                // whose markers are mirrored on the item for compatibility.
+                if !*in_take_context {
+                    item.stretch_markers.push(sm.clone());
+                }
+                if let Some(take) = current_take {
+                    take.stretch_markers.push(sm);
+                }
             }
             _ => {}
         }

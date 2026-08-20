@@ -26,5 +26,14 @@ facet = { workspace = true }
 # the wasm build nothing, and shared with the arrange view so both agree
 # on what "wide" means.
 adaptive-grid = { workspace = true }
+# The editor's commands are `#[architect::actions]` traits — see
+# `actions.rs`. `architect`'s `default = []` and its `action` module is
+# ungated, so this is metadata and a derive, not the RPC stack: no vox,
+# no dioxus, no tokio, and the wasm build is unaffected. It is here
+# rather than in the UI crate because the commands are the *editor's*,
+# and a REAPER backend registering them should not have to link a
+# renderer to find out what they are.
+architect = { workspace = true }
+architect-action-derive = { workspace = true }
 
 [dev-dependencies]

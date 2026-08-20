@@ -8,6 +8,7 @@
 //! whichever note sat under the *scaled* position.
 
 use dioxus::prelude::*;
+use dioxus_elements::input_data::MouseButton;
 use expression_editor_core::Editor;
 
 use crate::{canvas, paint, roll_widget, text, theme};
@@ -68,6 +69,8 @@ fn strip_write(mut editor: Signal<Editor>, h: f64, x: f64, y: f64) {
 pub fn LaneStrip(editor: Signal<Editor>) -> Element {
     let mut editor = editor;
     let mut drag = use_signal(|| None::<(f64, f64)>);
+    // Where a middle-drag pan last was.
+    let mut panning = use_signal(|| None::<(f64, f64)>);
 
     // Where each render leaves the drawing, and the shaper for its one
     // label. Both kept across renders — see `roll.rs` for why the
@@ -105,6 +108,14 @@ pub fn LaneStrip(editor: Signal<Editor>) -> Element {
                         touch-action: none; user-select: none; cursor: ns-resize;",
                 onpointerdown: move |e: PointerEvent| {
                     let c = e.data().element_coordinates();
+                    // Middle-drag pans here too. The strip shares the
+                    // roll's time axis, so being able to scroll the roll
+                    // but not the lane under it left the two showing
+                    // different bars.
+                    if matches!(e.trigger_button(), Some(MouseButton::Auxiliary)) {
+                        panning.set(Some((c.x, c.y)));
+                        return;
+                    }
                     if !per_note {
                         return;
                     }
@@ -113,14 +124,29 @@ pub fn LaneStrip(editor: Signal<Editor>) -> Element {
                     strip_write(editor, h, c.x, c.y);
                 },
                 onpointermove: move |e: PointerEvent| {
+                    let c = e.data().element_coordinates();
+                    if let Some((lx, _ly)) = panning() {
+                        // Time only. The strip's vertical axis is a
+                        // *value*, not pitch, so dragging up and down
+                        // here would scroll something that has no
+                        // scroll — the roll's own vertical is unrelated.
+                        editor.write().pan_px(c.x - lx, 0.0);
+                        panning.set(Some((c.x, c.y)));
+                        return;
+                    }
                     if drag.read().is_none() {
                         return;
                     }
-                    let c = e.data().element_coordinates();
                     strip_write(editor, h, c.x, c.y);
                 },
-                onpointerup: move |_| drag.set(None),
-                onpointerleave: move |_| drag.set(None),
+                onpointerup: move |_| {
+                    drag.set(None);
+                    panning.set(None);
+                },
+                onpointerleave: move |_| {
+                    drag.set(None);
+                    panning.set(None);
+                },
             }
         }
     }

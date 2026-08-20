@@ -24,6 +24,7 @@
 //! The Dioxus surface lives in `expression-editor-ui`; domain adapters
 //! (MIDI takes, `tune_dsp::PitchDoc`) live with their domains.
 
+pub mod actions;
 pub mod blob;
 pub mod camera;
 pub mod cc;
@@ -35,6 +36,8 @@ pub mod draft;
 pub mod edit;
 pub mod flam;
 pub mod handles;
+pub mod harmony;
+pub mod kit;
 pub mod memagic;
 pub mod menu;
 pub mod mode;
@@ -55,7 +58,9 @@ pub use camera::{Bounds, Camera, Content, VerticalCamera, Viewport};
 pub use cc::{CcDisplay, CcLane, CcSet};
 pub use chord::Chord;
 pub use cursor::{Aim, Cursor};
-pub use doc::{Curve, CurveShape, ExpressionDoc, Dimension, Marker, Note, NoteId, Point, Target, TimeBase};
+pub use doc::{
+    Curve, CurveShape, Dimension, ExpressionDoc, Marker, Note, NoteId, Point, Target, TimeBase,
+};
 pub use draft::PitchDraft;
 pub use edit::{Edit, History};
 pub use handles::{Handle, Scope};
@@ -170,6 +175,56 @@ pub struct Editor {
     /// than a toggle, because it is used to *check* something mid-edit
     /// and a mode you can forget you are in is worse than a held key.
     pub refs_to_front: bool,
+    /// Razor drags leave what they land on alone.
+    ///
+    /// MRE's `I`, "insert mode — don't delete target area". Off, a razor
+    /// dropped on occupied ground clears it first, which is what makes
+    /// comping work: the take you drag in *replaces* the one underneath.
+    /// On, both survive, which is what you want when the razor is a way
+    /// of layering rather than of choosing.
+    ///
+    /// A sticky mode rather than a modifier, because the modifier
+    /// spelling of it in MRE is a four-key chord and nobody reaches for
+    /// one of those mid-edit.
+    pub razor_insert: bool,
+    /// Razor drags are locked to one axis. `None` is free movement.
+    ///
+    /// MRE's `H` and `L`, which are mutually exclusive there and are one
+    /// field here for the same reason — two booleans would have a fourth
+    /// state that means nothing.
+    pub razor_axis: Option<razor::RazorAxis>,
+    /// The modifiers currently held down.
+    ///
+    /// Here rather than in a component signal because the *toolbar*
+    /// needs them: holding Ctrl means the next drag razors, and the
+    /// surface should say so before you commit to it — the same promise
+    /// the painted cursor already makes, which the tool buttons were not
+    /// keeping. Only the surface writes this; everything else reads it.
+    ///
+    /// It changes what the toolbar *shows*, never what a gesture does.
+    /// The map already resolves modifiers on its own, and a second
+    /// authority for the same question is how the two start disagreeing.
+    pub held_mods: Mods,
+    /// The time selection: a span with no pitch, unlike a razor.
+    ///
+    /// The two are different tools and both are worth having. A razor is
+    /// a rectangle — these rows, this span — and carves. A time
+    /// selection is the whole part between two points, and is what
+    /// loops, renders and "select notes in the range" act on. REAPER
+    /// keeps both for the same reason.
+    ///
+    /// Extended by the cursor keys, which is the point: `Ctrl+Shift+h`
+    /// and `Ctrl+Shift+l` walk the edit cursor and drag the selection
+    /// behind it, so a range gets built by pressing a key rather than by
+    /// aiming a drag.
+    pub time_selection: Option<(f64, f64)>,
+    /// The chord gun's key, scale, depth and inversion.
+    ///
+    /// Editor state rather than document state: it is how you are
+    /// *entering* notes, like the grid or the armed tool, and two people
+    /// opening the same part should not inherit each other's idea of
+    /// what `3` means.
+    pub chord_gun: harmony::ChordGun,
     /// Whether the coarse pitch handle snaps to the tuning. Shift
     /// reverses it per-gesture, as everywhere else on this surface.
     pub snap_pitch: bool,
@@ -214,7 +269,8 @@ pub struct Editor {
 impl Editor {
     pub fn new(doc: ExpressionDoc, viewport: Viewport) -> Self {
         let content = content_of(&doc);
-        let camera = camera::reset_view(content, viewport, CUSHION, PAD, camera::RowFold::default());
+        let camera =
+            camera::reset_view(content, viewport, CUSHION, PAD, camera::RowFold::default());
         let tracks = Workspace::single("Track 1", doc.clone());
         let mut editor = Self {
             doc,
@@ -228,6 +284,11 @@ impl Editor {
             // and silently outranked the enum's own default, so changing
             // that default changed nothing anyone could see.
             tool: Tool::default(),
+            held_mods: Mods::default(),
+            time_selection: None,
+            chord_gun: harmony::ChordGun::default(),
+            razor_insert: false,
+            razor_axis: None,
             dimension: Dimension::Pitch,
             overlays: Vec::new(),
             selection: Selection::default(),
@@ -709,6 +770,24 @@ impl Editor {
         }
     }
 
+    /// Replace one track's document with a fresh analysis, wherever it
+    /// lives — the parked slot, or the live editor when the track is
+    /// active. See [`tracks::Workspace::reload_doc`] for why history
+    /// resets.
+    pub fn reload_track_doc(&mut self, guid: &str, doc: doc::ExpressionDoc) -> bool {
+        if self
+            .tracks
+            .track(self.tracks.active())
+            .is_some_and(|t| t.guid == guid)
+        {
+            self.doc = doc;
+            self.history = History::new(tracks::HISTORY_LIMIT);
+            self.selection.clear();
+            return true;
+        }
+        self.tracks.reload_doc(guid, doc)
+    }
+
     pub fn switch_track(&mut self, i: usize) -> bool {
         // Validate before moving anything out of the editor, so a
         // rejected switch cannot leave `doc` and `history` stranded.
@@ -786,6 +865,28 @@ impl Editor {
     /// otherwise. Resolving it here rather than at each call site is
     /// what makes temporary notes free: every handle already takes a
     /// scope, so nothing else has to know the feature exists.
+    /// The tool the toolbar should light up right now.
+    ///
+    /// The armed tool, unless the modifiers currently held would make
+    /// the next drag do something else — hold Ctrl and the razor lights
+    /// up, hold Alt and note-draw does, exactly as holding `z` lights up
+    /// zoom. The difference is that `z` really does arm the tool and
+    /// these do not: the map resolves modifiers by itself, so this only
+    /// reports what the map would say.
+    ///
+    /// Asked of the map rather than of a modifier table, so a rebound
+    /// gesture relights the right button with nothing else to change.
+    pub fn shown_tool(&self) -> Tool {
+        self.mouse
+            .resolve(
+                mouse::Context::PianoRoll,
+                mouse::Gesture::Drag,
+                self.held_mods,
+            )
+            .tool_preview()
+            .unwrap_or(self.tool)
+    }
+
     pub fn scope_for(&self, note: NoteId) -> handles::Scope {
         match self.temp_note {
             Some((id, t0, t1)) if id == note => handles::Scope::Range { t0, t1 },
@@ -915,7 +1016,9 @@ impl Editor {
                 // A level, so it reads off the captured value at the
                 // scope's midpoint rather than restoring and shifting.
                 let mid = (t0 + t1) * 0.5;
-                let base = drag.base_of(dimension).sample(mid, dimension.default_value());
+                let base = drag
+                    .base_of(dimension)
+                    .sample(mid, dimension.default_value());
 
                 // Sibilant scope: the amplitude handle addresses only
                 // the unvoiced spans inside the scope. Each is written
@@ -955,7 +1058,9 @@ impl Editor {
                         });
                         for (g0, g1) in [(a - eps * 2.0, a - eps), (b + eps, b + eps * 2.0)] {
                             if g0 > t0 && g1 < t1 {
-                                let held = drag.base_of(dimension).sample(g0, dimension.default_value());
+                                let held = drag
+                                    .base_of(dimension)
+                                    .sample(g0, dimension.default_value());
                                 self.apply_live(&Edit::SetDimensionLevel {
                                     note: id,
                                     dimension,
@@ -1032,6 +1137,410 @@ impl Editor {
         edit.apply(&mut self.doc)
     }
 
+    // ── razor operations ─────────────────────────────────────────────
+    //
+    // The razor's *operations* have existed in `razor::` since it was
+    // written; what was missing was any way to reach them. They took a
+    // single area and a document, which is the right shape for the
+    // algorithm and the wrong one for a command: every caller then had
+    // to loop the set, open a gesture, and remember that carving
+    // invalidates ids.
+    //
+    // These are that missing layer. One undo step each, all areas, and
+    // no argument the caller has to get right.
+
+    /// Run `op` over every area, as one undo step.
+    ///
+    /// Areas are snapshotted first because the operations carve, which
+    /// rewrites `doc.notes` underneath an iteration over `self.razor`.
+    /// The whole set, not just one: a razor set is a *single* selection
+    /// that happens to be discontiguous, and an operation that quietly
+    /// applied to one rectangle of four would be the surprise.
+    fn razor_op(&mut self, op: impl Fn(&mut ExpressionDoc, RazorArea) -> bool) -> bool {
+        if self.razor.is_empty() {
+            return false;
+        }
+        let areas = self.razor.areas.clone();
+        self.begin_gesture();
+        let mut ok = false;
+        for area in areas {
+            ok |= op(&mut self.doc, area);
+        }
+        ok
+    }
+
+    /// Delete everything inside the areas, keeping the areas.
+    ///
+    /// The areas stay so a delete can be followed by another operation
+    /// on the same region — clearing them as well would make the
+    /// commonest pair (delete, then paste something else there) take two
+    /// gestures to set up.
+    pub fn razor_delete_contents(&mut self) -> bool {
+        self.razor_op(razor::delete_contents)
+    }
+
+    /// Mirror each area's contents in time about its own centre.
+    pub fn razor_reverse(&mut self) -> bool {
+        self.razor_op(razor::reverse_contents)
+    }
+
+    /// Split notes at the area edges and leave everything in place.
+    ///
+    /// Every other razor operation carves as a side effect of doing
+    /// something else. This is the carve on its own — the way to turn
+    /// "this rectangle" into real note boundaries you can then work with
+    /// by ordinary means.
+    pub fn razor_split(&mut self) -> bool {
+        self.razor_op(|doc, area| !razor::carve(doc, area).is_empty())
+    }
+
+    /// Scale each area's contents in time about the area's start.
+    ///
+    /// `2.0` turns a bar of eighths into a bar of quarters spilling past
+    /// the area; `0.5` halves it. The area itself is scaled to match, so
+    /// the rectangle keeps describing what it holds.
+    pub fn razor_scale(&mut self, factor: f64) -> bool {
+        if factor <= 0.0 {
+            return false;
+        }
+        let ok = self.razor_op(|doc, area| {
+            razor::stretch_contents(doc, area, area.t0, area.t0 + area.width() * factor)
+        });
+        if ok {
+            for a in &mut self.razor.areas {
+                a.t1 = a.t0 + a.width() * factor;
+            }
+        }
+        ok
+    }
+
+    /// Reverse the pitches, keeping the rhythm.
+    pub fn razor_reverse_pitches(&mut self) -> bool {
+        self.razor_op(razor::reverse_pitches)
+    }
+
+    /// Mirror the pitches about their own centre.
+    pub fn razor_invert(&mut self) -> bool {
+        self.razor_op(razor::invert_pitches)
+    }
+
+    /// Copy the contents forward by the area's own width, and take the
+    /// areas with them.
+    ///
+    /// The areas move rather than staying put, so pressing it twice
+    /// gives you three copies rather than two in the same place — the
+    /// gesture is "again", and again has to land somewhere new.
+    pub fn razor_duplicate(&mut self) -> bool {
+        if self.razor.is_empty() {
+            return false;
+        }
+        let areas = self.razor.areas.clone();
+        let insert = self.razor_insert;
+        self.begin_gesture();
+        let mut ok = false;
+        for area in &areas {
+            let width = area.width();
+            ok |= razor::move_contents(&mut self.doc, *area, width, 0, true, insert);
+        }
+        for a in &mut self.razor.areas {
+            let width = a.width();
+            *a = a.translated(width, 0);
+        }
+        ok
+    }
+
+    /// Take the notes inside the areas out of the selection.
+    pub fn razor_unselect_contents(&mut self) -> bool {
+        if self.razor.is_empty() || self.selection.is_empty() {
+            return false;
+        }
+        let inside: Vec<NoteId> = self
+            .razor
+            .areas
+            .iter()
+            .flat_map(|a| razor::peek(&self.doc, *a))
+            .collect();
+        let before = self.selection.notes.len();
+        self.selection.notes.retain(|id| !inside.contains(id));
+        before != self.selection.notes.len()
+    }
+
+    /// Grow the areas to cover every row.
+    ///
+    /// MRE's "full-lane area". The rectangle stops being about *which*
+    /// pitches and becomes purely about a span of time, which is what
+    /// you want when the edit is rhythmic and the pitch range was only
+    /// ever an accident of how far you dragged.
+    pub fn razor_full_lane(&mut self) -> bool {
+        if self.razor.is_empty() {
+            return false;
+        }
+        for a in &mut self.razor.areas {
+            a.row_lo = 0;
+            a.row_hi = 127;
+        }
+        true
+    }
+
+    /// Erase the active expression lane across the areas.
+    pub fn razor_clear_lane(&mut self) -> bool {
+        let dimension = self.dimension;
+        self.razor_op(move |doc, area| razor::clear_lane(doc, area, dimension))
+    }
+
+    /// Select the notes inside the areas, keeping the areas.
+    ///
+    /// The bridge between the two kinds of selection. A razor says
+    /// "this rectangle" and a selection says "these notes"; carving
+    /// first is what makes the second answer exact, because afterwards
+    /// there are no partial overlaps left to round one way or the other.
+    ///
+    /// The areas stay, following MRE: selecting is usually a step
+    /// towards another razor operation on the same region, not a way of
+    /// finishing with it.
+    pub fn razor_select_contents(&mut self) -> bool {
+        if self.razor.is_empty() {
+            return false;
+        }
+        let areas = self.razor.areas.clone();
+        self.begin_gesture();
+        let mut ids = Vec::new();
+        for area in areas {
+            ids.extend(razor::carve(&mut self.doc, area));
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        let found = !ids.is_empty();
+        self.selection.notes = ids;
+        found
+    }
+
+    /// Move the areas by `(dt, drows)`, carrying their contents.
+    pub fn razor_nudge(&mut self, dt: f64, drows: i32) -> bool {
+        if self.razor.is_empty() {
+            return false;
+        }
+        let areas = self.razor.areas.clone();
+        let insert = self.razor_insert;
+        self.begin_gesture();
+        let mut ok = false;
+        for area in &areas {
+            ok |= razor::move_contents(&mut self.doc, *area, dt, drows, false, insert);
+        }
+        for a in &mut self.razor.areas {
+            *a = a.translated(dt, drows);
+        }
+        ok || dt != 0.0 || drows != 0
+    }
+
+    /// Move the areas' right edge by `dt`, leaving the contents alone.
+    ///
+    /// Resize rather than stretch: this changes what the rectangle
+    /// *covers*, which is the thing you adjust when the sweep came out a
+    /// grid line short. Scaling the material is [`Editor::razor_scale`].
+    pub fn razor_resize(&mut self, dt: f64) -> bool {
+        if self.razor.is_empty() {
+            return false;
+        }
+        let mut ok = false;
+        for a in &mut self.razor.areas {
+            // Never past its own start: an inverted area is not a
+            // smaller one, it is a broken one.
+            let t1 = (a.t1 + dt).max(a.t0 + f64::EPSILON);
+            ok |= t1 != a.t1;
+            a.t1 = t1;
+        }
+        ok
+    }
+
+    /// Grow or shrink the areas by whole rows, from the top.
+    pub fn razor_resize_rows(&mut self, drows: i32) -> bool {
+        if self.razor.is_empty() {
+            return false;
+        }
+        for a in &mut self.razor.areas {
+            a.row_hi = (a.row_hi + drows).max(a.row_lo);
+        }
+        true
+    }
+
+    // ── the edit cursor, and what follows it ─────────────────────────
+    //
+    // `hjkl` as the FTS REAPER profile defines it
+    // (`reaper-input/config/.../navigation.styx` and `midi.styx`): `h`
+    // and `l` walk the edit cursor, `j` and `k` change track. The
+    // modifiers stack meanings on the horizontal pair — Ctrl for a grid
+    // step instead of a measure, Ctrl+Shift to drag a time selection
+    // along behind it.
+    //
+    // Note that `h`/`l` are *not* note movement in that profile, and
+    // deliberately: the arrows are. Moving the cursor is what you do
+    // constantly and moving notes is what you do on purpose.
+
+    /// Where the edit cursor is, or the left edge of the view.
+    ///
+    /// The cursor is `Option` because a document does not necessarily
+    /// have one; every command that walks it has to start somewhere, and
+    /// what is on screen is the least surprising place.
+    pub fn cursor(&self) -> f64 {
+        self.playhead.unwrap_or_else(|| self.camera.t_at(0.0))
+    }
+
+    /// Move the edit cursor by `delta`, clamped to the document.
+    pub fn move_cursor(&mut self, delta: f64) -> bool {
+        let to = (self.cursor() + delta).clamp(self.doc.start, self.doc.end);
+        let moved = self.playhead != Some(to);
+        self.playhead = Some(to);
+        moved
+    }
+
+    /// Move the cursor and drag the time selection with it.
+    ///
+    /// Anchored on where the selection already starts, so pressing the
+    /// key repeatedly grows one range rather than making a new one each
+    /// time — and reversing direction shrinks it back rather than
+    /// flipping to a fresh range on the other side.
+    pub fn move_cursor_extending(&mut self, delta: f64) -> bool {
+        let from = self.time_selection.map(|(a, _)| a).unwrap_or(self.cursor());
+        if !self.move_cursor(delta) {
+            return false;
+        }
+        let to = self.cursor();
+        self.time_selection = Some(if from <= to { (from, to) } else { (to, from) });
+        true
+    }
+
+    /// One measure, in document units — what `h` and `l` step by.
+    pub fn measure(&self) -> f64 {
+        self.units_per_bar()
+    }
+
+    /// The grid step, or a beat when the grid is free.
+    pub fn grid_step(&self) -> f64 {
+        let step = self.grid.step(self.units_per_beat());
+        if step > 0.0 {
+            step
+        } else {
+            self.units_per_beat()
+        }
+    }
+
+    pub fn clear_time_selection(&mut self) -> bool {
+        self.time_selection.take().is_some()
+    }
+
+    /// Lengthen or shorten the selected notes by `delta`.
+    ///
+    /// Never past nothing: a note dragged shorter than zero would read
+    /// as one that starts after it ends, and the shortening key is held
+    /// down as readily as any other.
+    pub fn nudge_note_lengths(&mut self, delta: f64) -> bool {
+        let notes = self.selection.notes.clone();
+        if notes.is_empty() {
+            return false;
+        }
+        let floor = self.grid_step() * 0.25;
+        self.begin_gesture();
+        let mut ok = false;
+        for id in notes {
+            let Some(n) = self.doc.note(id) else { continue };
+            let (start, end) = (n.start, n.end);
+            let next = (end + delta).max(start + floor);
+            if (next - end).abs() > f64::EPSILON {
+                ok |= self.apply_live(&Edit::Resize {
+                    note: id,
+                    start,
+                    end: next,
+                });
+            }
+        }
+        ok
+    }
+
+    /// Step to another track, wrapping at both ends.
+    pub fn step_track(&mut self, delta: i32) -> bool {
+        let n = self.tracks.len() as i32;
+        if n <= 1 {
+            return false;
+        }
+        let next = (self.active_track() as i32 + delta).rem_euclid(n) as usize;
+        self.switch_track(next)
+    }
+
+    // ── the chord gun ────────────────────────────────────────────────
+
+    /// Fire the chord on `degree` (1..=7) into the document.
+    ///
+    /// At the play cursor when there is one, else at the left edge of
+    /// the view — the same rule paste follows, and for the same reason:
+    /// dropping a chord at zero puts it off screen and looks like
+    /// nothing happened.
+    ///
+    /// One grid division long, because that is the length every other
+    /// insert on this surface uses and a chord you have to resize is a
+    /// chord you did not want fired.
+    ///
+    /// The new notes become the selection, so the gesture composes: fire
+    /// a chord, then `v u` to ramp it, or drag it somewhere else. And it
+    /// is one undo step, however many notes the depth produced.
+    pub fn insert_chord(&mut self, degree: usize) -> bool {
+        let pitches = self.chord_gun.pitches(degree);
+        if pitches.is_empty() {
+            return false;
+        }
+        let start = self
+            .playhead
+            .unwrap_or_else(|| self.camera.t_at(0.0))
+            .max(self.doc.start);
+        let start = self.snap_time(start);
+        let len = self.grid.step(self.units_per_beat());
+        // A free grid has no step to take a length from; a beat is the
+        // honest default rather than a zero-length note.
+        let len = if len > 0.0 {
+            len
+        } else {
+            self.units_per_beat()
+        };
+
+        self.begin_gesture();
+        let mut ids = Vec::with_capacity(pitches.len());
+        for pitch in pitches {
+            let id = self.doc.mint_id();
+            let mut note = doc::Note::new(id, start, start + len, pitch);
+            note.velocity = 100.0 / 127.0;
+            self.apply_live(&Edit::AddNote(Box::new(note)));
+            ids.push(id);
+        }
+        self.selection.notes = ids;
+        true
+    }
+
+    /// Put the document back to how the open gesture found it.
+    ///
+    /// For destructive drags, which cannot be expressed as a delta.
+    /// Moving a razor's contents *carves* — it splits notes at the area
+    /// boundaries and clears the ground it lands on — so re-running it
+    /// against a document it has already carved does not redo the move,
+    /// it cuts a second time in a place the material has since left.
+    /// Frame by frame that shreds the take: the notes that moved first
+    /// stop moving, notes that were never in the area get dragged along,
+    /// and everything ends up in pieces.
+    ///
+    /// A delta-based drag has no such problem, which is why nothing else
+    /// here needs this. The answer for the ones that do is to recompute
+    /// from the gesture's own starting point every frame — which costs
+    /// nothing to remember, because [`Editor::begin_gesture`] already
+    /// snapshotted it for undo.
+    ///
+    /// Undo is untouched: the snapshot is cloned, not consumed.
+    pub fn revert_gesture(&mut self) -> bool {
+        let Some(base) = self.history.gesture_base() else {
+            return false;
+        };
+        self.doc = base.clone();
+        true
+    }
+
     pub fn undo(&mut self) -> bool {
         let ok = self.history.undo(&mut self.doc);
         self.resync_row_space(ok);
@@ -1073,7 +1582,13 @@ impl Editor {
 
     /// The Reset View camera for the current content.
     pub fn reset_camera(&self) -> Camera {
-        camera::reset_view(self.content(), self.viewport, CUSHION, PAD, self.camera.fold)
+        camera::reset_view(
+            self.content(),
+            self.viewport,
+            CUSHION,
+            PAD,
+            self.camera.fold,
+        )
     }
 
     /// `V` — snap directly to Reset View, no interpolation, no magnets.
@@ -1113,9 +1628,9 @@ impl Editor {
         // Horizontal first: the vertical `InView` scope reads the time
         // window, so it has to see the one the gesture is producing
         // rather than the one it is replacing.
-        if let Some((t0, len)) = memagic::horizontal_span(
-            &self.doc, content, modes.horizontal, anchor, upb, view, cfg,
-        ) {
+        if let Some((t0, len)) =
+            memagic::horizontal_span(&self.doc, content, modes.horizontal, anchor, upb, view, cfg)
+        {
             self.camera.t0 = t0;
             self.camera.units_per_px = (len / self.viewport.w.max(1.0)).max(1e-9);
             moved = true;
@@ -1259,7 +1774,16 @@ impl Editor {
     /// The grid part is a no-op unless the user has asked for an
     /// adaptive density, and usually a no-op even then: a division only
     /// moves when the zoom crosses a power of two.
-    fn settle_camera(&mut self) {
+    ///
+    /// **Public, and the required ending for any direct camera write.**
+    /// It was private, which made the promise above impossible to keep:
+    /// the interactive zooms live in `expression-editor-ui`, where they
+    /// set `camera.units_per_px` by hand, and the one function that would
+    /// have refitted the grid afterwards was not reachable from there. So
+    /// the grid followed the wheel and not the zoom *tool* — which, since
+    /// `z` became the tool, is most zooming. Anything that assigns to
+    /// `camera` ends here.
+    pub fn settle_camera(&mut self) {
         self.camera.constrain(self.bounds(), self.viewport);
         let bar_px = self.units_per_bar() / self.camera.units_per_px;
         self.grid.refit(bar_px);
@@ -1276,6 +1800,26 @@ impl Editor {
         self.settle_camera();
     }
 
+    /// Set the division outright, and refit to the view at once.
+    ///
+    /// The *ceiling*, like every other grid control: an adaptive grid
+    /// may still show something coarser, which is what the readout says.
+    pub fn set_grid_division(&mut self, division: f64) {
+        self.grid.set_division(division);
+        self.settle_camera();
+    }
+
+    /// Triplet and dotted, which clear each other.
+    pub fn set_grid_triplet(&mut self, on: bool) {
+        self.grid.set_triplet(on);
+        self.settle_camera();
+    }
+
+    pub fn set_grid_dotted(&mut self, on: bool) {
+        self.grid.set_dotted(on);
+        self.settle_camera();
+    }
+
     pub fn grid_finer(&mut self) {
         self.grid.finer();
         self.settle_camera();
@@ -1285,6 +1829,33 @@ impl Editor {
     /// stop it following the zoom at all.
     pub fn set_grid_density(&mut self, density: adaptive_grid::Density) {
         self.grid.adaptive.density = density;
+        self.settle_camera();
+    }
+
+    /// Frame a box of the document: `t0..t1` across, `row_lo..row_hi` down.
+    ///
+    /// What the zoom tool's Alt-sweep lands on, and the honest primitive
+    /// behind "zoom to this". Written as a single assignment of the
+    /// camera rather than a sequence of zoom steps, because a sequence
+    /// has to decide an order and either order leaves the other axis
+    /// anchored on the wrong thing.
+    ///
+    /// Degenerate boxes are refused rather than clamped: a zero-width
+    /// sweep is a click that moved a pixel, and framing it would zoom to
+    /// the maximum and lose the user's place for what looked like a
+    /// misclick.
+    pub fn zoom_to_box(&mut self, t0: f64, t1: f64, row_lo: f64, row_hi: f64) {
+        let (t0, t1) = (t0.min(t1), t0.max(t1));
+        let (lo, hi) = (row_lo.min(row_hi), row_lo.max(row_hi));
+        let span_t = t1 - t0;
+        let span_rows = hi - lo;
+        if !(span_t.is_finite() && span_t > 0.0) || !(span_rows.is_finite() && span_rows > 0.0) {
+            return;
+        }
+        self.camera.units_per_px = (span_t / self.viewport.w.max(1.0)).max(1e-9);
+        self.camera.t0 = t0;
+        self.camera.vertical.px_per_row = (self.viewport.h.max(1.0) / span_rows).max(1e-6);
+        self.camera.vertical.center = (lo + hi) * 0.5;
         self.settle_camera();
     }
 
@@ -1384,6 +1955,40 @@ impl Editor {
     /// to open something rather than assuming the edit happened.
     pub fn run_command(&mut self, cmd: &menu::Command, under: Option<NoteId>) -> bool {
         use menu::Command as C;
+
+        // The razor verbs, which act on the areas rather than on a
+        // selection — so they are answered before `command_targets`
+        // works out what a note command would apply to.
+        //
+        // These call the same methods the keyboard does. A menu that
+        // reimplemented them would be a second definition of "reverse",
+        // and the two would differ the first time either changed.
+        match cmd {
+            C::RazorReverse => return self.razor_reverse(),
+            C::RazorReversePitches => return self.razor_reverse_pitches(),
+            C::RazorInvert => return self.razor_invert(),
+            C::RazorDeleteContents => return self.razor_delete_contents(),
+            C::RazorDuplicate => return self.razor_duplicate(),
+            C::RazorSelectContents => return self.razor_select_contents(),
+            C::RazorSplit => return self.razor_split(),
+            C::RazorClearLane => return self.razor_clear_lane(),
+            C::RazorFullLane => return self.razor_full_lane(),
+            // The factor is carried as a small integer because `Command`
+            // derives `PartialEq` and a menu built twice has to compare
+            // equal — two `f64`s that went through different arithmetic
+            // do not reliably do that.
+            C::RazorScale(n) => {
+                let factor = if *n <= 1 { 0.5 } else { *n as f64 };
+                return self.razor_scale(factor);
+            }
+            C::RazorClear => {
+                let had = !self.razor.is_empty();
+                self.razor.clear();
+                return had;
+            }
+            _ => {}
+        }
+
         let targets = self.command_targets(under);
         match cmd {
             C::Copy => self.clipboard.copy_from(&self.doc, &targets),
@@ -1517,6 +2122,20 @@ impl Editor {
             }
             // These still need UI: a submenu, a panel.
             C::SetArticulation(_) | C::Properties => false,
+            // Answered above, before the targets are worked out. Listed
+            // rather than swept up by a `_`, so a *new* note command
+            // still fails to compile until it has an arm.
+            C::RazorReverse
+            | C::RazorReversePitches
+            | C::RazorInvert
+            | C::RazorDeleteContents
+            | C::RazorDuplicate
+            | C::RazorSelectContents
+            | C::RazorSplit
+            | C::RazorClearLane
+            | C::RazorFullLane
+            | C::RazorScale(_)
+            | C::RazorClear => false,
         }
     }
 

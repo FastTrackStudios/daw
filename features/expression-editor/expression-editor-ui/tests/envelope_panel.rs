@@ -3,9 +3,7 @@
 //! Everything here is about *what am I editing* and *what can I see* —
 //! the two questions four overlaid crossing curves make hard.
 
-use expression_editor_ui::envelopes::{
-    ActiveEnvelope, EnvelopePanel, Shown, traces,
-};
+use expression_editor_ui::envelopes::{ActiveEnvelope, EnvelopePanel, Shown, traces};
 use level_dsp::envelope::{Bypass, Contributions, EnvPoint, GainSpan};
 
 fn parts() -> Contributions {
@@ -69,7 +67,10 @@ fn overlays_toggle_independently() {
     assert_eq!(shown.shown_count(), 4);
     shown.toggle(ActiveEnvelope::Gate);
     assert!(!shown.is_shown(ActiveEnvelope::Gate));
-    assert!(shown.is_shown(ActiveEnvelope::Ride), "the others are untouched");
+    assert!(
+        shown.is_shown(ActiveEnvelope::Ride),
+        "the others are untouched"
+    );
     assert_eq!(shown.shown_count(), 3);
 }
 

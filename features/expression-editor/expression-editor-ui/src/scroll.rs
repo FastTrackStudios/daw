@@ -60,6 +60,37 @@ fn table() -> &'static ScrollBindingTable {
     TABLE.get_or_init(build)
 }
 
+/// One wheel notch, in pixels.
+///
+/// The conversion a touchpad needs. A mouse reports scroll in *lines* —
+/// winit gives about 1.0 per notch — and every constant downstream is
+/// tuned for that. A touchpad reports *pixels*, tens of them per event,
+/// and the two were being passed on interchangeably: `strip_units()`
+/// discards which unit arrived and hands over the bare number.
+///
+/// The result was not a subtle difference in feel. Zoom is
+/// `e^(travel / 3)`, so a forty-pixel two-finger gesture asked for a
+/// six-hundred-thousand-fold zoom, and a two-finger scroll panned five
+/// thousand pixels an event. Touchpad input was unusable rather than
+/// merely wrong.
+const PIXELS_PER_NOTCH: f64 = 20.0;
+
+/// A wheel delta in notches, whatever unit it arrived in.
+///
+/// Normalising here rather than at each use means the gain constants
+/// stay tuned for one unit, and a device that reports a new one is a
+/// change in this function alone.
+pub fn notches(delta: &dioxus::html::geometry::WheelDelta) -> (f64, f64) {
+    use dioxus::html::geometry::WheelDelta;
+    match delta {
+        WheelDelta::Lines(v) => (v.x, v.y),
+        WheelDelta::Pixels(v) => (v.x / PIXELS_PER_NOTCH, v.y / PIXELS_PER_NOTCH),
+        // A page is a screenful; treat it as a firm push rather than
+        // scaling it into the thousands.
+        WheelDelta::Pages(v) => (v.x * 4.0, v.y * 4.0),
+    }
+}
+
 /// What the shared configuration says this gesture does here.
 ///
 /// `None` when nothing is bound, which the caller should treat as "leave
@@ -87,10 +118,38 @@ pub fn action_for(dx: f64, dy: f64, mods: Mods) -> Option<ActionId> {
 pub fn hint() -> String {
     let mut parts = Vec::new();
     for (label, mods) in [
-        ("scroll", Mods { ctrl: false, alt: false, shift: false }),
-        ("shift", Mods { ctrl: false, alt: false, shift: true }),
-        ("alt", Mods { ctrl: false, alt: true, shift: false }),
-        ("alt+shift", Mods { ctrl: false, alt: true, shift: true }),
+        (
+            "scroll",
+            Mods {
+                ctrl: false,
+                alt: false,
+                shift: false,
+            },
+        ),
+        (
+            "shift",
+            Mods {
+                ctrl: false,
+                alt: false,
+                shift: true,
+            },
+        ),
+        (
+            "alt",
+            Mods {
+                ctrl: false,
+                alt: true,
+                shift: false,
+            },
+        ),
+        (
+            "alt+shift",
+            Mods {
+                ctrl: false,
+                alt: true,
+                shift: true,
+            },
+        ),
     ] {
         let Some(action) = action_for(0.0, 1.0, mods) else {
             continue;
@@ -130,24 +189,45 @@ mod tests {
         );
     }
 
+    /// The editor scrolls with the shared scheme, and zooms on its own.
+    ///
+    /// `Alt+Scroll` zoomed here until `Alt` became "create". A modifier
+    /// that means one thing on a drag and another on a wheel is no more
+    /// derivable than one that changes meaning with the key held beside
+    /// it — so the editor's table keeps the scrolling half of the shared
+    /// scheme and drops the zooming half, which moved to held `Z`.
+    ///
+    /// The arrange view's `normal` table is untouched: it has no `Z`
+    /// tool and no `Alt`-creates rule, so nothing there needs to move.
     #[test]
-    fn the_editor_resolves_the_shared_scheme() {
+    fn the_editor_scrolls_with_the_shared_scheme() {
         assert_eq!(
             act(0.0, 10.0, mods(false, false, false)).as_deref(),
             Some("view.vscroll")
         );
         assert_eq!(
-            act(0.0, 10.0, mods(false, true, false)).as_deref(),
-            Some("view.zoom_v")
+            act(0.0, 10.0, mods(false, false, true)).as_deref(),
+            Some("view.hscroll")
         );
-        assert_eq!(
-            act(0.0, 10.0, mods(false, true, true)).as_deref(),
-            Some("view.zoom_h")
-        );
-        assert_eq!(
-            act(0.0, 10.0, mods(true, true, false)).as_deref(),
-            Some("view.zoom_both")
-        );
+    }
+
+    /// And `Alt` is not a zoom here any more, in any combination.
+    ///
+    /// The bug this pins is the one that was reported: holding Option to
+    /// insert a note and scrolling zoomed the view instead.
+    #[test]
+    fn alt_no_longer_zooms_the_editor() {
+        for m in [
+            mods(false, true, false),
+            mods(false, true, true),
+            mods(true, true, false),
+        ] {
+            assert_eq!(
+                act(0.0, 10.0, m),
+                None,
+                "Alt is the create modifier now, not a zoom: {m:?}"
+            );
+        }
     }
 
     #[test]
@@ -162,10 +242,44 @@ mod tests {
     fn the_hint_describes_the_bindings_rather_than_a_fixed_string() {
         let h = hint();
         assert!(h.contains("shift scrolls sideways"), "{h}");
-        assert!(h.contains("alt zooms pitch"), "{h}");
         // The failure this catches is the old one: a hint that says the
         // plain wheel zooms when the config says it scrolls.
         assert!(!h.contains("scroll zooms"), "stale hint: {h}");
+    }
+
+    /// A touchpad and a mouse must ask for comparable amounts.
+    ///
+    /// The bug this pins was not a difference in feel. Every gain
+    /// downstream is tuned for a mouse's line deltas — zoom is
+    /// `e^(travel / 3)` — and a touchpad's pixel deltas were handed over
+    /// unconverted, so a forty-pixel two-finger gesture asked for a
+    /// six-hundred-thousand-fold zoom.
+    #[test]
+    fn a_touchpads_pixels_and_a_mouses_lines_are_comparable() {
+        use dioxus::html::geometry::{LinesVector, PixelsVector3D, WheelDelta};
+
+        // One notch of a mouse wheel.
+        let mouse = notches(&WheelDelta::Lines(LinesVector::new(0.0, 1.0, 0.0)));
+        // A touchpad flick of about one notch's worth of travel.
+        let pad = notches(&WheelDelta::Pixels(PixelsVector3D::new(
+            0.0,
+            PIXELS_PER_NOTCH,
+            0.0,
+        )));
+        assert!(
+            (mouse.1 - pad.1).abs() < 1e-9,
+            "a notch and {PIXELS_PER_NOTCH}px should agree: {mouse:?} vs {pad:?}"
+        );
+
+        // And the thing that made it unusable: a raw pixel delta must
+        // never reach the gain constants at full size.
+        let big = notches(&WheelDelta::Pixels(PixelsVector3D::new(0.0, 40.0, 0.0)));
+        assert!(
+            big.1 < 4.0,
+            "40px of travel became {} notches — the zoom would be e^{}",
+            big.1,
+            big.1 / 3.0
+        );
     }
 
     #[test]

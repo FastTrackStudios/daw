@@ -27,22 +27,12 @@ use daw_proto::{
 
 use crate::sync::Standalone;
 
-/// One open accessor: decoded audio, ready to serve.
-struct OpenAccessor {
-    /// Interleaved, at `channels` and `sample_rate`.
-    samples: Vec<f32>,
-    channels: u16,
-    sample_rate: u32,
-}
+#[cfg(any(feature = "audio", feature = "decode"))]
+type OpenAccessor = crate::take_reader::TakeReader;
 
-impl OpenAccessor {
-    fn frames(&self) -> usize {
-        if self.channels == 0 {
-            return 0;
-        }
-        self.samples.len() / self.channels as usize
-    }
-}
+/// Without a decoder there is no audio to read; the table holds nothing.
+#[cfg(not(any(feature = "audio", feature = "decode")))]
+struct OpenAccessor;
 
 /// Open accessors, keyed by the handle handed out.
 ///
@@ -60,44 +50,23 @@ fn next_id() -> String {
     format!("sa-acc-{}", N.fetch_add(1, Ordering::Relaxed))
 }
 
-/// The source file behind a take, if it has one.
-fn take_source(
+#[cfg(any(feature = "audio", feature = "decode"))]
+fn open(
     daw: &Standalone,
     project: ProjectContext,
     item: ItemRef,
     take: TakeRef,
-) -> Option<String> {
-    use daw_proto::Takes;
-    let takes = daw.get_takes(project, item);
-    let index = match take {
-        TakeRef::Active => takes.iter().position(|t| t.is_active).unwrap_or(0),
-        TakeRef::Index(i) => i as usize,
-        TakeRef::Guid(ref g) => takes.iter().position(|t| t.guid == *g)?,
-    };
-    takes.get(index)?.source_file_path.clone()
+) -> Option<OpenAccessor> {
+    crate::take_reader::TakeReader::open_or_decode(daw, project, item, take)
 }
 
-#[cfg(feature = "decode")]
-fn decode(path: &str) -> Option<OpenAccessor> {
-    let bytes = std::fs::read(path).ok()?;
-    let extension = std::path::Path::new(path)
-        .extension()
-        .and_then(|e| e.to_str());
-    // The extension is a hint only: symphonia probes the content, and a
-    // file named `.wav` that is really a FLAC still decodes.
-    let decoded = match extension {
-        Some(ext) => crate::audio_engine::decode_audio_with_extension(&bytes, ext),
-        None => crate::audio_engine::decode_audio(&bytes),
-    }?;
-    Some(OpenAccessor {
-        samples: decoded.samples,
-        channels: decoded.channels,
-        sample_rate: decoded.sample_rate,
-    })
-}
-
-#[cfg(not(feature = "decode"))]
-fn decode(_path: &str) -> Option<OpenAccessor> {
+#[cfg(not(any(feature = "audio", feature = "decode")))]
+fn open(
+    _daw: &Standalone,
+    _project: ProjectContext,
+    _item: ItemRef,
+    _take: TakeRef,
+) -> Option<OpenAccessor> {
     // Without the decoder there is no way to read a source file, and
     // returning silence would be worse than declining: a caller would
     // analyse it and report a take with no notes.
@@ -120,8 +89,7 @@ impl AudioAccessors for Standalone {
         item: ItemRef,
         take: TakeRef,
     ) -> Option<String> {
-        let path = take_source(self, project, item, take)?;
-        let open = decode(&path)?;
+        let open = open(self, project, item, take)?;
         let id = next_id();
         table().lock().ok()?.insert(id.clone(), Arc::new(open));
         Some(id)
@@ -134,6 +102,8 @@ impl AudioAccessors for Standalone {
         false
     }
 
+    // r[impl drums.open.accessor-placement]
+    #[cfg(any(feature = "audio", feature = "decode"))]
     fn get_samples(&self, request: GetSamplesRequest) -> AudioSampleData {
         let Some(acc) = table()
             .lock()
@@ -142,16 +112,18 @@ impl AudioAccessors for Standalone {
         else {
             return AudioSampleData::default();
         };
+        let src_channels = acc.channels() as u32;
+        let src_rate = acc.sample_rate() as f64;
 
         // A zero in either field means "whatever you have", which is
         // how a caller discovers the format before reading in earnest.
         let out_channels = if request.num_channels == 0 {
-            acc.channels as u32
+            src_channels
         } else {
             request.num_channels
         };
         let rate = if request.sample_rate <= 0.0 {
-            acc.sample_rate as f64
+            src_rate
         } else {
             request.sample_rate
         };
@@ -159,39 +131,27 @@ impl AudioAccessors for Standalone {
         if want == 0 || out_channels == 0 {
             return AudioSampleData {
                 samples: Vec::new(),
-                sample_rate: acc.sample_rate as f64,
-                num_channels: acc.channels as u32,
+                sample_rate: src_rate,
+                num_channels: src_channels,
                 num_samples: 0,
             };
         }
 
-        // Nearest-neighbour when the rates differ. Deliberately crude:
-        // a caller that cares about quality should read at the source
-        // rate, which it can because the probe above tells it what that
-        // is. Resampling well here would only encourage asking for the
-        // wrong rate.
-        let ratio = acc.sample_rate as f64 / rate;
-        let start_frame = request.start_time * acc.sample_rate as f64;
-        let src_channels = acc.channels as usize;
-        let frames = acc.frames();
-
+        // Each output frame is a take time; the reader maps it through
+        // placement and markers to a source frame and interpolates. A
+        // request at a foreign rate is therefore resampled linearly —
+        // good enough for analysis; a caller that wants the exact
+        // samples reads at the source rate the probe reported.
+        let src_ch = src_channels.max(1) as usize;
         let mut samples = Vec::with_capacity(want * out_channels as usize);
         for i in 0..want {
-            let src = (start_frame + i as f64 * ratio).round();
-            let f = if src < 0.0 { usize::MAX } else { src as usize };
+            let t = request.start_time + i as f64 / rate;
             for ch in 0..out_channels as usize {
                 // Fewer source channels than asked for: repeat the last
                 // one, so a mono file read as stereo is centred rather
                 // than half-silent.
-                let sc = ch.min(src_channels.saturating_sub(1));
-                let v = if f < frames && src_channels > 0 {
-                    acc.samples[f * src_channels + sc] as f64
-                } else {
-                    // Past the end is silence, not an error: an item
-                    // longer than its source is ordinary.
-                    0.0
-                };
-                samples.push(v);
+                let sc = ch.min(src_ch - 1);
+                samples.push(acc.sample(t, sc) as f64);
             }
         }
 
@@ -201,6 +161,11 @@ impl AudioAccessors for Standalone {
             num_channels: out_channels,
             num_samples: want as u32,
         }
+    }
+
+    #[cfg(not(any(feature = "audio", feature = "decode")))]
+    fn get_samples(&self, _request: GetSamplesRequest) -> AudioSampleData {
+        AudioSampleData::default()
     }
 
     fn destroy_accessor(&self, accessor_id: &str) {

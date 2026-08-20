@@ -52,6 +52,32 @@ pub enum Command {
     SplitNote(NoteId, f64),
     /// Audio: merge with the following note.
     MergeNotes(NoteId),
+
+    // ── razor ────────────────────────────────────────────────────────
+    //
+    // The mouse path to the razor's verbs. The map has bound
+    // `RazorArea + RightClick` to `ContextMenu` since razors existed,
+    // but the only menu was the note menu — so right-clicking an area
+    // you had just drawn offered Cut, Copy and Properties for notes, and
+    // the map was promising something nothing implemented.
+    //
+    // Same commands the keyboard reaches, through the same
+    // `run_command`, so the two cannot mean different things.
+    RazorReverse,
+    /// Reverse the pitches and keep the rhythm.
+    RazorReversePitches,
+    RazorInvert,
+    RazorDeleteContents,
+    RazorDuplicate,
+    RazorSelectContents,
+    /// Split at the edges and leave everything where it is.
+    RazorSplit,
+    RazorClearLane,
+    RazorFullLane,
+    /// Scale the contents in time about each area's start.
+    RazorScale(u8),
+    /// Drop the areas, keeping the material.
+    RazorClear,
 }
 
 /// One row of the menu.
@@ -89,6 +115,73 @@ impl MenuItem {
         self.group_break = true;
         self
     }
+}
+
+/// The menu for a right-click, whichever kind of thing is under it.
+///
+/// A razor outranks a note, exactly as it does for hit-testing, Escape
+/// and Delete: the rectangle is the more specific statement, and it is
+/// the one you just drew. Right-clicking inside an area you are working
+/// with and being offered "Merge With Next" is the menu answering a
+/// question you did not ask.
+pub fn menu_at(ed: &Editor, under: Option<NoteId>, t: f64, row: i32) -> Vec<MenuItem> {
+    if ed.razor.at(t, row).is_some() {
+        razor_menu(ed)
+    } else {
+        note_menu(ed, under, t)
+    }
+}
+
+/// The razor's verbs, as a menu.
+///
+/// Every item here has a key, and every key is shown — the menu is the
+/// third way to the same commands after the razor mode's letters and the
+/// `k` prefix, and the point of a menu that lists its shortcuts is that
+/// you stop needing it.
+pub fn razor_menu(ed: &Editor) -> Vec<MenuItem> {
+    // Whether anything is actually inside, so the items that need
+    // material grey out rather than silently doing nothing. An area
+    // swept over empty roll is a perfectly ordinary thing to have.
+    let has_material = ed
+        .razor
+        .areas
+        .iter()
+        .any(|a| !crate::razor::peek(&ed.doc, *a).is_empty());
+
+    vec![
+        MenuItem::new(
+            "Delete Contents",
+            Command::RazorDeleteContents,
+            has_material,
+        )
+        .key("X"),
+        MenuItem::new("Duplicate", Command::RazorDuplicate, has_material).key("D"),
+        MenuItem::new("Split at Edges", Command::RazorSplit, has_material),
+        MenuItem::new("Retrograde", Command::RazorReverse, has_material)
+            .key("R")
+            .group(),
+        MenuItem::new(
+            "Retrograde Pitches",
+            Command::RazorReversePitches,
+            has_material,
+        )
+        .key("Ctrl+R"),
+        MenuItem::new("Invert Pitches", Command::RazorInvert, has_material).key("V"),
+        MenuItem::new("Double Length", Command::RazorScale(2), has_material),
+        MenuItem::new("Halve Length", Command::RazorScale(1), has_material),
+        MenuItem::new(
+            "Select Contents",
+            Command::RazorSelectContents,
+            has_material,
+        )
+        .key("S")
+        .group(),
+        MenuItem::new("Clear This Lane", Command::RazorClearLane, has_material),
+        MenuItem::new("Full-Lane Area", Command::RazorFullLane, true).key("F"),
+        MenuItem::new("Drop Areas", Command::RazorClear, true)
+            .key("Esc")
+            .group(),
+    ]
 }
 
 /// Build the context menu for a right-click at `t`, over `under`.

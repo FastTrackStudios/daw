@@ -34,6 +34,15 @@ impl ResolvedElement {
 }
 
 fn key_event(key: Key, modifiers: Modifiers, state: KeyState) -> BlitzKeyEvent {
+    repeating_key_event(key, modifiers, state, false)
+}
+
+fn repeating_key_event(
+    key: Key,
+    modifiers: Modifiers,
+    state: KeyState,
+    is_auto_repeating: bool,
+) -> BlitzKeyEvent {
     let text = match (&key, state) {
         (Key::Character(s), KeyState::Pressed) => Some(SmolStr::new(s)),
         _ => None,
@@ -43,7 +52,7 @@ fn key_event(key: Key, modifiers: Modifiers, state: KeyState) -> BlitzKeyEvent {
         code: Code::Unidentified,
         modifiers,
         location: Location::Standard,
-        is_auto_repeating: false,
+        is_auto_repeating,
         is_composing: false,
         state,
         text,
@@ -73,6 +82,45 @@ impl DocumentTester {
             key,
             modifiers,
             KeyState::Released,
+        )));
+    }
+
+    /// Presses `key` and leaves it down.
+    ///
+    /// A hold is not a press: spring-loaded modal keys, momentary
+    /// toggles and which-key prefixes all behave differently while a key
+    /// is *down*, and [`press_key`](Self::press_key) releases it in the
+    /// same call, so it can never exercise them. Pair with
+    /// [`key_up`](Self::key_up).
+    pub fn key_down(&self, key: Key, modifiers: Modifiers) {
+        self.send_ui_event(UiEvent::KeyDown(key_event(
+            key,
+            modifiers,
+            KeyState::Pressed,
+        )));
+    }
+
+    /// Releases a key held by [`key_down`](Self::key_down).
+    pub fn key_up(&self, key: Key, modifiers: Modifiers) {
+        self.send_ui_event(UiEvent::KeyUp(key_event(
+            key,
+            modifiers,
+            KeyState::Released,
+        )));
+    }
+
+    /// Sends one OS auto-repeat of a held key.
+    ///
+    /// The repeats a real keyboard emits while a key is down, flagged as
+    /// such. Worth sending explicitly: code that treats them as fresh
+    /// presses re-enters whatever the key does, dozens of times a
+    /// second, and only a test that repeats will catch it.
+    pub fn key_repeat(&self, key: Key, modifiers: Modifiers) {
+        self.send_ui_event(UiEvent::KeyDown(repeating_key_event(
+            key,
+            modifiers,
+            KeyState::Pressed,
+            true,
         )));
     }
 

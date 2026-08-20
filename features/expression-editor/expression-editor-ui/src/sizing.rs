@@ -54,8 +54,12 @@ use crate::canvas;
 // content — or, as the toolbar's wrapping once did, on the window's
 // *width* — would make that subtraction a guess.
 
-/// The tool bar.
-pub const TOOLBAR_H: f64 = 60.0;
+/// The tool bar — one row.
+///
+/// It was 60 for two rows: the modes on top, the verbs underneath. The
+/// modes moved into the panel down the right, where they cost width we
+/// already had instead of height the roll never has enough of.
+pub const TOOLBAR_H: f64 = 30.0;
 /// The track switcher under it.
 pub const SWITCHER_H: f64 = 28.0;
 /// The chord/selection row — **gone**, and kept at zero rather than
@@ -154,9 +158,7 @@ impl Chrome {
 
     /// Height taken by every row above and below the roll.
     pub fn stack_h(&self) -> f64 {
-        CHROME_HEIGHT
-            + if self.switcher { SWITCHER_H } else { 0.0 }
-            + self.lane_strip_h.max(0.0)
+        CHROME_HEIGHT + if self.switcher { SWITCHER_H } else { 0.0 } + self.lane_strip_h.max(0.0)
     }
 }
 
@@ -171,7 +173,11 @@ pub fn chrome_of(ed: &Editor, inspector_open: bool) -> Chrome {
     Chrome {
         inspector_open,
         switcher: crate::switcher::is_shown(ed),
-        lane_strip_h: ed.lane_strip_h,
+        // The stack view renders instead of the roll *and* its lane
+        // strip, so in that mode there is no strip to subtract. Charging
+        // for one left the stack short by its height — which is why it
+        // used to measure itself on mount instead of trusting this.
+        lane_strip_h: if ed.stacked { 0.0 } else { ed.lane_strip_h },
     }
 }
 

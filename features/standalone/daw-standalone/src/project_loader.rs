@@ -176,6 +176,13 @@ fn populate_tracks(
             p.transport.tempo = Tempo::from_bpm(env.default_tempo.max(1.0));
             let (num, denom) = env.default_time_signature;
             p.transport.time_signature = TimeSignature::new(num.max(1) as u32, denom.max(1) as u32);
+        } else if let Some((bpm, num, denom, _)) = project.properties.tempo {
+            // No tempo envelope: the header `TEMPO <bpm> <num> <denom>`
+            // is the project's one tempo, and everything that converts
+            // time — the grid, the ruler, quantize targets — reads it
+            // from here. r[impl drums.group.tempo]
+            p.transport.tempo = Tempo::from_bpm((bpm.max(1)) as f64);
+            p.transport.time_signature = TimeSignature::new(num.max(1) as u32, denom.max(1) as u32);
         }
 
         // Master section: `MASTER_VOLUME vol pan …` + `MASTERMUTESOLO`.
@@ -407,6 +414,22 @@ fn populate_tracks(
                 let mut takes_out = Vec::with_capacity(ri.takes.len().max(1));
                 for (take_idx, rt_take) in ri.takes.iter().enumerate() {
                     let take = build_take(&item_guid, take_idx as u32, rt_take, summary);
+                    // r[impl drums.open.stretch-markers]
+                    // `SM` lines are keyed per take; the third token is the
+                    // marker's slope (daw-proto's field of the same name).
+                    if !rt_take.stretch_markers.is_empty() {
+                        let mut markers: Vec<daw_proto::StretchMarker> = rt_take
+                            .stretch_markers
+                            .iter()
+                            .map(|sm| daw_proto::StretchMarker {
+                                position: sm.position,
+                                source_position: sm.source_position,
+                                slope: sm.rate.unwrap_or(0.0),
+                            })
+                            .collect();
+                        markers.sort_by(|a, b| a.position.total_cmp(&b.position));
+                        p.stretch_markers.insert(take.guid.clone(), markers);
+                    }
                     // If this is a MIDI take, decode its event stream
                     // into MidiNote entries on `p.midi_notes`. The
                     // renderer reads from this map to feed VST3i /

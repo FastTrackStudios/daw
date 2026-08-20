@@ -62,7 +62,10 @@ async fn a_drag_moves_the_value() -> dioxus_test::Result<()> {
     tester.pointer_up(ox + w as f64 * 0.95, y);
     let _ = tester.pump().await;
 
-    let html = tester.query(by_testid("readout")).immediately()?.inner_html();
+    let html = tester
+        .query(by_testid("readout"))
+        .immediately()?
+        .inner_html();
     assert!(
         !html.contains("0.000"),
         "the drag should have moved the value, got: {html}"

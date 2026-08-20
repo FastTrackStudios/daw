@@ -24,19 +24,19 @@
 
 use dioxus::prelude::*;
 use dioxus_elements::input_data::MouseButton;
+use expression_editor_core::Editor;
 use expression_editor_core::memagic;
 use expression_editor_core::tools::Mods;
-use expression_editor_core::Editor;
 use input::InputCommand;
 use keyboard_types::Modifiers;
 
 use crate::interaction::{self, Drag};
 use crate::menu_ui::{self, ContextMenu};
 use crate::multitool_ui::{self, MultiTool};
+use crate::{BendFlow, draw_hint_of, velocity_ramp};
 use crate::{
     canvas, cursor, drawer, drawer::ModDrawer, keys, paint, roll_widget, scroll, text, theme,
 };
-use crate::{draw_hint_of, BendFlow};
 /// Pointer coordinates in **roll** space — element coordinates minus
 /// the keyboard gutter and timeline ruler.
 ///
@@ -71,7 +71,9 @@ fn memagic_at(ed: &Editor, hover: Option<(f64, f64)>) -> (memagic::Region, memag
         return (
             memagic::Region::Elsewhere,
             memagic::Anchor {
-                t: ed.playhead.unwrap_or_else(|| ed.camera.t_at(ed.viewport.w * 0.5)),
+                t: ed
+                    .playhead
+                    .unwrap_or_else(|| ed.camera.t_at(ed.viewport.w * 0.5)),
                 row: None,
             },
         );
@@ -148,6 +150,31 @@ pub fn Canvas(
     // live, which is the overlay's cue to stay hidden.
     let mut which_key = use_signal(Vec::<keys::Continuation>::new);
 
+    // The tool to go back to when `z` is released.
+    //
+    // `Some` means a spring-loaded zoom is live. It is set the moment
+    // `z` goes down — the toolbar reads `ed.tool`, so arming late meant
+    // holding `z` looked like nothing was happening.
+    let mut spring_from = use_signal(|| None::<expression_editor_core::Tool>);
+
+    // Whether the hold got *used*, which is a separate question from
+    // whether it is live now that arming happens on the way down.
+    //
+    // A drag sets it, a key press does not, and the release reads it to
+    // decide whether the which-key tree is finished or still waiting for
+    // its second key. That is what keeps `z`-as-prefix and `z`-as-tool
+    // from having to be told apart by a timer.
+    let mut spring_used = use_signal(|| false);
+
+    // The live velocity shape, if one is open.
+    //
+    // A signal rather than a field on the `Editor` because it holds a
+    // `velocity::Session`, which lives in `expression-editor-tools` —
+    // and `tools` depends on `core`, so `core` cannot hold one without
+    // a cycle. It is gesture state either way, which is what the other
+    // signals here are.
+    let mut ramp = use_signal(|| None::<crate::velocity_ramp::VelocityRamp>);
+
     // The viewport is followed by `ExpressionEditor`, which is the only
     // component that knows the whole chrome. See the effect there.
 
@@ -188,6 +215,15 @@ pub fn Canvas(
         _ => None,
     };
 
+    // The razor being swept, already snapped. Read from the drag rather
+    // than recomputed here: `resolve_razor` decided it on the last move
+    // and the release will commit that same value, so drawing anything
+    // else would be drawing a third opinion.
+    let razor = match &*drag.read() {
+        Drag::RazorCreate { pending, .. } => *pending,
+        _ => None,
+    };
+
     let ed = editor.read();
     let vp = ed.viewport;
     let cc_editing = ed.cc_edit;
@@ -218,6 +254,7 @@ pub fn Canvas(
         vp.h + canvas::RULER_H,
         &paint::Overlay {
             marquee,
+            razor,
             draft: draft.read().as_ref().map(|d| canvas::draft_view(&ed, d)),
             // Prototype (#161): read deep in the drawing and nothing
             // between here and there cares, so it arrives by context.
@@ -255,12 +292,34 @@ pub fn Canvas(
             "data-testid": "canvas-cell",
             tabindex: "0",
             onkeydown: move |e: KeyboardEvent| {
+                // A held key is one press.
+                //
+                // The OS repeats `keydown` while a key is down, and the
+                // sequence resolver counts presses — so holding `z` typed
+                // `z z z…` and fired the `z z` binding without the user
+                // ever pressing it twice. Every held-key behaviour here
+                // depends on this: the spring-loaded zoom tool is a
+                // *hold*, and a hold that re-enters the keymap forty
+                // times a second is not one.
+                if e.is_auto_repeating() {
+                    e.prevent_default();
+                    return;
+                }
                 let key = e.key().to_string();
                 let m = mods_of(e.modifiers());
                 // Pressing a modifier is itself a keydown, so this is
                 // what makes the painted cursor answer to Alt and Ctrl
                 // with the pointer sitting still.
                 hover_mods.set(m);
+                // The toolbar lights up the tool the modifiers would
+                // use, so it has to hear about them. Written only when
+                // it actually changes: `Signal::write` notifies whether
+                // or not the value differs, and a keydown that renotified
+                // every subscriber would repaint the whole surface per
+                // key.
+                if editor.read().held_mods != m {
+                    editor.write().held_mods = m;
+                }
 
                 // The shared keymap gets first refusal, so which-key
                 // sequences resolve before any hardcoded binding. `z`
@@ -281,6 +340,13 @@ pub fn Canvas(
                         _ => None,
                     };
                     if let Some(action) = action {
+                        // Velocity commands first: they own a live shape
+                        // that outlives the keypress, which a function
+                        // taking only `&mut Editor` cannot hold.
+                        if let Some(hit) = velocity_action(&mut editor, &mut ramp, action) {
+                            ran |= hit;
+                            continue;
+                        }
                         let (region, anchor) = memagic_at(&editor.read(), hover());
                         ran |= keys::dispatch(&mut editor.write(), action, region, anchor);
                     }
@@ -288,6 +354,25 @@ pub fn Canvas(
                 // A half-typed sequence owns the key too: `z` on its way
                 // to `z i` must not also fire the tool shortcut.
                 which_key.set(keys::continuations());
+
+                // Arm the spring-loaded tool the instant its prefix goes
+                // down, not at the first drag. The toolbar reads
+                // `ed.tool`, so arming late left the button dark while
+                // the surface was already in zoom mode.
+                //
+                // Tap and hold stay one idea: this only arms, and the
+                // key-up decides. A tap arms and disarms without you
+                // seeing it, and leaves the tree open for `z i`.
+                if let Some(armed) = keys::held_prefix().as_deref().and_then(spring_tool)
+                    && spring_from.read().is_none()
+                {
+                    let previous = editor.read().tool;
+                    if previous != armed {
+                        spring_from.set(Some(previous));
+                        editor.write().tool = armed;
+                    }
+                }
+
                 if ran || keys::is_pending() {
                     e.prevent_default();
                     return;
@@ -409,6 +494,19 @@ pub fn Canvas(
                     e.prevent_default();
                     return;
                 }
+                // Abandon a sweep in progress rather than clearing the
+                // areas behind it.
+                //
+                // Escape reads as "not that" — and while you are still
+                // dragging, the thing you mean is the rectangle under
+                // the pointer, not the set you drew earlier. Dropping
+                // the drag leaves nothing committed, because the area
+                // only lands on release.
+                if key == "Escape" && matches!(&*drag.read(), Drag::RazorCreate { .. }) {
+                    drag.set(Drag::None);
+                    e.prevent_default();
+                    return;
+                }
                 if locked {
                     return;
                 }
@@ -418,12 +516,56 @@ pub fn Canvas(
                 }
             },
             onkeyup: move |e: KeyboardEvent| {
-                hover_mods.set(mods_of(e.modifiers()));
+                let m = mods_of(e.modifiers());
+                hover_mods.set(m);
+                // Releasing Ctrl has to put the razor highlight back as
+                // surely as pressing it lit one.
+                if editor.read().held_mods != m {
+                    editor.write().held_mods = m;
+                }
+                // The processor has to hear about the release, or it
+                // goes on believing the key is held and OS auto-repeat
+                // walks the sequence tree on its own. See `keys::release`.
+                // The processor owns sticky-prefix behaviour — holding `g`
+                // and tapping `q`, `w`, `e` in turn is `sticky_anchor`,
+                // which it maintains itself. All the surface has to do is
+                // report the release honestly and act on the answer:
+                // `true` means a sticky run that fired at least one
+                // action has ended, so the overlay should go. A bare
+                // hold-and-release returns `false` and the tree stays up,
+                // because you were reading it rather than using it.
+                if keys::release(&e.key().to_string(), mods_of(e.modifiers())) {
+                    which_key.set(Vec::new());
+                } else {
+                    which_key.set(keys::continuations());
+                }
                 // `R` is momentary: references drop back the instant it
                 // is released, so it can never be left on by accident.
                 match e.key().to_string().as_str() {
                     "r" => editor.write().refs_to_front = false,
                     "m" => editor.write().reference_to_front = false,
+                    // Releasing `z` always puts the tool back — it was
+                    // armed on the way down, so the spring is loaded
+                    // whether or not you did anything with it.
+                    //
+                    // What the release still has to decide is the
+                    // *tree*: a hold that got used is finished, and a
+                    // tap is only half a sequence. So a drag closes the
+                    // overlay and a bare tap leaves it open for `z i`.
+                    //
+                    // No timer decides which. The gesture does — which
+                    // is the point. Hold-versus-tap by timeout is where
+                    // this pattern usually goes wrong: it turns a slow
+                    // tap into a hold.
+                    key if spring_tool(key).is_some() => {
+                        if let Some(previous) = spring_from.take() {
+                            editor.write().tool = previous;
+                        }
+                        if spring_used.take() {
+                            which_key.set(Vec::new());
+                            keys::cancel();
+                        }
+                    }
                     _ => {}
                 }
             },
@@ -465,13 +607,12 @@ pub fn Canvas(
                 // A widget reports no intrinsic size, so without this it
                 // has none — and blitz-paint skips a widget whose box is
                 // zero, silently.
+                // `cursor: none` because `crate::cursor` paints the real
+                // one: CSS has no `[`, no `]`, no pencil and no razor,
+                // and Blitz supports no `cursor: url(…)` to supply them.
                 style: "position: absolute; left: 0; top: 0; display: block; \
                         width: {vp.w + canvas::GUTTER_W:.0}px; \
                         height: {vp.h + canvas::RULER_H:.0}px; \
-                        // The OS cursor is hidden because `crate::cursor`
-                        // paints the real one: CSS has no `[`, no `]`,
-                        // no pencil and no razor, and Blitz supports no
-                        // `cursor: url(…)` to supply them.
                         touch-action: none; user-select: none; cursor: none;",
                 onpointerdown: move |e: PointerEvent| {
                     let raw = e.data().element_coordinates();
@@ -497,11 +638,28 @@ pub fn Canvas(
                         }
                         Chrome::Roll => {}
                     }
-                    if locked {
-                        return;
-                    }
                     let (x, y) = local(&e);
                     let m = mods_of(e.modifiers());
+                    // A drag while the zoom prefix is held spends the
+                    // hold. The tool is already armed (see the keydown),
+                    // so all this does is tell the release that the
+                    // sequence is over and must not wait for `z i`.
+                    if keys::zoom_prefix_held() && spring_from.read().is_some() {
+                        spring_used.set(true);
+                    }
+                    // The lock stops you *editing*, not looking.
+                    //
+                    // `cursor_at` has always said so — it forbids a
+                    // gesture only when `action.is_edit()` — but the
+                    // handler refused everything, so the pointer drew a
+                    // hand over a surface that would not pan. Navigation
+                    // goes through first, and the lock applies to what is
+                    // left.
+                    let navigating = matches!(e.trigger_button(), Some(MouseButton::Auxiliary))
+                        || editor.read().tool.is_view();
+                    if locked && !navigating {
+                        return;
+                    }
                     let button = match e.trigger_button() {
                         Some(MouseButton::Secondary) => 2,
                         // Middle is a real gesture (hand-scroll pan);
@@ -526,8 +684,8 @@ pub fn Canvas(
                     // A right-click resolves to a menu request rather
                     // than a drag. Opening it here — not in `interaction`
                     // — keeps the core pointer path free of UI state.
-                    if let Drag::ContextMenu { x, y, under, t } = d {
-                        menu_state.write().show(x, y, under, t);
+                    if let Drag::ContextMenu { x, y, under, t, row } = d {
+                        menu_state.write().show(x, y, under, t, row);
                         return;
                     }
                     menu_state.write().close();
@@ -537,7 +695,11 @@ pub fn Canvas(
                     // Recorded before the drag guard: the anchor has to
                     // follow the pointer whether or not a drag is live.
                     hover.set(Some(local(&e)));
-                    hover_mods.set(mods_of(e.modifiers()));
+                    let m = mods_of(e.modifiers());
+                    hover_mods.set(m);
+                    if editor.read().held_mods != m {
+                        editor.write().held_mods = m;
+                    }
                     if !drag.read().is_active() {
                         return;
                     }
@@ -578,14 +740,39 @@ pub fn Canvas(
                     hover.set(None);
                 },
                 onwheel: move |e: WheelEvent| {
-                    let delta = e.delta().strip_units();
+                    // Normalised to notches: a touchpad reports pixels and a
+                    // mouse reports lines, and the gain constants
+                    // downstream are tuned for lines. See `scroll::notches`.
+                    let (dx, dy) = scroll::notches(&e.delta());
                     let m = mods_of(e.modifiers());
                     // Anchored on the last pointer position when there
                     // is one: a wheel event carries none of its own, and
                     // zooming about the middle of the view when the
                     // mouse is somewhere else is the wrong place.
+                    // A live ramp takes the wheel while `v` is held.
+                    //
+                    // This is the half of the gesture that makes a
+                    // preset usable: you get a shape, then you dial how
+                    // hard it leans. Gated on the hold rather than on
+                    // the ramp merely existing, so scrolling the view
+                    // after you have shaped something still scrolls the
+                    // view.
+                    if keys::held_prefix().as_deref() == Some("v") {
+                        // Taken out before it is used: a `write()` guard
+                        // held across the body would still be live at
+                        // `ramp.set`, which is the second borrow.
+                        let taken = ramp.write().take();
+                        if let Some(mut live) = taken {
+                            let moved = live.nudge(&mut editor.write(), dy);
+                            ramp.set(Some(live));
+                            if moved {
+                                e.prevent_default();
+                                return;
+                            }
+                        }
+                    }
                     let (x, y) = hover().unwrap_or((vp.w * 0.5, vp.h * 0.5));
-                    interaction::wheel(&mut editor.write(), x, y, delta.x, delta.y, m);
+                    interaction::wheel(&mut editor.write(), x, y, dx, dy, m);
                     e.prevent_default();
                 },
             }
@@ -657,43 +844,337 @@ pub fn Canvas(
                 }
             }
             // ── which-key ────────────────────────────────────────
-            // Shown while a key sequence is half-typed: what can follow,
-            // and what each one does. Bottom-left so it never covers the
-            // pointer, which is what the pending gesture is anchored on.
-            if !which_key().is_empty() {
+            //
+            // A half-typed sequence lists what can follow it. A live
+            // razor lists its own verbs, for the same reason and in the
+            // same place: those are bare letters with no prefix to type,
+            // so nothing would ever have prompted you with them and the
+            // only way to learn them would have been to be told.
+            //
+            // The sequence wins when both could show — you are part-way
+            // through saying something specific, and answering a
+            // different question would be the wrong help.
+            if let Some(panel) = key_panel(&editor.read(), which_key()) {
+                KeyPanel { title: panel.0, rows: panel.1 }
+            }
+        }
+    }
+}
+
+/// A key/description list, bottom-right.
+///
+/// Shared by the which-key sequence overlay and the razor's verb list so
+/// the two cannot drift into looking like different features — they are
+/// the same promise, that the surface will tell you what it can do
+/// without you having to look it up.
+///
+/// **Bottom-right**, not bottom-left. The status bar's own readouts are
+/// on the right, so a panel on the left sat over the roll's low
+/// register; and the pointer, which is what a pending gesture is
+/// anchored on, is far likelier to be on the left half of a piano roll
+/// than the right, since that is where the material you just clicked is.
+#[component]
+fn KeyPanel(title: String, rows: Vec<keys::Continuation>) -> Element {
+    // Every branch resolved *before* the markup, so this component has
+    // exactly one shape. `rsx!` conditionals add and remove nodes, and a
+    // template whose node count depends on its props is what blitz-dom
+    // walks a stale path through — the "invalid key" panic out of
+    // `node_at_path`. A heading that is sometimes absent and a label
+    // that is sometimes prefixed were two such conditionals; both are
+    // now styles and strings, which change without moving anything.
+    let heading = if title.is_empty() {
+        "display: none;".to_string()
+    } else {
+        format!(
+            "display: block; padding: 2px 10px 5px; margin-bottom: 3px; \
+             border-bottom: 1px solid {}; color: {}; \
+             font-weight: 600; letter-spacing: 0.4px;",
+            theme::PANEL_BORDER,
+            theme::TEXT_DIM,
+        )
+    };
+    let rows: Vec<(String, String, &'static str)> = rows
+        .into_iter()
+        .map(|c| {
+            let label = if c.is_group {
+                format!("+{}", c.label)
+            } else {
+                c.label
+            };
+            let colour = if c.is_group {
+                theme::TEXT_DIM
+            } else {
+                theme::TEXT
+            };
+            (c.key, label, colour)
+        })
+        .collect();
+
+    rsx! {
+        div {
+            "data-testid": "which-key",
+            style: format!(
+                "position: absolute; right: 10px; bottom: 10px; z-index: 40; \
+                 min-width: 220px; max-height: 60%; overflow-y: auto; \
+                 padding: 6px 0; border-radius: 6px; \
+                 border: 1px solid {}; background: {}; color: {}; \
+                 font-size: 11px; box-shadow: 0 6px 24px rgba(0,0,0,0.45);",
+                theme::PANEL_BORDER, theme::SURFACE_INSET, theme::TEXT,
+            ),
+            div { style: heading, "{title}" }
+            for (key, label, colour) in rows.into_iter() {
                 div {
-                    "data-testid": "which-key",
-                    style: format!(
-                        "position: absolute; left: 10px; bottom: 10px; z-index: 40; \
-                         min-width: 220px; max-height: 60%; overflow-y: auto; \
-                         padding: 6px 0; border-radius: 6px; \
-                         border: 1px solid {}; background: {}; color: {}; \
-                         font-size: 11px; box-shadow: 0 6px 24px rgba(0,0,0,0.45);",
-                        theme::PANEL_BORDER, theme::SURFACE_INSET, theme::TEXT,
-                    ),
-                    for c in which_key().into_iter() {
-                        div {
-                            key: "{c.key}",
-                            style: "display: flex; align-items: baseline; gap: 8px; \
-                                    padding: 2px 10px;",
-                            span {
-                                style: format!(
-                                    "min-width: 34px; font-weight: 600; color: {};",
-                                    theme::ACCENT,
-                                ),
-                                "{c.key}"
-                            }
-                            span {
-                                style: format!(
-                                    "color: {};",
-                                    if c.is_group { theme::TEXT_DIM } else { theme::TEXT },
-                                ),
-                                if c.is_group { "+{c.label}" } else { "{c.label}" }
-                            }
-                        }
+                    key: "{key}",
+                    style: "display: flex; align-items: baseline; gap: 8px; \
+                            padding: 2px 10px;",
+                    span {
+                        style: format!(
+                            "min-width: 34px; font-weight: 600; color: {};",
+                            theme::ACCENT,
+                        ),
+                        "{key}"
                     }
+                    span { style: format!("color: {colour};"), "{label}" }
                 }
             }
         }
     }
+}
+
+/// What the razor help offers right now, which depends on the tool.
+///
+/// The panel is up whenever a razor exists — an area on screen is a
+/// standing instruction, and the keys that act on it should be in front
+/// of you the whole time it is, not only once you have found the tool.
+///
+/// But *which* keys work depends on what is armed, and a panel that
+/// listed keys which do nothing would be worse than no panel. With the
+/// razor armed, the verbs are bare letters. From any other tool those
+/// letters are that tool's shortcuts, so what actually works is the `k`
+/// prefix — and that is what gets listed, read from the keymap rather
+/// than from a copy of it, so a rebound prefix relabels itself.
+///
+/// The side effect is the useful one: draw a razor from Select and the
+/// surface teaches you `k`, which works everywhere and which you would
+/// otherwise have had to go looking for.
+fn razor_help_rows(ed: &Editor) -> Vec<keys::Continuation> {
+    if interaction::razor_mode_live(ed) {
+        return interaction::RAZOR_KEYS
+            .iter()
+            .map(|(key, label)| keys::Continuation {
+                key: (*key).to_string(),
+                label: (*label).to_string(),
+                is_group: false,
+            })
+            .collect();
+    }
+    let mut rows: Vec<keys::Continuation> = keys::continuations_after("a")
+        .into_iter()
+        .map(|c| keys::Continuation {
+            key: format!("a {}", c.key),
+            ..c
+        })
+        .collect();
+    // The way out of the long spelling, since the panel is the only
+    // place that would ever mention it.
+    rows.push(keys::Continuation {
+        key: "x".to_string(),
+        label: "Razor tool — then single keys".to_string(),
+        is_group: false,
+    });
+    rows
+}
+
+fn razor_help_title(ed: &Editor) -> String {
+    if interaction::razor_mode_live(ed) {
+        "Razor".to_string()
+    } else {
+        "Razor · a".to_string()
+    }
+}
+
+/// The tool a held which-key prefix springs into, if it has one.
+///
+/// Two keys are both a prefix and a tool. Tap `z` and it waits for a
+/// zoom target; hold it and drag, and it *is* the zoom tool for the
+/// length of the hold. `v` is the same shape for velocity: tap for the
+/// tree, hold and drag to set velocity by hand — which is the gesture
+/// REAPER spells `Alt`+drag, and which is better on a prefix because the
+/// one key then covers both "shape this by hand" and every velocity
+/// command there is.
+///
+/// A table rather than a field on `Tool`, because it is a fact about the
+/// *keymap* — which key opens which tree — and the keymap is
+/// configuration. A tool does not know what letter reaches it.
+fn spring_tool(key: &str) -> Option<expression_editor_core::Tool> {
+    use expression_editor_core::Tool;
+    match key {
+        "z" => Some(Tool::Zoom),
+        "v" => Some(Tool::Velocity),
+        _ => None,
+    }
+}
+
+/// Run a `velocity.*` action, if `action` is one.
+///
+/// `None` means "not mine", so the caller falls through to the ordinary
+/// dispatch. These are handled here rather than in [`keys::dispatch`]
+/// because a ramp *outlives its keypress* — it stays live so the wheel
+/// can go on adjusting it — and a function handed only `&mut Editor` has
+/// nowhere to keep one.
+///
+/// Pressing a ramp command while that same ramp is already live inverts
+/// it rather than opening a second one. Which direction you wanted is
+/// something you find out by looking at it, and re-pressing is a faster
+/// answer than undo-and-pick-the-other-command. Pressing a *different*
+/// one replaces it, from the same baseline, so trying four shapes in a
+/// row costs one undo rather than four.
+fn velocity_action(
+    editor: &mut Signal<Editor>,
+    ramp: &mut Signal<Option<crate::velocity_ramp::VelocityRamp>>,
+    action: &str,
+) -> Option<bool> {
+    use expression_editor_tools::velocity::CurvePreset;
+
+    use expression_editor_core::actions::velocity as v;
+
+    let preset = match action {
+        a if a == v::RAMP_UP.id => Some(CurvePreset::Rise),
+        a if a == v::RAMP_DOWN.id => Some(CurvePreset::Fall),
+        a if a == v::RAMP_SMOOTH.id => Some(CurvePreset::RiseSmooth),
+        _ => None,
+    };
+
+    if let Some(preset) = preset {
+        // Already showing this shape? Turn it over.
+        let same = ramp.read().as_ref().map(|r| r.preset()) == Some(preset);
+        // Taken out before use: a `write()` guard held across the body
+        // would still be live at `ramp.set`, which is a second borrow.
+        let taken = ramp.write().take();
+        if same && let Some(mut live) = taken {
+            live.invert(&mut editor.write());
+            ramp.set(Some(live));
+            return Some(true);
+        } else if let Some(live) = taken {
+            // A different shape replaces the old one — but from the
+            // *original* velocities, so the shapes do not compound.
+            live.revert(&mut editor.write());
+        }
+        let notes = editor.read().selection.notes.clone();
+        let opened = crate::velocity_ramp::VelocityRamp::open(&mut editor.write(), preset, &notes);
+        let ok = opened.is_some();
+        ramp.set(opened);
+        return Some(ok);
+    }
+
+    // The rest act once and leave nothing live to adjust, so they close
+    // any open ramp first — committing it, not reverting it. You asked
+    // for the ramp; the next command is the one after it.
+    let closing = [
+        v::ACCENT.id,
+        v::COMPRESS.id,
+        v::EXPAND.id,
+        v::HUMANISE.id,
+        v::FLATTEN.id,
+        v::PANEL.id,
+    ]
+    .contains(&action);
+    if !closing {
+        return None;
+    }
+    ramp.set(None);
+
+    if action == v::PANEL.id {
+        // Chrome, not an edit. `try_consume_context` because a host that
+        // mounts the canvas without the editor's own chrome — the
+        // screenshot harness does — has no window to toggle, and that is
+        // a supported configuration rather than a missing one.
+        if let Some(panel) = try_consume_context::<crate::velocity_sink::PanelOpen>() {
+            let mut open = panel.0;
+            let now = !open();
+            open.set(now);
+            return Some(true);
+        }
+        return Some(false);
+    }
+
+    let notes = editor.read().selection.notes.clone();
+    let mut ed = editor.write();
+    Some(match action {
+        a if a == v::ACCENT.id => velocity_ramp::accent(&mut ed, &notes),
+        a if a == v::COMPRESS.id => velocity_ramp::dynamics(&mut ed, &notes, -0.35),
+        a if a == v::EXPAND.id => velocity_ramp::dynamics(&mut ed, &notes, 0.35),
+        a if a == v::HUMANISE.id => velocity_ramp::humanise(&mut ed, &notes),
+        a if a == v::FLATTEN.id => velocity_ramp::flatten(&mut ed, &notes),
+        _ => false,
+    })
+}
+
+/// Put the real chord names on the chord tree's degree rows.
+///
+/// The keymap can only say "fire the chord on this degree", because it
+/// is a static file and the answer depends on the key, the scale, the
+/// depth and the inversion. Which makes the generic label almost
+/// useless: the entire point of choosing by degree is that you are
+/// thinking in `I` and `vi`, and a panel that will not tell you the
+/// third degree of F Dorian is a panel you have to do theory to use.
+///
+/// Rewritten here rather than in `keys::label_for` because that has no
+/// editor to ask — it maps an action id to a string and nothing else.
+fn name_chord_rows(ed: &Editor, rows: Vec<keys::Continuation>) -> Vec<keys::Continuation> {
+    rows.into_iter()
+        .map(|c| {
+            let Ok(degree) = c.key.parse::<usize>() else {
+                return c;
+            };
+            if !(1..=7).contains(&degree) {
+                return c;
+            }
+            let name = ed.chord_gun.chord_name(degree);
+            if name.is_empty() {
+                return c;
+            }
+            keys::Continuation { label: name, ..c }
+        })
+        .collect()
+}
+
+/// Name the chord tree after the scale it is currently firing from.
+fn chord_panel_title(ed: &Editor) -> String {
+    // Only while the chord prefix is the one being typed — every other
+    // sequence keeps the bare panel it has always had. Empty rather than
+    // `None`, because the heading is always *rendered*; see `KeyPanel`.
+    if keys::held_prefix().as_deref() != Some("c") {
+        return String::new();
+    }
+    let gun = &ed.chord_gun;
+    format!(
+        "{} · {} · inv {}",
+        gun.scale_name(),
+        gun.depth.name(),
+        gun.inversion,
+    )
+}
+
+/// What the key panel should be showing, if anything.
+///
+/// One decision in one place, so the panel is *one* mounted component
+/// rather than a choice between two. It used to be an `if`/`else if`
+/// with a `KeyPanel` in each arm, and switching arms swapped a titled
+/// panel for an untitled one — the same component with a structurally
+/// different body. That is what a template diff walks a stale path
+/// through, and what the "invalid key" panic out of blitz-dom's
+/// `node_at_path` is: a mutation aimed at a node the last render's
+/// shape had and this one does not.
+fn key_panel(
+    ed: &Editor,
+    which_key: Vec<keys::Continuation>,
+) -> Option<(String, Vec<keys::Continuation>)> {
+    if !which_key.is_empty() {
+        return Some((chord_panel_title(ed), name_chord_rows(ed, which_key)));
+    }
+    if !ed.razor.is_empty() {
+        return Some((razor_help_title(ed), razor_help_rows(ed)));
+    }
+    None
 }

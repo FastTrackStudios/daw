@@ -509,11 +509,12 @@ pub mod reaper_ui {
 // ── UI components (portable, vector-themeable) ─────────────────────────────
 //
 // Enabled via `features = ["ui"]`. Re-exports the `daw-ui` component library —
-// theming tokens, widgets, and the Reaper-style panels (`DawWorkspace`,
-// `TrackControlPanel`, `MixerControlPanel`, `ArrangeView`) plus the `TrackView`
-// view-model the panels bind to. Renderer-agnostic: drives equally under
+// theming tokens, widgets, and the native components family (`daw::ui::
+// components` — the traced vector TCP/arrange/mixer of PR #279's main
+// window; the WALTER `panels` family was deleted 2026-08-19, see
+// `daw_ui::panels`' tombstone). Renderer-agnostic: drives equally under
 // `dioxus-native` (Blitz/GPU) on desktop and dioxus-web in the browser. Apps
-// consume the panels through `daw::ui::panels` rather than depending on
+// consume the components through `daw::ui` rather than depending on
 // `daw-ui` directly.
 #[cfg(feature = "ui")]
 pub mod ui {

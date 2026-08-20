@@ -6,8 +6,6 @@ license.workspace = true
 description = "Universal input processing with trie-based key dispatch and modal editing"
 
 [dependencies]
-actions-proto = { workspace = true, optional = true }
-actions-keybindings = { workspace = true, optional = true }
 facet = { workspace = true, optional = true }
 tracing.workspace = true
 serde.workspace = true

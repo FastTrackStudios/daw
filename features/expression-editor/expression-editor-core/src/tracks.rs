@@ -126,11 +126,7 @@ impl Track {
     /// A track carrying the host's identity. This is the constructor the
     /// DAW adapter uses, so that persisted data keyed on a guid means
     /// the same track when the project is reopened.
-    pub fn with_guid(
-        guid: impl Into<String>,
-        name: impl Into<String>,
-        doc: ExpressionDoc,
-    ) -> Self {
+    pub fn with_guid(guid: impl Into<String>, name: impl Into<String>, doc: ExpressionDoc) -> Self {
         Self {
             guid: guid.into(),
             name: name.into(),
@@ -199,6 +195,18 @@ pub struct Lane {
     /// strikes, and for the same reason: once you have sized a lane by
     /// hand, switching modes must not silently undo it.
     default_weight: f32,
+    /// The role this lane plays in a folded group (`Kick`, `Snare`, …),
+    /// when it was made by a group fold rather than by hand or by the
+    /// name matcher. A role is a label and a draw rule, not an identity:
+    /// merge/split clear it, and nothing durable references it.
+    pub role: Option<crate::kit::LaneRole>,
+    /// Draw each member in its own sub-row of the lane rather than
+    /// summed/overlaid — the `Toms` lane, one row per tom.
+    pub split: bool,
+    /// Draw only the active member's waveform instead of the members'
+    /// sum — "let me see just this mic". A view flag, not an audio
+    /// solo: detection and every edit still treat the lane whole.
+    pub solo_mic: bool,
 }
 
 impl Lane {
@@ -208,6 +216,21 @@ impl Lane {
             tracks: vec![guid.into()],
             weight,
             default_weight: weight,
+            role: None,
+            split: false,
+            solo_mic: false,
+        }
+    }
+
+    /// A role lane over `tracks` (draw order), at `weight`.
+    pub fn role(role: crate::kit::LaneRole, tracks: Vec<String>, weight: f32) -> Self {
+        Self {
+            tracks,
+            weight,
+            default_weight: weight,
+            role: Some(role),
+            split: role.splits_members(),
+            solo_mic: false,
         }
     }
 
@@ -467,10 +490,7 @@ impl Workspace {
                 Some(i) => lanes[i].tracks.push(track.guid.clone()),
                 None => {
                     keys.push(key);
-                    lanes.push(Lane::single(
-                        track.guid.clone(),
-                        track.mode.stack_weight(),
-                    ));
+                    lanes.push(Lane::single(track.guid.clone(), track.mode.stack_weight()));
                 }
             }
         }
@@ -506,9 +526,9 @@ impl Workspace {
             .flat_map(|lane| lane.tracks.iter())
             .find(|g| {
                 *g != guid
-                    && self.track_by_guid(g).is_some_and(|t| {
-                        (t.folder.clone(), normalize_track_name(&t.name)) == key
-                    })
+                    && self
+                        .track_by_guid(g)
+                        .is_some_and(|t| (t.folder.clone(), normalize_track_name(&t.name)) == key)
             })
             .cloned();
 
@@ -575,6 +595,9 @@ impl Workspace {
         if let Some(lane) = self.layout.lane_mut(upper) {
             lane.tracks.extend(moved);
             lane.weight = weight;
+            // A hand-merged lane is no longer the role it was folded as.
+            lane.role = None;
+            lane.split = false;
         }
         self.layout.lanes.remove(lower);
         self.layout.mark_arranged();
@@ -953,6 +976,28 @@ impl Workspace {
             next.doc.clone(),
             core::mem::replace(&mut next.history, History::new(HISTORY_LIMIT)),
         ))
+    }
+
+    /// Replace a parked track's document with a fresh analysis.
+    ///
+    /// For hosts that re-read audio after an edit landed on the daw —
+    /// the drawing must follow the writes or the lane shows where the
+    /// hits *were*. History is reset: the old undo steps describe a
+    /// document that no longer exists underneath them. Refuses the
+    /// active slot — that document lives on the editor, and writing the
+    /// stale copy here would be exactly what [`Workspace::doc_of`]
+    /// exists to prevent; callers go through `Editor::reload_track_doc`.
+    pub fn reload_doc(&mut self, guid: &str, doc: ExpressionDoc) -> bool {
+        let Some(i) = self.index_of_guid(guid) else {
+            return false;
+        };
+        if i == self.active {
+            return false;
+        }
+        let t = &mut self.tracks[i];
+        t.doc = doc;
+        t.history = History::new(HISTORY_LIMIT);
+        true
     }
 
     /// Rename without disturbing anything else.

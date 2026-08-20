@@ -99,27 +99,17 @@ fn main() {
     );
 }
 
-
 // ── the runner's root component ─────────────────────────────────────
 
-
-/// Height of the chooser strip. Fixed, so the editor below it gets a
-/// stable viewport — the canvas fits its content to the space it is
-/// given, and a bar that changed height would re-fit on every load.
-const BAR: f64 = 34.0;
-
-/// Height of the status line under the chooser.
-const STATUS: f64 = 18.0;
-
-
-/// Hand the editor the room left under the chooser and status line.
+/// Hand the editor the whole window.
 ///
-/// The runner subtracts only its *own* chrome. What the editor draws
-/// around the roll is the editor's business, and `sizing::Chrome`
-/// accounts for it — a host that tried to subtract the toolbar too would
-/// be the second source of truth all over again.
+/// The runner has no chrome of its own left to subtract: its chooser
+/// lives inside the editor's panel rather than in a bar above it. What
+/// the editor draws around the roll is the editor's business, and
+/// `sizing::Chrome` accounts for it — a host that tried to subtract the
+/// toolbar too would be the second source of truth all over again.
 fn report_space(window_w: f64, window_h: f64) {
-    expression_editor_ui::available_space(window_w, (window_h - BAR - STATUS).max(1.0));
+    expression_editor_ui::available_space(window_w, window_h.max(1.0));
 }
 
 /// The runner's window: a chooser, and the editor under it.
@@ -129,7 +119,10 @@ pub fn DevApp() -> Element {
     // a file argument still opens on that file.
     let editor = use_signal(|| {
         expression_editor_standalone::app::take_staged().unwrap_or_else(|| {
-            expression_editor_ui::demo::editor(expression_editor_ui::demo::Scene::Phrase, viewport())
+            expression_editor_ui::demo::editor(
+                expression_editor_ui::demo::Scene::Phrase,
+                viewport(),
+            )
         })
     });
 
@@ -139,13 +132,24 @@ pub fn DevApp() -> Element {
     // would strand any write-back. Replaced, not accumulated.
     let mut backend = use_signal(|| None::<Standalone>);
 
+    // Jobs first, then the fixtures, then whatever is on disk.
+    //
+    // The scenes are named after what they *demonstrate* — "Q zones",
+    // "Channel conflict", "Guitar Pro import" — which is right for the
+    // screenshot suite and wrong for a person: none of them is a thing
+    // anyone sets out to do. The workflows are that list, and they come
+    // first because they are the answer to "what am I opening this for".
+    // The fixtures stay because they are the coverage.
     let entries = use_signal(|| {
-        let mut all = library::scenes();
+        let mut all = library::workflows();
+        all.extend(library::scenes());
         all.extend(library::scan(&library::root()));
         all
     });
     let mut status = use_signal(|| String::from("ready"));
     let mut current = use_signal(|| String::new());
+    // Whether the chooser's list is showing.
+    let mut picking = use_signal(|| false);
 
     // The editor measures its canvas when told to, because
     // dioxus-native delivers no element resize event. winit does report
@@ -199,6 +203,108 @@ pub fn DevApp() -> Element {
         }
     };
 
+    // What to open, and what just happened. Built here and handed to the
+    // editor's panel slot below.
+    //
+    // A custom popup rather than a `<select>`: Blitz treats `select` as a
+    // focusable form control but implements no dropdown for it, so a
+    // native one renders as a dead box.
+    let chooser = rsx! {
+            div {
+                style: format!(
+                    "display: flex; flex-direction: column; align-items: stretch; \
+                     gap: 6px; padding: 8px 10px; position: relative; \
+                     border-bottom: 1px solid {};",
+                    theme::PANEL_BORDER,
+                ),
+
+                button {
+                    "data-testid": "chooser",
+                    style: format!(
+                        "flex: none; height: 20px; width: 100%; padding: 0 8px; \
+                         display: flex; align-items: center; justify-content: space-between; \
+                         gap: 8px; font-size: 10px; border-radius: 4px; cursor: pointer; \
+                         border: 1px solid {}; background: {}; color: {};",
+                        theme::PANEL_BORDER, theme::CONTROL, theme::TEXT,
+                    ),
+                    onclick: move |_| {
+                        let now = picking();
+                        picking.set(!now);
+                    },
+                    span {
+                        if current().is_empty() { "Open…" } else { "{current()}" }
+                    }
+                    span { style: "color: {theme::TEXT_DIM};", "▾" }
+                }
+
+                // The runner's stdout is not visible under `dx serve`, so
+                // the line `--example editor` prints goes here — under
+                // the chooser in the panel, where it costs the roll
+                // nothing.
+                span {
+                    "data-testid": "status",
+                    style: "font-size: 9px; color: {theme::TEXT_DIM}; \
+                            overflow: hidden; word-break: break-word;",
+                    "{status()}"
+                }
+
+                if picking() {
+                    div {
+                        "data-testid": "chooser-list",
+                        style: format!(
+                            "position: absolute; right: 10px; left: 10px; top: 34px; \
+                             z-index: 50; max-height: 70vh; overflow-y: auto; \
+                             padding: 4px 0; border-radius: 6px; \
+                             border: 1px solid {}; background: {}; \
+                             box-shadow: 0 8px 28px rgba(0,0,0,0.5);",
+                            theme::PANEL_BORDER, theme::PANEL,
+                        ),
+                        for (i, entry) in entries().into_iter().enumerate() {
+                        div {
+                            // Keyed by *kind and* arg. The args are not
+                            // unique across kinds — `drums` and `guitar`
+                            // are both a job and a fixture — and a
+                            // duplicate key is not a warning here, it is
+                            // `invalid key` and a dead window.
+                            key: "{entry.kind.label()}:{entry.arg}",
+                            // A caption whenever the kind changes, so the
+                            // jobs read as a group rather than as the
+                            // first ten of a long list.
+                            if i == 0 || entries()[i - 1].kind != entry.kind {
+                                div {
+                                    style: "font-size: 9px; letter-spacing: 0.08em; \
+                                            text-transform: uppercase; \
+                                            color: {theme::TEXT_DIM}; padding: 6px 10px 2px;",
+                                    "{entry.kind.label()}"
+                                }
+                            }
+                            button {
+                                "data-testid": "open-{entry.arg}",
+                                title: "{entry.arg}",
+                                style: format!(
+                                    "display: block; width: 100%; text-align: left; \
+                                     border: none; padding: 4px 10px; font-size: 11px; \
+                                     cursor: pointer; background: {}; color: {};",
+                                    if current() == entry.arg { theme::CONTROL_ACTIVE } else { "transparent" },
+                                    theme::TEXT,
+                                ),
+                                onclick: {
+                                    let entry = entry.clone();
+                                    move |_| {
+                                        open(entry.clone());
+                                        picking.set(false);
+                                    }
+                                },
+                                "{entry.label}"
+                            }
+                        }
+                        }
+                    }
+                }
+            }
+
+    };
+
     rsx! {
         style {
             "html, body {{ width: 100%; height: 100%; margin: 0; padding: 0; \
@@ -207,55 +313,14 @@ pub fn DevApp() -> Element {
         div {
             style: "width: 100vw; height: 100vh; display: flex; flex-direction: column;",
 
-            // ── the chooser ──────────────────────────────────────────
-            div {
-                style: format!(
-                    "height: {BAR}px; flex: none; display: flex; align-items: center; \
-                     gap: 6px; padding: 0 8px; overflow-x: auto; \
-                     background: {}; border-bottom: 1px solid {};",
-                    theme::SURFACE_INSET,
-                    theme::PANEL_BORDER,
-                ),
-                for entry in entries().into_iter() {
-                    button {
-                        key: "{entry.arg}",
-                        "data-testid": "open-{entry.arg}",
-                        title: "{entry.arg}",
-                        style: format!(
-                            "flex: none; height: 22px; padding: 0 8px; font-size: 10px; \
-                             border-radius: 4px; cursor: pointer; white-space: nowrap; \
-                             border: 1px solid {}; background: {}; color: {};",
-                            if current() == entry.arg { theme::ACCENT } else { theme::PANEL_BORDER },
-                            if current() == entry.arg { theme::CONTROL_ACTIVE } else { theme::SURFACE_INSET },
-                            theme::TEXT,
-                        ),
-                        onclick: {
-                            let entry = entry.clone();
-                            move |_| open(entry.clone())
-                        },
-                        "{entry.kind.label()} · {entry.label}"
-                    }
-                }
-            }
-
-            // ── what just happened ───────────────────────────────────
-            // The runner's stdout is not visible under `dx serve`, so
-            // the line the `--example editor` path prints has to be on
-            // screen instead.
-            div {
-                "data-testid": "status",
-                style: format!(
-                    "height: 18px; flex: none; padding: 0 10px; font-size: 10px; \
-                     line-height: 18px; color: {}; background: {};",
-                    theme::TEXT_DIM,
-                    theme::SURFACE_INSET,
-                ),
-                "{status()}"
-            }
-
             div {
                 style: "flex: 1; min-height: 0;",
-                ExpressionEditor { editor }
+                // The chooser goes *inside* the editor's panel. A bar of
+                // its own above the roll is vertical space, which is the
+                // scarcest thing on this surface; the panel down the
+                // right has room to spare and is already where
+                // session-scoped choices live.
+                ExpressionEditor { editor, panel_top: chooser }
             }
         }
     }
@@ -268,8 +333,5 @@ pub fn DevApp() -> Element {
 /// wide the window had been dragged — the roll snapped back to its
 /// opening aspect on each load.
 fn viewport() -> Viewport {
-    expression_editor_ui::current_viewport(expression_editor_ui::viewport_in(
-        1200.0,
-        760.0 - BAR - STATUS,
-    ))
+    expression_editor_ui::current_viewport(expression_editor_ui::viewport_in(1200.0, 760.0))
 }

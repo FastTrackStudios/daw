@@ -107,6 +107,13 @@ ui = ["dep:daw-ui", "daw-ui/web"]
 # daw-theme-reaper parser via daw-ui).
 ui-reaper-theme = ["ui", "daw-ui/reaper-theme"]
 standalone-rpp = ["standalone-audio", "daw-standalone/rpp-loader"]
+# Save an opened project to a NEW .rpp beside its original
+# (`daw::standalone::save`) — the write-back experiment; never in place.
+standalone-save = ["standalone-rpp", "daw-standalone/rpp-save"]
+# In-process client over the standalone backend
+# (`daw::standalone::bootstrap::build_in_process_daw`) — what a window
+# that owns a Standalone uses to feed daw-control-driven UI.
+standalone-bootstrap = ["standalone-audio", "daw-standalone/bootstrap"]
 # Plugin-host backends, exposed via `daw::plugin` (CLAP / VST3). Each pulls in
 # the matching daw-standalone backend feature; consumers (signal, etc.) enable
 # only the formats they need.

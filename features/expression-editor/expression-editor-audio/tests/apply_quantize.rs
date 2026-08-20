@@ -325,3 +325,30 @@ fn a_plan_with_nothing_in_it_leaves_the_items_alone() {
     assert_eq!(applied.pieces, 0);
     assert_eq!(pieces_on(&daw, &items[0]), before);
 }
+
+// r[verify drums.quantize.apply]
+#[test]
+fn warp_writes_one_marker_map_to_every_mic() {
+    use daw::service::StretchMarkers;
+    use expression_editor_audio::apply_quantize::apply_warp;
+
+    let daw = project();
+    let items = mics(&daw, &["Kick In", "Kick Out", "OH L"], 0.0);
+    let p = late_plan();
+    let frames = (TAKE_LEN * 100.0) as usize;
+    let alignment = p.alignment(frames, 100.0).expect("alignment");
+
+    let applied =
+        apply_warp(&daw, ProjectContext::Current, &items, &alignment).expect("warp applied");
+    assert_eq!(applied.items, 3);
+    assert!(applied.pieces > 0, "markers were written");
+
+    let markers_of = |item: &ItemRef| {
+        daw.get_stretch_markers(ProjectContext::Current, item.clone(), TakeRef::Active)
+    };
+    let first = markers_of(&items[0]);
+    assert!(!first.is_empty());
+    for item in &items[1..] {
+        assert_eq!(markers_of(item), first, "identical maps on every mic");
+    }
+}

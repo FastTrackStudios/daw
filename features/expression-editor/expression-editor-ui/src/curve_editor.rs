@@ -45,7 +45,10 @@ pub fn CurveEditor(
     // the panel scrolls, so a mount-time rect goes stale almost at once.
     let mut mounted: Signal<Option<std::rc::Rc<MountedData>>> = use_signal(|| None);
 
-    let points: Vec<Point> = curve.as_ref().map(|c| c.points().to_vec()).unwrap_or_default();
+    let points: Vec<Point> = curve
+        .as_ref()
+        .map(|c| c.points().to_vec())
+        .unwrap_or_default();
 
     // A drag maps pointer position straight to (x, y) in curve space.
     // Both axes move: pinning x would make the interior handles unable to
@@ -74,8 +77,7 @@ pub fn CurveEditor(
             Some(el) => el.get_client_rect().await.ok(),
             None => None,
         };
-        if let Some(r) = r
-        {
+        if let Some(r) = r {
             rect.set((r.origin.x, r.origin.y, r.size.width, r.size.height));
         }
     };

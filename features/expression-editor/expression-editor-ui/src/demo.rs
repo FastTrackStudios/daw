@@ -5,7 +5,7 @@
 //! PNG harness show *the same thing*. A screenshot that drifted from
 //! what the app actually launches would be worse than no screenshot.
 
-use expression_editor_core::doc::{ExpressionDoc, Dimension, Marker, Note, NoteId, TimeBase};
+use expression_editor_core::doc::{Dimension, ExpressionDoc, Marker, Note, NoteId, TimeBase};
 use expression_editor_core::{Editor, Viewport};
 
 pub const PPQ: f64 = 960.0;
@@ -421,17 +421,10 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
         Scene::Flams => {
             use expression_editor_core::rows::{DrumMap, RowSpace};
             let map = DrumMap::fts();
-            let row = |name: &str| {
-                map.lanes.iter().position(|l| l.name == name).unwrap_or(0) as i32
-            };
+            let row =
+                |name: &str| map.lanes.iter().position(|l| l.name == name).unwrap_or(0) as i32;
             let mut id = 1u64;
-            fn hit(
-                doc: &mut ExpressionDoc,
-                id: &mut u64,
-                r: i32,
-                beat: f64,
-                vel: f64,
-            ) -> NoteId {
+            fn hit(doc: &mut ExpressionDoc, id: &mut u64, r: i32, beat: f64, vel: f64) -> NoteId {
                 let t = PPQ * beat;
                 let mut n = Note::new(NoteId(*id), t, t + PPQ * 0.1, r);
                 n.velocity = vel;
@@ -444,7 +437,13 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
             for bar in 0..2 {
                 let b = bar as f64 * 4.0;
                 for e in 0..8 {
-                    hit(&mut doc, &mut id, row("H-Clsd Tip"), b + e as f64 * 0.5, 0.5);
+                    hit(
+                        &mut doc,
+                        &mut id,
+                        row("H-Clsd Tip"),
+                        b + e as f64 * 0.5,
+                        0.5,
+                    );
                 }
                 hit(&mut doc, &mut id, row("K"), b, 0.95);
                 hit(&mut doc, &mut id, row("K"), b + 2.5, 0.9);
@@ -696,9 +695,10 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
             // Both hands of the snare showing, since that is what a
             // flam needs you to see.
             if let expression_editor_core::RowSpace::Drums(m) = ed.row_space.clone()
-                && let Some(r) = m.lanes.iter().position(|l| l.name == "T1 R") {
-                    ed.toggle_piece_split(r);
-                }
+                && let Some(r) = m.lanes.iter().position(|l| l.name == "T1 R")
+            {
+                ed.toggle_piece_split(r);
+            }
             // A flammed tom, so the Hand and Flam controls have
             // something to act on.
             ed.selection.set_single(NoteId(13));

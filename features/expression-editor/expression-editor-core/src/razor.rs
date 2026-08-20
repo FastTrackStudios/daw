@@ -13,7 +13,20 @@
 //! usable for comping and for rhythmic rearrangement, and it is why the
 //! area — not the note — is the unit of operation.
 
-use crate::doc::{ExpressionDoc, Dimension, Note, NoteId};
+use crate::doc::{Dimension, ExpressionDoc, Note, NoteId};
+
+/// Which axis a razor drag is locked to.
+///
+/// MRE's `H` and `L`. One enum rather than two booleans because they are
+/// mutually exclusive there and two booleans would have a fourth state
+/// that means nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RazorAxis {
+    /// Time only — the rows the area covers cannot change.
+    Horizontal,
+    /// Rows only — the span of time cannot change.
+    Vertical,
+}
 
 /// A rectangular selection over time and rows.
 ///
@@ -145,12 +158,16 @@ pub fn delete_contents(doc: &mut ExpressionDoc, area: RazorArea) -> bool {
 /// `copy` leaves the originals behind. Either way the destination is
 /// cleared first, so dropping an area onto occupied ground replaces
 /// rather than piling up — the behaviour that makes comping work.
+///
+/// `insert` turns that off: both survive, and the razor becomes a way of
+/// layering rather than of choosing. MRE's `I`.
 pub fn move_contents(
     doc: &mut ExpressionDoc,
     area: RazorArea,
     dt: f64,
     drows: i32,
     copy: bool,
+    insert: bool,
 ) -> bool {
     let ids = carve(doc, area);
     if ids.is_empty() {
@@ -160,7 +177,9 @@ pub fn move_contents(
     if copy {
         // Clear the destination before duplicating, or the copy lands
         // on top of whatever was already there.
-        delete_contents(doc, dest);
+        if !insert {
+            delete_contents(doc, dest);
+        }
         crate::edit::Edit::CopyNotes {
             notes: ids,
             time_delta: dt,
@@ -170,10 +189,11 @@ pub fn move_contents(
     } else {
         // Non-overlapping destination: clear it, then move. Overlapping
         // (a nudge) must not clear the source out from under itself.
-        if dest.t0 >= area.t1
-            || dest.t1 <= area.t0
-            || dest.row_lo > area.row_hi
-            || dest.row_hi < area.row_lo
+        if !insert
+            && (dest.t0 >= area.t1
+                || dest.t1 <= area.t0
+                || dest.row_lo > area.row_hi
+                || dest.row_hi < area.row_lo)
         {
             delete_contents(doc, dest);
         }
@@ -250,6 +270,81 @@ pub fn reverse_contents(doc: &mut ExpressionDoc, area: RazorArea) -> bool {
             delta: new_start - n.start,
         }
         .apply(doc);
+    }
+    ok
+}
+
+/// Reverse the *pitches* in the area, leaving the rhythm alone.
+///
+/// MRE calls this "retrograde value only". The onsets stay exactly where
+/// they are and the pitch sequence is read backwards — so a rising line
+/// becomes a falling one over the identical groove, which is the version
+/// you want when the rhythm is the part that already works.
+pub fn reverse_pitches(doc: &mut ExpressionDoc, area: RazorArea) -> bool {
+    let mut ids = carve(doc, area);
+    if ids.len() < 2 {
+        return false;
+    }
+    // By onset, because "backwards" is a statement about time even
+    // though nothing here moves in time.
+    ids.sort_by(|a, b| {
+        let (x, y) = (doc.note(*a).map(|n| n.start), doc.note(*b).map(|n| n.start));
+        x.partial_cmp(&y).unwrap_or(core::cmp::Ordering::Equal)
+    });
+    let rows: Vec<i32> = ids
+        .iter()
+        .filter_map(|id| doc.note(*id).map(|n| n.row))
+        .collect();
+    if rows.len() != ids.len() {
+        return false;
+    }
+    let mut ok = false;
+    for (id, row) in ids.iter().zip(rows.iter().rev()) {
+        let Some(n) = doc.note(*id) else { continue };
+        let delta = row - n.row;
+        if delta != 0 {
+            ok |= crate::edit::Edit::Transpose {
+                notes: vec![*id],
+                semitones: delta,
+            }
+            .apply(doc);
+        }
+    }
+    ok
+}
+
+/// Mirror the pitches in the area about their own centre.
+///
+/// MRE's "invert". The axis is the middle of what is actually in the
+/// area rather than the area's rows, so inverting twice returns the
+/// original and a rectangle drawn loosely around a phrase inverts the
+/// phrase rather than flinging it to the far side of the rectangle.
+pub fn invert_pitches(doc: &mut ExpressionDoc, area: RazorArea) -> bool {
+    let ids = carve(doc, area);
+    if ids.is_empty() {
+        return false;
+    }
+    let rows: Vec<i32> = ids
+        .iter()
+        .filter_map(|id| doc.note(*id).map(|n| n.row))
+        .collect();
+    let (Some(&lo), Some(&hi)) = (rows.iter().min(), rows.iter().max()) else {
+        return false;
+    };
+    // Doubled so a half-step centre stays exact in integers: mirroring
+    // `row` gives `sum - row`, and `sum` is `lo + hi`.
+    let sum = lo + hi;
+    let mut ok = false;
+    for id in ids {
+        let Some(n) = doc.note(id) else { continue };
+        let delta = sum - n.row - n.row;
+        if delta != 0 {
+            ok |= crate::edit::Edit::Transpose {
+                notes: vec![id],
+                semitones: delta,
+            }
+            .apply(doc);
+        }
     }
     ok
 }

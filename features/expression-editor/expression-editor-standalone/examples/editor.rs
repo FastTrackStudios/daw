@@ -60,12 +60,12 @@ fn WindowedApp() -> Element {
 /// winit reports physical pixels; the editor lays out in CSS pixels, so
 /// the scale factor comes off here and nothing downstream has to know
 /// the display's density.
-fn report(window: &dyn dioxus_native::winit::window::Window, size: dioxus_native::PhysicalSize<u32>) {
+fn report(
+    window: &dyn dioxus_native::winit::window::Window,
+    size: dioxus_native::PhysicalSize<u32>,
+) {
     let scale = window.scale_factor();
-    expression_editor_ui::available_space(
-        size.width as f64 / scale,
-        size.height as f64 / scale,
-    );
+    expression_editor_ui::available_space(size.width as f64 / scale, size.height as f64 / scale);
 }
 
 fn main() {
@@ -103,7 +103,14 @@ fn main() {
     // dropping it here would leave a document with nowhere to go back
     // to the moment write-back lands.
     let _daw = runner.daw;
-    stage(runner.loaded.into_editor());
+    // A drum workspace stages its write half with it, so the quantize
+    // panel's Apply and the slip drag reach the daw.
+    match runner.host {
+        Some(host) => {
+            expression_editor_standalone::app::stage_with_host(runner.loaded.into_editor(), host)
+        }
+        None => stage(runner.loaded.into_editor()),
+    }
 
     let window = WindowAttributes::default()
         .with_title(format!("Expression editor — {}", runner.label))

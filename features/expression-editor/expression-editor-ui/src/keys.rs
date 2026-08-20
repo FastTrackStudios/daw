@@ -17,10 +17,11 @@
 use std::cell::RefCell;
 
 use input::{
-    ActionContext, InputCommand, InputEvent, InputProcessor, KeyChord, KeyCode, KeyEvent,
-    KeyTrie, KeymapConfig, ModeId, Modifiers,
+    ActionContext, InputCommand, InputEvent, InputProcessor, KeyChord, KeyCode, KeyEvent, KeyTrie,
+    KeymapConfig, ModeId, Modifiers,
 };
 
+use expression_editor_core::actions as core_actions;
 use expression_editor_core::memagic;
 use expression_editor_core::tools::Mods;
 
@@ -135,12 +136,15 @@ pub fn resolve(key: &str, mods: Mods) -> Vec<InputCommand> {
             ..Default::default()
         },
     });
-    let chord = KeyChord::new(key_code(key), Modifiers {
-        ctrl: mods.ctrl,
-        alt: mods.alt,
-        shift: mods.shift,
-        ..Default::default()
-    });
+    let chord = KeyChord::new(
+        key_code(key),
+        Modifiers {
+            ctrl: mods.ctrl,
+            alt: mods.alt,
+            shift: mods.shift,
+            ..Default::default()
+        },
+    );
 
     let commands = PROCESSOR.with(|p| {
         let mut slot = p.borrow_mut();
@@ -151,10 +155,6 @@ pub fn resolve(key: &str, mods: Mods) -> Vec<InputCommand> {
         });
         proc.process(event, &ActionContext::new())
     });
-
-    // See `release`: no key-up event reaches this surface, so the press
-    // is reported as released the moment it is handled.
-    release(key, mods);
 
     // Mirror the processor's sequence state so the overlay can walk to
     // it. Extended while a prefix is live, cleared the moment it is not.
@@ -173,21 +173,27 @@ pub fn resolve(key: &str, mods: Mods) -> Vec<InputCommand> {
 
 /// Tell the processor a key came back up.
 ///
-/// Called immediately after each keydown rather than from a real key-up
-/// event, because this dioxus/blitz build exposes `onkeydown` on
-/// elements and no `onkeyup`.
+/// Call this from a real `onkeyup`, and only from there. It used to be
+/// called at the end of every [`resolve`] instead — a fake release on
+/// the theory that this dioxus/blitz build had no key-up event. It has
+/// one, and faking it was what made holding `z` spasm: the processor
+/// tracks held keys precisely so OS auto-repeat cannot re-enter a
+/// sequence, and a surface that reports every press as instantly
+/// released turns that suppression off. Forty repeats a second then
+/// walked the zoom tree over and over.
 ///
-/// It is not optional. The processor tracks held keys to suppress OS
-/// auto-repeat inside a sequence — its own comment names `z z` as the
-/// leaf it must not match while `z` is held — so a surface that never
-/// reports a release leaves every key held forever and every same-key
-/// sequence silently stops working.
+/// Holding a prefix is a *state*, which is what makes spring-loading
+/// possible: `z` down opens the tree and arms the tool, `z` up closes
+/// it. Neither half works if the processor thinks the key is already up.
 ///
-/// The cost of faking it: auto-repeat suppression and hold-to-keep-prefix
-/// are both off here, so holding a prefix re-enters it. Losing `z z`
-/// entirely is worse. Move this to a real `onkeyup` if the renderer ever
-/// grows one.
-pub fn release(key: &str, mods: Mods) {
+/// Returns the processor's own answer to "should the overlay go now?" —
+/// `true` when a sticky-prefix run that fired at least one action has
+/// ended. The sticky behaviour itself is entirely the processor's:
+/// `InputProcessor` keeps a `sticky_anchor` and rewinds the sequence to
+/// it after every match while the anchor is held, so holding `g` and
+/// tapping `q`, `w`, `e` fires three grid commands. Nothing here needs
+/// to re-open anything; it only has to report the release.
+pub fn release(key: &str, mods: Mods) -> bool {
     let chord = KeyChord::new(
         key_code(key),
         Modifiers {
@@ -197,11 +203,18 @@ pub fn release(key: &str, mods: Mods) {
             ..Default::default()
         },
     );
-    PROCESSOR.with(|p| {
-        if let Some(proc) = p.borrow_mut().as_mut() {
-            proc.notify_key_release(chord);
-        }
+    let hide = PROCESSOR.with(|p| {
+        p.borrow_mut()
+            .as_mut()
+            .map(|proc| proc.notify_key_release(chord))
+            .unwrap_or(false)
     });
+    // The mirror the overlay walks has to follow the processor's state,
+    // which a sticky release just cleared.
+    if !is_pending() {
+        PENDING.with(|p| p.borrow_mut().clear());
+    }
+    hide
 }
 
 /// Abandon a half-typed sequence.
@@ -241,11 +254,32 @@ pub fn continuations() -> Vec<Continuation> {
     if prefix.is_empty() {
         return Vec::new();
     }
+    walk(prefix)
+}
+
+/// What can follow `key`, whether or not it has been pressed.
+///
+/// The same walk [`continuations`] does, from a prefix the caller names
+/// instead of the one being typed — so a panel can show what `k` offers
+/// as a way of *teaching* it, rather than only as a reply to it.
+///
+/// Read from the keymap rather than from a table beside it, which is the
+/// point: a rebound prefix relabels itself, and a user's own bindings
+/// appear without anything here knowing they exist.
+pub fn continuations_after(key: &str) -> Vec<Continuation> {
+    walk(vec![KeyChord::new(key_code(key), Modifiers::default())])
+}
+
+fn walk(prefix: Vec<KeyChord>) -> Vec<Continuation> {
     PROCESSOR.with(|p| {
-        let slot = p.borrow();
-        let Some(proc) = slot.as_ref() else {
-            return Vec::new();
-        };
+        // `get_or_insert_with`, because a panel may ask before any key
+        // has been pressed — and a processor that does not exist yet has
+        // no keymap to walk, which would show an empty panel exactly
+        // once per session.
+        let mut slot = p.borrow_mut();
+        let proc = slot.get_or_insert_with(|| {
+            InputProcessor::from_config(editor_config()).unwrap_or_default()
+        });
         let Some(trie) = proc.keymaps().get(&ModeId::new("normal")) else {
             return Vec::new();
         };
@@ -277,42 +311,49 @@ pub fn continuations() -> Vec<Continuation> {
     })
 }
 
-/// A readable name for an action id.
-///
-/// The shared keymap carries ids, not descriptions — REAPER's which-key
-/// config has a `label` field and this one does not — so the names live
-/// here, next to the dispatch that implements them.
-pub fn label_for(action: &str) -> String {
-    for (id, label) in LABELS {
-        if action.contains(id) {
-            return (*label).to_string();
-        }
-    }
-    // Fall back to the last segment rather than an empty row: an
-    // unlabelled binding should still be visible and pressable.
-    action
-        .rsplit(['.', '"'])
-        .find(|s| !s.is_empty())
-        .unwrap_or(action)
-        .replace('_', " ")
-}
-
-/// Action id fragment to overlay label.
-const LABELS: &[(&str, &str)] = &[
-    ("view.memagic.fit_item", "Fit item"),
-    ("view.memagic.fit_notes", "Fit notes in view"),
-    ("view.memagic.center", "Centre on notes"),
-    ("view.memagic.top", "Top of range"),
-    ("view.memagic.bottom", "Bottom of range"),
-    ("view.memagic", "Zoom to what I am pointing at"),
-];
-
 /// Whether a sequence is half-typed, so the next key belongs to it.
 ///
 /// The caller checks this after an empty [`resolve`]: a pending prefix
 /// means the key was consumed by the sequence and must not also fall
 /// through to the editor's own handling, or `z` would fire the tool
 /// shortcut on its way to `z i`.
+/// Whether the pending sequence is the zoom prefix, and nothing more.
+///
+/// The question the roll asks on a press: a drag *now* means the zoom
+/// tool for the length of the hold, rather than the first half of a
+/// sequence. Which is what makes `z` one idea at two speeds — tap it and
+/// it is a prefix awaiting a target (`z i`), hold it and drag and it is
+/// the tool.
+///
+/// Deliberately narrow. It is true only when `z` alone is pending, so a
+/// half-typed longer sequence is never mistaken for a held tool.
+pub fn zoom_prefix_held() -> bool {
+    held_prefix().as_deref() == Some("z")
+}
+
+/// The single-key prefix currently held, if exactly one is.
+///
+/// The generalisation of [`zoom_prefix_held`], because `z` stopped being
+/// the only key that is a prefix *and* a spring-loaded tool. `v` is the
+/// second: tap it for the velocity tree, hold it and drag to set
+/// velocity by hand.
+///
+/// Deliberately narrow, and for the same reason it always was: only a
+/// lone pending chord counts, so a half-typed longer sequence is never
+/// mistaken for a held tool.
+pub fn held_prefix() -> Option<String> {
+    PENDING.with(|p| {
+        let pending = p.borrow();
+        match pending.as_slice() {
+            [only] => match &only.key {
+                KeyCode::Character(c) => Some(c.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    })
+}
+
 pub fn is_pending() -> bool {
     PROCESSOR.with(|p| {
         p.borrow()
@@ -321,63 +362,62 @@ pub fn is_pending() -> bool {
     })
 }
 
-/// The action ids this surface knows how to carry out.
+/// A readable name for an action id.
 ///
-/// Listed so the editor's dispatch and the keymap cannot drift apart
-/// silently: a binding naming something absent here is dead, which the
-/// test below catches.
-pub const ACTIONS: &[&str] = &[
-    "view.memagic",
-    "view.memagic.fit_item",
-    "view.memagic.fit_notes",
-    "view.memagic.center",
-    "view.memagic.top",
-    "view.memagic.bottom",
-];
+/// Read from the action's own declaration — `expression_editor_core::
+/// actions` is where every editor command says what it is called. This
+/// used to be a `LABELS` table right here, matched with `contains`,
+/// which meant `grid.1` shadowed `grid.16` and the two lists had to be
+/// hand-ordered around each other.
+///
+/// The fallback covers ids this editor does not own: the keymap is
+/// shared, so a host may bind something from another surface.
+pub fn label_for(action: &str) -> String {
+    if let Some(meta) = core_actions::find(action) {
+        return meta.display_name.to_string();
+    }
+    action
+        .rsplit(['.', '_'])
+        .find(|s| !s.is_empty())
+        .unwrap_or(action)
+        .replace('_', " ")
+}
+
+/// How an action says it is reached, for an overlay to print.
+///
+/// Empty when the action does not declare one, which is what
+/// `ActionMeta::shortcut` means by absent.
+pub fn shortcut_for(action: &str) -> &'static str {
+    core_actions::find(action).map(|m| m.shortcut).unwrap_or("")
+}
 
 /// Carry out a resolved action against the editor.
 ///
-/// Kept here beside [`ACTIONS`] and [`LABELS`] so the three cannot drift:
-/// adding a binding means adding an arm, a label and an id in one place.
+/// Two steps, and the split is a dependency fact rather than a taste:
+/// [`core_actions::run`] does everything reachable from an `&mut
+/// Editor`, and what is left needs something this crate has and that one
+/// cannot — `expression-editor-tools` for the velocity engines, and a
+/// pointer position for MeMagic.
 ///
-/// Returns whether it did anything, so an unknown id falls through
-/// rather than silently swallowing the key.
+/// Velocity is absent from *both* — it holds a live shape that outlives
+/// the keypress, so `crate::roll` handles it where the signal lives.
+/// `tests/actions.rs` asserts that between the three nothing declared is
+/// unreachable.
 pub fn dispatch(
     ed: &mut expression_editor_core::Editor,
     action: &str,
     region: memagic::Region,
     anchor: memagic::Anchor,
 ) -> bool {
-    use memagic::{Horizontal, Modes, Scope, Vertical};
-
-    let cfg = memagic::Config::default();
-    let modes = match action {
-        // The contextual one: the region decides, which is the whole
-        // point of MeMagic.
-        "view.memagic" => return ed.memagic(region, anchor),
-        "view.memagic.fit_item" => Modes {
-            horizontal: Horizontal::FitItem,
-            vertical: Vertical::FitNotes { scope: Scope::InItem },
-        },
-        "view.memagic.fit_notes" => Modes {
-            horizontal: Horizontal::Keep,
-            vertical: Vertical::FitNotes { scope: Scope::InView },
-        },
-        "view.memagic.center" => Modes {
-            horizontal: Horizontal::Keep,
-            vertical: Vertical::Center { scope: Scope::InView },
-        },
-        "view.memagic.top" => Modes {
-            horizontal: Horizontal::Keep,
-            vertical: Vertical::Highest { scope: Scope::InView },
-        },
-        "view.memagic.bottom" => Modes {
-            horizontal: Horizontal::Keep,
-            vertical: Vertical::Lowest { scope: Scope::InView },
-        },
-        _ => return false,
-    };
-    ed.memagic_with(modes, anchor, &cfg)
+    if core_actions::run(ed, action) {
+        return true;
+    }
+    // The contextual zoom, which is the whole point of MeMagic: the
+    // region under the pointer decides what "zoom" means.
+    if action == core_actions::view::MEMAGIC.id {
+        return ed.memagic(region, anchor);
+    }
+    false
 }
 
 #[cfg(test)]
@@ -411,31 +451,46 @@ mod tests {
         let first = resolve("z", plain());
         assert!(actions(&first).is_empty(), "z alone fired something");
         assert!(is_pending(), "z should leave a sequence half-typed");
+        release("z", plain());
 
-        let second = resolve("z", plain());
-        assert_eq!(actions(&second), vec!["view.memagic"]);
+        // `z x`, not `z z`. A sequence whose second key repeats its own
+        // prefix cannot survive being *held*: the OS repeats the key,
+        // and the leaf fires without anyone pressing it twice. Holding
+        // `z` is now the zoom tool, so `z` had to stop being its own
+        // continuation.
+        let second = resolve("x", plain());
+        assert_eq!(actions(&second), vec![core_actions::view::MEMAGIC.id]);
         assert!(!is_pending(), "the sequence should be finished");
+        release("x", plain());
     }
 
     #[test]
     fn each_bound_sequence_reaches_its_action() {
         for (second, want) in [
-            ("i", "view.memagic.fit_item"),
-            ("n", "view.memagic.fit_notes"),
-            ("c", "view.memagic.center"),
-            ("t", "view.memagic.top"),
-            ("b", "view.memagic.bottom"),
+            ("i", core_actions::view::FIT_ITEM.id),
+            ("n", core_actions::view::FIT_NOTES.id),
+            ("c", core_actions::view::CENTER.id),
+            ("t", core_actions::view::TOP.id),
+            ("b", core_actions::view::BOTTOM.id),
         ] {
+            // Press and release each key, the way the surface does.
+            // `resolve` no longer fakes the release for you — the
+            // processor has to be able to tell a hold from a press.
             resolve("z", plain());
+            release("z", plain());
             let got = actions(&resolve(second, plain()));
+            release(second, plain());
             assert_eq!(got, vec![want.to_string()], "z {second}");
         }
     }
 
     #[test]
-    fn every_binding_names_an_action_the_editor_can_run() {
+    fn every_binding_names_an_action_the_editor_declares() {
         // Catches a keymap entry that points at nothing — a binding that
-        // looks configured and does nothing when pressed.
+        // looks configured and does nothing when pressed. It used to
+        // check a hand-kept `ACTIONS` list; now the declarations *are*
+        // the list, so this can no longer pass by both being wrong in
+        // the same way.
         let cfg = config();
         let bound = cfg
             .keymap
@@ -443,8 +498,41 @@ mod tests {
             .expect("the editor surface is in the shipped keymap");
         for action in bound.values() {
             assert!(
-                ACTIONS.contains(&action.as_str()),
-                "{action} is bound but the editor cannot run it"
+                core_actions::find(action).is_some(),
+                "{action} is bound but no action declares it",
+            );
+        }
+    }
+
+    #[test]
+    fn every_declared_action_is_bound_and_says_so() {
+        // The other direction, and the one that keeps the overlay
+        // honest: an action's `shortcut` is what a panel *prints*, and
+        // the keymap is what actually happens. Nothing but this stops
+        // them drifting.
+        let cfg = config();
+        let bound = cfg
+            .keymap
+            .get(SURFACE)
+            .expect("the editor surface is in the shipped keymap");
+
+        for meta in core_actions::all() {
+            let keys: Vec<&str> = bound
+                .iter()
+                .filter(|(_, a)| a.as_str() == meta.id)
+                .map(|(k, _)| k.as_str())
+                .collect();
+            assert!(
+                !keys.is_empty(),
+                "{} is declared but nothing is bound to it",
+                meta.id,
+            );
+            assert!(
+                keys.contains(&meta.shortcut),
+                "{} advertises `{}` but is bound to {:?}",
+                meta.id,
+                meta.shortcut,
+                keys,
             );
         }
     }

@@ -305,7 +305,7 @@ async fn shoot_razor() {
 
     // Moving it slices the held notes at both edges and carries the
     // middle — the thing a marquee cannot do.
-    razor::move_contents(&mut ed.doc, area, demo::PPQ * 4.0, 0, false);
+    razor::move_contents(&mut ed.doc, area, demo::PPQ * 4.0, 0, false, false);
     ed.razor.clear();
     ed.razor.add(area.translated(demo::PPQ * 4.0, 0));
     shoot(ed, "18-razor-moved").await;
@@ -433,8 +433,8 @@ async fn shoot_note_handles() {
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_blob_pitch_carry() {
-    use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
     use expression_editor_core::Mode;
+    use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
 
     const PPQ: f64 = 960.0;
     let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 16.0);
@@ -471,8 +471,8 @@ async fn shoot_blob_pitch_carry() {
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "picture generator, not an assertion — `just ee-shots`"]
 async fn shoot_audio_backdrop() {
-    use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
     use expression_editor_core::Mode;
+    use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
 
     const PPQ: f64 = 960.0;
     let end = PPQ * 16.0;
@@ -728,7 +728,8 @@ async fn shoot_stack() {
     }
     let mut kit = part(86.1328125, &kit_hits, 0.06);
     kit.row_space = RowSpace::Bands(SliceBands::default());
-    ed.tracks.push(Track::in_mode("Kit", kit, Mode::UnpitchedAudio));
+    ed.tracks
+        .push(Track::in_mode("Kit", kit, Mode::UnpitchedAudio));
 
     ed.camera.t0 = -20.0;
     ed.camera.units_per_px = 0.55;
@@ -782,7 +783,11 @@ async fn staged_real_music() {
         let Ok(imported) = expression_editor_guitarpro::import_file(&name) else {
             continue;
         };
-        let stem = path.file_stem().unwrap().to_string_lossy().replace('.', "-");
+        let stem = path
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .replace('.', "-");
         let mut ed = Editor::new(imported.doc, demo::default_viewport());
         ed.set_mode(expression_editor_core::Mode::Guitar);
         ed.reset_view();

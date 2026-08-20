@@ -35,6 +35,7 @@
 //! `<g transform=… clip-path=…>` did.
 
 use anyrender::{PaintScene, Scene};
+use expression_editor_core::razor::RazorArea;
 use expression_editor_core::{Dimension, Editor};
 use kurbo::{Affine, BezPath, Line, Point, Rect, Stroke};
 use peniko::{Color, Fill};
@@ -55,6 +56,13 @@ pub struct Overlay {
     pub marquee: Option<(f64, f64, f64, f64)>,
     /// An open pitch drawing, which owns the surface while it is up.
     pub draft: Option<canvas::DraftView>,
+    /// The razor area a sweep in progress would commit, already snapped.
+    ///
+    /// A razor used to appear only on release, so the most destructive
+    /// selection on the surface was the one you could not see before
+    /// committing to it. Drawn from the same resolved area the release
+    /// will add, so what is previewed is what lands.
+    pub razor: Option<RazorArea>,
     /// Where a string roll draws its bend flow (#161).
     pub flow: crate::guitar::BendFlow,
 }
@@ -113,10 +121,6 @@ fn path_of(points: impl Iterator<Item = Point>, close: bool) -> BezPath {
 /// The geometry layer's polyline type, as a path.
 fn line_of(points: &[(f64, f64)]) -> BezPath {
     path_of(points.iter().map(|&(x, y)| Point::new(x, y)), false)
-}
-
-fn area_of(points: &[(f64, f64)]) -> BezPath {
-    path_of(points.iter().map(|&(x, y)| Point::new(x, y)), true)
 }
 
 fn polygon(s: &str) -> BezPath {
@@ -185,13 +189,7 @@ impl Batch {
 /// `w` and `h` are the element's box, handed down by the widget. Nothing
 /// here derives a size from the content, which is the property the svg
 /// could not offer.
-pub fn roll_scene(
-    ed: &Editor,
-    w: f64,
-    h: f64,
-    overlay: &Overlay,
-    labels: &mut Labeller,
-) -> Scene {
+pub fn roll_scene(ed: &Editor, w: f64, h: f64, overlay: &Overlay, labels: &mut Labeller) -> Scene {
     let mut scene = Scene::new();
     let vp = ed.viewport;
 
@@ -212,7 +210,12 @@ pub fn roll_scene(
     let roll_at = Affine::translate((canvas::GUTTER_W, canvas::RULER_H));
     scene.push_clip_layer(
         roll_at,
-        &Rect::new(0.0, 0.0, (w - canvas::GUTTER_W).max(0.0), (h - canvas::RULER_H).max(0.0)),
+        &Rect::new(
+            0.0,
+            0.0,
+            (w - canvas::GUTTER_W).max(0.0),
+            (h - canvas::RULER_H).max(0.0),
+        ),
     );
 
     rows(&mut scene, ed, roll_at, vp.w);
@@ -220,7 +223,8 @@ pub fn roll_scene(
     lanes(&mut scene, ed, roll_at, vp.w);
     guides(&mut scene, ed, roll_at, vp.w, labels);
     audio(&mut scene, ed, roll_at);
-    razors(&mut scene, ed, roll_at);
+    time_selection(&mut scene, ed, roll_at, vp.h);
+    razors(&mut scene, ed, roll_at, overlay.razor.as_ref());
     references(&mut scene, ed, roll_at);
     notes(&mut scene, ed, roll_at, labels);
     curves(&mut scene, ed, roll_at);
@@ -238,13 +242,7 @@ pub fn roll_scene(
             None,
             &r,
         );
-        scene.stroke(
-            &stroke_of(1.0),
-            roll_at,
-            color(theme::ACCENT),
-            None,
-            &r,
-        );
+        scene.stroke(&stroke_of(1.0), roll_at, color(theme::ACCENT), None, &r);
     }
 
     scene.pop_layer();
@@ -319,7 +317,11 @@ pub fn strip_scene(ed: &Editor, w: f64, h: f64, labels: &mut Labeller) -> Scene 
     let mut guides = Batch::default();
     for (y, major) in canvas::strip_guides(h) {
         guides.add(
-            color(if major { theme::GRID_BEAT } else { theme::GRID_SUB }),
+            color(if major {
+                theme::GRID_BEAT
+            } else {
+                theme::GRID_SUB
+            }),
             &Line::new((0.0, y), (vp_w, y)),
         );
     }
@@ -388,7 +390,11 @@ fn rows(scene: &mut Scene, ed: &Editor, at: Affine, w: f64) {
 fn grid(scene: &mut Scene, ed: &Editor, at: Affine, h: f64) {
     let mut lines = Batch::default();
     for g in canvas::grid_lines(ed) {
-        let c = if g.beat { theme::GRID_BEAT } else { theme::GRID_SUB };
+        let c = if g.beat {
+            theme::GRID_BEAT
+        } else {
+            theme::GRID_SUB
+        };
         lines.add(color(c), &Line::new((g.x, 0.0), (g.x, h)));
     }
     lines.stroke(scene, at, 1.0);
@@ -490,13 +496,7 @@ fn audio(scene: &mut Scene, ed: &Editor, at: Affine) {
 /// than as an overlay. A guitarist reads bends as "full" and "half", so
 /// the peak carries the number and the curve only shows how it got
 /// there.
-fn strings(
-    scene: &mut Scene,
-    ed: &Editor,
-    at: Affine,
-    overlay: &Overlay,
-    labels: &mut Labeller,
-) {
+fn strings(scene: &mut Scene, ed: &Editor, at: Affine, overlay: &Overlay, labels: &mut Labeller) {
     if overlay.flow.on_row() {
         for f in crate::guitar::flow_paths(ed) {
             scene.stroke(
@@ -562,7 +562,42 @@ fn draft(scene: &mut Scene, overlay: &Overlay, at: Affine) {
     }
 }
 
-fn razors(scene: &mut Scene, ed: &Editor, at: Affine) {
+/// The time selection: a span with no pitch.
+///
+/// Full height and unfilled but for a wash, which is what distinguishes
+/// it from a razor at a glance. A razor is a *rectangle* — it has rows,
+/// and what it holds is what it will carve. A time selection is two
+/// points on the timeline and says nothing about pitch, so drawing it as
+/// a box would claim a boundary it does not have.
+fn time_selection(scene: &mut Scene, ed: &Editor, at: Affine, h: f64) {
+    let Some((t0, t1)) = ed.time_selection else {
+        return;
+    };
+    let (x0, x1) = (ed.camera.x(t0), ed.camera.x(t1));
+    if x1 <= x0 {
+        return;
+    }
+    scene.fill(
+        Fill::NonZero,
+        at,
+        with_alpha(color(theme::SELECTED), 0.10),
+        None,
+        &Rect::new(x0, 0.0, x1, h),
+    );
+    // The edges carry the weight: a 10% wash is easy to lose over a
+    // dense roll, and where the range *ends* is the thing being read.
+    for x in [x0, x1] {
+        scene.stroke(
+            &stroke_of(1.0),
+            at,
+            with_alpha(color(theme::SELECTED), 0.8),
+            None,
+            &Line::new((x, 0.0), (x, h)),
+        );
+    }
+}
+
+fn razors(scene: &mut Scene, ed: &Editor, at: Affine, pending: Option<&RazorArea>) {
     for r in canvas::razor_rects(ed) {
         scene.fill(
             Fill::NonZero,
@@ -572,6 +607,38 @@ fn razors(scene: &mut Scene, ed: &Editor, at: Affine) {
             &Rect::new(r.x, r.y, r.x + r.w, r.y + r.h),
         );
     }
+
+    // The sweep in progress. Same fill so there is no question about
+    // what it will become, plus a bright edge on the two sides that are
+    // still moving — a razor is a *cut*, and where its boundaries fall
+    // is the entire decision being made. Without the edges a snapped
+    // rectangle and an unsnapped one look identical until you release.
+    let Some(area) = pending else { return };
+    let r = canvas::razor_rect(ed, area);
+    let box_ = Rect::new(r.x, r.y, r.x + r.w, r.y + r.h);
+    scene.fill(
+        Fill::NonZero,
+        at,
+        with_alpha(color(theme::RAZOR), 0.22),
+        None,
+        &box_,
+    );
+    for x in [r.x, r.x + r.w] {
+        scene.stroke(
+            &stroke_of(1.5),
+            at,
+            with_alpha(color(theme::RAZOR), 0.95),
+            None,
+            &kurbo::Line::new((x, r.y), (x, r.y + r.h)),
+        );
+    }
+    scene.stroke(
+        &stroke_of(1.0),
+        at,
+        with_alpha(color(theme::RAZOR), 0.6),
+        None,
+        &box_,
+    );
 }
 
 fn references(scene: &mut Scene, ed: &Editor, at: Affine) {
@@ -612,7 +679,11 @@ fn notes(scene: &mut Scene, ed: &Editor, at: Affine, labels: &mut Labeller) {
     // Notes recede while a controller is being edited: the roll is that
     // dimension's editing surface for the moment, and full-strength
     // notes would compete with the curve for the same pixels.
-    let dim = if ed.cc_editing() { ed.cc_display.note_dim } else { 1.0 };
+    let dim = if ed.cc_editing() {
+        ed.cc_display.note_dim
+    } else {
+        1.0
+    };
 
     // Gathered by paint and emitted once each, rather than three
     // commands per note. Depth is preserved because each batch is a
@@ -622,6 +693,9 @@ fn notes(scene: &mut Scene, ed: &Editor, at: Affine, labels: &mut Labeller) {
     let mut centres = Batch::default();
     let mut outlines = Batch::default();
     let mut thick = Batch::default();
+    // Ambiguity bars. Their own batch because they are filled, not
+    // stroked, and because they must land on top of both outlines.
+    let mut warnings = Batch::default();
     let mut zones = Batch::default();
     let mut zones_active = Batch::default();
     // Labels are glyph runs and cannot be batched, so they are held back
@@ -662,19 +736,37 @@ fn notes(scene: &mut Scene, ed: &Editor, at: Affine, labels: &mut Labeller) {
                     zones.add(color(theme::ZONE), &line);
                 }
             }
-            let edge = color(if n.ambiguous {
-                theme::ZONE
-            } else if n.selected {
+            // The outline says one thing and one thing only: whether
+            // this note is selected.
+            //
+            // Ambiguity used to claim it too, and won — so selecting a
+            // red note appeared to do nothing, and on MPE material where
+            // most notes are flagged the selection was invisible
+            // wholesale. Two independent facts cannot share one channel;
+            // one of them has to lose, and the one you are actively
+            // changing must not be it.
+            let edge = color(if n.selected {
                 theme::SELECTED
             } else {
                 theme::BORDER_STRONG
             });
             // Two widths, so two batches: a stroke width belongs to the
             // command, not to the path.
-            if n.selected || n.ambiguous {
+            if n.selected {
                 thick.add(edge, &r);
             } else {
                 outlines.add(edge, &r);
+            }
+            // Ambiguity gets its own mark instead: a red bar along the
+            // top edge, which composes with any outline rather than
+            // replacing it. It stays legible on a note only a few pixels
+            // tall, which an inset stroke would not.
+            if n.ambiguous {
+                let bar = (n.h * 0.25).clamp(1.5, 3.0);
+                warnings.add(
+                    with_alpha(color(theme::ZONE), 0.95 * alpha),
+                    &Rect::new(n.x, n.y, n.x + n.w, n.y + bar),
+                );
             }
         }
 
@@ -725,6 +817,7 @@ fn notes(scene: &mut Scene, ed: &Editor, at: Affine, labels: &mut Labeller) {
     zones_active.stroke(scene, at, 2.0);
     outlines.stroke(scene, at, 1.0);
     thick.stroke(scene, at, 2.0);
+    warnings.fill(scene, at);
 
     for (s, x, y, size, c) in deferred {
         label(scene, labels, &s, x, y, size, text::Align::Left, c, at);
@@ -775,11 +868,11 @@ fn handles(scene: &mut Scene, ed: &Editor, at: Affine) {
             // shape is faster to read than one anyway.
             let (cx, cy) = (h.x + h.w * 0.5, h.y + h.h * 0.5);
             let half = h.w.min(h.h) * 0.5;
-            let hollow = matches!(h.handle, expression_editor_core::Handle::Amplitude)
-                && ed.sibilant_scope;
-            if let Ok(mark) = kurbo::BezPath::from_svg(&crate::handle_mark(
-                h.handle, cx, cy, half, hollow,
-            )) {
+            let hollow =
+                matches!(h.handle, expression_editor_core::Handle::Amplitude) && ed.sibilant_scope;
+            if let Ok(mark) =
+                kurbo::BezPath::from_svg(&crate::handle_mark(h.handle, cx, cy, half, hollow))
+            {
                 scene.stroke(&stroke_of(1.2), at, color(theme::TEXT), None, &mark);
             }
         }
@@ -807,14 +900,7 @@ fn curves(scene: &mut Scene, ed: &Editor, at: Affine) {
     active.stroke(scene, at, 2.5);
 }
 
-fn controllers(
-    scene: &mut Scene,
-    ed: &Editor,
-    at: Affine,
-    w: f64,
-    h: f64,
-    labels: &mut Labeller,
-) {
+fn controllers(scene: &mut Scene, ed: &Editor, at: Affine, w: f64, h: f64, labels: &mut Labeller) {
     let _ = (w, h);
     for (i, c) in canvas::cc_paths(ed).into_iter().enumerate() {
         let fill = polygon(&c.fill);
@@ -903,7 +989,11 @@ fn keyboard(scene: &mut Scene, ed: &Editor, h: f64, labels: &mut Labeller) {
     scene.fill(
         Fill::NonZero,
         at,
-        color(if piano { theme::KEY_WHITE } else { theme::SURFACE_BAR }),
+        color(if piano {
+            theme::KEY_WHITE
+        } else {
+            theme::SURFACE_BAR
+        }),
         None,
         &band,
     );
@@ -927,7 +1017,11 @@ fn keyboard(scene: &mut Scene, ed: &Editor, h: f64, labels: &mut Labeller) {
             }
         } else {
             faces.add(
-                color(if k.black { theme::KEY_BLACK } else { theme::KEY_WHITE }),
+                color(if k.black {
+                    theme::KEY_BLACK
+                } else {
+                    theme::KEY_WHITE
+                }),
                 &Rect::new(0.0, k.y, canvas::GUTTER_W, k.y + k.h),
             );
             edges.add(
@@ -1002,7 +1096,11 @@ fn ruler(scene: &mut Scene, ed: &Editor, w: f64, labels: &mut Labeller) {
         scene.stroke(
             &stroke_of(1.0),
             at,
-            color(if t.bar { theme::TEXT_DIM } else { theme::GRID_SUB }),
+            color(if t.bar {
+                theme::TEXT_DIM
+            } else {
+                theme::GRID_SUB
+            }),
             None,
             &Line::new((t.x, top), (t.x, canvas::RULER_H)),
         );

@@ -137,18 +137,37 @@ impl Curve {
     /// stays undoable through [`super::Session`], which holds the
     /// baseline regardless.
     pub fn apply(&self, notes: &[Note], range: Range) -> Vec<VelocityEdit> {
-        let picked: Vec<u32> = targets(notes).map(|(_, n)| n.index).collect();
+        self.apply_blended(notes, 1.0, range)
+    }
+
+    /// As [`Curve::apply`], mixed `amount` of the way in.
+    ///
+    /// `1.0` is [`Curve::apply`] — the curve stated absolutely, which is
+    /// what the drawn contour means. Below that it is a *blend* toward
+    /// the shape from whatever the notes already are, so a ramp can be
+    /// dialled from "a hint of a crescendo" to "exactly this contour"
+    /// without redrawing it.
+    ///
+    /// Which is the difference between a preset and a gesture. A preset
+    /// applied at full strength flattens whatever performance was there;
+    /// the same preset at 30% *leans* on it, and the accents you played
+    /// survive underneath. `pattern` and `randomize` already take an
+    /// amount for the same reason — this makes the curve the third.
+    pub fn apply_blended(&self, notes: &[Note], amount: f64, range: Range) -> Vec<VelocityEdit> {
+        let amount = amount.clamp(0.0, 1.0);
+        let picked: Vec<(u32, u8)> = targets(notes).map(|(_, n)| (n.index, n.velocity)).collect();
         let last = picked.len().saturating_sub(1);
         picked
             .into_iter()
             .enumerate()
-            .map(|(i, index)| {
+            .map(|(i, (index, was))| {
                 // A single note sits at the curve's start, not at a
                 // 0/0 division.
                 let t = if last == 0 { 0.0 } else { i as f64 / last as f64 };
+                let target = self.velocity_at(t);
                 VelocityEdit {
                     index,
-                    velocity: range.clamp(self.velocity_at(t)),
+                    velocity: range.clamp(was as f64 + (target - was as f64) * amount),
                 }
             })
             .collect()

@@ -256,3 +256,82 @@ pub fn spans<E: Sustained>(events: &[E], plan: &Plan) -> Vec<(f64, f64)> {
         })
         .collect()
 }
+
+/// One hit as a preview draws it: where it is, where the plan puts it,
+/// and whether it moves at all.
+///
+/// Defined here rather than in the UI or the audio crate because both
+/// need the same list — the panel draws it and the bridge computes it —
+/// and two copies of "what counts as moved" is how they drift apart.
+/// The unit is the events' own, exactly as everything else in this
+/// module.
+// r[impl drums.quantize.preview]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HitPreview {
+    /// Where the hit is now.
+    pub at: f64,
+    /// Where the plan puts it. Equal to `at` when it does not move.
+    pub to: f64,
+    /// Whether the plan actually moves it — a matched hit already on
+    /// its division is drawn like one that stays put.
+    pub moved: bool,
+    /// Whether the plan deliberately left it alone: outside tolerance,
+    /// lost its window to something stronger, or below the sensitivity
+    /// filter. Excluded hits are dimmed, never hidden.
+    pub excluded: bool,
+}
+
+/// Flatten a plan into the per-hit list a preview draws.
+///
+/// Sorted by current position, so a strip can draw it left to right
+/// without re-sorting.
+// r[impl drums.quantize.preview]
+pub fn hit_previews(plan: &Plan) -> Vec<HitPreview> {
+    let mut out: Vec<HitPreview> = plan
+        .moves
+        .iter()
+        .map(|m| HitPreview {
+            at: m.from,
+            to: m.to,
+            moved: (m.to - m.from).abs() > 1e-9,
+            excluded: false,
+        })
+        .collect();
+    out.extend(plan.unmatched.iter().map(|&at| HitPreview {
+        at,
+        to: at,
+        moved: false,
+        excluded: true,
+    }));
+    out.sort_by(|a, b| a.at.partial_cmp(&b.at).unwrap_or(std::cmp::Ordering::Equal));
+    out
+}
+
+/// Swing the plan's off-beat targets later.
+///
+/// `amount` is `0.0..=1.0`: `0` is straight, `1` moves every odd
+/// division to the triplet position (two thirds of the pair span). It is
+/// target placement only — the matching is unchanged, which is why this
+/// is a pass over an existing plan rather than a knob on [`plan`]: the
+/// planner never needs to know the grid is swung.
+// r[impl drums.quantize.grid-options]
+pub fn swing(plan: &mut Plan, cfg: QuantizeConfig, amount: f64) {
+    let amount = amount.clamp(0.0, 1.0);
+    if amount <= 0.0 || cfg.grid <= 0.0 {
+        return;
+    }
+    // 100 % swing puts the off-beat at 2/3 of the two-division span:
+    // its target moves from grid (1/2 of the span) to 4/3 grid, a delay
+    // of grid/3.
+    let delay = amount * cfg.grid / 3.0;
+    let strength = cfg.strength.clamp(0.0, 1.0);
+    for m in &mut plan.moves {
+        let n = ((m.division - cfg.grid_offset) / cfg.grid).round() as i64;
+        if n.rem_euclid(2) == 1 {
+            m.division += delay;
+            // `to` already had strength applied toward the straight
+            // division; pull it the same fraction of the extra distance.
+            m.to += delay * strength;
+        }
+    }
+}

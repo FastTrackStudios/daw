@@ -88,8 +88,7 @@ pub fn Slider(
             Some(el) => el.get_client_rect().await.ok(),
             None => None,
         };
-        if let Some(r) = r
-        {
+        if let Some(r) = r {
             rect.set((r.origin.x, r.size.width));
         }
     };
@@ -150,8 +149,7 @@ pub fn RangeSlider(
     max: f64,
     #[props(default = 1.0)] step: f64,
     #[props(default = 150.0)] width: f64,
-    #[props(default)]
-    testid: String,
+    #[props(default)] testid: String,
     on_change: EventHandler<(f64, f64)>,
 ) -> Element {
     let span = (max - min).max(f64::EPSILON);
@@ -164,8 +162,7 @@ pub fn RangeSlider(
             Some(el) => el.get_client_rect().await.ok(),
             None => None,
         };
-        if let Some(r) = r
-        {
+        if let Some(r) = r {
             rect.set((r.origin.x, r.size.width));
         }
     };
@@ -237,8 +234,7 @@ pub fn BarEditor(
     values: Vec<u8>,
     #[props(default = 127)] max: u8,
     #[props(default = 88.0)] height: f64,
-    #[props(default)]
-    testid: String,
+    #[props(default)] testid: String,
     on_change: EventHandler<(usize, u8)>,
 ) -> Element {
     let mut dragging = use_signal(|| false);
@@ -255,7 +251,9 @@ pub fn BarEditor(
         if w <= 0.0 || h <= 0.0 {
             return None;
         }
-        let i = (((cx - x) / w) * count as f64).floor().clamp(0.0, (count - 1) as f64) as usize;
+        let i = (((cx - x) / w) * count as f64)
+            .floor()
+            .clamp(0.0, (count - 1) as f64) as usize;
         // Inverted: the top of the box is the highest velocity.
         let frac = 1.0 - ((cy - y) / h).clamp(0.0, 1.0);
         Some((i, (frac * f64::from(max)).round().max(1.0) as u8))
@@ -266,8 +264,7 @@ pub fn BarEditor(
             Some(el) => el.get_client_rect().await.ok(),
             None => None,
         };
-        if let Some(r) = r
-        {
+        if let Some(r) = r {
             rect.set((r.origin.x, r.origin.y, r.size.width, r.size.height));
         }
     };

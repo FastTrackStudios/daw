@@ -8,7 +8,7 @@
 //! pointer.
 
 use crate::camera::{Camera, Viewport};
-use crate::doc::{ExpressionDoc, Dimension, NoteId, Target};
+use crate::doc::{Dimension, ExpressionDoc, NoteId, Target};
 
 /// The active drawing tool.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
@@ -25,6 +25,31 @@ pub enum Tool {
     Eraser,
     NoteDraw,
     NoteErase,
+    /// Change the view, not the material.
+    ///
+    /// Drag up and down to zoom pitch, left and right to zoom time —
+    /// so the direction you drag is the axis you get. Held `z` arms it
+    /// for the length of the hold; it is also a tool like any other, so
+    /// it can be clicked and left on.
+    Zoom,
+    /// Sweep out time × row areas to operate on.
+    ///
+    /// A razor selects a *region of the canvas* rather than a set of
+    /// notes: it says "these rows, this span", and what follows — carve,
+    /// delete, move contents, clear a lane — applies to whatever falls
+    /// inside, including the halves of notes that straddle an edge.
+    /// `Ctrl` reaches it from any tool; arming it puts the same thing on
+    /// the plain drag, which is what you want when cutting several areas
+    /// in a row.
+    Razor,
+    /// Vertical drags set velocity.
+    ///
+    /// The habit this replaces is REAPER's Alt+drag-on-a-note. A held
+    /// `v` arms it the way a held `z` arms zoom, which is better than a
+    /// modifier for the same reason zoom is: `v` is also a which-key
+    /// prefix, so the one key is both "shape velocity by hand" and the
+    /// door to every velocity command there is.
+    Velocity,
 }
 
 impl Tool {
@@ -54,17 +79,57 @@ impl Tool {
             // Erasing owns both, or sweeping across notes would move the
             // first one it touched instead of deleting it.
             Tool::NoteErase => &[(C::PianoRoll, G::Drag), (C::Note, G::Drag)],
+            // Zoom owns every drag it can reach. It is a *view* tool:
+            // while it is armed nothing about the material should
+            // change, so a drag that started on a note must zoom rather
+            // than move the note.
+            Tool::Zoom => &[(C::PianoRoll, G::Drag), (C::Note, G::Drag)],
+            // Roll, notes, and note *edges*. A razor has to cut through
+            // material rather than pick it up, and an edge is the one
+            // place a sweep is most likely to start: on dense music
+            // every few pixels is somebody's edge, so leaving them to
+            // the map meant a cut that began a hair off resized a note
+            // instead.
+            //
+            // Deliberately NOT `RazorArea` or `RazorEdge`. An area you
+            // have already drawn keeps the map's gestures, so dragging
+            // its contents and resizing it still work while the tool is
+            // armed — claiming those would leave the tool unable to use
+            // its own output.
+            Tool::Razor => &[
+                (C::PianoRoll, G::Drag),
+                (C::Note, G::Drag),
+                (C::NoteEdge, G::Drag),
+            ],
+            // Notes and their edges. Not the empty roll: a drag that
+            // starts on nothing has no note to set the velocity of, and
+            // stealing the marquee there would cost you the only way to
+            // *choose* the notes you are about to shape.
+            Tool::Velocity => &[(C::Note, G::Drag), (C::NoteEdge, G::Drag)],
         }
     }
 
-    pub const ALL: [Tool; 6] = [
+    pub const ALL: [Tool; 9] = [
         Tool::Select,
         Tool::Pen,
         Tool::Curve,
         Tool::Eraser,
         Tool::NoteDraw,
         Tool::NoteErase,
+        Tool::Razor,
+        Tool::Velocity,
+        Tool::Zoom,
     ];
+
+    /// Whether this tool changes the view rather than the material.
+    ///
+    /// A view tool is safe to arm at any moment and safe to leave armed:
+    /// it cannot alter the document, so nothing it does needs undo and
+    /// nothing it does can be lost. That is what makes it reasonable to
+    /// spring-load one onto a held key.
+    pub fn is_view(self) -> bool {
+        matches!(self, Tool::Zoom)
+    }
 
     pub fn label(&self) -> &'static str {
         match self {
@@ -74,6 +139,9 @@ impl Tool {
             Tool::Eraser => "Eraser",
             Tool::NoteDraw => "Note Draw",
             Tool::NoteErase => "Note Erase",
+            Tool::Razor => "Razor",
+            Tool::Velocity => "Velocity",
+            Tool::Zoom => "Zoom",
         }
     }
 
@@ -106,7 +174,11 @@ pub enum Hit {
     /// A Q-zone split handle in the bottom strip or note body.
     ZoneSplit { id: NoteId, index: usize, t: f64 },
     /// A point on the active dimension's curve.
-    CurvePoint { id: NoteId, dimension: Dimension, t: f64 },
+    CurvePoint {
+        id: NoteId,
+        dimension: Dimension,
+        t: f64,
+    },
     /// Empty canvas at this time and pitch.
     Empty { t: f64, pitch: f64 },
 }
@@ -368,13 +440,26 @@ pub struct Grid {
     /// 1/4, and the control would stop meaning anything.
     fitted: Option<f64>,
     pub triplet: bool,
+    /// Dotted: each step is half again as long.
+    ///
+    /// Mutually exclusive with `triplet` in practice — see
+    /// [`Grid::set_triplet`] — because a dotted triplet is a real thing
+    /// nobody sets from a grid menu, and two toggles that can both be on
+    /// would make the readout say something no one asked for.
+    pub dotted: bool,
     pub enabled: bool,
     /// Whether — and how tightly — the division follows the zoom.
     ///
-    /// Off by default, so a grid stays exactly where it was put until
-    /// the user asks for otherwise. `triplet` stays a separate flag
-    /// precisely so this can scale the division by powers of two without
-    /// ever straightening a triplet grid.
+    /// **On** by default, at the middle density — see
+    /// [`adaptive_grid::Adaptive::default`]. [`Grid::division`] stays the
+    /// user's ceiling and the zoom only ever coarsens away from it, so a
+    /// grid that follows the view can never snap finer than was asked
+    /// for. [`Grid::label`] reports what is in use, not the ceiling,
+    /// which is what keeps that honest.
+    ///
+    /// `triplet` stays a separate flag precisely so this can scale the
+    /// division by powers of two without ever straightening a triplet
+    /// grid.
     pub adaptive: adaptive_grid::Adaptive,
 }
 
@@ -384,6 +469,7 @@ impl Default for Grid {
             division: 1.0 / 16.0,
             fitted: None,
             triplet: false,
+            dotted: false,
             enabled: true,
             adaptive: adaptive_grid::Adaptive::default(),
         }
@@ -405,12 +491,32 @@ impl Grid {
     /// Grid step in document units.
     pub fn step(&self, units_per_beat: f64) -> f64 {
         let beats = self.effective() * 4.0;
+        // Two thirds for a triplet, three halves for a dotted note —
+        // the definitions, not adjustments to them.
         let beats = if self.triplet {
             beats * 2.0 / 3.0
+        } else if self.dotted {
+            beats * 1.5
         } else {
             beats
         };
         beats * units_per_beat
+    }
+
+    /// Arm the triplet grid, clearing dotted.
+    pub fn set_triplet(&mut self, on: bool) {
+        self.triplet = on;
+        if on {
+            self.dotted = false;
+        }
+    }
+
+    /// Arm the dotted grid, clearing triplet.
+    pub fn set_dotted(&mut self, on: bool) {
+        self.dotted = on;
+        if on {
+            self.triplet = false;
+        }
     }
 
     pub fn snap(&self, t: f64, origin: f64, units_per_beat: f64) -> f64 {
@@ -453,11 +559,33 @@ impl Grid {
             .is_some_and(|f| (f / self.division - 1.0).abs() > 1e-9)
     }
 
-    /// `1/16` / `1/16T`, for the fixed-width toolbar readout.
+    /// `1/16`, `1/16T`, `1/16.` — for the fixed-width toolbar readout.
+    ///
+    /// A whole note reads as `1`, not `1/1`: it is the bar, and every
+    /// grid menu in every DAW calls it that.
     pub fn label(&self) -> String {
         let denom = (1.0 / self.effective()).round() as i64;
+        let base = if denom <= 1 {
+            "1".to_string()
+        } else {
+            format!("1/{denom}")
+        };
         if self.triplet {
-            format!("1/{denom}T")
+            format!("{base}T")
+        } else if self.dotted {
+            format!("{base}.")
+        } else {
+            base
+        }
+    }
+
+    /// The *setting*, spelled the same way [`Grid::label`] spells the
+    /// division in use — so a readout showing both cannot render the
+    /// same number two ways.
+    pub fn ceiling_label(&self) -> String {
+        let denom = (1.0 / self.division).round() as i64;
+        if denom <= 1 {
+            "1".to_string()
         } else {
             format!("1/{denom}")
         }
@@ -469,6 +597,13 @@ impl Grid {
     /// moved the view. `Editor::grid_coarser` refits straight after.
     pub fn coarser(&mut self) {
         self.division = (self.division * 2.0).min(1.0);
+        self.fitted = None;
+    }
+
+    /// Set the division, dropping whatever the zoom had fitted — same
+    /// reasoning as [`Grid::coarser`].
+    pub fn set_division(&mut self, division: f64) {
+        self.division = division.clamp(1.0 / 128.0, 1.0);
         self.fitted = None;
     }
 
