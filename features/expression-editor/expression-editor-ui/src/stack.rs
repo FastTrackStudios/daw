@@ -1222,7 +1222,7 @@ pub fn StackView(
                                 x: 7, y: "{lane.y + 12.0:.1}",
                                 font_size: "8",
                                 letter_spacing: "2",
-                                fill: if lane.active { theme::TEXT_BRIGHT } else { theme::TEXT_FAINT },
+                                fill: if lane.active { theme::TEXT_BRIGHT } else { theme::TEXT_DIM },
                                 {lane.name.to_uppercase()}
                             }
                         } else {
