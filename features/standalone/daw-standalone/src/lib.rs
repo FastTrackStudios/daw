@@ -69,6 +69,14 @@ pub mod media_seed;
 pub mod metering;
 mod midi;
 mod peak;
+/// Persistent source-level peaks: REAPER `.reapeaks` sidecars next to
+/// each on-disk media file, shared with REAPER where projects overlap.
+#[cfg(all(
+    feature = "reapeaks",
+    any(feature = "audio", feature = "decode"),
+    not(target_arch = "wasm32")
+))]
+mod peak_store;
 pub(crate) mod platform;
 pub mod plugin;
 mod plugin_loader;

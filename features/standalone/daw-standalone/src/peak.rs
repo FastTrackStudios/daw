@@ -51,8 +51,12 @@ impl Peaks for Standalone {
         // markers), all of which bump the project revision when they
         // change — so `(take, block)` at the current revision is
         // reusable, and every consumer (the arrangement, the drum
-        // lanes, a refresh after an edit) pays the scan once. REAPER's
-        // equivalent is the `.reapeaks` file; ours lives in memory.
+        // lanes, a refresh after an edit) pays the scan once. This
+        // in-memory cache holds the TAKE-level result (placement /
+        // markers / play rate applied); the SOURCE-level scan persists
+        // across cold starts as a REAPER-compatible `.reapeaks`
+        // sidecar next to the media (`reapeaks` feature — see
+        // `crate::peak_store`).
         let cache_key = peak_cache_key(self, &project, &item, &take, block_size);
         if let Some((key, revision)) = &cache_key
             && let Some(hit) = cache().lock().ok().and_then(|c| {
@@ -66,11 +70,17 @@ impl Peaks for Standalone {
 
         // A take with no materialized media has no waveform: empty, not
         // an error, so a lane can still be laid out around it.
-        let Some(reader) =
+        let Some(mut reader) =
             crate::take_reader::TakeReader::open_or_decode(self, project, item, take)
         else {
             return TakePeakData::default();
         };
+        // Source-level persistence: load (or build once + write) the
+        // `.reapeaks` sidecar for on-disk media, so coarse-zoom blocks
+        // below fold from the mipmap instead of rescanning PCM on every
+        // cold start. The revision-keyed in-memory cache above still
+        // caches the take-time mapping.
+        reader.ensure_reapeaks();
         let rate = reader.sample_rate() as f64;
         let channels = reader.channels().max(1) as u32;
         let block = block_size.max(1);

@@ -489,6 +489,159 @@ const SIGNAL_PACK_KIND_PCM_I24: u32 = 8;
 /// sample_start/end) stays valid — decode trims/pads to the index length.
 const SIGNAL_PACK_KIND_OGG_VORBIS: u32 = 6;
 
+/// The fixed 64-byte `.signalpack` file header — THE one parse/encode
+/// implementation. Every reader (pack open, extraction, in-place spec
+/// rewrite) and the writer go through this type.
+///
+/// Layout (all integers little-endian):
+///
+/// | offset | bytes | field |
+/// |--------|-------|-------|
+/// | 0      | 8     | magic `"SIGPACK\0"` |
+/// | 8      | 4     | version (currently 1) |
+/// | 12     | 4     | kind (5 FLAC i24, 6 Ogg Vorbis, 7 PCM i16, 8 PCM i24) |
+/// | 16     | 8     | body offset (always 64 — the header length) |
+/// | 24     | 8     | index offset (byte position of the text index) |
+/// | 32     | 8     | index length in bytes |
+/// | 40     | 8     | entry count |
+/// | 48     | 16    | reserved (zero) |
+///
+/// The raw 64 bytes are retained so a rewriter can patch the index span
+/// while carrying every other byte (entry count, reserved area) forward
+/// verbatim.
+#[derive(Debug, Clone, Copy)]
+pub struct PackFileHeader {
+    raw: [u8; SIGNAL_PACK_HEADER_LEN],
+    version: u32,
+    kind: u32,
+    body_offset: u64,
+    index_offset: u64,
+    index_len: u64,
+    entry_count: u64,
+}
+
+impl PackFileHeader {
+    /// Fixed on-disk header length in bytes.
+    pub const LEN: usize = SIGNAL_PACK_HEADER_LEN;
+
+    /// Read + parse the header from the start of an open pack file.
+    /// Leaves the reader positioned at the body offset (byte 64).
+    pub fn read(file: &mut File) -> Result<Self, SamplerError> {
+        let mut raw = [0u8; Self::LEN];
+        file.read_exact(&mut raw)?;
+        Self::parse(raw)
+    }
+
+    /// Parse a raw 64-byte header. Validates the magic, the version, and
+    /// offset plausibility (body at 64, index at or after the body).
+    /// Kind is NOT validated here — spec rewriting copies unknown-kind
+    /// bodies verbatim; readers that decode audio call
+    /// [`require_known_kind`](Self::require_known_kind).
+    pub fn parse(raw: [u8; Self::LEN]) -> Result<Self, SamplerError> {
+        if &raw[0..8] != SIGNAL_PACK_MAGIC {
+            return Err(invalid_data("invalid signal pack magic"));
+        }
+        let version = read_u32(&raw, 8)?;
+        if version != SIGNAL_PACK_VERSION {
+            return Err(invalid_data(format!(
+                "unsupported signal pack version {version}"
+            )));
+        }
+        let kind = read_u32(&raw, 12)?;
+        let body_offset = read_u64(&raw, 16)?;
+        let index_offset = read_u64(&raw, 24)?;
+        let index_len = read_u64(&raw, 32)?;
+        let entry_count = read_u64(&raw, 40)?;
+        if body_offset != Self::LEN as u64 || index_offset < body_offset {
+            return Err(invalid_data("implausible signal pack header offsets"));
+        }
+        Ok(Self {
+            raw,
+            version,
+            kind,
+            body_offset,
+            index_offset,
+            index_len,
+            entry_count,
+        })
+    }
+
+    /// Build a fresh header for the writer (magic/version/body offset
+    /// filled in; reserved bytes zero).
+    pub fn new(kind: u32, index_offset: u64, index_len: u64, entry_count: u64) -> Self {
+        let mut raw = [0u8; Self::LEN];
+        raw[0..8].copy_from_slice(SIGNAL_PACK_MAGIC);
+        write_u32(&mut raw, 8, SIGNAL_PACK_VERSION);
+        write_u32(&mut raw, 12, kind);
+        write_u64(&mut raw, 16, Self::LEN as u64);
+        write_u64(&mut raw, 24, index_offset);
+        write_u64(&mut raw, 32, index_len);
+        write_u64(&mut raw, 40, entry_count);
+        Self {
+            raw,
+            version: SIGNAL_PACK_VERSION,
+            kind,
+            body_offset: Self::LEN as u64,
+            index_offset,
+            index_len,
+            entry_count,
+        }
+    }
+
+    /// Err unless the kind is one this build knows how to decode.
+    pub fn require_known_kind(&self) -> Result<u32, SamplerError> {
+        if !matches!(
+            self.kind,
+            SIGNAL_PACK_KIND_FLAC_I24
+                | SIGNAL_PACK_KIND_OGG_VORBIS
+                | SIGNAL_PACK_KIND_PCM_I16
+                | SIGNAL_PACK_KIND_PCM_I24
+        ) {
+            return Err(invalid_data(format!(
+                "signal pack kind {} is not a known pack format",
+                self.kind
+            )));
+        }
+        Ok(self.kind)
+    }
+
+    /// Copy of this header with the index span replaced — the spec-rewrite
+    /// path: every other byte (kind, entry count, reserved) rides along
+    /// unchanged.
+    pub fn with_index_span(&self, index_offset: u64, index_len: u64) -> Self {
+        let mut out = *self;
+        write_u64(&mut out.raw, 24, index_offset);
+        write_u64(&mut out.raw, 32, index_len);
+        out.index_offset = index_offset;
+        out.index_len = index_len;
+        out
+    }
+
+    /// The raw 64 bytes, ready to write to disk.
+    pub fn as_bytes(&self) -> &[u8; Self::LEN] {
+        &self.raw
+    }
+
+    pub fn version(&self) -> u32 {
+        self.version
+    }
+    pub fn kind(&self) -> u32 {
+        self.kind
+    }
+    pub fn body_offset(&self) -> u64 {
+        self.body_offset
+    }
+    pub fn index_offset(&self) -> u64 {
+        self.index_offset
+    }
+    pub fn index_len(&self) -> u64 {
+        self.index_len
+    }
+    pub fn entry_count(&self) -> u64 {
+        self.entry_count
+    }
+}
+
 /// Codec used for the audio entries of a `.signalpack`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PackCodec {
@@ -1332,34 +1485,11 @@ impl SignalPcmPack {
     /// No audio is decoded.
     pub fn open(path: &Path) -> Result<Self, SamplerError> {
         let mut file = File::open(path)?;
-        let mut header = [0u8; SIGNAL_PACK_HEADER_LEN];
-        file.read_exact(&mut header)?;
-        if &header[0..8] != SIGNAL_PACK_MAGIC {
-            return Err(invalid_data("invalid signal pack magic"));
-        }
-        let version = read_u32(&header, 8)?;
-        if version != SIGNAL_PACK_VERSION {
-            return Err(invalid_data(format!(
-                "unsupported signal pack version {version}"
-            )));
-        }
-        let kind = read_u32(&header, 12)?;
-        if !matches!(
-            kind,
-            SIGNAL_PACK_KIND_FLAC_I24
-                | SIGNAL_PACK_KIND_OGG_VORBIS
-                | SIGNAL_PACK_KIND_PCM_I16
-                | SIGNAL_PACK_KIND_PCM_I24
-        ) {
-            return Err(invalid_data(format!(
-                "signal pack kind {kind} is not a known pack format"
-            )));
-        }
-        let index_offset = read_u64(&header, 24)?;
-        let index_len = read_u64(&header, 32)?;
+        let header = PackFileHeader::read(&mut file)?;
+        let kind = header.require_known_kind()?;
 
-        file.seek(SeekFrom::Start(index_offset))?;
-        let mut index = vec![0u8; index_len as usize];
+        file.seek(SeekFrom::Start(header.index_offset()))?;
+        let mut index = vec![0u8; header.index_len() as usize];
         file.read_exact(&mut index)?;
 
         let mut entries = HashMap::new();
@@ -1995,16 +2125,14 @@ fn write_signal_pack_file(
     drop(pack);
 
     let mut file = File::options().write(true).open(pack_path)?;
-    let mut header = [0u8; SIGNAL_PACK_HEADER_LEN];
-    header[0..8].copy_from_slice(SIGNAL_PACK_MAGIC);
-    write_u32(&mut header, 8, SIGNAL_PACK_VERSION);
-    write_u32(&mut header, 12, codec.header_kind());
-    write_u64(&mut header, 16, SIGNAL_PACK_HEADER_LEN as u64);
-    write_u64(&mut header, 24, index_offset);
-    write_u64(&mut header, 32, index.len() as u64);
-    write_u64(&mut header, 40, stats.prepared as u64);
+    let header = PackFileHeader::new(
+        codec.header_kind(),
+        index_offset,
+        index.len() as u64,
+        stats.prepared as u64,
+    );
     file.seek(SeekFrom::Start(0))?;
-    file.write_all(&header)?;
+    file.write_all(header.as_bytes())?;
 
     Ok(stats)
 }
@@ -2014,34 +2142,11 @@ pub fn extract_signal_pack(
     output_dir: &Path,
 ) -> Result<PrepareStats, SamplerError> {
     let mut file = File::open(pack_path)?;
-    let mut header = [0u8; SIGNAL_PACK_HEADER_LEN];
-    file.read_exact(&mut header)?;
-    if &header[0..8] != SIGNAL_PACK_MAGIC {
-        return Err(invalid_data("invalid signal pack magic"));
-    }
-    let version = read_u32(&header, 8)?;
-    if version != SIGNAL_PACK_VERSION {
-        return Err(invalid_data(format!(
-            "unsupported signal pack version {version}"
-        )));
-    }
-    let kind = read_u32(&header, 12)?;
-    if !matches!(
-        kind,
-        SIGNAL_PACK_KIND_FLAC_I24
-            | SIGNAL_PACK_KIND_OGG_VORBIS
-            | SIGNAL_PACK_KIND_PCM_I16
-            | SIGNAL_PACK_KIND_PCM_I24
-    ) {
-        return Err(invalid_data(format!(
-            "signal pack kind {kind} is not an exportable pack"
-        )));
-    }
-    let index_offset = read_u64(&header, 24)?;
-    let index_len = read_u64(&header, 32)?;
+    let header = PackFileHeader::read(&mut file)?;
+    header.require_known_kind()?;
 
-    file.seek(SeekFrom::Start(index_offset))?;
-    let mut index = vec![0u8; index_len as usize];
+    file.seek(SeekFrom::Start(header.index_offset()))?;
+    let mut index = vec![0u8; header.index_len() as usize];
     file.read_exact(&mut index)?;
 
     let mut stats = PrepareStats::default();

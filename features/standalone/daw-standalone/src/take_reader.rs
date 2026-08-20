@@ -27,6 +27,23 @@ pub(crate) struct TakeReader {
     pub length: f64,
     /// The take's stretch markers, sorted by position.
     pub markers: Vec<StretchMarker>,
+    /// The source's on-disk media file, when the resolver (or the raw
+    /// path) points at one — the key for the `.reapeaks` sidecar.
+    #[cfg(all(
+        feature = "reapeaks",
+        any(feature = "audio", feature = "decode"),
+        not(target_arch = "wasm32")
+    ))]
+    pub media_path: Option<std::path::PathBuf>,
+    /// Parsed source-level peak mipmap (see [`crate::peak_store`]);
+    /// populated by [`Self::ensure_reapeaks`], never eagerly — the
+    /// audio accessor opens readers too and must stay scan-free.
+    #[cfg(all(
+        feature = "reapeaks",
+        any(feature = "audio", feature = "decode"),
+        not(target_arch = "wasm32")
+    ))]
+    pub reapeaks: Option<std::sync::Arc<dawfile_reaper::reapeaks::ReaPeaks>>,
 }
 
 impl TakeReader {
@@ -56,12 +73,37 @@ impl TakeReader {
             .read_project(&guid, |p| p.stretch_markers.get(&t.guid).cloned())
             .flatten()
             .unwrap_or_default();
+        #[cfg(all(
+            feature = "reapeaks",
+            any(feature = "audio", feature = "decode"),
+            not(target_arch = "wasm32")
+        ))]
+        let media_path = t.source_file_path.as_deref().and_then(|p| {
+            // The bay resolver is authoritative (project-relative paths);
+            // a plain absolute path that exists works without one.
+            daw.media_bay().resolve_file_path(p).or_else(|| {
+                let raw = std::path::Path::new(p);
+                raw.is_file().then(|| raw.to_path_buf())
+            })
+        });
         Some(Self {
             source,
             start_offset: t.start_offset.as_seconds(),
             play_rate: if t.play_rate > 0.0 { t.play_rate } else { 1.0 },
             length,
             markers,
+            #[cfg(all(
+                feature = "reapeaks",
+                any(feature = "audio", feature = "decode"),
+                not(target_arch = "wasm32")
+            ))]
+            media_path,
+            #[cfg(all(
+                feature = "reapeaks",
+                any(feature = "audio", feature = "decode"),
+                not(target_arch = "wasm32")
+            ))]
+            reapeaks: None,
         })
     }
 
@@ -105,6 +147,36 @@ impl TakeReader {
         .ok()?;
         Self::open(daw, project, item, take)
     }
+
+    /// Load-or-build the source-level `.reapeaks` mipmap for this
+    /// take's media (see [`crate::peak_store`]). Only for on-disk
+    /// PCM-file sources — in-memory decodes scan RAM cheaply and get
+    /// no sidecar. Called by the peaks builder, deliberately not by
+    /// [`Self::open`]: the first build scans the source once, and the
+    /// audio accessor's opens must stay scan-free.
+    #[cfg(all(
+        feature = "reapeaks",
+        any(feature = "audio", feature = "decode"),
+        not(target_arch = "wasm32")
+    ))]
+    pub(crate) fn ensure_reapeaks(&mut self) {
+        if self.reapeaks.is_some() {
+            return;
+        }
+        if !matches!(*self.source, AudioSource::PcmFile(_)) {
+            return;
+        }
+        if let Some(path) = &self.media_path {
+            self.reapeaks = crate::peak_store::get_or_build(path, &self.source);
+        }
+    }
+
+    #[cfg(not(all(
+        feature = "reapeaks",
+        any(feature = "audio", feature = "decode"),
+        not(target_arch = "wasm32")
+    )))]
+    pub(crate) fn ensure_reapeaks(&mut self) {}
 
     pub(crate) fn channels(&self) -> u16 {
         self.source.channels()
@@ -170,6 +242,25 @@ impl TakeReader {
         let lo = lo.max(0.0).floor() as usize;
         let hi = (hi.ceil() as usize).min(frames);
         if lo >= hi {
+            return;
+        }
+        // Coarse zooms fold from the persistent source mipmap instead of
+        // scanning PCM; fine zooms (span below the finest mipmap ratio)
+        // still read the source — the mipmap can't resolve them.
+        #[cfg(all(
+            feature = "reapeaks",
+            any(feature = "audio", feature = "decode"),
+            not(target_arch = "wasm32")
+        ))]
+        if let Some(pk) = &self.reapeaks
+            && let Some(fine) = pk.levels.first()
+            && (hi - lo) as u64 >= fine.samples_per_peak.max(1) as u64
+        {
+            for c in 0..ch {
+                let (mn, mx) = crate::peak_store::min_max_block(pk, lo, hi, c);
+                out[c * 2] = (mn as f64).min(0.0);
+                out[c * 2 + 1] = (mx as f64).max(0.0);
+            }
             return;
         }
         for c in 0..ch {
