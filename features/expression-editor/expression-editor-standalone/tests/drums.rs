@@ -222,3 +222,204 @@ fn the_drums_flag_parses_with_and_without_a_folder() {
     assert_eq!(ordered.target.drums, Some(None));
     assert!(matches!(ordered.source, Source::Rpp(_)));
 }
+
+/// Every item on the track holding `item`, as (position, length,
+/// offset) — the same fingerprint the slip tests use.
+fn pieces_on(
+    daw: &daw::standalone::Standalone,
+    ctx: &daw::service::ProjectContext,
+    item: &daw::service::ItemRef,
+) -> Vec<(f64, f64, f64)> {
+    use daw::service::{Items, TakeRef, Takes};
+    let info = daw.get_item(ctx.clone(), item.clone()).expect("item");
+    let mut out: Vec<(f64, f64, f64)> = daw
+        .get_items(
+            ctx.clone(),
+            daw::service::TrackRef::Guid(info.track_guid.clone()),
+        )
+        .into_iter()
+        .map(|i| {
+            let offset = daw
+                .get_take(
+                    ctx.clone(),
+                    daw::service::ItemRef::Guid(i.guid.clone()),
+                    TakeRef::Active,
+                )
+                .map(|t| t.start_offset.as_seconds())
+                .unwrap_or(0.0);
+            (i.position.as_seconds(), i.length.as_seconds(), offset)
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    out
+}
+
+fn open_kit(tag: &str) -> Runner {
+    let dir = std::env::temp_dir().join(format!("fts-ee-standalone-drums-{tag}"));
+    let path = fixture(&dir);
+    Runner::open(
+        &Source::Rpp(path),
+        &Target {
+            drums: Some(None),
+            ..Target::default()
+        },
+        viewport(),
+        None,
+    )
+    .expect("the kit opens")
+}
+
+// r[verify drums.quantize.apply]
+// r[verify drums.quantize.undo]
+#[test]
+fn the_hosts_apply_cuts_every_mic_the_same_and_one_undo_restores() {
+    use daw::service::ProjectContext;
+    let runner = open_kit("apply");
+    let host = runner.host.as_ref().expect("a drum workspace has a host");
+    let daw = runner.daw.as_ref().expect("backend");
+    let ctx = ProjectContext::Current;
+
+    let items = host.group();
+    assert_eq!(items.len(), 3, "the whole kit is the group");
+    let before: Vec<_> = items.iter().map(|i| pieces_on(daw, &ctx, i)).collect();
+
+    // The panel at its defaults — at 120 bpm the fixture's clicks at
+    // 0.1/0.4/0.7 s are all off the default grid.
+    let panel = expression_editor_ui::QuantizePanel::default();
+    let (bins, previews) = host.preview(&panel);
+    assert!(!bins.is_empty(), "the histogram has content");
+    assert!(previews.iter().any(|p| p.moved), "the plan moves hits");
+
+    let done = host.apply(&panel).expect("applied");
+    assert_eq!(done.items, 3, "every mic was edited");
+    assert!(done.pieces > 3, "each mic was cut into pieces");
+
+    let first = pieces_on(daw, &ctx, &items[0]);
+    assert!(first.len() > 1);
+    for item in &items[1..] {
+        assert_eq!(pieces_on(daw, &ctx, item), first, "mics cut identically");
+    }
+
+    assert!(host.undo(), "one undo step");
+    for (i, item) in items.iter().enumerate() {
+        assert_eq!(pieces_on(daw, &ctx, item), before[i], "mic {i} restored");
+    }
+}
+
+// r[verify drums.manual.slip]
+#[test]
+fn the_hosts_slip_slides_every_mic_and_one_undo_restores() {
+    use daw::service::ProjectContext;
+    use expression_editor_audio::quantize::SplitConfig;
+    let runner = open_kit("slip");
+    let host = runner.host.as_ref().expect("host");
+    let daw = runner.daw.as_ref().expect("backend");
+    let ctx = ProjectContext::Current;
+    let items = host.group();
+    let before: Vec<_> = items.iter().map(|i| pieces_on(daw, &ctx, i)).collect();
+
+    let cfg = SplitConfig {
+        leading_pad_secs: 0.005,
+        crossfade_secs: 0.005,
+    };
+    // Drag the middle click (0.4 s) 30 ms later; the next is at 0.7 s.
+    let done = host.slip(0.4, 0.7, 0.030, cfg).expect("slipped");
+    assert_eq!(done.items, 3);
+    assert_eq!(done.pieces, 9, "three pieces per mic");
+
+    let first = pieces_on(daw, &ctx, &items[0]);
+    for item in &items[1..] {
+        assert_eq!(pieces_on(daw, &ctx, item), first, "mics slid identically");
+    }
+    let moved = first
+        .iter()
+        .find(|(pos, ..)| (pos - (0.395 + 0.030)).abs() < 1e-9);
+    assert!(moved.is_some(), "the dragged span landed 30 ms later");
+
+    assert!(host.undo(), "one undo step");
+    for (i, item) in items.iter().enumerate() {
+        assert_eq!(pieces_on(daw, &ctx, item), before[i], "mic {i} restored");
+    }
+}
+
+// r[verify drums.manual.stretch]
+#[test]
+fn the_hosts_stretch_writes_one_marker_map_to_every_mic_and_one_undo_restores() {
+    use daw::service::{ProjectContext, StretchMarkers, TakeRef};
+    let runner = open_kit("stretch");
+    let host = runner.host.as_ref().expect("host");
+    let daw = runner.daw.as_ref().expect("backend");
+    let ctx = ProjectContext::Current;
+    let items = host.group();
+
+    // Drag the middle click (0.4 s) 30 ms later between its neighbours.
+    let done = host
+        .stretch(0.4, 0.1, 0.7, 0.030, false)
+        .expect("stretched");
+    assert_eq!(done.items, 3, "every mic warped");
+    assert!(done.pieces > 0, "markers were written");
+
+    let markers_of = |item: &daw::service::ItemRef| {
+        daw.get_stretch_markers(ctx.clone(), item.clone(), TakeRef::Active)
+    };
+    let first = markers_of(&items[0]);
+    assert!(!first.is_empty(), "the map exists");
+    for item in &items[1..] {
+        assert_eq!(markers_of(item), first, "identical maps on every mic");
+    }
+    // The dragged hit is heard 30 ms later: some marker plays 0.4 s of
+    // source at 0.43 s of take time.
+    assert!(
+        first
+            .iter()
+            .any(|m| (m.source_position - 0.4).abs() < 0.01 && (m.position - 0.43).abs() < 0.01),
+        "the hit's marker moved: {first:?}"
+    );
+
+    assert!(host.undo(), "one undo step");
+    for item in &items {
+        assert!(markers_of(item).is_empty(), "markers gone after undo");
+    }
+}
+
+// r[verify drums.manual.add-remove]
+#[test]
+fn hand_added_and_removed_hits_shape_the_list_but_not_the_daw() {
+    use daw::service::ProjectContext;
+    let runner = open_kit("manual");
+    let host = runner.host.as_ref().expect("host");
+    let daw = runner.daw.as_ref().expect("backend");
+    let ctx = ProjectContext::Current;
+    let items = host.group();
+    let before: Vec<_> = items.iter().map(|i| pieces_on(daw, &ctx, i)).collect();
+
+    let panel = expression_editor_ui::QuantizePanel::default();
+    let detected = host.hits(&panel).len();
+    assert!(detected >= 3, "the fixture's clicks were found");
+
+    // A hand-placed hit near silence at 0.55 s refines to wherever the
+    // sum rises most — the fixture is silent there, so it stays put.
+    let landed = host.add_hit(0.55, 0.02);
+    assert!(
+        (landed - 0.55).abs() <= 0.02,
+        "refined nearby, got {landed}"
+    );
+    assert_eq!(host.hits(&panel).len(), detected + 1, "the list grew");
+
+    // Throwing out a detected hit suppresses it across re-detection.
+    host.remove_hit(0.4);
+    let now = host.hits(&panel);
+    assert_eq!(now.len(), detected, "one added, one removed");
+    assert!(
+        !now.iter().any(|t| (t.at - 0.4).abs() < 0.015),
+        "the removed hit stays gone"
+    );
+    // Un-adding the hand hit brings the count back down.
+    host.remove_hit(landed);
+    assert_eq!(host.hits(&panel).len(), detected - 1);
+
+    // And none of it touched the daw.
+    for (i, item) in items.iter().enumerate() {
+        assert_eq!(pieces_on(daw, &ctx, item), before[i], "mic {i} untouched");
+    }
+}

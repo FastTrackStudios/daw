@@ -292,6 +292,94 @@ impl AudioSource {
             p.prefetch(start_frame, frames);
         }
     }
+
+    /// Min/max of one channel over `[lo, hi)` frames, in one linear
+    /// pass over the raw storage.
+    ///
+    /// This is what makes peak building cheap: `sample()` per frame
+    /// costs a bounds check, an offset multiply and a format dispatch
+    /// *each*, and a peaks pass touches every frame of every take.
+    /// Here the dispatch happens once and the inner loop is a bare
+    /// stride walk — an order of magnitude on a whole session.
+    pub fn min_max_block(&self, lo: usize, hi: usize, channel: usize) -> (f32, f32) {
+        let (mut mn, mut mx) = (f32::MAX, f32::MIN);
+        match self {
+            AudioSource::Memory(d) => {
+                let ch = d.channels.max(1) as usize;
+                let c = channel.min(ch - 1);
+                let hi = hi.min(d.frame_count());
+                if lo >= hi {
+                    return (0.0, 0.0);
+                }
+                let mut i = lo * ch + c;
+                let end = hi * ch;
+                while i < end {
+                    let v = d.samples[i];
+                    mn = mn.min(v);
+                    mx = mx.max(v);
+                    i += ch;
+                }
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            AudioSource::PcmFile(p) => {
+                let ch = p.channels.max(1) as usize;
+                let c = channel.min(ch - 1);
+                let hi = hi.min(p.frames);
+                if lo >= hi {
+                    return (0.0, 0.0);
+                }
+                let bps = p.format.bytes_per_sample();
+                let stride = ch * bps;
+                let start = p.data_offset + (lo * ch + c) * bps;
+                let end = p.data_offset + (hi * ch + c) * bps;
+                let b: &[u8] = &p.map;
+                if end > b.len() {
+                    // Truncated file: fall back to the checked reader.
+                    for i in lo..hi {
+                        let v = p.sample(i, c);
+                        mn = mn.min(v);
+                        mx = mx.max(v);
+                    }
+                } else {
+                    match p.format {
+                        PcmFormat::I16 => {
+                            let mut off = start;
+                            let (mut imn, mut imx) = (i16::MAX, i16::MIN);
+                            while off < end {
+                                let v = i16::from_le_bytes([b[off], b[off + 1]]);
+                                imn = imn.min(v);
+                                imx = imx.max(v);
+                                off += stride;
+                            }
+                            mn = imn as f32 / 32768.0;
+                            mx = imx as f32 / 32768.0;
+                        }
+                        PcmFormat::I24 => {
+                            let mut off = start;
+                            while off < end {
+                                let v = ((b[off] as i32) << 8
+                                    | (b[off + 1] as i32) << 16
+                                    | (b[off + 2] as i32) << 24)
+                                    >> 8;
+                                let v = v as f32 / 8_388_608.0;
+                                mn = mn.min(v);
+                                mx = mx.max(v);
+                                off += stride;
+                            }
+                        }
+                        _ => {
+                            for i in lo..hi {
+                                let v = p.sample(i, c);
+                                mn = mn.min(v);
+                                mx = mx.max(v);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if mn > mx { (0.0, 0.0) } else { (mn, mx) }
+    }
 }
 
 #[cfg(test)]

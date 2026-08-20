@@ -17,8 +17,8 @@
 use std::cell::RefCell;
 
 use input::{
-    ActionContext, InputCommand, InputEvent, InputProcessor, KeyChord, KeyCode, KeyEvent,
-    KeyTrie, KeymapConfig, ModeId, Modifiers,
+    ActionContext, InputCommand, InputEvent, InputProcessor, KeyChord, KeyCode, KeyEvent, KeyTrie,
+    KeymapConfig, ModeId, Modifiers,
 };
 
 use expression_editor_core::actions as core_actions;
@@ -136,12 +136,15 @@ pub fn resolve(key: &str, mods: Mods) -> Vec<InputCommand> {
             ..Default::default()
         },
     });
-    let chord = KeyChord::new(key_code(key), Modifiers {
-        ctrl: mods.ctrl,
-        alt: mods.alt,
-        shift: mods.shift,
-        ..Default::default()
-    });
+    let chord = KeyChord::new(
+        key_code(key),
+        Modifiers {
+            ctrl: mods.ctrl,
+            alt: mods.alt,
+            shift: mods.shift,
+            ..Default::default()
+        },
+    );
 
     let commands = PROCESSOR.with(|p| {
         let mut slot = p.borrow_mut();
@@ -307,7 +310,6 @@ fn walk(prefix: Vec<KeyChord>) -> Vec<Continuation> {
         out
     })
 }
-
 
 /// Whether a sequence is half-typed, so the next key belongs to it.
 ///

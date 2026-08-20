@@ -6,7 +6,7 @@
 //! this asserts the view actually reaches the screen.
 
 use dioxus::prelude::*;
-use expression_editor_core::doc::{ExpressionDoc, Dimension, Note, NoteId, TimeBase};
+use expression_editor_core::doc::{Dimension, ExpressionDoc, Note, NoteId, TimeBase};
 use expression_editor_core::{Editor, Viewport};
 use expression_editor_ui::ExpressionEditor;
 
@@ -140,10 +140,15 @@ fn every_note_reaches_the_canvas() {
     let mut empty = demo_editor(false, false);
     empty.doc.notes.clear();
     empty.selection.notes.clear();
-    let without =
-        paint::roll_scene(&empty, 900.0, 480.0, &paint::Overlay::default(), &mut labels)
-            .commands
-            .len();
+    let without = paint::roll_scene(
+        &empty,
+        900.0,
+        480.0,
+        &paint::Overlay::default(),
+        &mut labels,
+    )
+    .commands
+    .len();
 
     assert!(
         with_notes >= without + notes,

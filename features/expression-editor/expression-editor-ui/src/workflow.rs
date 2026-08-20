@@ -179,13 +179,7 @@ mod tests {
     fn every_workflow_opens_in_its_own_mode() {
         for w in Workflow::ALL {
             let ed = w.editor(Viewport::new(900.0, 480.0));
-            assert_eq!(
-                ed.mode,
-                w.mode(),
-                "{} opened in {:?}",
-                w.label(),
-                ed.mode
-            );
+            assert_eq!(ed.mode, w.mode(), "{} opened in {:?}", w.label(), ed.mode);
         }
     }
 
@@ -207,7 +201,10 @@ mod tests {
 
     #[test]
     fn the_unfinished_ones_say_so() {
-        let noted: Vec<_> = Workflow::ALL.iter().filter(|w| w.note().is_some()).collect();
+        let noted: Vec<_> = Workflow::ALL
+            .iter()
+            .filter(|w| w.note().is_some())
+            .collect();
         assert_eq!(noted.len(), 2, "only the stubs carry a note");
     }
 }

@@ -123,7 +123,6 @@ fn line_of(points: &[(f64, f64)]) -> BezPath {
     path_of(points.iter().map(|&(x, y)| Point::new(x, y)), false)
 }
 
-
 fn polygon(s: &str) -> BezPath {
     let mut path = polyline(s);
     if !path.is_empty() {
@@ -190,13 +189,7 @@ impl Batch {
 /// `w` and `h` are the element's box, handed down by the widget. Nothing
 /// here derives a size from the content, which is the property the svg
 /// could not offer.
-pub fn roll_scene(
-    ed: &Editor,
-    w: f64,
-    h: f64,
-    overlay: &Overlay,
-    labels: &mut Labeller,
-) -> Scene {
+pub fn roll_scene(ed: &Editor, w: f64, h: f64, overlay: &Overlay, labels: &mut Labeller) -> Scene {
     let mut scene = Scene::new();
     let vp = ed.viewport;
 
@@ -217,7 +210,12 @@ pub fn roll_scene(
     let roll_at = Affine::translate((canvas::GUTTER_W, canvas::RULER_H));
     scene.push_clip_layer(
         roll_at,
-        &Rect::new(0.0, 0.0, (w - canvas::GUTTER_W).max(0.0), (h - canvas::RULER_H).max(0.0)),
+        &Rect::new(
+            0.0,
+            0.0,
+            (w - canvas::GUTTER_W).max(0.0),
+            (h - canvas::RULER_H).max(0.0),
+        ),
     );
 
     rows(&mut scene, ed, roll_at, vp.w);
@@ -244,13 +242,7 @@ pub fn roll_scene(
             None,
             &r,
         );
-        scene.stroke(
-            &stroke_of(1.0),
-            roll_at,
-            color(theme::ACCENT),
-            None,
-            &r,
-        );
+        scene.stroke(&stroke_of(1.0), roll_at, color(theme::ACCENT), None, &r);
     }
 
     scene.pop_layer();
@@ -325,7 +317,11 @@ pub fn strip_scene(ed: &Editor, w: f64, h: f64, labels: &mut Labeller) -> Scene 
     let mut guides = Batch::default();
     for (y, major) in canvas::strip_guides(h) {
         guides.add(
-            color(if major { theme::GRID_BEAT } else { theme::GRID_SUB }),
+            color(if major {
+                theme::GRID_BEAT
+            } else {
+                theme::GRID_SUB
+            }),
             &Line::new((0.0, y), (vp_w, y)),
         );
     }
@@ -394,7 +390,11 @@ fn rows(scene: &mut Scene, ed: &Editor, at: Affine, w: f64) {
 fn grid(scene: &mut Scene, ed: &Editor, at: Affine, h: f64) {
     let mut lines = Batch::default();
     for g in canvas::grid_lines(ed) {
-        let c = if g.beat { theme::GRID_BEAT } else { theme::GRID_SUB };
+        let c = if g.beat {
+            theme::GRID_BEAT
+        } else {
+            theme::GRID_SUB
+        };
         lines.add(color(c), &Line::new((g.x, 0.0), (g.x, h)));
     }
     lines.stroke(scene, at, 1.0);
@@ -496,13 +496,7 @@ fn audio(scene: &mut Scene, ed: &Editor, at: Affine) {
 /// than as an overlay. A guitarist reads bends as "full" and "half", so
 /// the peak carries the number and the curve only shows how it got
 /// there.
-fn strings(
-    scene: &mut Scene,
-    ed: &Editor,
-    at: Affine,
-    overlay: &Overlay,
-    labels: &mut Labeller,
-) {
+fn strings(scene: &mut Scene, ed: &Editor, at: Affine, overlay: &Overlay, labels: &mut Labeller) {
     if overlay.flow.on_row() {
         for f in crate::guitar::flow_paths(ed) {
             scene.stroke(
@@ -685,7 +679,11 @@ fn notes(scene: &mut Scene, ed: &Editor, at: Affine, labels: &mut Labeller) {
     // Notes recede while a controller is being edited: the roll is that
     // dimension's editing surface for the moment, and full-strength
     // notes would compete with the curve for the same pixels.
-    let dim = if ed.cc_editing() { ed.cc_display.note_dim } else { 1.0 };
+    let dim = if ed.cc_editing() {
+        ed.cc_display.note_dim
+    } else {
+        1.0
+    };
 
     // Gathered by paint and emitted once each, rather than three
     // commands per note. Depth is preserved because each batch is a
@@ -870,11 +868,11 @@ fn handles(scene: &mut Scene, ed: &Editor, at: Affine) {
             // shape is faster to read than one anyway.
             let (cx, cy) = (h.x + h.w * 0.5, h.y + h.h * 0.5);
             let half = h.w.min(h.h) * 0.5;
-            let hollow = matches!(h.handle, expression_editor_core::Handle::Amplitude)
-                && ed.sibilant_scope;
-            if let Ok(mark) = kurbo::BezPath::from_svg(&crate::handle_mark(
-                h.handle, cx, cy, half, hollow,
-            )) {
+            let hollow =
+                matches!(h.handle, expression_editor_core::Handle::Amplitude) && ed.sibilant_scope;
+            if let Ok(mark) =
+                kurbo::BezPath::from_svg(&crate::handle_mark(h.handle, cx, cy, half, hollow))
+            {
                 scene.stroke(&stroke_of(1.2), at, color(theme::TEXT), None, &mark);
             }
         }
@@ -902,14 +900,7 @@ fn curves(scene: &mut Scene, ed: &Editor, at: Affine) {
     active.stroke(scene, at, 2.5);
 }
 
-fn controllers(
-    scene: &mut Scene,
-    ed: &Editor,
-    at: Affine,
-    w: f64,
-    h: f64,
-    labels: &mut Labeller,
-) {
+fn controllers(scene: &mut Scene, ed: &Editor, at: Affine, w: f64, h: f64, labels: &mut Labeller) {
     let _ = (w, h);
     for (i, c) in canvas::cc_paths(ed).into_iter().enumerate() {
         let fill = polygon(&c.fill);
@@ -998,7 +989,11 @@ fn keyboard(scene: &mut Scene, ed: &Editor, h: f64, labels: &mut Labeller) {
     scene.fill(
         Fill::NonZero,
         at,
-        color(if piano { theme::KEY_WHITE } else { theme::SURFACE_BAR }),
+        color(if piano {
+            theme::KEY_WHITE
+        } else {
+            theme::SURFACE_BAR
+        }),
         None,
         &band,
     );
@@ -1022,7 +1017,11 @@ fn keyboard(scene: &mut Scene, ed: &Editor, h: f64, labels: &mut Labeller) {
             }
         } else {
             faces.add(
-                color(if k.black { theme::KEY_BLACK } else { theme::KEY_WHITE }),
+                color(if k.black {
+                    theme::KEY_BLACK
+                } else {
+                    theme::KEY_WHITE
+                }),
                 &Rect::new(0.0, k.y, canvas::GUTTER_W, k.y + k.h),
             );
             edges.add(
@@ -1097,7 +1096,11 @@ fn ruler(scene: &mut Scene, ed: &Editor, w: f64, labels: &mut Labeller) {
         scene.stroke(
             &stroke_of(1.0),
             at,
-            color(if t.bar { theme::TEXT_DIM } else { theme::GRID_SUB }),
+            color(if t.bar {
+                theme::TEXT_DIM
+            } else {
+                theme::GRID_SUB
+            }),
             None,
             &Line::new((t.x, top), (t.x, canvas::RULER_H)),
         );

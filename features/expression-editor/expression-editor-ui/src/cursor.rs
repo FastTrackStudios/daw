@@ -70,7 +70,11 @@ pub fn cursor_at(ed: &Editor, x: f64, y: f64, mods: Mods, locked: bool) -> Curso
             .iter()
             .any(|s| (s.x - x).abs() <= grab)
         {
-            return if locked { Cursor::Forbidden } else { Cursor::Split };
+            return if locked {
+                Cursor::Forbidden
+            } else {
+                Cursor::Split
+            };
         }
     }
 
@@ -283,7 +287,9 @@ fn shape(scene: &mut Scene, cursor: Cursor, at: Affine, color: Color, w: f64) {
             }
         }
 
-        Cursor::Hand | Cursor::HandClosed => hand(scene, at, color, w, cursor == Cursor::HandClosed),
+        Cursor::Hand | Cursor::HandClosed => {
+            hand(scene, at, color, w, cursor == Cursor::HandClosed)
+        }
         Cursor::Zoom => {
             scene.stroke(&s, at, color, None, &Circle::new(Point::new(9.0, 9.0), 6.0));
             scene.stroke(
@@ -362,13 +368,7 @@ fn shape(scene: &mut Scene, cursor: Cursor, at: Affine, color: Color, w: f64) {
         }
         Cursor::Razor => {
             // A blade: the rectangle is the handle, the line is the cut.
-            scene.stroke(
-                &s,
-                at,
-                color,
-                None,
-                &Rect::new(6.0, 4.0, SIZE - 3.0, 11.0),
-            );
+            scene.stroke(&s, at, color, None, &Rect::new(6.0, 4.0, SIZE - 3.0, 11.0));
             scene.stroke(
                 &s,
                 at,
@@ -404,7 +404,13 @@ fn handle_glyph(scene: &mut Scene, at: Affine, color: Color, w: f64, handle: Han
     match handle {
         // Coarse pitch: the note, moving between rows.
         Handle::Pitch => {
-            scene.stroke(&s, at, color, None, &Rect::new(5.0, c - 2.5, SIZE - 5.0, c + 2.5));
+            scene.stroke(
+                &s,
+                at,
+                color,
+                None,
+                &Rect::new(5.0, c - 2.5, SIZE - 5.0, c + 2.5),
+            );
             arrow_line(scene, at, color, w, (c, c - 4.0), (c, 2.0), 3.0);
             arrow_line(scene, at, color, w, (c, c + 4.0), (c, SIZE - 2.0), 3.0);
         }
@@ -421,7 +427,15 @@ fn handle_glyph(scene: &mut Scene, at: Affine, color: Color, w: f64, handle: Han
                 );
             }
             arrow_line(scene, at, color, w, (c + 5.0, c - 3.0), (c + 5.0, 3.0), 2.5);
-            arrow_line(scene, at, color, w, (c + 5.0, c + 3.0), (c + 5.0, SIZE - 3.0), 2.5);
+            arrow_line(
+                scene,
+                at,
+                color,
+                w,
+                (c + 5.0, c + 3.0),
+                (c + 5.0, SIZE - 3.0),
+                2.5,
+            );
         }
         // The slopes: the transition tilting in or out.
         Handle::LeftSlope | Handle::RightSlope => {
@@ -447,7 +461,13 @@ fn handle_glyph(scene: &mut Scene, at: Affine, color: Color, w: f64, handle: Han
         }
         // Formant: the note with a shifted overtone above it.
         Handle::Formant => {
-            scene.stroke(&s, at, color, None, &Rect::new(5.0, c + 2.0, SIZE - 5.0, c + 6.0));
+            scene.stroke(
+                &s,
+                at,
+                color,
+                None,
+                &Rect::new(5.0, c + 2.0, SIZE - 5.0, c + 6.0),
+            );
             scene.stroke(
                 &s,
                 at,
@@ -464,7 +484,10 @@ fn handle_glyph(scene: &mut Scene, at: Affine, color: Color, w: f64, handle: Han
                 at,
                 color,
                 None,
-                &Line::new(Point::new(6.0, SIZE - 4.0), Point::new(SIZE - 6.0, SIZE - 4.0)),
+                &Line::new(
+                    Point::new(6.0, SIZE - 4.0),
+                    Point::new(SIZE - 6.0, SIZE - 4.0),
+                ),
             );
             scene.fill(
                 Fill::NonZero,
@@ -720,7 +743,11 @@ pub fn CursorLayer(
         Some((x, y)) => (x + canvas::GUTTER_W - SIZE, y + canvas::RULER_H - SIZE),
         None => (0.0, 0.0),
     };
-    let visibility = if hovering.is_some() { "visible" } else { "hidden" };
+    let visibility = if hovering.is_some() {
+        "visible"
+    } else {
+        "hidden"
+    };
     let label = cursor.map(|c| c.label()).unwrap_or("none");
 
     rsx! {

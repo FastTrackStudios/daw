@@ -29,9 +29,9 @@
 //! also why it has to be *closed*: while it is live the history has an
 //! open snapshot, and anything else that opens one would nest.
 
+use expression_editor_core::Editor;
 use expression_editor_core::doc::NoteId;
 use expression_editor_core::edit::Edit;
-use expression_editor_core::Editor;
 use expression_editor_tools::velocity::{CurvePreset, Note as VNote, Session};
 
 /// How far one wheel notch moves the strength.
@@ -78,7 +78,11 @@ impl VelocityRamp {
             .iter()
             .filter_map(|id| {
                 let n = ed.doc.note(*id)?;
-                Some((n.start, *id, (n.velocity * 127.0).round().clamp(1.0, 127.0) as u8))
+                Some((
+                    n.start,
+                    *id,
+                    (n.velocity * 127.0).round().clamp(1.0, 127.0) as u8,
+                ))
             })
             .collect();
         if picked.len() < 2 {
@@ -217,7 +221,11 @@ fn picked(ed: &Editor, notes: &[NoteId]) -> (Vec<NoteId>, Vec<VNote>) {
         .iter()
         .filter_map(|id| {
             let n = ed.doc.note(*id)?;
-            Some((n.start, *id, (n.velocity * 127.0).round().clamp(1.0, 127.0) as u8))
+            Some((
+                n.start,
+                *id,
+                (n.velocity * 127.0).round().clamp(1.0, 127.0) as u8,
+            ))
         })
         .collect();
     rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(core::cmp::Ordering::Equal));

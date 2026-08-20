@@ -211,7 +211,10 @@ async fn the_kit_renders_every_lane_it_has() -> dioxus_test::Result<()> {
     };
     stage(ed);
     let tester = render(Surface).with_window_size(1000, 620).build();
-    let html = tester.query(by_testid("readout")).immediately()?.inner_html();
+    let html = tester
+        .query(by_testid("readout"))
+        .immediately()?
+        .inner_html();
     assert_eq!(
         field(&html, "rows"),
         lanes,
@@ -244,13 +247,21 @@ async fn a_sweep_paints_hits_across_the_kit() -> dioxus_test::Result<()> {
     tester.drain();
     for i in 1..=20 {
         let t = i as f64 / 20.0;
-        tester.pointer_move_mods(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, true, Modifiers::empty());
+        tester.pointer_move_mods(
+            x0 + (x1 - x0) * t,
+            y0 + (y1 - y0) * t,
+            true,
+            Modifiers::empty(),
+        );
         tester.drain();
     }
     tester.pointer_up_mods(x1, y1, Modifiers::empty());
     let _ = tester.pump().await;
 
-    let html = tester.query(by_testid("readout")).immediately()?.inner_html();
+    let html = tester
+        .query(by_testid("readout"))
+        .immediately()?
+        .inner_html();
     assert!(
         field(&html, "notes") > before,
         "a diagonal sweep across the kit painted nothing (was {before}): {html}"

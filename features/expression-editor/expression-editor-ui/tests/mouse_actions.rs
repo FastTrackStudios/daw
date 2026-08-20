@@ -178,8 +178,12 @@ fn the_two_stretches_disagree() {
 fn a_vertical_move_does_not_travel_in_time() {
     let mut ed = four_notes();
     let before = span(&ed, NoteId(2));
-    ed.mouse
-        .set(Context::Note, Gesture::Drag, ModKey::NONE, Action::MoveNoteVertically);
+    ed.mouse.set(
+        Context::Note,
+        Gesture::Drag,
+        ModKey::NONE,
+        Action::MoveNoteVertically,
+    );
 
     let (x, y) = at(&ed, PPQ * 1.25);
     // Three whole rows: this fixture is one row tall, so `reset_view`
@@ -237,8 +241,12 @@ fn a_horizontal_move_does_not_change_pitch() {
 fn one_axis_commits_to_the_first_direction() {
     for (dx, rows, moves_in_time) in [(200.0, 0.02, true), (8.0, -3.0, false)] {
         let mut ed = four_notes();
-        ed.mouse
-            .set(Context::Note, Gesture::Drag, ModKey::NONE, Action::MoveNoteOneAxis);
+        ed.mouse.set(
+            Context::Note,
+            Gesture::Drag,
+            ModKey::NONE,
+            Action::MoveNoteOneAxis,
+        );
         let (x, y) = at(&ed, PPQ * 1.25);
         let dy = row_px(&ed) * rows;
         let far = row_px(&ed) * 3.0;
@@ -274,8 +282,16 @@ fn moving_one_note_can_ignore_the_selection() {
     interaction::pointer_move(&mut ed, &mut d, x + 120.0, y, plain());
     interaction::pointer_up(&mut ed, d, x + 120.0, y, plain());
 
-    assert_ne!(span(&ed, NoteId(2)), (PPQ, PPQ * 1.5), "the grabbed note stayed put");
-    assert_eq!(span(&ed, NoteId(1)), untouched, "the rest of the selection moved");
+    assert_ne!(
+        span(&ed, NoteId(2)),
+        (PPQ, PPQ * 1.5),
+        "the grabbed note stayed put"
+    );
+    assert_eq!(
+        span(&ed, NoteId(1)),
+        untouched,
+        "the rest of the selection moved"
+    );
 }
 
 // ── razor ───────────────────────────────────────────────────────────
@@ -443,11 +459,18 @@ fn editing_a_lyric_arms_the_field() {
 #[test]
 fn sweeping_the_eraser_deletes_what_it_crosses() {
     let mut ed = four_notes();
-    ed.mouse
-        .set(Context::Note, Gesture::Drag, ModKey::NONE, Action::EraseNotes);
+    ed.mouse.set(
+        Context::Note,
+        Gesture::Drag,
+        ModKey::NONE,
+        Action::EraseNotes,
+    );
     let (x, y) = at(&ed, PPQ * 1.25);
     let mut d = interaction::pointer_down(&mut ed, x, y, plain(), 0);
-    assert!(ed.doc.note(NoteId(2)).is_none(), "the pressed note survived");
+    assert!(
+        ed.doc.note(NoteId(2)).is_none(),
+        "the pressed note survived"
+    );
     for i in 1..=12 {
         let (sx, _) = at(&ed, PPQ * 1.25 + PPQ * 0.25 * i as f64);
         interaction::pointer_move(&mut ed, &mut d, sx, y, plain());
@@ -677,7 +700,12 @@ fn a_click_with_the_razor_leaves_no_area() {
 fn two_selected_with_contours() -> Editor {
     let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
     for (i, row) in [(0u64, 60), (1, 64)] {
-        let mut n = Note::new(NoteId(i + 1), PPQ * i as f64 * 2.0, PPQ * (i as f64 * 2.0 + 2.0), row);
+        let mut n = Note::new(
+            NoteId(i + 1),
+            PPQ * i as f64 * 2.0,
+            PPQ * (i as f64 * 2.0 + 2.0),
+            row,
+        );
         // Different contours, so a gesture that flattens both onto one
         // shared value cannot pass by looking like a shift.
         for k in 0..32 {
@@ -911,7 +939,8 @@ fn a_razor_drag_is_still_one_undo() {
 fn razor_mode(area_end: f64) -> Editor {
     let mut ed = four_notes();
     ed.tool = expression_editor_core::Tool::Razor;
-    ed.razor.add(RazorArea::new(0.0, area_end, ROW - 2, ROW + 2));
+    ed.razor
+        .add(RazorArea::new(0.0, area_end, ROW - 2, ROW + 2));
     ed
 }
 
@@ -928,7 +957,12 @@ fn press_ctrl(ed: &mut Editor, key: &str) -> bool {
 }
 
 fn starts(ed: &Editor) -> Vec<i64> {
-    let mut v: Vec<i64> = ed.doc.notes.iter().map(|n| n.start.round() as i64).collect();
+    let mut v: Vec<i64> = ed
+        .doc
+        .notes
+        .iter()
+        .map(|n| n.start.round() as i64)
+        .collect();
     v.sort_unstable();
     v
 }
@@ -1037,7 +1071,10 @@ fn razor_mode_leaves_the_ordinary_keys_alone() {
     assert!(ed.doc.notes.len() < before);
 
     // Undo is not a razor verb, and still works.
-    assert!(press_ctrl(&mut ed, "z"), "Ctrl+Z was swallowed by razor mode");
+    assert!(
+        press_ctrl(&mut ed, "z"),
+        "Ctrl+Z was swallowed by razor mode"
+    );
     assert_eq!(ed.doc.notes.len(), before, "undo did not restore the notes");
 }
 
@@ -1113,7 +1150,10 @@ fn the_arrows_move_and_resize_the_areas() {
     };
     interaction::key_down(&mut ed, &Drag::None, "ArrowRight", mods);
     let resized = ed.razor.areas[0];
-    assert!(resized.width() > moved.width(), "Shift+Right did not resize");
+    assert!(
+        resized.width() > moved.width(),
+        "Shift+Right did not resize"
+    );
     assert_eq!(resized.t0, moved.t0, "a resize moved the area's start");
 }
 
@@ -1145,7 +1185,10 @@ fn the_razor_help_matches_the_razor_keys() {
         } else {
             press(&mut ed, bare)
         };
-        assert!(ran, "the panel advertises `{key}` ({label}) and it did nothing");
+        assert!(
+            ran,
+            "the panel advertises `{key}` ({label}) and it did nothing"
+        );
     }
 
     // And nothing does something without being advertised. Every letter,
@@ -1302,10 +1345,7 @@ fn a_ramp_rises_from_the_first_note_to_the_last() {
         after.windows(2).all(|w| w[1] >= w[0]),
         "the ramp did not rise in time order: {after:?}",
     );
-    assert!(
-        after.last() > after.first(),
-        "the ramp is flat: {after:?}",
-    );
+    assert!(after.last() > after.first(), "the ramp is flat: {after:?}",);
 }
 
 /// Strength is reversible, because everything comes from the baseline.
@@ -1322,8 +1362,7 @@ fn dialling_the_strength_back_lands_where_it_started() {
 
     let mut ed = all_selected();
     let notes = ed.selection.notes.clone();
-    let mut ramp =
-        VelocityRamp::open(&mut ed, CurvePreset::Rise, &notes).expect("a ramp");
+    let mut ramp = VelocityRamp::open(&mut ed, CurvePreset::Rise, &notes).expect("a ramp");
     let opened = vels(&ed);
 
     for _ in 0..5 {
@@ -1494,7 +1533,11 @@ fn the_zoom_tool_leaves_a_fixed_grid_alone() {
     interaction::pointer_move(&mut ed, &mut d, x - 380.0, y, plain());
     interaction::pointer_up(&mut ed, d, x - 380.0, y, plain());
 
-    assert_eq!(ed.grid.effective(), before, "a fixed grid followed the zoom");
+    assert_eq!(
+        ed.grid.effective(),
+        before,
+        "a fixed grid followed the zoom"
+    );
 }
 
 // ── the grid tree ───────────────────────────────────────────────────

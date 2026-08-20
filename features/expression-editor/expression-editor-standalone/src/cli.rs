@@ -30,18 +30,6 @@ pub struct Args {
 pub const DEFAULT_WIDTH: u32 = 1200;
 pub const DEFAULT_HEIGHT: u32 = 760;
 
-/// The roll's own height inside the window: the chrome above and below
-/// it (toolbar, switcher, chord row, lane strip, status bar) takes the
-/// rest. The canvas sizes itself from its intrinsic aspect ratio, so
-/// asking for the full window height here pushes the status bar out of
-/// frame rather than shrinking the roll.
-///
-/// Measured off a rendered shot rather than derived: the chrome is
-/// several components' own padding and there is no one number to read
-/// it off. Re-measure it with `--example shot` if the toolbar grows a
-/// row.
-pub const CHROME_HEIGHT: f64 = 224.0;
-
 /// What `--help` prints.
 pub const USAGE: &str = "\
 The expression editor, standalone.
@@ -192,11 +180,14 @@ impl Args {
     }
 
     /// The viewport the document is laid out against.
+    ///
+    /// The UI crate owns its chrome arithmetic — asking it keeps the
+    /// runner honest when a bar is added or removed. The old local
+    /// constant here (224 px) was measured against a two-row toolbar
+    /// that no longer exists, and every headless shot carried ~120 px
+    /// of dead canvas at the bottom because of it.
     pub fn viewport(&self) -> Viewport {
-        Viewport::new(
-            self.width as f64,
-            (self.height as f64 - CHROME_HEIGHT).max(160.0),
-        )
+        expression_editor_ui::viewport_in(self.width as f64, self.height as f64)
     }
 }
 

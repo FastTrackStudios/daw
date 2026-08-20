@@ -17,8 +17,28 @@ expression-editor-ui = { workspace = true }
 expression-editor-guitarpro = { workspace = true }
 # `standalone-rpp` = the standalone backend + the `.rpp` loader + source
 # decoding, which is what makes an audio take analysable with no DAW.
-daw = { workspace = true, features = ["standalone-rpp"] }
+# `standalone-bootstrap` = the in-process daw-control client the
+# workstation's arrange/mixer panels read through.
+daw = { workspace = true, features = [
+    "standalone-rpp",
+    "standalone-save",
+    "standalone-bootstrap",
+] }
+# The workstation's panels: the native `daw_ui::components` family —
+# the traced vector TCP/arrange/mixer the REAPER theme's art is
+# exported from (PR #279's main window). `daw-theme-art` carries the
+# panel geometry both columns align on.
+daw-ui = { workspace = true, features = ["web"] }
+daw-theme = { workspace = true }
+daw-theme-art = { workspace = true }
+daw-control = { workspace = true }
+# Component-context timer for the workstation's reconnect loops.
+# dioxus-native schedules futures itself with no tokio runtime; a tokio
+# timer there is a panic. Same choice daw-ui makes, same reason.
+futures-timer = "3"
 dioxus = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+eyre = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]

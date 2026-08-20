@@ -57,7 +57,24 @@ async fn main() {
     }
 
     let _daw = runner.daw;
-    stage(runner.loaded.into_editor());
+    let mut editor = runner.loaded.into_editor();
+    // `SHOT_SPAN=start..end` (seconds) zooms the shot to a window of
+    // the material — a whole song in 1600 px is a texture, not a
+    // picture of the editor.
+    if let Ok(span) = std::env::var("SHOT_SPAN")
+        && let Some((a, b)) = span.split_once("..")
+        && let (Ok(a), Ok(b)) = (a.trim().parse::<f64>(), b.trim().parse::<f64>())
+        && b > a
+    {
+        let ups = editor.doc.time_base.units_per_second(editor.bpm);
+        editor.camera.t0 = a * ups;
+        editor.camera.units_per_px = ((b - a) * ups / (args.width as f64).max(1.0)).max(1e-9);
+    }
+    if let Some(host) = runner.host.clone() {
+        expression_editor_standalone::app::stage_with_host(editor, host);
+    } else {
+        stage(editor);
+    }
 
     let dom = VirtualDom::new(App);
     let tester = DocumentTester::from_virtual_dom(dom)
@@ -68,6 +85,23 @@ async fn main() {
     // pre-measure size.
     for _ in 0..4 {
         let _ = tester.pump().await;
+    }
+    // `SHOT_CLICK=<testid>[,<testid>…]` clicks chrome before the
+    // picture — how a shot shows the quantize drawer open.
+    if let Ok(ids) = std::env::var("SHOT_CLICK") {
+        for id in ids.split(',').filter(|s| !s.is_empty()) {
+            match tester.query(dioxus_test::by_testid(id)).immediately() {
+                Ok(el) => {
+                    el.click();
+                    tester.drain();
+                    tester.relayout();
+                }
+                Err(e) => eprintln!("SHOT_CLICK {id}: {e:?}"),
+            }
+        }
+        for _ in 0..3 {
+            let _ = tester.pump().await;
+        }
     }
     tester.render_png(&out);
     println!("shot: {}", out.display());

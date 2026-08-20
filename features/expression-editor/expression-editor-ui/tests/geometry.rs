@@ -185,7 +185,11 @@ fn measure_the_chrome() {
         "inspector",
     ] {
         match doc.query(by_testid(id)).immediately() {
-            Ok(el) => println!("  {id:>16}: size {:?} origin {:?}", el.size(), el.document_origin()),
+            Ok(el) => println!(
+                "  {id:>16}: size {:?} origin {:?}",
+                el.size(),
+                el.document_origin()
+            ),
             Err(_) => println!("  {id:>16}: (no data-testid)"),
         }
     }
@@ -284,7 +288,9 @@ fn editor_viewport(doc: &dioxus_test::DocumentTester) -> (f64, f64) {
         .expect("no roll")
         .attribute("data-viewport")
         .expect("roll carries no data-viewport");
-    let (w, h) = raw.split_once('x').unwrap_or_else(|| panic!("bad readout {raw:?}"));
+    let (w, h) = raw
+        .split_once('x')
+        .unwrap_or_else(|| panic!("bad readout {raw:?}"));
     (
         w.trim().parse().expect("width"),
         h.trim().parse().expect("height"),
@@ -481,7 +487,12 @@ fn the_status_bar_carries_the_grid_and_its_adaptive_setting() {
         read("grid-adaptive")
     );
     let adaptive = read("grid-division");
-    let denom = |s: &str| s.trim_start_matches("1/").trim_end_matches('T').parse::<f64>().unwrap();
+    let denom = |s: &str| {
+        s.trim_start_matches("1/")
+            .trim_end_matches('T')
+            .parse::<f64>()
+            .unwrap()
+    };
     assert!(
         denom(&adaptive) <= denom(&fixed),
         "the widest adaptive grid should be no finer than the fixed one: \
@@ -521,7 +532,11 @@ fn the_mode_picker_offers_every_mode_grouped_by_family() {
         .inner_html();
 
     for mode in Mode::ALL {
-        assert!(list.contains(mode.label()), "missing mode: {}", mode.label());
+        assert!(
+            list.contains(mode.label()),
+            "missing mode: {}",
+            mode.label()
+        );
     }
 
     let at = |label: &str| list.find(label).expect("just checked");

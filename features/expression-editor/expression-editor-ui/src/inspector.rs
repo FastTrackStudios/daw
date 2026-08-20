@@ -11,12 +11,12 @@
 //! list, not a cycling button.
 
 use dioxus::prelude::*;
-use expression_editor_core::cc::{standard_name, CC_COLORS};
+use expression_editor_core::cc::{CC_COLORS, standard_name};
 use expression_editor_core::doc::NoteId;
 use expression_editor_core::flam::FlamStep;
-use expression_editor_core::rows::Hand;
 use expression_editor_core::rows::Articulation;
-use expression_editor_core::{blob, chord, tuning, Edit, Editor, RowSpace};
+use expression_editor_core::rows::Hand;
+use expression_editor_core::{Edit, Editor, RowSpace, blob, chord, tuning};
 
 use crate::theme;
 use crate::widgets::{CenterSlider, Slider};
@@ -96,7 +96,10 @@ pub fn Inspector(
         _ => Default::default(),
     };
     let editing_lyric = ed.editing_lyric;
-    let lyric = note.as_ref().and_then(|n| n.text.clone()).unwrap_or_default();
+    let lyric = note
+        .as_ref()
+        .and_then(|n| n.text.clone())
+        .unwrap_or_default();
     // The field's own text while it is being typed. Held here rather
     // than written through on each keystroke so the input is not
     // fighting a trimmed value, and so one syllable is one undo step.
@@ -109,8 +112,9 @@ pub fn Inspector(
     });
     let selected_id = single;
     let fret_now: Option<u8> = match (&space, &note) {
-        (RowSpace::Strings(t), Some(n)) => expression_editor_core::rows::fret_of(n, t)
-            .and_then(|f| u8::try_from(f).ok()),
+        (RowSpace::Strings(t), Some(n)) => {
+            expression_editor_core::rows::fret_of(n, t).and_then(|f| u8::try_from(f).ok())
+        }
         _ => None,
     };
     let fret_label: String = match (&space, &note) {
@@ -123,12 +127,12 @@ pub fn Inspector(
     let color_by_string = ed.color_by_string;
     // What `f` will do to the selected hit, so the button can say it
     // rather than the user finding out by pressing.
-    let flam_step = ed
+    let flam_step = ed.selection.notes.first().and_then(|id| ed.flam_step(*id));
+    let hand = ed
         .selection
         .notes
         .first()
-        .and_then(|id| ed.flam_step(*id));
-    let hand = ed.selection.notes.first().and_then(|id| ed.hand_of_note(*id));
+        .and_then(|id| ed.hand_of_note(*id));
     drop(ed);
 
     let decomposition = note

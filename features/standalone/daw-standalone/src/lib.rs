@@ -41,6 +41,8 @@ pub mod audio_engine;
 mod audio_engine_svc;
 mod automation;
 mod automation_touch;
+#[cfg(feature = "rpp-save")]
+pub mod save;
 mod stretch_marker;
 #[cfg(any(feature = "audio", feature = "decode"))]
 mod take_reader;

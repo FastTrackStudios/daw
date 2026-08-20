@@ -68,6 +68,46 @@ pub fn merge_hits(lists: &[&[Transient]], window_secs: f64) -> Vec<Transient> {
     out
 }
 
+/// Refine a hand-placed hit to the audio.
+///
+/// A click lands where the eye put it; the hit the user *meant* is the
+/// attack nearby. This finds the strongest rise of the rectified signal
+/// within `window_secs` either side of `at` — the biggest positive jump
+/// between neighbouring 1 ms frames, which is where an attack starts —
+/// and falls back to the click itself in silence.
+// r[impl drums.manual.add-remove]
+pub fn refine_onset(samples: &[f64], sample_rate: f64, at: f64, window_secs: f64) -> f64 {
+    if samples.is_empty() || sample_rate <= 0.0 {
+        return at;
+    }
+    let hop = (sample_rate / 1000.0).max(1.0) as usize; // 1 ms frames
+    let center = (at * sample_rate) as isize;
+    let half = (window_secs.max(0.0) * sample_rate) as isize;
+    let lo = (center - half).max(0) as usize;
+    let hi = ((center + half).max(0) as usize).min(samples.len());
+    if hi <= lo + hop {
+        return at;
+    }
+    let peak_of = |start: usize| -> f64 {
+        samples[start..(start + hop).min(hi)]
+            .iter()
+            .fold(0.0f64, |m, v| m.max(v.abs()))
+    };
+    let mut best = (0.0f64, at);
+    let mut prev = peak_of(lo);
+    let mut i = lo + hop;
+    while i + hop <= hi {
+        let cur = peak_of(i);
+        let rise = cur - prev;
+        if rise > best.0 {
+            best = (rise, i as f64 / sample_rate);
+        }
+        prev = cur;
+        i += hop;
+    }
+    if best.0 > 1e-6 { best.1 } else { at }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,5 +149,25 @@ mod tests {
             (merged[0].loudness - 0.9).abs() < 1e-12,
             "the kick's louder hit won the window"
         );
+    }
+
+    // r[verify drums.manual.add-remove]
+    #[test]
+    fn a_hand_placed_hit_refines_to_the_attack() {
+        // Silence, then a burst starting at 0.5 s. A click at 0.46 s
+        // lands on the attack, not where the finger was.
+        let sr = 1000.0;
+        let mut s = vec![0.0f64; 1000];
+        for (i, v) in s.iter_mut().enumerate().skip(500).take(60) {
+            *v = 0.8 * (-((i - 500) as f64) / 40.0).exp();
+        }
+        let refined = refine_onset(&s, sr, 0.46, 0.06);
+        assert!(
+            (refined - 0.5).abs() <= 0.002,
+            "refined to {refined}, wanted ~0.5"
+        );
+        // In silence the click is kept.
+        let quiet = vec![0.0f64; 1000];
+        assert_eq!(refine_onset(&quiet, sr, 0.25, 0.05), 0.25);
     }
 }

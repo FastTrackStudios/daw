@@ -360,13 +360,31 @@ impl Projects for Standalone {
         false
     }
 
+    /// With `rpp-save` on, saving writes a **new** `.rpp` beside the
+    /// original — never over it — and remembers where it went (see
+    /// [`crate::save::save_project_as`], `last_saved_path`). Without
+    /// the feature the call is accepted and does nothing, keeping the
+    /// trait surface usable.
+    // r[impl drums.save.new-file]
     fn save(&self, project: ProjectContext) {
-        // Standalone has no persistent backing — the project lives
-        // in memory only. `save` accepts the call to keep the trait
-        // surface usable. Writing back to an .rpp file would be a
-        // dawfile-reaper serialize round-trip + std::fs::write; not
-        // wired in yet because the standalone test surface focuses
-        // on read-side parity.
+        #[cfg(feature = "rpp-save")]
+        {
+            let Some(guid) = resolve_ctx_guid(self, &project) else {
+                return;
+            };
+            match crate::save::save_project_as(self, &guid) {
+                Ok(path) => {
+                    let written = path.to_string_lossy().into_owned();
+                    let _ = self.with_project_mut(&guid, |p| {
+                        p.project_ext_state
+                            .insert((String::new(), "LAST_SAVED_PATH".into()), written.clone());
+                    });
+                    tracing::info!(path = %written, "saved project as a new file");
+                }
+                Err(e) => tracing::warn!(error = %e, "save failed"),
+            }
+        }
+        #[cfg(not(feature = "rpp-save"))]
         let _ = project;
     }
     fn save_all(&self) {}

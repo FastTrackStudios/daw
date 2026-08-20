@@ -1,15 +1,20 @@
 //! What a frame actually costs, at a real display size.
-use std::time::Instant;
 use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
 use expression_editor_core::{Editor, Viewport};
 use expression_editor_ui::{canvas, paint, text};
+use std::time::Instant;
 
 const PPQ: f64 = 960.0;
 
 fn big(notes: usize, w: f64, h: f64) -> Editor {
     let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 4.0 * notes as f64);
     for i in 0..notes as u64 {
-        let mut n = Note::new(NoteId(i + 1), PPQ * i as f64 * 0.5, PPQ * i as f64 * 0.5 + PPQ * 0.4, 36 + (i % 60) as i32);
+        let mut n = Note::new(
+            NoteId(i + 1),
+            PPQ * i as f64 * 0.5,
+            PPQ * i as f64 * 0.5 + PPQ * 0.4,
+            36 + (i % 60) as i32,
+        );
         for k in 0..24 {
             let f = k as f64 / 23.0;
             n.pitch.set(n.start + (n.end - n.start) * f, -1.0 + 2.0 * f);
@@ -25,20 +30,35 @@ fn big(notes: usize, w: f64, h: f64) -> Editor {
 #[ignore = "measurement"]
 fn frame_cost_at_5120x1440() {
     // The roll's box on a 5120x1440 display, less chrome.
-    let (w, h) = (5120.0 - 236.0 - canvas::GUTTER_W, 1440.0 - 116.0 - canvas::RULER_H);
+    let (w, h) = (
+        5120.0 - 236.0 - canvas::GUTTER_W,
+        1440.0 - 116.0 - canvas::RULER_H,
+    );
     for notes in [200usize, 2000] {
         let ed = big(notes, w, h);
         let mut labels = text::Labeller::new();
         let ov = paint::Overlay::default();
 
         // Warm the shaping cache, as a running editor's would be.
-        let scene = paint::roll_scene(&ed, w + canvas::GUTTER_W, h + canvas::RULER_H, &ov, &mut labels);
+        let scene = paint::roll_scene(
+            &ed,
+            w + canvas::GUTTER_W,
+            h + canvas::RULER_H,
+            &ov,
+            &mut labels,
+        );
         let commands = scene.commands.len();
 
         let t = Instant::now();
         const N: u32 = 20;
         for _ in 0..N {
-            std::hint::black_box(paint::roll_scene(&ed, w + canvas::GUTTER_W, h + canvas::RULER_H, &ov, &mut labels));
+            std::hint::black_box(paint::roll_scene(
+                &ed,
+                w + canvas::GUTTER_W,
+                h + canvas::RULER_H,
+                &ov,
+                &mut labels,
+            ));
         }
         let build = t.elapsed().as_secs_f64() * 1000.0 / N as f64;
 
@@ -48,7 +68,9 @@ fn frame_cost_at_5120x1440() {
         }
         let clone = t.elapsed().as_secs_f64() * 1000.0 / N as f64;
 
-        println!("{notes:>5} notes: {commands:>7} commands  build {build:>7.2}ms  clone {clone:>7.2}ms");
+        println!(
+            "{notes:>5} notes: {commands:>7} commands  build {build:>7.2}ms  clone {clone:>7.2}ms"
+        );
     }
 }
 
@@ -56,17 +78,30 @@ fn frame_cost_at_5120x1440() {
 #[test]
 #[ignore = "measurement"]
 fn what_the_build_spends_its_time_on() {
-    let (w, h) = (5120.0 - 236.0 - canvas::GUTTER_W, 1440.0 - 116.0 - canvas::RULER_H);
+    let (w, h) = (
+        5120.0 - 236.0 - canvas::GUTTER_W,
+        1440.0 - 116.0 - canvas::RULER_H,
+    );
     let ed = big(2000, w, h);
     const N: u32 = 20;
 
     let t = Instant::now();
-    for _ in 0..N { std::hint::black_box(canvas::note_rects(&ed)); }
-    println!("note_rects   {:>7.2}ms", t.elapsed().as_secs_f64() * 1000.0 / N as f64);
+    for _ in 0..N {
+        std::hint::black_box(canvas::note_rects(&ed));
+    }
+    println!(
+        "note_rects   {:>7.2}ms",
+        t.elapsed().as_secs_f64() * 1000.0 / N as f64
+    );
 
     let t = Instant::now();
-    for _ in 0..N { std::hint::black_box(canvas::curve_paths(&ed)); }
-    println!("curve_paths  {:>7.2}ms", t.elapsed().as_secs_f64() * 1000.0 / N as f64);
+    for _ in 0..N {
+        std::hint::black_box(canvas::curve_paths(&ed));
+    }
+    println!(
+        "curve_paths  {:>7.2}ms",
+        t.elapsed().as_secs_f64() * 1000.0 / N as f64
+    );
 
     // Curve points used to be `"x,y x,y "` strings — an svg attribute —
     // which the painter parsed straight back into numbers. They are
@@ -80,14 +115,23 @@ fn what_the_build_spends_its_time_on() {
 #[test]
 #[ignore = "measurement"]
 fn the_remaining_build_cost() {
-    let (w, h) = (5120.0 - 236.0 - canvas::GUTTER_W, 1440.0 - 116.0 - canvas::RULER_H);
+    let (w, h) = (
+        5120.0 - 236.0 - canvas::GUTTER_W,
+        1440.0 - 116.0 - canvas::RULER_H,
+    );
     let ed = big(2000, w, h);
     const N: u32 = 20;
     macro_rules! t {
         ($name:expr, $e:expr) => {{
             let t = Instant::now();
-            for _ in 0..N { std::hint::black_box($e); }
-            println!("{:<14} {:>7.2}ms", $name, t.elapsed().as_secs_f64() * 1000.0 / N as f64);
+            for _ in 0..N {
+                std::hint::black_box($e);
+            }
+            println!(
+                "{:<14} {:>7.2}ms",
+                $name,
+                t.elapsed().as_secs_f64() * 1000.0 / N as f64
+            );
         }};
     }
     t!("rows", canvas::rows(&ed));
@@ -103,22 +147,39 @@ fn the_remaining_build_cost() {
     let mut labels = text::Labeller::new();
     labels.shape("C4", 10.0);
     let t = Instant::now();
-    for _ in 0..N { for _ in 0..2000 { std::hint::black_box(labels.shape("C4", 10.0)); } }
-    println!("{:<14} {:>7.2}ms  (2000 cache hits)", "label hits", t.elapsed().as_secs_f64() * 1000.0 / N as f64);
+    for _ in 0..N {
+        for _ in 0..2000 {
+            std::hint::black_box(labels.shape("C4", 10.0));
+        }
+    }
+    println!(
+        "{:<14} {:>7.2}ms  (2000 cache hits)",
+        "label hits",
+        t.elapsed().as_secs_f64() * 1000.0 / N as f64
+    );
 }
 
 /// The layers `roll_scene` calls that nothing above measured.
 #[test]
 #[ignore = "measurement"]
 fn the_unmeasured_layers() {
-    let (w, h) = (5120.0 - 236.0 - canvas::GUTTER_W, 1440.0 - 116.0 - canvas::RULER_H);
+    let (w, h) = (
+        5120.0 - 236.0 - canvas::GUTTER_W,
+        1440.0 - 116.0 - canvas::RULER_H,
+    );
     let ed = big(2000, w, h);
     const N: u32 = 20;
     macro_rules! t {
         ($name:expr, $e:expr) => {{
             let t = Instant::now();
-            for _ in 0..N { std::hint::black_box($e); }
-            println!("{:<16} {:>7.2}ms", $name, t.elapsed().as_secs_f64() * 1000.0 / N as f64);
+            for _ in 0..N {
+                std::hint::black_box($e);
+            }
+            println!(
+                "{:<16} {:>7.2}ms",
+                $name,
+                t.elapsed().as_secs_f64() * 1000.0 / N as f64
+            );
         }};
     }
     t!("guitar::joins", expression_editor_ui::guitar::joins(&ed));
@@ -138,11 +199,23 @@ fn the_unmeasured_layers() {
     for _ in 0..N {
         let mut scene = anyrender::Scene::new();
         for _ in 0..2000 {
-            text::draw(&mut scene, &shaped, 10.0, 10.0, text::Align::Left, peniko::Color::BLACK, kurbo::Affine::IDENTITY);
+            text::draw(
+                &mut scene,
+                &shaped,
+                10.0,
+                10.0,
+                text::Align::Left,
+                peniko::Color::BLACK,
+                kurbo::Affine::IDENTITY,
+            );
         }
         std::hint::black_box(scene);
     }
-    println!("{:<16} {:>7.2}ms  (2000 labels)", "label draw", t.elapsed().as_secs_f64() * 1000.0 / N as f64);
+    println!(
+        "{:<16} {:>7.2}ms  (2000 labels)",
+        "label draw",
+        t.elapsed().as_secs_f64() * 1000.0 / N as f64
+    );
 }
 
 /// What a nearly empty roll puts in a frame at 5120x1440.
@@ -152,9 +225,15 @@ fn the_unmeasured_layers() {
 #[test]
 #[ignore = "measurement"]
 fn what_five_notes_cost_on_a_wide_display() {
-    let (w, h) = (5120.0 - 236.0 - canvas::GUTTER_W, 1440.0 - 116.0 - canvas::RULER_H);
+    let (w, h) = (
+        5120.0 - 236.0 - canvas::GUTTER_W,
+        1440.0 - 116.0 - canvas::RULER_H,
+    );
     let ed = big(5, w, h);
-    println!("viewport {:.0}x{:.0}  px_per_row {:.2}", ed.viewport.w, ed.viewport.h, ed.camera.vertical.px_per_row);
+    println!(
+        "viewport {:.0}x{:.0}  px_per_row {:.2}",
+        ed.viewport.w, ed.viewport.h, ed.camera.vertical.px_per_row
+    );
     println!("rows        {}", canvas::rows(&ed).len());
     println!("gridlines   {}", canvas::grid_lines(&ed).len());
     println!("keys        {}", canvas::keyboard(&ed).len());
@@ -162,15 +241,30 @@ fn what_five_notes_cost_on_a_wide_display() {
 
     let mut labels = text::Labeller::new();
     let ov = paint::Overlay::default();
-    let scene = paint::roll_scene(&ed, w + canvas::GUTTER_W, h + canvas::RULER_H, &ov, &mut labels);
+    let scene = paint::roll_scene(
+        &ed,
+        w + canvas::GUTTER_W,
+        h + canvas::RULER_H,
+        &ov,
+        &mut labels,
+    );
     println!("commands    {}", scene.commands.len());
 
     const N: u32 = 20;
     let t = Instant::now();
     for _ in 0..N {
-        std::hint::black_box(paint::roll_scene(&ed, w + canvas::GUTTER_W, h + canvas::RULER_H, &ov, &mut labels));
+        std::hint::black_box(paint::roll_scene(
+            &ed,
+            w + canvas::GUTTER_W,
+            h + canvas::RULER_H,
+            &ov,
+            &mut labels,
+        ));
     }
-    println!("build       {:.2}ms", t.elapsed().as_secs_f64() * 1000.0 / N as f64);
+    println!(
+        "build       {:.2}ms",
+        t.elapsed().as_secs_f64() * 1000.0 / N as f64
+    );
 }
 
 // ── the cost of moving the camera ────────────────────────────────────
@@ -211,13 +305,20 @@ fn PanSurface() -> Element {
 #[ignore = "measurement"]
 fn what_a_pan_costs() {
     for notes in [5usize, 500, 2000] {
-        let ed = big(notes, 5120.0 - 236.0 - canvas::GUTTER_W, 1440.0 - 116.0 - canvas::RULER_H);
+        let ed = big(
+            notes,
+            5120.0 - 236.0 - canvas::GUTTER_W,
+            1440.0 - 116.0 - canvas::RULER_H,
+        );
         STAGED.with(|s| *s.borrow_mut() = Some(ed));
         let doc = render(PanSurface).with_window_size(5120, 1440).build();
         doc.drain();
         doc.relayout();
 
-        let pan = doc.query(by_testid("pan")).immediately().expect("no pan button");
+        let pan = doc
+            .query(by_testid("pan"))
+            .immediately()
+            .expect("no pan button");
         const N: u32 = 30;
         // Split, because the two halves have completely different fixes:
         // `drain` is dioxus re-rendering every component that reads the

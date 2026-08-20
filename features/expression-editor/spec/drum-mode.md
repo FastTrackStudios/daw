@@ -293,6 +293,35 @@ guitar workspace later defines roles `DI` / `Amps` over the same `Lane`
 and the same `apply` path, with a DI-triggered group — no new edit
 machinery.
 
+## Saving
+
+Standalone edits must survive as a REAPER project. The write path is
+`dawfile-standalone`'s patched export — the original text is re-parsed
+and only what changed is rewritten, so every construct the model never
+learned (FX chunks, ruler lanes, extensions state) goes out verbatim.
+
+r[drums.save.new-file]
+Saving a standalone project MUST write a **new** file beside the
+original — `<stem>.fts-edit.rpp`, numbered up (`.fts-edit-2.rpp`, …)
+when taken — and never modify the original in place. This is the rule
+until the round trip is trusted at 100 %: the source session stays
+exactly as REAPER left it, and the experiment is always inspectable
+next to it. `Projects::save` returns after writing and the project
+remembers the path it wrote.
+
+r[drums.save.patched]
+The written file is the original **patched**, not regenerated: item
+blocks are reconciled by `IGUID` (edited items rewritten in place,
+split pieces added, deleted ones dropped), take offsets, fades and `SM`
+lines carry the edits, and every byte the edit did not touch is the
+original's. Saving an unedited project writes a byte-identical copy.
+
+r[drums.save.reopens]
+A saved file MUST reopen: loading it back through `Projects::open`
+yields the edited item layout (same piece positions, lengths, offsets
+and markers on every mic), with media resolving exactly as the original
+did — relative paths stay relative.
+
 ## Verification
 
 The runner and `dioxus-test` are the harness (`standalone-runner.md`,

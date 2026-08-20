@@ -102,6 +102,8 @@ pub const SURFACE_DEEP: &str = d::SURFACE_DEEP;
 pub const SURFACE_SUNKEN: &str = d::SURFACE_SUNKEN;
 /// Toolbars and status bars.
 pub const SURFACE_BAR: &str = d::SURFACE_BAR;
+/// Audio waveform bodies — the blue-steel every DAW draws peaks in.
+pub const PEAKS: &str = d::PEAKS;
 /// A selected-but-not-engaged control.
 pub const CONTROL_SELECTED: &str = d::CONTROL_SELECTED;
 /// A control under the pointer.

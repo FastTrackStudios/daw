@@ -58,7 +58,9 @@ use expression_editor_ui::workflow::Workflow;
 
 pub mod app;
 pub mod cli;
+pub mod drum_host;
 pub mod library;
+pub mod workstation;
 
 pub use app::{App, stage};
 pub use cli::Args;
@@ -265,6 +267,10 @@ pub struct Runner {
     pub loaded: Loaded,
     /// What to show in the window title: enough to tell two runs apart.
     pub label: String,
+    /// The drum workspace's write half — `Some` only for
+    /// [`Loaded::DrumWorkspace`], where the panel's Apply and the slip
+    /// drag land through it.
+    pub host: Option<drum_host::SharedDrumHost>,
 }
 
 /// The document, and the shape of the round trip behind it.
@@ -362,11 +368,13 @@ impl Runner {
                 daw: None,
                 loaded: Loaded::Scene(Box::new(demo::editor(*scene, viewport))),
                 label: format!("scene: {}", scene.label()),
+                host: None,
             },
             Source::Workflow(w) => Runner {
                 daw: None,
                 loaded: Loaded::Scene(Box::new(w.editor(viewport))),
                 label: w.label().to_string(),
+                host: None,
             },
             Source::Rpp(path) => match &target.drums {
                 Some(folder) => Self::open_rpp_drums(path, folder.as_deref(), viewport)?,
@@ -405,6 +413,7 @@ impl Runner {
                 path.file_name().unwrap_or_default().to_string_lossy(),
                 notes,
             ),
+            host: None,
         })
     }
 
@@ -432,6 +441,7 @@ impl Runner {
             ),
             daw: Some(daw),
             loaded: Loaded::Midi(Box::new(session)),
+            host: None,
         })
     }
     /// Which track of a standard MIDI file to open.
@@ -478,6 +488,7 @@ impl Runner {
                     label: format!("{name} — {}", cand.describe()),
                     daw: Some(daw),
                     loaded: runner,
+                    host: None,
                 });
             }
         }
@@ -536,9 +547,22 @@ impl Runner {
             folder: Option<String>,
             role: expression_editor_core::kit::LaneRole,
             doc: expression_editor_core::ExpressionDoc,
+            item: ItemRef,
+            length_secs: f64,
         }
 
-        let mut members: Vec<Member> = Vec::new();
+        // The kit's member tracks, with their folder chains — cheap
+        // metadata, gathered sequentially.
+        struct Job {
+            guid: String,
+            name: String,
+            folder: Option<String>,
+            role: expression_editor_core::kit::LaneRole,
+            item_guid: String,
+            length_secs: f64,
+            volume: f64,
+        }
+        let mut jobs: Vec<Job> = Vec::new();
         let mut items_seen = 0usize;
         for track in &tracks {
             if track.is_folder {
@@ -568,16 +592,79 @@ impl Runner {
             let Some((item_guid, length_secs, volume)) = pick else {
                 continue;
             };
-            let Some((samples, rate)) = read_take_mono(&daw, &ctx, &item_guid, length_secs, volume)
-            else {
-                continue;
-            };
-            members.push(Member {
+            jobs.push(Job {
                 guid: track.guid.clone(),
                 name: track.name.clone(),
                 folder: chain.first().map(|s| s.to_string()),
                 role,
-                doc: percussion_doc(&samples, rate),
+                item_guid,
+                length_secs,
+                volume,
+            });
+        }
+
+        // The expensive half — reading each mic's audio and finding its
+        // hits — is per-mic independent, so it runs one thread per mic.
+        // A kit is a dozen tracks; this is the difference between a
+        // multi-second open and about the longest single mic.
+        let analysed: Vec<Option<(Job, Vec<f64>, f64, expression_editor_core::ExpressionDoc)>> =
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = jobs
+                    .into_iter()
+                    .map(|job| {
+                        let daw = daw.clone();
+                        let ctx = ctx.clone();
+                        scope.spawn(move || {
+                            let (samples, rate) = read_take_mono(
+                                &daw,
+                                &ctx,
+                                &job.item_guid,
+                                job.length_secs,
+                                job.volume,
+                            )?;
+                            let mut doc = percussion_doc(&samples, rate);
+                            attach_regions(&daw, &ctx, &mut doc);
+                            Some((job, samples, rate, doc))
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|h| h.join().unwrap_or(None))
+                    .collect()
+            });
+
+        // The trigger lanes' running sums (mean of the members), built
+        // while the samples are in hand — the host detects on these.
+        // r[impl drums.group.detection-source]
+        let mut members: Vec<Member> = Vec::new();
+        let mut sums: std::collections::HashMap<
+            expression_editor_core::kit::LaneRole,
+            (Vec<f64>, usize),
+        > = std::collections::HashMap::new();
+        let mut sample_rate = 0.0f64;
+        for (job, samples, rate, doc) in analysed.into_iter().flatten() {
+            if sample_rate <= 0.0 {
+                sample_rate = rate;
+            }
+            if job.role.is_detection_source() {
+                let (sum, count) = sums.entry(job.role).or_default();
+                if sum.len() < samples.len() {
+                    sum.resize(samples.len(), 0.0);
+                }
+                for (o, v) in sum.iter_mut().zip(samples.iter()) {
+                    *o += v;
+                }
+                *count += 1;
+            }
+            members.push(Member {
+                guid: job.guid,
+                name: job.name,
+                folder: job.folder,
+                role: job.role,
+                doc,
+                item: ItemRef::Guid(job.item_guid),
+                length_secs: job.length_secs,
             });
         }
 
@@ -589,6 +676,35 @@ impl Runner {
         }
 
         let mics = members.len();
+        let take_secs = members.iter().map(|m| m.length_secs).fold(0.0f64, f64::max);
+        // The kit group's items, by role — the host edits all of them
+        // for every gesture. r[impl drums.group.kit]
+        let host_lanes: Vec<drum_host::HostLane> = expression_editor_core::kit::LaneRole::ALL
+            .into_iter()
+            .filter_map(|role| {
+                let items: Vec<ItemRef> = members
+                    .iter()
+                    .filter(|m| m.role == role)
+                    .map(|m| m.item.clone())
+                    .collect();
+                if items.is_empty() {
+                    return None;
+                }
+                let summed = sums.remove(&role).map(|(mut sum, count)| {
+                    let scale = 1.0 / count.max(1) as f64;
+                    for v in &mut sum {
+                        *v *= scale;
+                    }
+                    sum
+                });
+                Some(drum_host::HostLane {
+                    role,
+                    items,
+                    summed,
+                })
+            })
+            .collect();
+
         let mut it = members.into_iter();
         let first = it.next().expect("checked non-empty");
         let mut editor = Editor::new(first.doc, viewport);
@@ -620,10 +736,19 @@ impl Runner {
             editor.bpm = bpm;
         }
 
+        let host = drum_host::DrumHost::new(
+            daw.clone(),
+            ctx,
+            host_lanes,
+            sample_rate,
+            take_secs,
+            60.0 / editor.bpm.max(1.0),
+        );
         Ok(Runner {
             label: format!("{name} — drums: {} ({mics} mics)", kit.name),
             daw: Some(daw),
             loaded: Loaded::DrumWorkspace(Box::new(editor)),
+            host: Some(std::sync::Arc::new(host)),
         })
     }
 
@@ -835,11 +960,73 @@ fn edit_item(
     (seen, best)
 }
 
+/// Compose one track's *playing* audio into a single timeline buffer —
+/// every playing-lane audio item read through the accessor and placed
+/// at its position, out to `take_secs`. This is what a lane draws
+/// after an edit landed on the daw: the split pieces where they now
+/// sit, not where the take was when it loaded.
+pub(crate) fn track_timeline(
+    daw: &Standalone,
+    ctx: &ProjectContext,
+    track: &daw::service::Track,
+    take_secs: f64,
+    sample_rate: f64,
+) -> Vec<f64> {
+    let mut out = vec![0.0f64; (take_secs * sample_rate).ceil().max(0.0) as usize];
+    let items = Items::get_items(
+        daw,
+        ctx.clone(),
+        daw::service::TrackRef::Guid(track.guid.clone()),
+    );
+    let mut placed: Vec<_> = items
+        .into_iter()
+        .filter(|item| {
+            if track.lane_count > 0
+                && let Some(lane) = item.fixed_lane
+                && (lane >= 64 || track.lane_play_mask & (1u64 << lane) == 0)
+            {
+                return false;
+            }
+            Takes::get_active_take(daw, ctx.clone(), ItemRef::Guid(item.guid.clone()))
+                .is_some_and(|t| t.source_type == daw::service::SourceType::Audio)
+        })
+        .collect();
+    // Ascending position: a later piece's attack overwrites the
+    // previous piece's crossfade tail, which is what detection needs.
+    placed.sort_by(|a, b| a.position.as_seconds().total_cmp(&b.position.as_seconds()));
+    for item in placed {
+        let Some((samples, rate)) =
+            read_take_mono(daw, ctx, &item.guid, item.length.as_seconds(), item.volume)
+        else {
+            continue;
+        };
+        let at = (item.position.as_seconds() * sample_rate).round().max(0.0) as usize;
+        if (rate - sample_rate).abs() < 1e-6 {
+            for (i, s) in samples.iter().enumerate() {
+                if at + i < out.len() {
+                    out[at + i] = *s;
+                }
+            }
+        } else {
+            // Rates differing inside one kit is unusual; nearest-
+            // neighbour is fine for drawing and detection.
+            let n = (samples.len() as f64 * sample_rate / rate) as usize;
+            for i in 0..n {
+                let src = (i as f64 * rate / sample_rate) as usize;
+                if at + i < out.len() && src < samples.len() {
+                    out[at + i] = samples[src];
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Pull one take's audio through the accessor, chunked, mono, at the
 /// source rate — the same read [`AudioSession::load`] does, capped at
 /// the item length. Returns `(samples, sample_rate)`.
 // r[impl drums.open.runner]
-fn read_take_mono(
+pub(crate) fn read_take_mono(
     daw: &Standalone,
     ctx: &ProjectContext,
     item_guid: &str,
@@ -912,13 +1099,43 @@ fn read_take_mono(
 /// per transient.
 ///
 /// Deliberately **not** [`expression_editor_audio::analyze_percussive`]:
+/// Carry the project's regions onto a document, in its own time units.
+///
+/// The sections are how a player knows where they are — "bar 38" says
+/// nothing, "CH 1" says everything — so every lane's ruler shows them.
+/// Host colours come through as `#rrggbb`; REAPER's section colours are
+/// the ones the band already knows from the arrange view.
+pub(crate) fn attach_regions(
+    daw: &Standalone,
+    ctx: &ProjectContext,
+    doc: &mut expression_editor_core::ExpressionDoc,
+) {
+    use daw::service::Regions;
+    let ups = doc.time_base.units_per_second(120.0);
+    if ups <= 0.0 {
+        return;
+    }
+    doc.regions = Regions::all(daw, ctx.clone())
+        .into_iter()
+        .map(|r| expression_editor_core::doc::Region {
+            start: r.time_range.start_seconds() * ups,
+            end: r.time_range.end_seconds() * ups,
+            label: r.name,
+            color: r.color.map(|c| format!("#{c:06x}")),
+        })
+        .collect();
+}
+
 /// that segments by spectral flux over an STFT, which quantises every
 /// hit to a hop and costs a transform per mic. The envelope gate is the
 /// detector the quantize panel uses, sample-accurate and cheap — the
 /// price is that it measures no centroid, so every hit lands in the
 /// middle band rather than being sorted by brightness.
 // r[impl drums.open.runner]
-fn percussion_doc(samples: &[f64], sample_rate: f64) -> expression_editor_core::ExpressionDoc {
+pub(crate) fn percussion_doc(
+    samples: &[f64],
+    sample_rate: f64,
+) -> expression_editor_core::ExpressionDoc {
     use expression_editor_audio::{DetectConfig, transients};
     use expression_editor_core::rows::SliceBands;
     use expression_editor_core::{ExpressionDoc, Note, NoteId, RowSpace, TimeBase};

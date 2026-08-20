@@ -181,8 +181,22 @@ fn two_notes_sounding_at_once_shape_separately() {
         .set(PPQ, -1.0);
 
     // Same instant, opposite bends, both intact.
-    assert_eq!(ed.doc.note(a).unwrap().curve(Dimension::Pitch).sample(PPQ, 0.0), 1.0);
-    assert_eq!(ed.doc.note(b).unwrap().curve(Dimension::Pitch).sample(PPQ, 0.0), -1.0);
+    assert_eq!(
+        ed.doc
+            .note(a)
+            .unwrap()
+            .curve(Dimension::Pitch)
+            .sample(PPQ, 0.0),
+        1.0
+    );
+    assert_eq!(
+        ed.doc
+            .note(b)
+            .unwrap()
+            .curve(Dimension::Pitch)
+            .sample(PPQ, 0.0),
+        -1.0
+    );
 }
 
 #[test]
@@ -228,8 +242,7 @@ fn every_note_has_its_own_channel_so_expression_is_attributable() {
 // ── on the real surface ──────────────────────────────────────────────
 
 #[tokio::test]
-async fn a_pen_stroke_writes_the_active_dimension_and_only_that_one()
--> dioxus_test::Result<()> {
+async fn a_pen_stroke_writes_the_active_dimension_and_only_that_one() -> dioxus_test::Result<()> {
     // What the pen writes must land in the dimension the toolbar has
     // active — a stroke that also moved pitch while you were shaping
     // timbre is the failure this catches. (Ctrl used to be the pen
@@ -269,7 +282,10 @@ async fn a_pen_stroke_writes_the_active_dimension_and_only_that_one()
     tester.pointer_up_mods(x1, y1, Modifiers::empty());
     let _ = tester.pump().await;
 
-    let html = tester.query(by_testid("readout")).immediately()?.inner_html();
+    let html = tester
+        .query(by_testid("readout"))
+        .immediately()?
+        .inner_html();
     assert!(
         field(&html, "Timbre") > 0,
         "the stroke wrote nothing into the active dimension: {html}"

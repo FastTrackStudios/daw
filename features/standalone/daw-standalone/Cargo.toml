@@ -40,6 +40,7 @@ symphonia = { version = "0.5", optional = true, features = ["mp3", "ogg", "flac"
 
 # RPP project loading
 dawfile-reaper = { workspace = true, optional = true }
+dawfile-standalone = { workspace = true, optional = true }
 
 # Optional native HTTP fetcher for `HttpBaseUrlResolver`.
 ureq = { version = "2", optional = true }
@@ -104,6 +105,9 @@ pipewire = ["audio"]
 # `rpp-project` without default features:
 #   default-features = false, features = ["rpp-project-wasm"]
 rpp-project = ["dep:dawfile-reaper", "dawfile-reaper/parallel"]
+# Save an opened project back to a NEW .rpp beside its original, via
+# dawfile-standalone's patched export (verbatim source + minimal patch).
+rpp-save = ["rpp-project", "dep:dawfile-standalone"]
 # REAPER .reapeaks peak-cache reading (waveform drawing) — much lighter
 # than rpp-project (no parallel parser).
 reapeaks = ["dep:dawfile-reaper"]

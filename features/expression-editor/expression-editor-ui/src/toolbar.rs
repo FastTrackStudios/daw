@@ -136,6 +136,12 @@ pub fn Toolbar(
     /// The quantize drawer's visibility. Owned by the host component —
     /// the toolbar only toggles it.
     quantize_open: Signal<bool>,
+    /// Save, when the host has somewhere to save to. Standalone writes
+    /// a *new* `.rpp` beside the original; absent (REAPER hosts, demo
+    /// scenes) the button is not drawn at all — a dead Save button
+    /// reads as a bug.
+    #[props(default)]
+    on_save: Option<EventHandler<()>>,
 ) -> Element {
     let mut editor = editor;
     let mut drawer = drawer;
@@ -433,6 +439,20 @@ pub fn Toolbar(
                                 quantize_open.set(!open);
                             },
                             "Quantize"
+                        }
+                    }
+                }
+                // r[impl drums.save.new-file]
+                if let Some(save) = on_save {
+                    Segment {
+                        Seg {
+                            active: false,
+                            accent: false,
+                            testid: "tool-save".to_string(),
+                            title: "Save as a new .rpp beside the original — never over it"
+                                .to_string(),
+                            onclick: move |_| save.call(()),
+                            "Save"
                         }
                     }
                 }

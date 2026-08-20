@@ -75,7 +75,8 @@ fn band() -> Editor {
     // that makes the shared timeline non-trivial.
     let mut kit = frames_doc(86.1328125, &hits, 1);
     kit.row_space = RowSpace::Bands(SliceBands::default());
-    ed.tracks.push(Track::in_mode("Kit", kit, Mode::UnpitchedAudio));
+    ed.tracks
+        .push(Track::in_mode("Kit", kit, Mode::UnpitchedAudio));
 
     ed
 }
@@ -90,7 +91,12 @@ fn a_lane_per_track_in_workspace_order() {
     );
     assert_eq!(
         lanes.iter().map(|l| l.mode).collect::<Vec<_>>(),
-        vec![Mode::PitchedAudio, Mode::Midi, Mode::Guitar, Mode::UnpitchedAudio]
+        vec![
+            Mode::PitchedAudio,
+            Mode::Midi,
+            Mode::Guitar,
+            Mode::UnpitchedAudio
+        ]
     );
     assert!(lanes[0].active);
     assert!(lanes[1..].iter().all(|l| !l.active));
@@ -324,7 +330,9 @@ fn guitar_notes_colour_by_string_by_default_and_by_pitch_when_off() {
     let by_pitch = expression_editor_ui::stack::lanes(&ed, 1.0, 20.0);
 
     let fills = |ls: &[expression_editor_ui::stack::LaneView]| -> Vec<String> {
-        ls.iter().flat_map(|l| l.notes.iter().map(|n| n.fill.clone())).collect()
+        ls.iter()
+            .flat_map(|l| l.notes.iter().map(|n| n.fill.clone()))
+            .collect()
     };
     assert_ne!(
         fills(&by_string),
@@ -351,7 +359,9 @@ fn the_toggle_leaves_non_guitar_rows_alone() {
     let off = expression_editor_ui::stack::lanes(&ed, 1.0, 20.0);
 
     let fill = |ls: &[expression_editor_ui::stack::LaneView]| {
-        ls.iter().flat_map(|l| l.notes.iter().map(|n| n.fill.clone())).collect::<Vec<_>>()
+        ls.iter()
+            .flat_map(|l| l.notes.iter().map(|n| n.fill.clone()))
+            .collect::<Vec<_>>()
     };
     assert_eq!(fill(&on), fill(&off));
 }

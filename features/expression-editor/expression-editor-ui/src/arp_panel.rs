@@ -15,7 +15,7 @@ use expression_editor_tools::arp::{ArpNote, ArpSession, Direction, PPQ};
 use expression_editor_tools::{ArpSink, DemoArpSink};
 
 use crate::drag::Slider;
-use crate::velocity_panel::{Chip, PanelStyles, Section, BUTTON};
+use crate::velocity_panel::{BUTTON, Chip, PanelStyles, Section};
 
 /// Cloneable handle so an arp sink can live in Dioxus context.
 #[derive(Clone)]

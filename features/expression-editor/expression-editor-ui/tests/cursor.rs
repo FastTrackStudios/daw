@@ -17,8 +17,8 @@ use expression_editor_core::cursor::Cursor;
 use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
 use expression_editor_core::tools::Mods;
 use expression_editor_core::{Editor, Mode, MouseMap, Tool, Viewport};
-use expression_editor_ui::cursor::cursor_at;
 use expression_editor_ui::ExpressionEditor;
+use expression_editor_ui::cursor::cursor_at;
 
 const PPQ: f64 = 960.0;
 
@@ -224,7 +224,11 @@ fn stage(ed: Editor) {
 
 #[component]
 fn Staged() -> Element {
-    let editor = use_signal(|| STAGED.with(|s| s.borrow_mut().take()).unwrap_or_else(one_note));
+    let editor = use_signal(|| {
+        STAGED
+            .with(|s| s.borrow_mut().take())
+            .unwrap_or_else(one_note)
+    });
     use_hook(|| expression_editor_ui::available_space(1000.0, 620.0));
     rsx! { ExpressionEditor { editor } }
 }
@@ -247,7 +251,9 @@ async fn there_is_no_cursor_before_the_pointer_arrives() -> dioxus_test::Result<
         "a glyph was resolved before the pointer had been over the roll",
     );
     assert!(
-        el.attribute("style").unwrap_or_default().contains("visibility: hidden"),
+        el.attribute("style")
+            .unwrap_or_default()
+            .contains("visibility: hidden"),
         "the untouched cursor layer is visible",
     );
     Ok(())
@@ -283,10 +289,7 @@ async fn the_cursor_appears_and_follows_the_pointer() -> dioxus_test::Result<()>
         first.contains("left:") && first.contains("top:"),
         "the cursor layer is not positioned at all: {first}",
     );
-    assert_ne!(
-        first, second,
-        "the cursor did not follow the pointer",
-    );
+    assert_ne!(first, second, "the cursor did not follow the pointer",);
     Ok(())
 }
 
@@ -311,7 +314,11 @@ async fn the_cursor_layer_does_not_swallow_gestures() -> dioxus_test::Result<()>
     tester.pointer_down(ox + w as f64 * 0.2, y);
     tester.drain();
     for i in 1..=4 {
-        tester.pointer_move(ox + w as f64 * (0.2 + 0.1 * i as f64), y - i as f64 * 3.0, true);
+        tester.pointer_move(
+            ox + w as f64 * (0.2 + 0.1 * i as f64),
+            y - i as f64 * 3.0,
+            true,
+        );
         tester.drain();
     }
     tester.pointer_up(ox + w as f64 * 0.6, y - 12.0);
@@ -361,8 +368,8 @@ async fn the_cursor_layer_has_a_box() -> dioxus_test::Result<()> {
 /// laid out 0x0 and was skipped without a word.
 #[tokio::test]
 async fn the_renderer_paints_the_cursor_widget() -> dioxus_test::Result<()> {
-    use std::sync::atomic::Ordering;
     use expression_editor_ui::roll_widget::SCENE_PAINTS;
+    use std::sync::atomic::Ordering;
 
     let tester = render(Surface).with_window_size(1000, 620).build();
     let roll = tester.query(by_testid("roll")).immediately()?;
@@ -399,7 +406,10 @@ async fn the_renderer_paints_the_cursor_widget() -> dioxus_test::Result<()> {
 
 /// Focus the surface that owns the key handlers, and hand back the roll.
 fn focused(tester: &dioxus_test::DocumentTester) -> dioxus_test::Result<()> {
-    tester.query(by_testid("canvas-cell")).immediately()?.focus();
+    tester
+        .query(by_testid("canvas-cell"))
+        .immediately()?
+        .focus();
     Ok(())
 }
 
@@ -500,7 +510,6 @@ async fn auto_repeat_does_not_walk_the_zoom_tree() -> dioxus_test::Result<()> {
     Ok(())
 }
 
-
 // ── the toolbar previews the modifiers ──────────────────────────────
 
 /// Holding Ctrl lights the razor; letting go puts it back.
@@ -576,8 +585,12 @@ async fn rebinding_ctrl_moves_the_highlight_with_it() -> dioxus_test::Result<()>
 
     let mut ed = one_note();
     // Ctrl now draws instead of razoring. Nothing in the toolbar knows.
-    ed.mouse
-        .set(Context::PianoRoll, Gesture::Drag, ModKey::CTRL, Action::PenOverride);
+    ed.mouse.set(
+        Context::PianoRoll,
+        Gesture::Drag,
+        ModKey::CTRL,
+        Action::PenOverride,
+    );
     stage(ed);
 
     let tester = render(Staged).with_window_size(1000, 620).build();
@@ -610,7 +623,10 @@ async fn razor_mode_lists_its_verbs() -> dioxus_test::Result<()> {
     let mut ed = one_note();
     ed.tool = Tool::Razor;
     ed.razor.add(expression_editor_core::RazorArea::new(
-        0.0, PPQ, NOTE_ROW - 1, NOTE_ROW + 1,
+        0.0,
+        PPQ,
+        NOTE_ROW - 1,
+        NOTE_ROW + 1,
     ));
     stage(ed);
 
@@ -620,7 +636,10 @@ async fn razor_mode_lists_its_verbs() -> dioxus_test::Result<()> {
     let html = panel.inner_html();
 
     for verb in ["Retrograde", "Invert pitches", "Delete contents"] {
-        assert!(html.contains(verb), "the razor panel does not list {verb}: {html}");
+        assert!(
+            html.contains(verb),
+            "the razor panel does not list {verb}: {html}"
+        );
     }
     Ok(())
 }
@@ -635,18 +654,23 @@ async fn razor_mode_lists_its_verbs() -> dioxus_test::Result<()> {
 /// listed is the `k` prefix, which works from anywhere — and the panel
 /// becomes how you find out `k` exists.
 #[tokio::test]
-async fn a_razor_from_another_tool_lists_the_prefix_spelling()
--> dioxus_test::Result<()> {
+async fn a_razor_from_another_tool_lists_the_prefix_spelling() -> dioxus_test::Result<()> {
     let mut ed = one_note();
     ed.tool = Tool::Select;
     ed.razor.add(expression_editor_core::RazorArea::new(
-        0.0, PPQ, NOTE_ROW - 1, NOTE_ROW + 1,
+        0.0,
+        PPQ,
+        NOTE_ROW - 1,
+        NOTE_ROW + 1,
     ));
     stage(ed);
 
     let tester = render(Staged).with_window_size(1000, 620).build();
     tester.query(by_testid("roll")).immediately()?;
-    let html = tester.query(by_testid("which-key")).immediately()?.inner_html();
+    let html = tester
+        .query(by_testid("which-key"))
+        .immediately()?
+        .inner_html();
 
     assert!(
         html.contains("a r") || html.contains("a v"),
@@ -680,7 +704,10 @@ async fn the_key_panel_sits_in_the_bottom_right() -> dioxus_test::Result<()> {
     let mut ed = one_note();
     ed.tool = Tool::Razor;
     ed.razor.add(expression_editor_core::RazorArea::new(
-        0.0, PPQ, NOTE_ROW - 1, NOTE_ROW + 1,
+        0.0,
+        PPQ,
+        NOTE_ROW - 1,
+        NOTE_ROW + 1,
     ));
     stage(ed);
 
@@ -691,7 +718,10 @@ async fn the_key_panel_sits_in_the_bottom_right() -> dioxus_test::Result<()> {
         .immediately()?
         .attribute("style")
         .unwrap_or_default();
-    assert!(style.contains("right:"), "the panel is not anchored right: {style}");
+    assert!(
+        style.contains("right:"),
+        "the panel is not anchored right: {style}"
+    );
     assert!(
         !style.contains("left:"),
         "the panel is still anchored left as well: {style}",
@@ -716,7 +746,10 @@ async fn v_p_opens_the_velocity_window() -> dioxus_test::Result<()> {
     focused(&tester)?;
 
     assert!(
-        tester.query(by_testid("velocity-window")).immediately().is_err(),
+        tester
+            .query(by_testid("velocity-window"))
+            .immediately()
+            .is_err(),
         "the velocity window was up before anything asked for it",
     );
 
@@ -733,7 +766,10 @@ async fn v_p_opens_the_velocity_window() -> dioxus_test::Result<()> {
     tester.drain();
     let _ = tester.pump().await;
     assert!(
-        tester.query(by_testid("velocity-window")).immediately().is_err(),
+        tester
+            .query(by_testid("velocity-window"))
+            .immediately()
+            .is_err(),
         "`v p` a second time did not close the window",
     );
     Ok(())
@@ -774,7 +810,9 @@ async fn the_velocity_window_can_be_moved() -> dioxus_test::Result<()> {
         .attribute("style")
         .unwrap_or_default();
 
-    let bar = tester.query(by_testid("velocity-window-title")).immediately()?;
+    let bar = tester
+        .query(by_testid("velocity-window-title"))
+        .immediately()?;
     let (ox, oy) = bar.document_origin();
     tester.pointer_down(ox + 40.0, oy + 8.0);
     let _ = tester.pump().await;
@@ -797,7 +835,10 @@ async fn the_velocity_window_can_be_moved() -> dioxus_test::Result<()> {
         .immediately()?
         .attribute("style")
         .unwrap_or_default();
-    assert_ne!(before, after, "dragging the title bar did not move the window");
+    assert_ne!(
+        before, after,
+        "dragging the title bar did not move the window"
+    );
     Ok(())
 }
 
@@ -835,7 +876,10 @@ async fn a_held_prefix_takes_more_than_one_command() -> dioxus_test::Result<()> 
     tester.key_up(Key::Character("g".into()), Modifiers::empty());
     let _ = tester.pump().await;
 
-    let readout = tester.query(by_testid("grid-division")).immediately()?.inner_html();
+    let readout = tester
+        .query(by_testid("grid-division"))
+        .immediately()?
+        .inner_html();
     assert!(
         readout.contains("1/4T"),
         "the second key did not reach the grid tree: readout {readout}",
@@ -886,15 +930,17 @@ async fn a_prefix_tree_stays_up_until_it_has_been_used() -> dioxus_test::Result<
 /// that no longer exists, which is what a template whose *shape* changed
 /// between renders looks like from inside the diff.
 #[tokio::test]
-async fn switching_between_prefix_trees_does_not_corrupt_the_dom()
--> dioxus_test::Result<()> {
+async fn switching_between_prefix_trees_does_not_corrupt_the_dom() -> dioxus_test::Result<()> {
     use dioxus_test::keyboard_types::{Key, Modifiers};
 
     let mut ed = one_note();
     // A razor, so the panel is already up with the *other* shape — the
     // razor help has a title, a which-key tree does not.
     ed.razor.add(expression_editor_core::RazorArea::new(
-        0.0, PPQ, NOTE_ROW - 1, NOTE_ROW + 1,
+        0.0,
+        PPQ,
+        NOTE_ROW - 1,
+        NOTE_ROW + 1,
     ));
     stage(ed);
 

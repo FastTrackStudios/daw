@@ -153,6 +153,21 @@ pub fn ExpressionEditor(
     /// the daw write never happens in this crate.
     #[props(default)]
     on_quantize_apply: Option<EventHandler<quantize_panel::QuantizePanel>>,
+    /// Called when a hand edit leaves the stacked view — a slip or
+    /// stretch drag, a nudge, a hit added or removed. Same contract as
+    /// [`stack::StackView`]'s prop of the same name; the write mode and
+    /// nudge step are threaded from the quantize panel here, so the
+    /// host only ever sees finished gestures.
+    #[props(default)]
+    on_hit: Option<EventHandler<stack::HitGesture>>,
+    /// Save, when the host has somewhere to save to. Shown as a
+    /// toolbar button only when present.
+    #[props(default)]
+    on_save: Option<EventHandler<()>>,
+    /// The transport's position, seconds — drawn as a playhead in the
+    /// stacked view when present.
+    #[props(default)]
+    playhead_secs: Option<Signal<f64>>,
     /// Anything the host wants at the top of the inspector.
     ///
     /// A slot, so a host can put its own controls inside the editor's
@@ -261,7 +276,7 @@ pub fn ExpressionEditor(
                     width: 100%; height: 100%; \
                     min-height: 0; overflow: hidden; background: {theme::BG}; \
                     color: {theme::TEXT}; font-family: system-ui, sans-serif;",
-            toolbar::Toolbar { editor, drag, drawer, quantize_open }
+            toolbar::Toolbar { editor, drag, drawer, quantize_open, on_save }
             switcher::TrackSwitcher { editor }
             div {
                 style: "display: flex; flex: 1 1 auto; min-height: 0;",
@@ -269,7 +284,18 @@ pub fn ExpressionEditor(
                     style: "display: flex; flex-direction: column; flex: 1 1 auto; \
                             min-width: 0; min-height: 0;",
                     if editor.read().stacked {
-                        stack::StackView { editor }
+                        // The hand gestures follow the panel's write
+                        // mode and grid, so a drag and the Apply button
+                        // cannot mean different edits.
+                        stack::StackView {
+                            editor,
+                            on_hit,
+                            warp: quantize.read().mode == quantize_panel::WriteMode::Warp,
+                            grid_secs: quantize
+                                .read()
+                                .grid_in(60.0 / editor.read().bpm.max(1.0)),
+                            playhead_secs,
+                        }
                     } else {
                         Canvas { editor, drag, drawer, multi, menu_state, pending, draft }
                         LaneStrip { editor }

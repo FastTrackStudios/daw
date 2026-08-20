@@ -47,6 +47,23 @@ impl Peaks for Standalone {
         take: TakeRef,
         block_size: u32,
     ) -> TakePeakData {
+        // The cache: peaks are pure over (take audio, placement,
+        // markers), all of which bump the project revision when they
+        // change — so `(take, block)` at the current revision is
+        // reusable, and every consumer (the arrangement, the drum
+        // lanes, a refresh after an edit) pays the scan once. REAPER's
+        // equivalent is the `.reapeaks` file; ours lives in memory.
+        let cache_key = peak_cache_key(self, &project, &item, &take, block_size);
+        if let Some((key, revision)) = &cache_key
+            && let Some(hit) = cache().lock().ok().and_then(|c| {
+                c.get(key)
+                    .filter(|(rev, _)| rev == revision)
+                    .map(|(_, data)| data.clone())
+            })
+        {
+            return (*hit).clone();
+        }
+
         // A take with no materialized media has no waveform: empty, not
         // an error, so a lane can still be laid out around it.
         let Some(reader) =
@@ -76,12 +93,18 @@ impl Peaks for Standalone {
             let t0 = b as f64 * block_secs;
             reader.peak_block(t0, t0 + block_secs, out);
         }
-        TakePeakData {
+        let data = TakePeakData {
             sample_rate: rate,
             num_channels: channels,
             peaks,
             samples_per_peak: block,
+        };
+        if let Some((key, revision)) = cache_key
+            && let Ok(mut c) = cache().lock()
+        {
+            c.insert(key, (revision, std::sync::Arc::new(data.clone())));
         }
+        data
     }
 
     #[cfg(not(any(feature = "audio", feature = "decode")))]
@@ -94,6 +117,46 @@ impl Peaks for Standalone {
     ) -> TakePeakData {
         TakePeakData::default()
     }
+}
+
+/// The peaks cache: `(project, take, block)` → the data computed at a
+/// project revision. Process-global for the same reason the accessor
+/// table is — `Standalone` is a cloneable handle, and peaks asked
+/// through one clone must be reusable through another.
+#[cfg(any(feature = "audio", feature = "decode"))]
+type PeakCache =
+    std::collections::HashMap<(String, String, u32), (u64, std::sync::Arc<TakePeakData>)>;
+
+#[cfg(any(feature = "audio", feature = "decode"))]
+fn cache() -> &'static std::sync::Mutex<PeakCache> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<PeakCache>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// The cache key for a request, plus the revision it would be valid
+/// at. `None` when the take cannot be resolved — an uncacheable miss.
+#[cfg(any(feature = "audio", feature = "decode"))]
+fn peak_cache_key(
+    daw: &Standalone,
+    project: &ProjectContext,
+    item: &ItemRef,
+    take: &TakeRef,
+    block: u32,
+) -> Option<((String, String, u32), u64)> {
+    use daw_proto::Takes;
+    let guid = match project {
+        ProjectContext::Project(g) => g.clone(),
+        ProjectContext::Current => daw.state.lock().ok()?.current_project_guid.clone()?,
+    };
+    let takes = daw.get_takes(project.clone(), item.clone());
+    let index = match take {
+        TakeRef::Active => takes.iter().position(|t| t.is_active).unwrap_or(0),
+        TakeRef::Index(i) => *i as usize,
+        TakeRef::Guid(g) => takes.iter().position(|t| t.guid == *g)?,
+    };
+    let take_guid = takes.get(index)?.guid.clone();
+    let revision = daw.read_project(&guid, |p| p.revision)?;
+    Some(((guid, take_guid, block.max(1)), revision))
 }
 
 impl Standalone {

@@ -1245,7 +1245,8 @@ pub fn cc_paths(ed: &Editor) -> Vec<CcPath> {
 
             let mut ts: Vec<f64> = vec![t0];
             ts.extend(
-                dimension.curve
+                dimension
+                    .curve
                     .points()
                     .iter()
                     .map(|p| p.t)

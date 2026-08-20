@@ -226,8 +226,7 @@ impl SceneWidget {
 /// not. So a pixel diff cannot tell "the widget never painted" from "the
 /// rasterizer does not draw widgets", and this can: the renderer calls
 /// `paint` only for a widget it has laid out and intends to draw.
-pub static SCENE_PAINTS: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
+pub static SCENE_PAINTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 impl blitz_dom::Widget for SceneWidget {
     fn paint(
@@ -261,8 +260,7 @@ impl blitz_dom::Widget for RollWidget {
         self.frames.tick();
         let started = std::time::Instant::now();
         let scene = self.slot.take_scene().unwrap_or_default();
-        self.frames
-            .spent(started.elapsed().as_secs_f64() * 1000.0);
+        self.frames.spent(started.elapsed().as_secs_f64() * 1000.0);
         scene
     }
 }
