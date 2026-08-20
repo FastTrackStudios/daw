@@ -54,8 +54,10 @@ pub const MIXER_W: f64 = (STRIP_W as f64 + 1.0) * 4.0 + 2.0;
 pub const ARRANGE_FRACTION: f64 = 0.45;
 /// The transport band, per the main window.
 const TRANSPORT_H: f64 = 40.0;
-/// The section strip over the arrangement.
-const REGION_H: f64 = 18.0;
+/// The ruler's region lane — REAPER's colored section bands.
+const REGION_H: f64 = 16.0;
+/// The ruler's marker lane — numbered flags under the regions.
+const MARKER_H: f64 = 14.0;
 /// The arrange view's own ruler — the TCP column's spacer must match it
 /// exactly, per the main window's alignment contract.
 const ARR_RULER_H: f32 = 26.0;
@@ -127,13 +129,23 @@ pub fn bootstrap_daw_blocking(standalone: &Standalone) -> eyre::Result<()> {
     Ok(())
 }
 
-/// One song section for the strip over the arrangement.
+/// One song section for the ruler's region lane.
 #[derive(Clone, PartialEq)]
 struct Section {
     start: f64,
     end: f64,
     name: String,
     color: Option<String>,
+}
+
+/// One project marker for the ruler's marker lane.
+#[derive(Clone, PartialEq)]
+struct MarkerFlag {
+    at: f64,
+    name: String,
+    color: Option<String>,
+    /// REAPER's marker number — the flag's label.
+    idx: u32,
 }
 
 /// Everything the native panels need, fetched in one pass. The
@@ -145,6 +157,7 @@ struct ProjectShape {
     previews: HashMap<String, ItemPreview>,
     fx: HashMap<String, Vec<Fx>>,
     sections: Vec<Section>,
+    markers: Vec<MarkerFlag>,
     bpm: f64,
     /// End of the last item, so the timeline spans the material.
     length_secs: f64,
@@ -197,12 +210,32 @@ async fn fetch_project() -> Option<ProjectShape> {
         .collect();
     let bpm = project.transport().get_tempo().await.unwrap_or(120.0);
 
+    // Only real markers: REAPER stores a region as a marker pair, and
+    // the standalone loader keeps them apart, but an unnamed marker at
+    // a region edge would be ruler noise either way.
+    let markers = project
+        .markers()
+        .all()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|m| !m.name.is_empty())
+        .enumerate()
+        .map(|(i, m)| MarkerFlag {
+            at: m.position.seconds().unwrap_or(0.0),
+            name: m.name.clone(),
+            color: m.color.map(|c| format!("#{c:06x}")),
+            idx: m.id.unwrap_or(i as u32 + 1),
+        })
+        .collect();
+
     Some(ProjectShape {
         tracks,
         items,
         previews,
         fx,
         sections,
+        markers,
         bpm,
         length_secs: length.max(60.0),
     })
@@ -332,6 +365,7 @@ pub fn WorkstationApp() -> Element {
     let item_previews = s.previews.clone();
     let fx = s.fx.clone();
     let sections = s.sections.clone();
+    let marker_flags = s.markers.clone();
     let bpm = s.bpm;
     let seconds = s.length_secs;
     drop(s);
@@ -342,20 +376,26 @@ pub fn WorkstationApp() -> Element {
     let rule = t.chrome.surface_sunken.shade(-0.25).css();
 
     // The arrangement zooms to readable bars — 40 px a bar keeps the
-    // ruler's numbers apart at any tempo — and scrolls horizontally;
-    // the section strip above stays a whole-song map.
+    // ruler's numbers apart at any tempo — and scrolls horizontally.
+    // The region and marker lanes live INSIDE that scroll at the same
+    // pixels-per-second, the way REAPER's ruler carries them: one time
+    // axis, panned together. (The old whole-song strip drew sections
+    // at a second scale over a zoomed timeline — a map stapled to a
+    // window.)
     let arrange_w = (left_w - ROW_W as f64).max(100.0) as f32;
     let pps = (40.0 * bpm as f32 / 240.0).max(4.0);
     let content_w = (seconds as f32 * pps).max(arrange_w);
-    let overview_pps = arrange_w as f64 / seconds.max(1.0);
-    // The lanes' full content height: ruler + one pitch per row, the
-    // pitch both columns share. The pane scrolls; the columns cannot
-    // drift because they scroll together.
+    // The lanes' full content height: region lane + marker lane +
+    // ruler + one pitch per row, the pitch both columns share. The
+    // pane scrolls; the columns cannot drift because they scroll
+    // together.
     let env_lanes: HashMap<String, Vec<daw_ui::components::arrangement_view::EnvelopeLaneView>> =
         HashMap::new();
     let rows = plan_rows(&tracks, &env_lanes, ROW_H);
-    let content_h = ARR_RULER_H + 1.0 + rows.iter().map(|(_, _, h)| h + 1.0).sum::<f32>();
-    let lanes_h = (arrange_h - TRANSPORT_H - REGION_H).max(60.0);
+    let ruler_block_h = REGION_H + MARKER_H;
+    let arr_h = ARR_RULER_H + 1.0 + rows.iter().map(|(_, _, h)| h + 1.0).sum::<f32>();
+    let content_h = ruler_block_h as f32 + arr_h;
+    let lanes_h = (arrange_h - TRANSPORT_H).max(60.0);
     let playhead_x = playhead() * pps as f64;
 
     // The mixer column: an FX band when any strip has a chain, strips
@@ -388,42 +428,6 @@ pub fn WorkstationApp() -> Element {
                             background: {bar_bg}; border-bottom: 1px solid {rule};",
                     NativeTransportBar { playing, bpm, position: playhead, on_play, on_stop }
                 }
-                // The song's sections — click seeks, like the ruler.
-                div {
-                    style: "height: {REGION_H}px; flex: 0 0 auto; position: relative; \
-                            background: {bar_bg}; border-bottom: 1px solid {rule}; \
-                            margin-left: {ROW_W}px; overflow: hidden;",
-                    "data-testid": "workstation-sections",
-                    for sec in sections.iter() {
-                        {
-                            let x = sec.start * overview_pps;
-                            let w = ((sec.end - sec.start) * overview_pps).max(1.0);
-                            let bg = sec.color.clone().unwrap_or_else(|| rule.clone());
-                            let name = sec.name.clone();
-                            let to = sec.start;
-                            rsx! {
-                                div {
-                                    style: "position: absolute; left: {x}px; top: 0; \
-                                            width: {w}px; height: 100%; background: {bg}; \
-                                            border-right: 1px solid {ground}; \
-                                            font-size: 9px; color: #101014; \
-                                            padding-left: 3px; overflow: hidden;",
-                                    onclick: move |_| {
-                                        playhead.set(to);
-                                        spawn(async move {
-                                            if let Some(daw) = daw::get()
-                                                && let Ok(p) = daw.current_project().await
-                                            {
-                                                let _ = p.transport().set_position(to).await;
-                                            }
-                                        });
-                                    },
-                                    "{name}"
-                                }
-                            }
-                        }
-                    }
-                }
                 // TCP | arrangement, one shared vertical scroll.
                 div {
                     style: "height: {lanes_h}px; flex: 0 0 auto; overflow-y: scroll; \
@@ -434,9 +438,11 @@ pub fn WorkstationApp() -> Element {
                                 width: {left_w}px; height: {content_h}px;",
                         div {
                             style: "width: {ROW_W}px; flex: 0 0 auto; overflow: hidden;",
-                            // The ruler's height in empty panel, so row
-                            // one starts where lane one does.
-                            div { style: "height: {ARR_RULER_H + 1.0}px;" }
+                            // The full ruler block's height in empty
+                            // panel — region lane, marker lane and the
+                            // bar ruler — so row one starts where lane
+                            // one does.
+                            div { style: "height: {ruler_block_h + ARR_RULER_H as f64 + 1.0}px;" }
                             for (kind, _, _) in rows.iter() {
                                 if let ArrangeRowKind::Track(i) = kind {
                                     TrackRow {
@@ -461,12 +467,97 @@ pub fn WorkstationApp() -> Element {
                                 div {
                                     style: "position: relative; width: {content_w}px; \
                                             height: {content_h}px;",
+                                    // ── The ruler block, REAPER's way:
+                                    // region bands, then marker flags,
+                                    // then the bar ruler — all at the
+                                    // timeline's own pixels-per-second,
+                                    // panning with it. ──
+                                    div {
+                                        style: "position: relative; height: {REGION_H}px; \
+                                                background: {bar_bg}; \
+                                                border-bottom: 1px solid {rule}; overflow: hidden;",
+                                        "data-testid": "workstation-sections",
+                                        for sec in sections.iter() {
+                                            {
+                                                let x = sec.start * pps as f64;
+                                                let w = ((sec.end - sec.start) * pps as f64).max(1.0);
+                                                let bg = sec.color.clone().unwrap_or_else(|| rule.clone());
+                                                let name = sec.name.clone();
+                                                let to = sec.start;
+                                                rsx! {
+                                                    div {
+                                                        style: "position: absolute; left: {x}px; top: 1px; \
+                                                                width: {w}px; height: {REGION_H - 2.0}px; \
+                                                                background: {bg}; border-radius: 3px; \
+                                                                border-right: 1px solid {ground}; \
+                                                                font-size: 9px; color: #101014; \
+                                                                line-height: {REGION_H - 2.0}px; \
+                                                                padding-left: 4px; overflow: hidden;",
+                                                        onclick: move |_| {
+                                                            playhead.set(to);
+                                                            spawn(async move {
+                                                                if let Some(daw) = daw::get()
+                                                                    && let Ok(p) = daw.current_project().await
+                                                                {
+                                                                    let _ = p.transport().set_position(to).await;
+                                                                }
+                                                            });
+                                                        },
+                                                        "{name}"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    div {
+                                        style: "position: relative; height: {MARKER_H}px; \
+                                                background: {bar_bg}; \
+                                                border-bottom: 1px solid {rule}; overflow: hidden;",
+                                        "data-testid": "workstation-markers",
+                                        for m in marker_flags.iter() {
+                                            {
+                                                let x = m.at * pps as f64;
+                                                let bg = m.color.clone().unwrap_or_else(|| rule.clone());
+                                                let label = format!("{} {}", m.idx, m.name);
+                                                let to = m.at;
+                                                rsx! {
+                                                    // The flag: a colored tab at the
+                                                    // marker, its number and name
+                                                    // running right, REAPER-style.
+                                                    div {
+                                                        style: "position: absolute; left: {x}px; top: 0; \
+                                                                width: 2px; height: 100%; background: {bg};",
+                                                    }
+                                                    div {
+                                                        style: "position: absolute; left: {x + 2.0}px; top: 1px; \
+                                                                height: {MARKER_H - 2.0}px; \
+                                                                background: {bg}; border-radius: 0 3px 3px 0; \
+                                                                font-size: 8px; color: #101014; \
+                                                                line-height: {MARKER_H - 2.0}px; \
+                                                                padding: 0 4px; overflow: hidden; \
+                                                                white-space: nowrap;",
+                                                        onclick: move |_| {
+                                                            playhead.set(to);
+                                                            spawn(async move {
+                                                                if let Some(daw) = daw::get()
+                                                                    && let Ok(p) = daw.current_project().await
+                                                                {
+                                                                    let _ = p.transport().set_position(to).await;
+                                                                }
+                                                            });
+                                                        },
+                                                        "{label}"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                     ArrangePreview {
                                         tracks: tracks.clone(),
                                         items,
                                         previews: item_previews,
                                         width: content_w,
-                                        height: content_h,
+                                        height: arr_h,
                                         pixels_per_second: pps,
                                         bpm,
                                     }
