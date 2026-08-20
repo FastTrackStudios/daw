@@ -58,13 +58,15 @@ fn main() {
     // dropping it stops the stream. Failure is not fatal: the soft
     // clock still moves the playhead, just silently, and a machine
     // with no output device should still open the editor.
-    let project_guid = daw::service::Projects::info(
-        &standalone,
-        daw::service::ProjectContext::Current,
-    )
-    .map(|i| i.guid)
-    .unwrap_or_default();
-    match standalone.attach_audio_engine(&project_guid) {
+    let project_guid =
+        daw::service::Projects::info(&standalone, daw::service::ProjectContext::Current)
+            .map(|i| i.guid)
+            .unwrap_or_default();
+    // Inside the bootstrap's runtime: the engine spawns tasks on
+    // construction, and a plain `main` has no reactor of its own.
+    match expression_editor_standalone::workstation::in_daw_runtime(|| {
+        standalone.attach_audio_engine(&project_guid)
+    }) {
         Ok(engine) => {
             Box::leak(Box::new(engine));
         }

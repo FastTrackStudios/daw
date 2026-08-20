@@ -89,6 +89,22 @@ static STAGED: Mutex<Option<StagedWorkstation>> = Mutex::new(None);
 /// lifetime. Dropping it would silently disconnect every panel.
 static DAW_BUNDLE: OnceLock<daw::standalone::bootstrap::InProcessDaw> = OnceLock::new();
 
+/// The engine runtime, for callers that must construct something which
+/// spawns tasks (the audio engine) from a plain `main` — enter it
+/// first, or `architect::platform::spawn` panics with "no reactor".
+static DAW_RT: OnceLock<&'static tokio::runtime::Runtime> = OnceLock::new();
+
+/// Run `f` inside the bootstrap's tokio runtime context. Panics if
+/// [`bootstrap_daw_blocking`] has not run — that ordering bug should
+/// fail loudly, not silently skip audio.
+pub fn in_daw_runtime<R>(f: impl FnOnce() -> R) -> R {
+    let rt = DAW_RT
+        .get()
+        .expect("bootstrap_daw_blocking before in_daw_runtime");
+    let _guard = rt.enter();
+    f()
+}
+
 /// Hand the workstation its document, host and window size.
 pub fn stage_workstation(editor: Editor, host: Option<SharedDrumHost>, size: (f64, f64)) {
     *STAGED.lock().unwrap() = Some(StagedWorkstation { editor, host, size });
@@ -111,6 +127,7 @@ pub fn bootstrap_daw_blocking(standalone: &Standalone) -> eyre::Result<()> {
         .enable_all()
         .build()?;
     let rt: &'static tokio::runtime::Runtime = Box::leak(Box::new(rt));
+    let _ = DAW_RT.set(rt);
     let bundle = rt.block_on(daw::standalone::bootstrap::build_in_process_daw(
         standalone.clone(),
     ))?;
