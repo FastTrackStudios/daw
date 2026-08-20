@@ -63,6 +63,12 @@ pub struct LaneView {
     /// palette, tinting waveform, hits and label alike so the lane
     /// reads as one thing.
     pub role_color: Option<&'static str>,
+    /// Index into the workspace's lane layout — the stable identity a
+    /// popup keyed on this lane survives re-renders by.
+    pub lane: usize,
+    /// The lane's member tracks: `(track index, name, is_active)`, in
+    /// draw order. What the gutter's mic selector offers.
+    pub members: Vec<(usize, String, bool)>,
     /// The summed waveform of a role lane (kick, snare, other), as
     /// mirrored polygon points — the same shape
     /// [`canvas::take_waveform`] builds for the roll. `None` when the
@@ -195,6 +201,19 @@ const SLIP_PICK_PX: f64 = 6.0;
 
 /// Vertical padding inside a lane, in pixels, top and bottom.
 const LANE_PAD: f64 = 3.0;
+
+// ── the gutter's mic selector ────────────────────────────────────────
+//
+// Shared by the renderer and the press handler, which must agree on
+// this geometry exactly or clicks land beside what they aim at.
+/// The chip's top, below the role eyebrow, lane-relative.
+const MIC_CHIP_TOP: f64 = 18.0;
+/// The menu's first item top, lane-relative.
+const MIC_MENU_TOP: f64 = 36.0;
+/// One row of chip or menu.
+const MIC_ITEM_H: f64 = 16.0;
+/// The open menu's width — wider than the gutter, over the lane.
+const MIC_MENU_W: f64 = 120.0;
 
 /// Rows of headroom added around a lane's content before fitting.
 ///
@@ -422,6 +441,14 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
         split,
         is_role: role.is_some(),
         role_color: role.map(|r| r.color()),
+        lane: row.lane,
+        members: members
+            .iter()
+            .filter_map(|&i| {
+                let t = ed.tracks.track(i)?;
+                Some((i, t.name.clone(), i == ed.tracks.active()))
+            })
+            .collect(),
         waveform,
         sub_lanes,
     })
@@ -747,6 +774,9 @@ pub fn StackView(
     // event reaches this renderer, so two presses within the window
     // and the pick radius are the gesture.
     let mut last_press = use_signal(|| None::<(std::time::Instant, f64, f64)>);
+    // The lane whose mic menu is open, by layout-lane index. One at a
+    // time: a second chip click moves the menu rather than stacking.
+    let mut mic_menu = use_signal(|| None::<usize>);
     let ed = editor.read();
     let vp = ed.viewport;
     let lanes = lanes(&ed, ACTIVE_BOOST, ed.lane_floor().max(MIN_LANE));
@@ -936,6 +966,44 @@ pub fn StackView(
                 if matches!(e.trigger_button(), Some(MouseButton::Auxiliary)) {
                     panning.set(Some((c.x, c.y)));
                     return;
+                }
+                // The gutter's mic selector, ahead of every other
+                // gesture: an open menu owns the next press, and a
+                // press on a lane's chip opens its menu instead of
+                // switching lanes.
+                {
+                    let ed = editor.read();
+                    let views = self::lanes(&ed, ACTIVE_BOOST, ed.lane_floor().max(MIN_LANE));
+                    drop(ed);
+                    let ly = c.y - canvas::RULER_H;
+                    if let Some(open) = mic_menu() {
+                        let picked = views.iter().find(|l| l.lane == open).and_then(|l| {
+                            l.members.iter().enumerate().find_map(|(i, (ti, ..))| {
+                                let iy = l.y + MIC_MENU_TOP + i as f64 * MIC_ITEM_H;
+                                (c.x >= 4.0
+                                    && c.x <= 4.0 + MIC_MENU_W
+                                    && ly >= iy
+                                    && ly < iy + MIC_ITEM_H)
+                                    .then_some(*ti)
+                            })
+                        });
+                        mic_menu.set(None);
+                        if let Some(track) = picked {
+                            editor.write().switch_track(track);
+                        }
+                        return;
+                    }
+                    if let Some(l) = views.iter().find(|l| {
+                        l.is_role
+                            && l.members.len() > 1
+                            && c.x >= 4.0
+                            && c.x <= canvas::GUTTER_W
+                            && ly >= l.y + MIC_CHIP_TOP
+                            && ly < l.y + MIC_CHIP_TOP + MIC_ITEM_H
+                    }) {
+                        mic_menu.set(Some(l.lane));
+                        return;
+                    }
                 }
                 // A press near a role lane's hit line picks the hit up
                 // for a slip/stretch instead of switching lanes. Only
@@ -1302,6 +1370,42 @@ pub fn StackView(
                                 opacity: if lane.active { "1" } else { "0.75" },
                                 {lane.name.to_uppercase()}
                             }
+                            // The lane's mic, and the way to change it:
+                            // a chip under the eyebrow, opening a list
+                            // of the lane's members. This replaces the
+                            // old chip row across the top — the choice
+                            // belongs to the lane it changes.
+                            if lane.members.len() > 1 {
+                                rect {
+                                    x: 4, y: "{lane.y + MIC_CHIP_TOP:.1}",
+                                    width: "{canvas::GUTTER_W - 8.0}",
+                                    height: "{MIC_ITEM_H - 2.0}",
+                                    rx: 2,
+                                    fill: theme::SURFACE_BAR,
+                                    stroke: theme::PANEL_BORDER,
+                                    stroke_width: 1,
+                                }
+                                text {
+                                    x: 8, y: "{lane.y + MIC_CHIP_TOP + 10.0:.1}",
+                                    font_size: "8",
+                                    fill: theme::TEXT,
+                                    {
+                                        let name = lane
+                                            .members
+                                            .iter()
+                                            .find(|(_, _, a)| *a)
+                                            .map(|(_, n, _)| n.as_str())
+                                            .unwrap_or_else(|| {
+                                                lane.members
+                                                    .first()
+                                                    .map(|(_, n, _)| n.as_str())
+                                                    .unwrap_or("")
+                                            });
+                                        let fit: String = name.chars().take(6).collect();
+                                        format!("{fit} ▾")
+                                    }
+                                }
+                            }
                         } else {
                             text {
                                 x: 4, y: "{lane.y + 11.0:.1}",
@@ -1338,6 +1442,42 @@ pub fn StackView(
                                     editor.write().toggle_piece_split(row);
                                 },
                                 if lane.split { "L|R" } else { "L+R" }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // The open mic menu, over everything: the lane's members,
+            // the active one marked. Geometry mirrored exactly by the
+            // press handler above.
+            if let Some(open) = mic_menu() {
+                if let Some(lane) = lanes.iter().find(|l| l.lane == open) {
+                    g {
+                        transform: "translate(0, {canvas::RULER_H})",
+                        rect {
+                            x: 4, y: "{lane.y + MIC_MENU_TOP - 2.0:.1}",
+                            width: "{MIC_MENU_W}",
+                            height: "{lane.members.len() as f64 * MIC_ITEM_H + 4.0:.1}",
+                            rx: 3,
+                            fill: theme::PANEL,
+                            stroke: theme::BORDER_STRONG,
+                            stroke_width: 1,
+                        }
+                        for (i, (_, name, active)) in lane.members.iter().enumerate() {
+                            if *active {
+                                rect {
+                                    x: 5, y: "{lane.y + MIC_MENU_TOP + i as f64 * MIC_ITEM_H:.1}",
+                                    width: "{MIC_MENU_W - 2.0}",
+                                    height: "{MIC_ITEM_H}",
+                                    fill: theme::CONTROL_SELECTED,
+                                }
+                            }
+                            text {
+                                x: 12, y: "{lane.y + MIC_MENU_TOP + i as f64 * MIC_ITEM_H + 11.0:.1}",
+                                font_size: "9",
+                                fill: if *active { theme::TEXT_BRIGHT } else { theme::TEXT },
+                                "{name}"
                             }
                         }
                     }

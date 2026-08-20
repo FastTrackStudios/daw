@@ -30,7 +30,20 @@ fn shortcut(i: usize) -> Option<String> {
 /// copies of the predicate would mean a second track silently stealing a
 /// row from the roll.
 pub fn is_shown(ed: &Editor) -> bool {
-    ed.tracks.len() >= 2
+    if ed.tracks.len() < 2 {
+        return false;
+    }
+    // A stacked workspace of role lanes picks its mic *per lane*, in
+    // the lane's own gutter. Thirteen chips named In/Out/Trig across
+    // the top say nothing a lane's selector doesn't say better, and
+    // they cost a row of the roll's scarcest resource.
+    if ed.stacked {
+        let lanes = ed.tracks.layout().lanes();
+        if !lanes.is_empty() && lanes.iter().all(|l| l.role.is_some()) {
+            return false;
+        }
+    }
+    true
 }
 
 #[component]

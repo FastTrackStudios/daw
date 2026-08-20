@@ -338,3 +338,69 @@ async fn a_press_away_from_any_hit_does_not_gesture() -> dioxus_test::Result<()>
     );
     Ok(())
 }
+
+/// A two-mic kick, for the gutter's mic selector.
+fn two_mic_editor() -> Editor {
+    let doc = ExpressionDoc::new(TimeBase::Frames { frame_rate: RATE }, 0.0, RATE * 4.0);
+    let mut ed = Editor::new(doc.clone(), Viewport::new(VP_W, VP_H));
+    ed.set_mode(Mode::UnpitchedAudio);
+    ed.tracks.rename(0, "In");
+    let first = ed.tracks.track(0).unwrap().guid.clone();
+    let second = {
+        let t = expression_editor_core::tracks::Track::in_mode("Out", doc, Mode::UnpitchedAudio);
+        let g = t.guid.clone();
+        ed.tracks.push(t);
+        g
+    };
+    ed.tracks
+        .fold_roles(&[(first, LaneRole::Kick), (second, LaneRole::Kick)]);
+    ed.stacked = true;
+    ed.reset_view();
+    ed
+}
+
+/// The gutter chip and its menu own their presses: opening the list
+/// and picking a member never leaks into the hit-gesture or
+/// lane-switch paths. (The switch itself is a `switch_track` call the
+/// core already tests; the surface's job is routing the press.)
+#[tokio::test]
+async fn the_gutter_chip_picks_the_lanes_mic() -> dioxus_test::Result<()> {
+    let ed = two_mic_editor();
+    assert_eq!(ed.tracks.active(), 0, "opens on In");
+    let views = stack::lanes(&ed, 1.15, 24.0);
+    let lane = views.iter().find(|l| l.is_role).expect("the kick lane");
+    assert_eq!(lane.members.len(), 2);
+    let (chip_x, chip_y) = (10.0, canvas::RULER_H + lane.y + 22.0);
+    // The second member's menu row, in element space.
+    let item_y = canvas::RULER_H + lane.y + 36.0 + 16.0 + 8.0;
+    STAGED.with(|s| *s.borrow_mut() = Some((ed, false)));
+    GOT.with(|g| g.borrow_mut().clear());
+
+    let tester = render(Surface)
+        .with_window_size(
+            (VP_W + canvas::GUTTER_W) as u32,
+            (VP_H + canvas::RULER_H) as u32,
+        )
+        .build();
+    tester.drain();
+    tester.relayout();
+    let origin = tester
+        .query(by_testid("stack"))
+        .immediately()?
+        .document_origin();
+
+    // Open the menu…
+    tester.pointer_down(origin.0 + chip_x, origin.1 + chip_y);
+    tester.drain();
+    tester.pointer_up(origin.0 + chip_x, origin.1 + chip_y);
+    tester.drain();
+    tester.relayout();
+    // …and pick "Out".
+    tester.pointer_down(origin.0 + 20.0, origin.1 + item_y);
+    tester.drain();
+    tester.pointer_up(origin.0 + 20.0, origin.1 + item_y);
+    let _ = tester.pump().await;
+
+    assert!(got().is_empty(), "a menu press is not a hit gesture");
+    Ok(())
+}
