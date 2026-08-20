@@ -3,10 +3,33 @@ name = "fts-sample"
 version.workspace = true
 authors.workspace = true
 license.workspace = true
-edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+edition = "2021"          # kept on 2021 — matches signal-sampler (the engine's home crate); migrate the pair together
 description = "Shared audio sample loading utilities for FTS plugins"
 
 [dependencies]
 symphonium = { workspace = true }
 crossbeam-channel = { workspace = true }
 tracing = { workspace = true }
+thiserror = { workspace = true }
+
+# ── Sample-engine file layer (moved from signal-sampler) ──────────────────────
+arc-swap    = "1.7"
+hound       = "3.5"
+# FLAC decode for .signalpack samples. Primary path is symphonia (faster on
+# 24-bit); claxon is kept as a correctness fallback. See `load_flac_bytes`:
+# symphonia rejects our streams' short final block (STREAMINFO min<max read as
+# variable-blocksize), so we normalize STREAMINFO min:=max in the copy we feed
+# it. claxon decodes the raw bytes regardless and backstops any oddball pack.
+claxon      = "0.4"
+symphonia   = { version = "0.5", default-features = false, features = ["flac"] }
+symphonia-bundle-flac = "0.5"
+symphonia-core = "0.5"
+# Ogg Vorbis proxy packs (kind 6): pure-Rust decode via symphonia (runtime,
+# wasm-clean); encode via vorbis_rs (vendored aoTuV libvorbis — builder-side
+# only, `create_signal_pack_with(PackCodec::OggVorbis)`).
+symphonia-format-ogg  = "0.5"
+symphonia-codec-vorbis = "0.5"
+vorbis_rs   = "0.5"
+memmap2     = { workspace = true }
+flacenc     = "0.5.1"
+rayon       = "1"

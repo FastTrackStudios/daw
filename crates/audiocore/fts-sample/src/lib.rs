@@ -21,6 +21,22 @@
 
 pub mod dialog;
 
+// ── Sample-engine file layer (moved from signal-sampler's `engine/`) ─────────
+//
+// The audio-file half of the sampler engine: RAM budgeting, the decoded-sample
+// cache + .signalpack access, the FLAC seek index, chunked streaming, and the
+// on-disk stream cache. Voice/playback types stay in signal-sampler; these
+// modules are re-exported there as `signal_sampler::engine::{budget, cache,
+// flac_index, stream, stream_cache}`.
+pub mod budget;
+pub mod cache;
+mod error;
+pub mod flac_index;
+pub mod stream;
+pub mod stream_cache;
+
+pub use error::SamplerError;
+
 use std::path::Path;
 
 use symphonium::{ResampleQuality, SymphoniumLoader};
