@@ -551,16 +551,19 @@ impl Runner {
             length_secs: f64,
         }
 
-        let mut members: Vec<Member> = Vec::new();
+        // The kit's member tracks, with their folder chains — cheap
+        // metadata, gathered sequentially.
+        struct Job {
+            guid: String,
+            name: String,
+            folder: Option<String>,
+            role: expression_editor_core::kit::LaneRole,
+            item_guid: String,
+            length_secs: f64,
+            volume: f64,
+        }
+        let mut jobs: Vec<Job> = Vec::new();
         let mut items_seen = 0usize;
-        // The trigger lanes' running sums (mean of the members), built
-        // while the samples are in hand — the host detects on these.
-        // r[impl drums.group.detection-source]
-        let mut sums: std::collections::HashMap<
-            expression_editor_core::kit::LaneRole,
-            (Vec<f64>, usize),
-        > = std::collections::HashMap::new();
-        let mut sample_rate = 0.0f64;
         for track in &tracks {
             if track.is_folder {
                 continue;
@@ -589,15 +592,63 @@ impl Runner {
             let Some((item_guid, length_secs, volume)) = pick else {
                 continue;
             };
-            let Some((samples, rate)) = read_take_mono(&daw, &ctx, &item_guid, length_secs, volume)
-            else {
-                continue;
-            };
+            jobs.push(Job {
+                guid: track.guid.clone(),
+                name: track.name.clone(),
+                folder: chain.first().map(|s| s.to_string()),
+                role,
+                item_guid,
+                length_secs,
+                volume,
+            });
+        }
+
+        // The expensive half — reading each mic's audio and finding its
+        // hits — is per-mic independent, so it runs one thread per mic.
+        // A kit is a dozen tracks; this is the difference between a
+        // multi-second open and about the longest single mic.
+        let analysed: Vec<Option<(Job, Vec<f64>, f64, expression_editor_core::ExpressionDoc)>> =
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = jobs
+                    .into_iter()
+                    .map(|job| {
+                        let daw = daw.clone();
+                        let ctx = ctx.clone();
+                        scope.spawn(move || {
+                            let (samples, rate) = read_take_mono(
+                                &daw,
+                                &ctx,
+                                &job.item_guid,
+                                job.length_secs,
+                                job.volume,
+                            )?;
+                            let mut doc = percussion_doc(&samples, rate);
+                            attach_regions(&daw, &ctx, &mut doc);
+                            Some((job, samples, rate, doc))
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|h| h.join().unwrap_or(None))
+                    .collect()
+            });
+
+        // The trigger lanes' running sums (mean of the members), built
+        // while the samples are in hand — the host detects on these.
+        // r[impl drums.group.detection-source]
+        let mut members: Vec<Member> = Vec::new();
+        let mut sums: std::collections::HashMap<
+            expression_editor_core::kit::LaneRole,
+            (Vec<f64>, usize),
+        > = std::collections::HashMap::new();
+        let mut sample_rate = 0.0f64;
+        for (job, samples, rate, doc) in analysed.into_iter().flatten() {
             if sample_rate <= 0.0 {
                 sample_rate = rate;
             }
-            if role.is_detection_source() {
-                let (sum, count) = sums.entry(role).or_default();
+            if job.role.is_detection_source() {
+                let (sum, count) = sums.entry(job.role).or_default();
                 if sum.len() < samples.len() {
                     sum.resize(samples.len(), 0.0);
                 }
@@ -606,16 +657,14 @@ impl Runner {
                 }
                 *count += 1;
             }
-            let mut doc = percussion_doc(&samples, rate);
-            attach_regions(&daw, &ctx, &mut doc);
             members.push(Member {
-                guid: track.guid.clone(),
-                name: track.name.clone(),
-                folder: chain.first().map(|s| s.to_string()),
-                role,
+                guid: job.guid,
+                name: job.name,
+                folder: job.folder,
+                role: job.role,
                 doc,
-                item: ItemRef::Guid(item_guid),
-                length_secs,
+                item: ItemRef::Guid(job.item_guid),
+                length_secs: job.length_secs,
             });
         }
 

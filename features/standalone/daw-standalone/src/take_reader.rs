@@ -173,12 +173,7 @@ impl TakeReader {
             return;
         }
         for c in 0..ch {
-            let (mut mn, mut mx) = (f32::MAX, f32::MIN);
-            for i in lo..hi {
-                let v = self.source.channel_interp(i, i, 0.0, c);
-                mn = mn.min(v);
-                mx = mx.max(v);
-            }
+            let (mn, mx) = self.source.min_max_block(lo, hi, c);
             out[c * 2] = mn.min(0.0) as f64;
             out[c * 2 + 1] = mx.max(0.0) as f64;
         }

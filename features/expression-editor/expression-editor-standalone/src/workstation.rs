@@ -171,7 +171,6 @@ struct MarkerFlag {
 struct ProjectShape {
     tracks: Vec<Track>,
     items: Vec<Item>,
-    previews: HashMap<String, ItemPreview>,
     fx: HashMap<String, Vec<Fx>>,
     sections: Vec<Section>,
     markers: Vec<MarkerFlag>,
@@ -180,6 +179,11 @@ struct ProjectShape {
     length_secs: f64,
 }
 
+/// The fast pass: everything the window needs to *stand* — tracks,
+/// items (as colored blocks), sections, tempo. No waveforms: those are
+/// the slow 90% and they stream in afterwards, item by item, through
+/// [`stream_previews`]. A window that shows the arrangement in under a
+/// second and fills waveforms in behind it beats a spinner every time.
 async fn fetch_project() -> Option<ProjectShape> {
     let daw = daw::get()?;
     let project = daw.current_project().await.ok()?;
@@ -187,19 +191,8 @@ async fn fetch_project() -> Option<ProjectShape> {
     let items = project.items().all().await.ok()?;
 
     let mut length = 0.0f64;
-    let mut previews = HashMap::new();
     for item in &items {
         length = length.max(item.position.as_seconds() + item.length.as_seconds());
-        // ~86 peaks a second at 44.1k — the same block the live
-        // arrangement fetches; the editor below has the close view.
-        if let Ok(Some(handle)) = project.items().by_guid(&item.guid).await
-            && let Ok(data) = handle.active_take().peaks(512).await
-        {
-            let amps = waveform_from_peaks(&data);
-            if !amps.is_empty() {
-                previews.insert(item.guid.clone(), ItemPreview::Waveform(amps));
-            }
-        }
     }
 
     let mut fx = HashMap::new();
@@ -249,13 +242,42 @@ async fn fetch_project() -> Option<ProjectShape> {
     Some(ProjectShape {
         tracks,
         items,
-        previews,
         fx,
         sections,
         markers,
         bpm,
         length_secs: length.max(60.0),
     })
+}
+
+/// The slow pass: waveform previews, streamed into `previews` as each
+/// item's peaks arrive so the arrangement fills in live. Coarse blocks
+/// (2048 ≈ 23 px/s of detail at 48 k) — the arrangement is an overview;
+/// the editor below holds the close view. `pending` counts down to zero
+/// for the loading readout.
+async fn stream_previews(
+    items: Vec<Item>,
+    mut previews: Signal<HashMap<String, ItemPreview>>,
+    mut pending: Signal<usize>,
+) {
+    let Some(daw) = daw::get() else { return };
+    let Ok(project) = daw.current_project().await else {
+        return;
+    };
+    pending.set(items.len());
+    for item in items {
+        if let Ok(Some(handle)) = project.items().by_guid(&item.guid).await
+            && let Ok(data) = handle.active_take().peaks(2048).await
+        {
+            let amps = waveform_from_peaks(&data);
+            if !amps.is_empty() {
+                previews
+                    .write()
+                    .insert(item.guid.clone(), ItemPreview::Waveform(amps));
+            }
+        }
+        pending.set(pending().saturating_sub(1));
+    }
 }
 
 /// The workstation. Takes no props — see [`stage_workstation`].
@@ -302,13 +324,19 @@ pub fn WorkstationApp() -> Element {
     let store = use_track_store();
     use_daw_tracks(store);
 
-    // The project, fetched once through the facade. The drum host
+    // The project, in two passes: the fast shape (tracks, items as
+    // blocks, sections) lands in well under a second and the window
+    // stands; waveforms then stream in item by item. The drum host
     // already refreshes the editor's own lanes after every write.
     let mut shape = use_signal(ProjectShape::default);
+    let item_previews_sig = use_signal(HashMap::<String, ItemPreview>::new);
+    let previews_pending = use_signal(|| 0usize);
     use_effect(move || {
         spawn(async move {
             if let Some(s) = fetch_project().await {
+                let items = s.items.clone();
                 shape.set(s);
+                stream_previews(items, item_previews_sig, previews_pending).await;
             }
         });
     });
@@ -379,7 +407,7 @@ pub fn WorkstationApp() -> Element {
     let s = shape.read();
     let tracks = s.tracks.clone();
     let items = s.items.clone();
-    let item_previews = s.previews.clone();
+    let item_previews = item_previews_sig();
     let fx = s.fx.clone();
     let sections = s.sections.clone();
     let marker_flags = s.markers.clone();
@@ -444,6 +472,12 @@ pub fn WorkstationApp() -> Element {
                             align-items: center; padding-left: 8px; \
                             background: {bar_bg}; border-bottom: 1px solid {rule};",
                     NativeTransportBar { playing, bpm, position: playhead, on_play, on_stop }
+                    if previews_pending() > 0 {
+                        span {
+                            style: "margin-left: 12px; font-size: 10px; color: #7b7b7b;",
+                            "waveforms… {previews_pending()} left"
+                        }
+                    }
                 }
                 // TCP | arrangement, one shared vertical scroll.
                 div {
@@ -471,9 +505,13 @@ pub fn WorkstationApp() -> Element {
                             }
                         }
                         if tracks.is_empty() {
+                            // The fast shape lands in well under a
+                            // second; this is a state, not a splash.
                             div {
-                                style: "padding: 16px; color: #7b7b7b; font-size: 12px;",
-                                "Loading project…"
+                                style: "padding: 16px; color: #a0a0a0; font-size: 12px;",
+                                "data-testid": "workstation-loading",
+                                "Opening the project — tracks and items land first, \
+                                 waveforms stream in behind them…"
                             }
                         } else {
                             // The lanes' own horizontal scroll — the
