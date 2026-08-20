@@ -1035,23 +1035,43 @@ pub fn StackView(
                 }
             },
 
+            // The stack sits on the roll's own ink — the darkest step,
+            // so the lanes read as material on a desk rather than
+            // panels on a panel.
             rect {
                 x: 0, y: 0,
                 width: "{vp.w + canvas::GUTTER_W}",
                 height: "{vp.h + canvas::RULER_H}",
-                fill: theme::BG,
+                fill: theme::GUTTER_BG,
             }
 
             // One ruler for the whole stack — the shared axis is the
             // reason the view exists, so it is drawn once rather than
-            // per lane.
+            // per lane. Bar starts get their number; beats get a short
+            // tick, exactly like the roll's ruler.
+            rect {
+                x: 0, y: 0,
+                width: "{vp.w + canvas::GUTTER_W}",
+                height: "{canvas::RULER_H}",
+                fill: theme::SURFACE_BAR,
+            }
             g {
                 transform: "translate({canvas::GUTTER_W}, 0)",
                 for t in ticks.iter() {
                     line {
                         x1: "{t.x:.1}", x2: "{t.x:.1}",
-                        y1: "{canvas::RULER_H - 6.0}", y2: "{canvas::RULER_H}",
-                        stroke: theme::TEXT_DIM, stroke_width: 1,
+                        y1: if t.bar { "{canvas::RULER_H - 10.0}" } else { "{canvas::RULER_H - 5.0}" },
+                        y2: "{canvas::RULER_H}",
+                        stroke: if t.bar { theme::TEXT_DIM } else { theme::TEXT_FAINT },
+                        stroke_width: 1,
+                    }
+                    if let Some(label) = t.label.as_ref() {
+                        text {
+                            x: "{t.x + 3.0:.1}", y: "{canvas::RULER_H - 4.0}",
+                            font_size: "8",
+                            fill: theme::TEXT_DIM,
+                            "{label}"
+                        }
                     }
                 }
             }
@@ -1067,23 +1087,47 @@ pub fn StackView(
                             x: 0, y: "{lane.y:.1}",
                             width: "{vp.w + canvas::GUTTER_W}",
                             height: "{lane.h:.1}",
-                            fill: if lane.active { theme::ROW_WHITE } else { theme::BG },
+                            fill: if lane.active { theme::ROW_WHITE } else { theme::ROW_BLACK },
                         }
                         line {
                             x1: 0, x2: "{vp.w + canvas::GUTTER_W}",
                             y1: "{lane.y:.1}", y2: "{lane.y:.1}",
                             stroke: theme::OCTAVE_LINE, stroke_width: 1,
                         }
+                        // The armed-lane rail: the one bright fixture,
+                        // down the gutter edge of the lane you are
+                        // editing — a console's channel-select, not a
+                        // second highlight fighting the hits.
+                        if lane.active {
+                            rect {
+                                x: 0, y: "{lane.y:.1}",
+                                width: 3,
+                                height: "{lane.h:.1}",
+                                fill: theme::ACCENT,
+                            }
+                        }
                         g {
                             transform: "translate({canvas::GUTTER_W}, 0)",
+                            // The beat grid, under the audio: reading a
+                            // hit's distance from the beat is the whole
+                            // job, so the beat must be drawn where the
+                            // hits are, not only in the ruler.
+                            for t in ticks.iter() {
+                                line {
+                                    x1: "{t.x:.1}", x2: "{t.x:.1}",
+                                    y1: "{lane.y:.1}", y2: "{lane.y + lane.h:.1}",
+                                    stroke: if t.bar { theme::GRID_BEAT } else { theme::GRID_SUB },
+                                    stroke_width: 1,
+                                }
+                            }
                             // A role lane's audio, behind everything
                             // else — the hits draw over it.
                             // r[impl drums.lanes.summed]
                             if let Some(w) = lane.waveform.as_ref() {
                                 polygon {
                                     points: "{w}",
-                                    fill: theme::REFERENCE,
-                                    opacity: "0.3",
+                                    fill: theme::PEAKS,
+                                    opacity: if lane.active { "0.55" } else { "0.35" },
                                 }
                             }
                             // r[impl drums.lanes.toms-split]
@@ -1091,8 +1135,8 @@ pub fn StackView(
                                 if let Some(p) = s.points.as_ref() {
                                     polygon {
                                         points: "{p}",
-                                        fill: theme::REFERENCE,
-                                        opacity: if s.faded { "0.15" } else { "0.3" },
+                                        fill: theme::PEAKS,
+                                        opacity: if s.faded { "0.12" } else { "0.35" },
                                     }
                                 }
                             }
@@ -1169,19 +1213,34 @@ pub fn StackView(
                             }
                         }
                         // The name last, so it sits over the material
-                        // rather than under it.
-                        text {
-                            x: 4, y: "{lane.y + 11.0:.1}",
-                            font_size: "9",
-                            fill: if lane.active { theme::TEXT } else { theme::TEXT_DIM },
-                            "{lane.name}"
+                        // rather than under it. A role lane's is an
+                        // eyebrow — small caps, spaced, quiet — because
+                        // the label is furniture and the audio is the
+                        // content.
+                        if lane.is_role {
+                            text {
+                                x: 7, y: "{lane.y + 12.0:.1}",
+                                font_size: "8",
+                                letter_spacing: "2",
+                                fill: if lane.active { theme::TEXT_BRIGHT } else { theme::TEXT_FAINT },
+                                {lane.name.to_uppercase()}
+                            }
+                        } else {
+                            text {
+                                x: 4, y: "{lane.y + 11.0:.1}",
+                                font_size: "9",
+                                fill: if lane.active { theme::TEXT } else { theme::TEXT_DIM },
+                                "{lane.name}"
+                            }
                         }
                         // Each tom's name at its own sub-row, indented
                         // under the lane's role label.
                         // r[impl drums.lanes.toms-split]
                         for s in lane.sub_lanes.iter() {
                             text {
-                                x: 12, y: "{s.label_y:.1}",
+                                // Clear of the role eyebrow, which owns
+                                // the first ~60px of the lane's top row.
+                                x: 64, y: "{s.label_y:.1}",
                                 font_size: "8",
                                 fill: theme::TEXT_DIM,
                                 opacity: if s.faded { "0.5" } else { "1" },
