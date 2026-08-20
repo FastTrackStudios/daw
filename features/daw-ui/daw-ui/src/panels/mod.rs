@@ -1,63 +1,32 @@
-//! # These panels are not the app's mixer, and must not be deleted
+//! # The WALTER panels are gone — the native components are the UI
 //!
-//! [`McpStrip`][mcp_strip::McpStrip] executes a **WALTER program**: the
-//! theme's own layout, evaluated per frame at the strip's real pixel box by
-//! a 938-line interpreter with preprocessor, macro expansion, prefix
-//! arithmetic and layout scoping, corpus-tested against four third-party
-//! themes. It does not imitate a REAPER layout — it runs one, and it blits
-//! that theme's art because rendering somebody else's theme is precisely
-//! what it is for.
+//! Deleted 2026-08-19, at Cody's direction: `arrange_view.rs`,
+//! `track_control_panel.rs`, `mixer_control_panel.rs`, `workspace.rs`
+//! (DawWorkspace), `mcp_strip.rs` (the WALTER-executing strip),
+//! `envcp_row.rs`, `transport_bar.rs`, and the `model.rs` view-model
+//! (`TrackView`/`ClipView`/`MarkerView`/…).
 //!
-//! The app's own mixer is [`crate::components::mixer::MixerPanel`], which
-//! draws the vector controls and blits nothing. #147 replaced the bitmap
-//! art path *there*, behind that seam, and deliberately left this one
-//! standing, because:
+//! Those panels rendered a *REAPER theme* — WALTER layout, PNG atlas —
+//! and they were this crate's first implementation. The one UI is now
+//! the **native components family** (`crate::components`, PR #279): the
+//! traced vector TCP, arrangement, mixer and controls that the shipped
+//! REAPER theme's art is *exported from* (`daw-theme-art`). Building a
+//! window on the WALTER panels again is the mistake this deletion
+//! exists to prevent — outside a theme editor they render placeholder
+//! art, because executing somebody's theme is a different job from
+//! being the product's UI.
 //!
-//! - the theme editor's live preview depends on it, rebuilding a theme from
-//!   palette and layout **text** with no filesystem, on the same frame as a
-//!   colour edit;
-//! - it is the verifier any future layout generator would need — the only
-//!   way to check emitted output against real rendering;
-//! - it is how this tree reads other people's themes at all, and that
-//!   corpus is the only evidence available about what real WALTER programs
-//!   look like in the wild.
+//! If you are building a theme *editor* and need to render a
+//! `.ReaperTheme`'s own layout faithfully, that is a real use — the
+//! WALTER interpreter still lives in `crate::theming::walter` (parser
+//! and layout evaluation), and the deleted rendering components are in
+//! git history at this file's deletion commit. Revive them under the
+//! themer, not here.
 //!
-//! An earlier version of the wayfinding map said these would be deleted.
-//! #130 corrected it. Building against that note would remove a shipping
-//! feature.
+//! What remains is [`native`]: vector controls that belong with the
+//! components family and predate its module ([`NativeTransportBar`] is
+//! mounted by `components::main_window`).
 
-//! Top-level DAW panels — reusable, Reaper-style composition components.
-//!
-//! Built from the crate's widgets and driven by a shared [`TrackView`] model
-//! (no host/`daw-proto` coupling, so any project can mount them):
-//!
-//! - [`TrackControlPanel`] — the left control sidebar (per-track rows).
-//! - [`MixerControlPanel`] — the bottom-third mixer console.
-//! - [`ArrangeView`] — TCP sidebar + scrollable timeline lanes.
-//! - [`DawWorkspace`] — arrange-over-mixer composition of all three.
-//!
-//! Those render a *REAPER theme*: WALTER layout, PNG atlas. The [`native`]
-//! module draws the same controls from the vector components instead — no
-//! WALTER, no bitmaps — starting with [`NativeTransportBar`].
-
-pub mod arrange_view;
-pub mod envcp_row;
-pub mod mcp_strip;
-pub mod mixer_control_panel;
 pub mod native;
-pub mod model;
-pub mod track_control_panel;
-pub mod transport_bar;
-pub mod workspace;
 
-pub use arrange_view::{ArrangeEdit, ArrangeView};
-pub use envcp_row::EnvcpRow;
-pub use mcp_strip::McpStrip;
-pub use mixer_control_panel::MixerControlPanel;
 pub use native::NativeTransportBar;
-pub use model::{
-    ClipView, EnvelopeView, LaneDisplay, MarkerView, RegionView, TempoMarkerView, TrackView,
-};
-pub use track_control_panel::TrackControlPanel;
-pub use transport_bar::TransportBar;
-pub use workspace::DawWorkspace;

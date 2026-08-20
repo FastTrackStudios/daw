@@ -30,12 +30,13 @@ pub mod prelude;
 pub mod signals;
 
 // ── Reusable, vector-themeable component library (merged from the former
-// `audio-controls` crate). Low-level widgets + the token-based theming model +
-// the reusable top-level panels (TrackControlPanel / MixerControlPanel /
-// ArrangeView / DawWorkspace). Driven by props/Signals + `Theme` — no DAW
-// runtime dependency, unlike the `components::*` panels above. ──
+// `audio-controls` crate). Low-level widgets + the token-based theming model.
+// The WALTER-driven top-level panels that used to live beside them were
+// deleted 2026-08-19 — see `panels/mod.rs` for the tombstone; the native
+// `components::*` family above is the one UI. ──
 pub mod core;
-/// Reusable top-level panels (require the `web`/dioxus feature).
+/// The native transport bar (require the `web`/dioxus feature). The rest
+/// of this module is a tombstone — see its docs.
 #[cfg(feature = "web")]
 pub mod panels;
 pub mod theming;
