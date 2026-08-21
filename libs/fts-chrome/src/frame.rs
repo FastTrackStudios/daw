@@ -294,6 +294,13 @@ fn StatusView(item: StatusItem) -> Element {
                 }
             }
         }
+        StatusItem::Tagged { testid, item } => rsx! {
+            span {
+                "data-testid": "{testid}",
+                style: "display: flex; align-items: center;",
+                StatusView { item: *item }
+            }
+        },
     }
 }
 
@@ -315,9 +322,11 @@ pub fn PanelRail() -> Element {
                 {
                     let open = chrome.panel_open(&panel.id);
                     let id = panel.id.clone();
+                    let testid = panel.testid.clone().unwrap_or_default();
                     rsx! {
                         button {
                             key: "{panel.id}",
+                            "data-testid": "{testid}",
                             style: format!(
                                 "appearance: none; display: flex; align-items: center; justify-content: center; \
                                  width: {HIT}px; height: {HIT}px; border: none; border-radius: 9px; \

@@ -141,6 +141,9 @@ pub enum StatusItem {
     Dot { on: bool, color: String },
     /// A level meter, 0..1.
     Meter { level: f32, color: String, width_px: u32 },
+    /// Any other item, wrapped with a `data-testid` so an e2e suite can find
+    /// it in the bar. Purely additive — renders exactly like the wrapped item.
+    Tagged { testid: String, item: Box<StatusItem> },
 }
 
 impl StatusItem {
@@ -155,6 +158,10 @@ impl StatusItem {
     }
     pub fn meter(level: f32, color: impl Into<String>) -> Self {
         Self::Meter { level, color: color.into(), width_px: 72 }
+    }
+    /// Wrap an item with a `data-testid` (for e2e suites).
+    pub fn tagged(testid: impl Into<String>, item: StatusItem) -> Self {
+        Self::Tagged { testid: testid.into(), item: Box::new(item) }
     }
 }
 
@@ -197,15 +204,23 @@ pub struct PanelSpec {
     pub icon: Icon,
     /// Preferred width when open.
     pub width_px: u32,
+    /// Optional `data-testid` for the rail's toggle button (e2e suites).
+    pub testid: Option<String>,
 }
 
 impl PanelSpec {
     pub fn new(id: impl Into<String>, title: impl Into<String>, icon: Icon) -> Self {
-        Self { id: id.into(), title: title.into(), icon, width_px: 320 }
+        Self { id: id.into(), title: title.into(), icon, width_px: 320, testid: None }
     }
 
     pub fn width(mut self, px: u32) -> Self {
         self.width_px = px;
+        self
+    }
+
+    /// Tag the rail's toggle button with a `data-testid`.
+    pub fn testid(mut self, id: impl Into<String>) -> Self {
+        self.testid = Some(id.into());
         self
     }
 }
