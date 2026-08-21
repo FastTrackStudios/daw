@@ -140,11 +140,99 @@ pub fn wake_value() -> u32 {
 /// Returns how many samples were filled. Safe to call from a worker only.
 pub fn drain() -> usize {
     let mut n = 0;
+    // Zone opens FIRST: a note is waiting on one of these (it is silent
+    // until its zone exists), whereas a chunk fill is a voice already
+    // sounding that has audio buffered ahead of it.
+    while let Some(job) = dequeue_open() {
+        // Decodes the head and inserts into the cache the AUDIO THREAD
+        // reads — same map, shared heap, no handoff. An error means the
+        // pack bytes are not there yet; the next press re-queues it.
+        if job.cache.get(&job.path).is_ok() {
+            OPENED.fetch_add(1, Ordering::Relaxed);
+        }
+        n += 1;
+    }
     while let Some(sample) = dequeue() {
         sample.fill_wanted_off_thread();
         n += 1;
     }
     n
+}
+
+// ── Zone-open jobs ─────────────────────────────────────────────────────
+//
+// The other half of the work, and the reason this queue exists at all now:
+// a note whose zone was never OPENED needs `cache.get(path)` — decode the
+// head, insert it into the cache map. On the audio thread that measured
+// ~26 ms per zone. `SampleCache` is `Send + Sync` and lives in this shared
+// heap, so a streamer worker can do it and the audio thread SEES THE
+// RESULT with no copy and no message: same map, same memory.
+//
+// (This is what replaces the earlier decoder-worker protocol, where a
+// second wasm instance with its OWN heap decoded and shipped PCM back
+// through a MessagePort — correct, but every sample crossed as a copy.)
+
+/// One "open this zone" job: which cache, which sample.
+struct OpenJob {
+    cache: super::cache::SampleCache,
+    path: std::path::PathBuf,
+}
+
+static OPEN_SLOTS: [AtomicUsize; RING] = [const { AtomicUsize::new(0) }; RING];
+static OPEN_HEAD: AtomicUsize = AtomicUsize::new(0);
+static OPEN_TAIL: AtomicUsize = AtomicUsize::new(0);
+static OPENED: AtomicUsize = AtomicUsize::new(0);
+
+/// Queue a zone to be opened off-thread. **Audio-thread safe**: one
+/// allocation for the job box and a CAS. Duplicates are harmless — the
+/// second open finds it cached and returns.
+pub fn enqueue_open(cache: &super::cache::SampleCache, path: &std::path::Path) {
+    let head = OPEN_HEAD.load(Ordering::Relaxed);
+    if head.wrapping_sub(OPEN_TAIL.load(Ordering::Acquire)) >= RING {
+        DROPPED.fetch_add(1, Ordering::Relaxed);
+        return;
+    }
+    let job = Box::into_raw(Box::new(OpenJob {
+        cache: cache.clone_handle(),
+        path: path.to_path_buf(),
+    })) as usize;
+    let idx = OPEN_HEAD.fetch_add(1, Ordering::AcqRel) & MASK;
+    let prev = OPEN_SLOTS[idx].swap(job, Ordering::Release);
+    if prev != 0 {
+        unsafe { drop(Box::from_raw(prev as *mut OpenJob)) };
+        DROPPED.fetch_add(1, Ordering::Relaxed);
+    }
+    wake_one();
+}
+
+fn dequeue_open() -> Option<Box<OpenJob>> {
+    loop {
+        let tail = OPEN_TAIL.load(Ordering::Relaxed);
+        if tail == OPEN_HEAD.load(Ordering::Acquire) {
+            return None;
+        }
+        if OPEN_TAIL
+            .compare_exchange_weak(
+                tail,
+                tail.wrapping_add(1),
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            )
+            .is_err()
+        {
+            continue;
+        }
+        let ptr = OPEN_SLOTS[tail & MASK].swap(0, Ordering::AcqRel);
+        if ptr == 0 {
+            continue;
+        }
+        return Some(unsafe { Box::from_raw(ptr as *mut OpenJob) });
+    }
+}
+
+/// Zones opened off-thread since boot.
+pub fn opened() -> usize {
+    OPENED.load(Ordering::Relaxed)
 }
 
 /// Samples dropped because the ring was full — decoders falling behind.
