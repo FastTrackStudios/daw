@@ -63,6 +63,11 @@ pub mod cache;
 pub mod flac_index;
 #[cfg(feature = "engine-core")]
 pub mod stream;
+/// The browser's streamer queue — the wasm stand-in for the native streamer
+/// thread pool (see the module docs; W13 of browser-keys-rig.md). Rides the
+/// same feature gate as `stream`, whose types it queues.
+#[cfg(all(feature = "engine-core", target_arch = "wasm32"))]
+pub mod stream_wasm;
 #[cfg(feature = "engine-native")]
 pub mod stream_cache;
 

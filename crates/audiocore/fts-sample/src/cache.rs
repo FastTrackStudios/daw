@@ -998,6 +998,48 @@ impl SampleCache {
         self.inner.loaded_snapshot.load().get(path).map(Arc::clone)
     }
 
+    /// Whether this cache can resolve `path` at all — a pack entry, a
+    /// prepared-cache entry, or an already-loaded sample. The out-of-process
+    /// decoder (browser decoder worker) uses this to route a decoded sample
+    /// to the engine whose pack actually owns it.
+    pub fn knows_path(&self, path: &Path) -> bool {
+        if self.inner.loaded_snapshot.load().contains_key(path) {
+            return true;
+        }
+        if let Some(pack) = self.inner.pcm_pack.as_ref() {
+            if pack.entry_for_path(path).is_some() {
+                return true;
+            }
+        }
+        self.inner.prepared.contains_key(path)
+    }
+
+    /// Insert PCM that was decoded SOMEWHERE ELSE (another thread, another
+    /// wasm instance) as if `get` had decoded it here: charges the
+    /// process-wide budget via the one `insert_loaded` door and publishes a
+    /// fresh audio-thread snapshot. Replacing an existing entry releases the
+    /// old bytes first.
+    pub fn insert_decoded(&self, path: PathBuf, data: Arc<SampleData>) {
+        self.insert_loaded(path, data, true);
+    }
+
+    /// Remove one decoded sample, releasing its budget charge and
+    /// publishing a fresh snapshot. Voices already holding the `Arc` keep
+    /// playing; the bytes free when they finish. The decoder worker uses
+    /// this to stay memory-flat: decode, hand the PCM out, take it back out
+    /// of its own cache.
+    pub fn take_loaded(&self, path: &Path) -> Option<Arc<SampleData>> {
+        let removed = {
+            let mut loaded = self.inner.loaded.write().unwrap_or_else(|e| e.into_inner());
+            loaded.remove(path)
+        };
+        if let Some(data) = removed.as_ref() {
+            super::budget::release(data.decoded_bytes());
+            self.publish_loaded_snapshot();
+        }
+        removed
+    }
+
     /// Decode one sample (if not already cached) and insert it into the
     /// shared map. Safe to call concurrently from any thread; the audio
     /// thread sees the new entry as soon as the write lock is released.

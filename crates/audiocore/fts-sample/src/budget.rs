@@ -45,9 +45,30 @@ const MAX_BUDGET_MB: u64 = 4096;
 #[cfg(any(target_os = "ios", target_os = "android"))]
 const MOBILE_BUDGET_MB: u64 = 384;
 
+/// The resolved ceiling, so hosts without an environment can set one.
+static LIMIT: OnceLock<u64> = OnceLock::new();
+
+/// Set the ceiling explicitly, in MB (0 = unlimited). The browser has no
+/// environment to read `FTS_PRELOAD_BUDGET_MB` from, so the page passes its
+/// choice in at worklet construction.
+///
+/// Takes effect only BEFORE the limit is first read — the ceiling is
+/// resolved once and cached, because a budget that moved under a running
+/// engine would make its charge/release accounting meaningless. Returns
+/// whether this call is the one that set it.
+///
+/// On wasm the practical maximum is bounded by the 4 GB linear-memory
+/// address space, shared with the app itself; pack BYTES live on the JS heap
+/// (attach-by-handle), so decoded PCM is the main occupant. Overshooting
+/// does not degrade — an allocation failure TRAPS the instance with no panic
+/// hook — so leave real headroom.
+pub fn set_limit_mb(mb: u64) -> bool {
+    let limit = if mb == 0 { u64::MAX } else { mb * 1024 * 1024 };
+    LIMIT.set(limit).is_ok()
+}
+
 /// The ceiling in bytes; `u64::MAX` when explicitly unlimited.
 pub fn limit_bytes() -> u64 {
-    static LIMIT: OnceLock<u64> = OnceLock::new();
     *LIMIT.get_or_init(|| {
         if let Ok(mb) = std::env::var("FTS_PRELOAD_BUDGET_MB") {
             if let Ok(mb) = mb.trim().parse::<u64>() {

@@ -330,10 +330,34 @@ impl StreamedSample {
         if !self.queued.swap(true, Ordering::AcqRel) {
             streamer().enqueue(Arc::downgrade(self));
         }
-        // No streamer thread without the native half: decode the wanted
-        // chunk synchronously, right here. Correctness first — on wasm the
-        // caller that cares warms/pins ahead of the audio callback.
-        #[cfg(not(feature = "engine-native"))]
+        // Without the native half (wasm) there is no streamer THREAD — and
+        // in an AudioWorklet the caller of this is the audio thread itself,
+        // where a synchronous ogg decode is a dropout: it stalls `process()`
+        // for tens of ms and silences every voice currently sounding. That
+        // was the field bug ("goes silent every time I play a new note").
+        //
+        // With shared memory + atomics (W13) there ARE workers, sharing this
+        // very heap, so the request behaves exactly like the native one:
+        // hand the sample to the streamer queue and return. A CAS and a
+        // notify — no allocation, no blocking, no decode.
+        #[cfg(all(
+            not(feature = "engine-native"),
+            target_arch = "wasm32",
+            target_feature = "atomics"
+        ))]
+        crate::stream_wasm::enqueue(self);
+        // No workers (single-threaded wasm build): the wanted set is
+        // recorded and nothing decodes here. A voice that outruns its head
+        // reads silence for those frames rather than taking the whole
+        // render down with it; the host fills it off-thread by other means
+        // (the W12 decoder-worker protocol).
+    }
+
+    /// Decode everything currently wanted ON THIS THREAD. The wasm hosts'
+    /// off-thread seam: safe from a Worker (never from the audio thread).
+    /// Native builds have the streamer pool and never need it.
+    #[cfg(not(feature = "engine-native"))]
+    pub fn fill_wanted_off_thread(self: &Arc<Self>) {
         self.fill();
     }
 
