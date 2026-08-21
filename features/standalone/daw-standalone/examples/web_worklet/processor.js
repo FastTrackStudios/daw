@@ -22,6 +22,10 @@
 //   reload_lanes { replyTo? }                        → true/error string
 //   midi        { bytes: [status, d1, d2] }          raw 3-byte MIDI
 //   all_notes_off | panic
+//   track_peaks { replyTo }                          → [peak, …] (post-fader
+//               per project track; index 0 is the rig folder = master)
+//   set_track_volume { index, volume }               linear, 1.0 = unity
+//   set_track_mute   { index, muted }
 //
 // Messages with a `replyTo` field get a reply `{ replyTo, value }`
 // so the main side can `await rpc(...)`.
@@ -101,6 +105,12 @@ class DawStandaloneProcessor extends AudioWorkletProcessor {
       case 'midi': {
         const [status, d1, d2] = msg.bytes;
         this.renderer?.midi(status, d1 ?? 0, d2 ?? 0);
+        break;
+      }
+      case 'set_track_volume': this.renderer?.setTrackVolume(msg.index, msg.volume); break;
+      case 'set_track_mute': this.renderer?.setTrackMute(msg.index, msg.muted); break;
+      case 'track_peaks': {
+        this.reply(msg, Array.from(this.renderer?.trackPeaks?.() ?? []));
         break;
       }
       case 'all_notes_off': this.renderer?.allNotesOff(); break;
