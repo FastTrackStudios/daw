@@ -75,7 +75,12 @@ fn machine_ram_mb() -> Option<u64> {
         let kb: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
         Some(kb / 1024)
     }
-    #[cfg(not(target_os = "linux"))]
+    // No RAM to read on wasm — callers fall back to the fixed default budget.
+    #[cfg(target_arch = "wasm32")]
+    {
+        None
+    }
+    #[cfg(not(any(target_os = "linux", target_arch = "wasm32")))]
     {
         let out = std::process::Command::new("sysctl").args(["-n", "hw.memsize"]).output().ok()?;
         let bytes: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
@@ -205,13 +210,19 @@ impl Drop for Charge {
     }
 }
 
+/// Serialises tests that assert on the process-wide counter. Every test in
+/// this binary that charges or releases (here and in `cache::tests`'
+/// eviction tests) must hold this, or their deltas race each other.
+#[cfg(test)]
+pub(crate) static TEST_COUNTER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn charge_and_release_move_the_total_by_what_they_say() {
-        // Deltas, not absolutes: other tests in this binary share the counter.
+        let _serial = TEST_COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let before = used_bytes();
         charge(4096);
         assert!(used_bytes() >= before + 4096);
@@ -221,7 +232,7 @@ mod tests {
 
     #[test]
     fn charge_guard_balances_across_clone_and_drop() {
-        // Deltas, not absolutes: other tests in this binary share the counter.
+        let _serial = TEST_COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let before = used_bytes();
         let g = Charge::now(2048);
         let g2 = g.clone();

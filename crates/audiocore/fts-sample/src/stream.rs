@@ -17,10 +17,13 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex};
+#[cfg(feature = "engine-native")]
+use std::sync::{Condvar, OnceLock, Weak};
 
 use arc_swap::ArcSwap;
 
+use crate::cache::PackBytes;
 use crate::flac_index::FlacIndex;
 
 /// Sample frames per chunk — a quarter second at 48 kHz, 48 KB of stereo
@@ -44,8 +47,8 @@ const WANTED_WORDS: usize = 8;
 
 /// A sample that lives compressed in a pack and is decoded a chunk at a time.
 pub struct StreamedSample {
-    /// The pack mapping and this entry's byte range within it.
-    map: Arc<memmap2::Mmap>,
+    /// The pack bytes and this entry's byte range within them.
+    map: PackBytes,
     offset: usize,
     bytes: usize,
     index: FlacIndex,
@@ -120,13 +123,14 @@ impl StreamedSample {
     /// Returns `None` when the entry can't be indexed (not FLAC, or a
     /// malformed header) — the caller decodes it whole instead.
     pub fn open(
-        map: Arc<memmap2::Mmap>,
+        map: impl Into<PackBytes>,
         offset: usize,
         bytes: usize,
         channels: u16,
         sample_rate: u32,
         num_frames: usize,
     ) -> Option<Arc<Self>> {
+        let map = map.into();
         let stream = map.get(offset..offset + bytes)?;
         let index = FlacIndex::build(stream)?;
         let head = decode_chunk(stream, &index, 0, HEAD_FRAMES, channels)?;
@@ -147,6 +151,7 @@ impl StreamedSample {
             last_touch: AtomicU64::new(sweep_tick()),
             pins: Mutex::new(HashMap::new()),
         });
+        #[cfg(feature = "engine-native")]
         streamer().register(Arc::downgrade(&sample));
         Some(sample)
     }
@@ -184,12 +189,14 @@ impl StreamedSample {
     }
 
     /// Whether any voice is holding a region of this sample.
+    #[cfg(feature = "engine-native")]
     fn is_pinned(&self) -> bool {
         self.pins.lock().map(|p| !p.is_empty()).unwrap_or(true)
     }
 
     /// Drop every decoded chunk except the pinned ones, keeping the head.
     /// Called by the sweep when no voice has touched this sample recently.
+    #[cfg(feature = "engine-native")]
     fn shed_chunks(&self) {
         if self.chunks.load().is_empty() {
             return;
@@ -312,9 +319,15 @@ impl StreamedSample {
         }
         self.last_touch.store(sweep_tick(), Ordering::Relaxed);
         self.wanted[word].fetch_or(1 << bit, Ordering::Release);
+        #[cfg(feature = "engine-native")]
         if !self.queued.swap(true, Ordering::AcqRel) {
             streamer().enqueue(Arc::downgrade(self));
         }
+        // No streamer thread without the native half: decode the wanted
+        // chunk synchronously, right here. Correctness first — on wasm the
+        // caller that cares warms/pins ahead of the audio callback.
+        #[cfg(not(feature = "engine-native"))]
+        self.fill();
     }
 
     /// Take the wanted set, clearing it.
@@ -332,6 +345,7 @@ impl StreamedSample {
     }
 
     /// Anything still asked for after a fill?
+    #[cfg(feature = "engine-native")]
     fn has_wanted(&self) -> bool {
         self.wanted.iter().any(|w| w.load(Ordering::Acquire) != 0)
     }
@@ -389,6 +403,7 @@ impl StreamedSample {
         // stranded: clear the flag first, then re-queue if anything is
         // outstanding. The other order loses whatever landed in between.
         self.queued.store(false, Ordering::Release);
+        #[cfg(feature = "engine-native")]
         if self.has_wanted() && !self.queued.swap(true, Ordering::AcqRel) {
             streamer().enqueue(Arc::downgrade(self));
         }
@@ -436,6 +451,9 @@ fn decode_chunk(
 // ── The streamer thread ─────────────────────────────────────────────────────
 
 /// Background decoder: the only place a compressed chunk is ever decoded.
+/// Native only — under bare `engine-core` (wasm) chunks decode synchronously
+/// in [`StreamedSample::request`].
+#[cfg(feature = "engine-native")]
 struct Streamer {
     queue: Mutex<Vec<Weak<StreamedSample>>>,
     wake: Condvar,
@@ -447,12 +465,14 @@ struct Streamer {
 static SWEEP_TICK: AtomicU64 = AtomicU64::new(0);
 /// How often the sweep runs. Chunks survive at least one full sweep after
 /// their last read, so a held note is never interrupted.
+#[cfg(feature = "engine-native")]
 const SWEEP: std::time::Duration = std::time::Duration::from_secs(2);
 
 fn sweep_tick() -> u64 {
     SWEEP_TICK.load(Ordering::Relaxed)
 }
 
+#[cfg(feature = "engine-native")]
 fn streamer() -> &'static Streamer {
     static STREAMER: OnceLock<Streamer> = OnceLock::new();
     STREAMER.get_or_init(|| {
@@ -476,6 +496,7 @@ fn streamer() -> &'static Streamer {
     })
 }
 
+#[cfg(feature = "engine-native")]
 impl Streamer {
     fn register(&self, sample: Weak<StreamedSample>) {
         if let Ok(mut r) = self.registry.lock() {
@@ -546,13 +567,14 @@ impl Streamer {
 
 /// A poisoned streamer queue means the process is already unwinding; parking
 /// forever is better than spinning on a lock nobody will release.
+#[cfg(feature = "engine-native")]
 fn return_never() -> ! {
     loop {
         std::thread::park();
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "engine-native"))]
 mod tests {
     use super::*;
 

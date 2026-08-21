@@ -29,10 +29,11 @@ budget = []
 # Memory-mapped PCM file source (`mapped::PcmFile`) — memmap2 only, none of
 # the `engine` codecs. The DAW's streaming WAV path.
 mapped = ["dep:memmap2"]
-# The pack/cache/stream engine — the heavy half (FLAC/Vorbis codecs, rayon,
-# memmap2). Lean consumers (e.g. the iOS-clean session-guide) take only
-# `load`/`write`.
-engine = [
+# The wasm-clean half of the pack engine: open a pack from bytes
+# (`SignalPcmPack::open_bytes`) and decode its samples (FLAC via
+# symphonia/claxon, Ogg Vorbis via symphonia, raw PCM straight from the
+# buffer). No mmap, no threads, no encoders.
+engine-core = [
     "budget",
     "dep:arc-swap",
     "dep:hound",
@@ -42,11 +43,22 @@ engine = [
     "dep:symphonia-core",
     "dep:symphonia-format-ogg",
     "dep:symphonia-codec-vorbis",
-    "dep:vorbis_rs",
-    "dep:memmap2",
-    "dep:flacenc",
-    "dep:rayon",
 ]
+# The native half on top: mmap'd pack open, rayon-parallel preload, the
+# background streamer/warm threads, the on-disk stream cache, and pack
+# WRITING (flacenc / vorbis_rs encoders).
+engine-native = [
+    "engine-core",
+    "dep:memmap2",
+    "dep:rayon",
+    "dep:flacenc",
+    "dep:vorbis_rs",
+]
+# The pack/cache/stream engine — the heavy half. Alias for `engine-native`
+# so existing consumers (signal-sampler et al.) are untouched. Lean
+# consumers (e.g. the iOS-clean session-guide) take only `load`/`write`;
+# wasm consumers take `engine-core`.
+engine = ["engine-native"]
 
 [dependencies]
 symphonium = { workspace = true, optional = true }

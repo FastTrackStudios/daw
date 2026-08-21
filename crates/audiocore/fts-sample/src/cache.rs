@@ -8,21 +8,79 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::Read;
+#[cfg(feature = "engine-native")]
+use std::io::{BufRead, BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
+#[cfg(feature = "engine-native")]
 use std::time::Instant;
 
 use arc_swap::ArcSwap;
+#[cfg(feature = "engine-native")]
 use flacenc::component::BitRepr;
+#[cfg(feature = "engine-native")]
 use flacenc::error::Verify;
+#[cfg(feature = "engine-native")]
 use rayon::prelude::*;
 
 use crate::SamplerError;
 
-/// A packed-sample lookup: the shared pack mmap plus the entry's offset/length.
-type PackedSampleRef = (Arc<memmap2::Mmap>, PackEntry);
+/// The bytes of an opened `.signalpack`: memory-mapped on native, an owned
+/// buffer when the pack arrived as bytes (wasm, network fetches, tests).
+/// Cheap to clone — both arms are `Arc`s over one backing allocation.
+#[derive(Debug, Clone)]
+pub enum PackBytes {
+    /// The whole pack file, memory-mapped once at open. Sample reads slice
+    /// straight out of this; residency is page cache the OS can evict.
+    #[cfg(feature = "engine-native")]
+    Mapped(Arc<memmap2::Mmap>),
+    /// The whole pack resident in memory.
+    Owned(Arc<[u8]>),
+}
+
+impl std::ops::Deref for PackBytes {
+    type Target = [u8];
+
+    #[inline]
+    fn deref(&self) -> &[u8] {
+        match self {
+            #[cfg(feature = "engine-native")]
+            Self::Mapped(map) => map,
+            Self::Owned(bytes) => bytes,
+        }
+    }
+}
+
+#[cfg(feature = "engine-native")]
+impl From<Arc<memmap2::Mmap>> for PackBytes {
+    fn from(map: Arc<memmap2::Mmap>) -> Self {
+        Self::Mapped(map)
+    }
+}
+
+impl From<Vec<u8>> for PackBytes {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self::Owned(bytes.into())
+    }
+}
+
+impl PackBytes {
+    /// Ask the OS to read `offset..offset + len` ahead, asynchronously.
+    /// Meaningful only for the mapped arm; owned bytes are already resident.
+    fn advise_will_need(&self, offset: usize, len: usize) {
+        #[cfg(feature = "engine-native")]
+        if let Self::Mapped(map) = self {
+            let _ = map.advise_range(memmap2::Advice::WillNeed, offset, len);
+        }
+        #[cfg(not(feature = "engine-native"))]
+        let _ = (offset, len);
+    }
+}
+
+/// A packed-sample lookup: the shared pack bytes plus the entry's offset/length.
+type PackedSampleRef = (PackBytes, PackEntry);
 
 /// Per-path preload plan: source path, optional prepared-cache entry, the
 /// prepared-cache directory (if any), and the packed-sample lookup (if any).
@@ -84,10 +142,11 @@ pub enum Pcm {
     /// is resident and the rest is decoded a chunk at a time as the voice
     /// plays it. See [`super::stream`].
     Streamed(Arc<super::stream::StreamedSample>),
-    /// **Direct from disk**: a window into a memory-mapped file. Nothing is
-    /// decoded and nothing is allocated; reads touch page-cache pages.
+    /// **Direct from disk**: a window into a memory-mapped file (or an
+    /// in-memory pack buffer). Nothing is decoded and nothing is allocated;
+    /// reads touch page-cache pages.
     Mapped {
-        map: Arc<memmap2::Mmap>,
+        map: PackBytes,
         /// Byte offset of the first sample within the mapping.
         offset: usize,
         /// Number of PCM samples (not frames, not bytes).
@@ -154,7 +213,7 @@ impl Pcm {
                     return 0.0;
                 }
                 let at = offset + index * fmt.width();
-                let bytes = map.as_ref();
+                let bytes: &[u8] = map;
                 match fmt {
                     PcmFmt::I16 => {
                         let Some(b) = bytes.get(at..at + 2) else { return 0.0 };
@@ -236,7 +295,7 @@ impl SampleData {
     /// A window into a memory-mapped pack — nothing decoded, nothing
     /// allocated.
     pub fn mapped(
-        map: Arc<memmap2::Mmap>,
+        map: impl Into<PackBytes>,
         offset: usize,
         samples: usize,
         fmt: PcmFmt,
@@ -244,7 +303,12 @@ impl SampleData {
         sample_rate: u32,
         num_frames: usize,
     ) -> Self {
-        Self { pcm: Pcm::Mapped { map, offset, samples, fmt }, channels, sample_rate, num_frames }
+        Self {
+            pcm: Pcm::Mapped { map: map.into(), offset, samples, fmt },
+            channels,
+            sample_rate,
+            num_frames,
+        }
     }
 
     /// A sample that stays compressed in its pack and streams as it plays.
@@ -313,12 +377,13 @@ impl SampleData {
     pub fn warm(&self, head_frames: usize) {
         let Pcm::Mapped { map, offset, samples, fmt } = &self.pcm else { return };
         let len = samples * fmt.width();
-        // Read-ahead for the whole sample, asynchronously.
-        let _ = map.advise_range(memmap2::Advice::WillNeed, *offset, len);
+        // Read-ahead for the whole sample, asynchronously (mapped arm only —
+        // owned bytes are already resident).
+        map.advise_will_need(*offset, len);
         // …and synchronously touch the head, one byte per page.
         let head = (head_frames * self.channels.max(1) as usize * fmt.width()).min(len);
         let page = 4096;
-        let bytes = map.as_ref();
+        let bytes: &[u8] = map;
         let mut acc = 0u8;
         let mut at = *offset;
         while at < offset + head {
@@ -412,11 +477,12 @@ struct PreparedEntry {
 #[derive(Debug, Clone)]
 pub struct SignalPcmPack {
     path: PathBuf,
-    /// The whole pack file, memory-mapped once at open. Sample decode slices
-    /// straight out of this — no per-sample `File::open`/seek/read syscalls
-    /// (those were the preload bottleneck on multi-GB packs / external drives).
-    /// `Arc` so clones share one mapping.
-    mmap: Arc<memmap2::Mmap>,
+    /// The whole pack, memory-mapped once at open (native) or handed over as
+    /// an in-memory buffer ([`open_bytes`](Self::open_bytes)). Sample decode
+    /// slices straight out of this — no per-sample `File::open`/seek/read
+    /// syscalls (those were the preload bottleneck on multi-GB packs /
+    /// external drives). Clones share one backing allocation.
+    mmap: PackBytes,
     /// Header kind field (5 = FLAC i24 lossless, 6 = Ogg Vorbis proxy).
     kind: u32,
     entries: HashMap<PathBuf, PackEntry>,
@@ -665,6 +731,7 @@ impl PackCodec {
     /// Vorbis proxy at q8 — transparent on orchestral content, ~7-8× smaller.
     pub const OGG_VORBIS_Q8: PackCodec = PackCodec::OggVorbis { quality: 0.8 };
 
+    #[cfg(feature = "engine-native")]
     fn header_kind(self) -> u32 {
         match self {
             PackCodec::FlacI24 => SIGNAL_PACK_KIND_FLAC_I24,
@@ -726,6 +793,7 @@ impl SampleCache {
         }
     }
 
+    #[cfg(feature = "engine-native")]
     pub fn with_prepared(cache_dir: Option<&Path>) -> Self {
         let mut prepared: HashMap<PathBuf, PreparedEntry> = HashMap::new();
         let mut prepared_dir: Option<PathBuf> = None;
@@ -781,7 +849,12 @@ impl SampleCache {
         if self.inner.loaded_snapshot.load().contains_key(path) {
             return;
         }
+        #[cfg(feature = "engine-native")]
         warm_queue().send(self.clone_handle(), path.to_owned());
+        // No background threads without the native half: decode here and now.
+        // Correctness over latency — a wasm host that cares warms up front.
+        #[cfg(not(feature = "engine-native"))]
+        let _ = self.get(path);
     }
 
     /// Whether this cache's samples stream (a FLAC pack) or must be decoded
@@ -846,15 +919,21 @@ impl SampleCache {
         {
             return Ok(Arc::clone(entry));
         }
+        // `Instant::now` panics on wasm32-unknown-unknown; the timing is a
+        // native diagnostic anyway.
+        #[cfg(feature = "engine-native")]
         let start = Instant::now();
         let data = decode_path(&self.inner, path)?;
-        let elapsed = start.elapsed();
-        if elapsed.as_millis() >= 5 {
-            tracing::debug!(
-                "sample cache miss loaded {} in {:.2} ms",
-                path.display(),
-                elapsed.as_secs_f64() * 1000.0
-            );
+        #[cfg(feature = "engine-native")]
+        {
+            let elapsed = start.elapsed();
+            if elapsed.as_millis() >= 5 {
+                tracing::debug!(
+                    "sample cache miss loaded {} in {:.2} ms",
+                    path.display(),
+                    elapsed.as_secs_f64() * 1000.0
+                );
+            }
         }
         let arc = Arc::new(data);
         self.insert_loaded(path.to_owned(), Arc::clone(&arc), true);
@@ -889,9 +968,7 @@ impl SampleCache {
         let bytes_n = AtomicUsize::new(0);
         let skipped_n = AtomicUsize::new(0);
 
-        paths
-            .par_iter()
-            .for_each(|(path, prepared, prepared_dir, packed)| {
+        for_each_maybe_parallel(&paths, |(path, prepared, prepared_dir, packed)| {
                 // The budget is the engine's hard RAM ceiling: past it, the
                 // rest of this preload streams from disk instead. Reserve the
                 // estimated size FIRST — decodes run in parallel, and charging
@@ -993,7 +1070,7 @@ impl SampleCache {
         let bytes_n = AtomicUsize::new(0);
         let skipped_n = AtomicUsize::new(0);
 
-        work.par_iter().for_each(|(path, packed)| {
+        for_each_maybe_parallel(&work, |(path, packed)| {
             if should_cancel() {
                 return;
             }
@@ -1155,6 +1232,18 @@ impl SampleCache {
     }
 }
 
+/// Run `f` over every item — fanned out across the rayon pool on native,
+/// plainly sequential under bare `engine-core` (wasm has no threads).
+#[cfg(feature = "engine-native")]
+fn for_each_maybe_parallel<T: Sync>(items: &[T], f: impl Fn(&T) + Sync + Send) {
+    items.par_iter().for_each(f);
+}
+
+#[cfg(not(feature = "engine-native"))]
+fn for_each_maybe_parallel<T>(items: &[T], f: impl Fn(&T)) {
+    items.iter().for_each(f);
+}
+
 /// What a sample will cost once decoded, in bytes, without decoding it.
 ///
 /// Packs and prepared caches declare their frame count, so the estimate is
@@ -1186,6 +1275,7 @@ fn estimated_decoded_bytes(
 /// A sample that has already been through the stream cache, mapped back in
 /// without decoding anything. Needs the shape up front, which pack and
 /// prepared entries carry and a bare file on disk does not.
+#[cfg(feature = "engine-native")]
 fn mapped_from_stream_cache(
     inner: &CacheInner,
     path: &Path,
@@ -1230,6 +1320,7 @@ fn decode_path(inner: &CacheInner, path: &Path) -> Result<SampleData, SamplerErr
 
 /// Hand a freshly decoded sample to the stream cache; play the mapping it
 /// gives back, or the decoded audio when the cache is off.
+#[cfg(feature = "engine-native")]
 fn stream_cached(path: &Path, data: SampleData) -> SampleData {
     if matches!(data.pcm, Pcm::Mapped { .. }) || super::stream_cache::dir().is_none() {
         return data;
@@ -1237,6 +1328,23 @@ fn stream_cached(path: &Path, data: SampleData) -> SampleData {
     super::stream_cache::materialize(path, &data).unwrap_or(data)
 }
 
+/// No on-disk stream cache without the native half: nothing to look up, and
+/// freshly decoded samples stay decoded.
+#[cfg(not(feature = "engine-native"))]
+fn mapped_from_stream_cache(
+    _inner: &CacheInner,
+    _path: &Path,
+    _packed: Option<&PackedSampleRef>,
+) -> Option<SampleData> {
+    None
+}
+
+#[cfg(not(feature = "engine-native"))]
+fn stream_cached(_path: &Path, data: SampleData) -> SampleData {
+    data
+}
+
+#[cfg(feature = "engine-native")]
 fn load_prepared_index(
     cache_dir: &Path,
     prepared_out: &mut HashMap<PathBuf, PreparedEntry>,
@@ -1483,20 +1591,44 @@ fn load_prepared_sample(
 impl SignalPcmPack {
     /// Open a `.signalpack` and parse its header + index.
     /// No audio is decoded.
+    #[cfg(feature = "engine-native")]
     pub fn open(path: &Path) -> Result<Self, SamplerError> {
-        let mut file = File::open(path)?;
-        let header = PackFileHeader::read(&mut file)?;
+        let file = File::open(path)?;
+        // Memory-map the whole pack once; header/index parse and sample
+        // decode all slice from this.
+        // Safety: the pack file is read-only for the cache's lifetime; we never
+        // write it, and external truncation would be a deployment error.
+        let mmap = Arc::new(unsafe { memmap2::Mmap::map(&file)? });
+        Self::from_pack_bytes(path.to_owned(), PackBytes::Mapped(mmap))
+    }
+
+    /// Open a `.signalpack` handed over as one in-memory buffer — the wasm
+    /// path (a fetched pack), and anything else with no file to map. Same
+    /// parse as [`open`](Self::open); no audio is decoded.
+    pub fn open_bytes(bytes: Vec<u8>) -> Result<Self, SamplerError> {
+        Self::from_pack_bytes(PathBuf::from("<memory>"), PackBytes::from(bytes))
+    }
+
+    /// Parse header + index out of the pack bytes, however they arrived.
+    fn from_pack_bytes(path: PathBuf, data: PackBytes) -> Result<Self, SamplerError> {
+        let raw: &[u8] = &data;
+        let header_raw: [u8; PackFileHeader::LEN] = raw
+            .get(..PackFileHeader::LEN)
+            .and_then(|b| b.try_into().ok())
+            .ok_or_else(|| invalid_data("signal pack is shorter than its header"))?;
+        let header = PackFileHeader::parse(header_raw)?;
         let kind = header.require_known_kind()?;
 
-        file.seek(SeekFrom::Start(header.index_offset()))?;
-        let mut index = vec![0u8; header.index_len() as usize];
-        file.read_exact(&mut index)?;
+        let index_start = header.index_offset() as usize;
+        let index = raw
+            .get(index_start..index_start.saturating_add(header.index_len() as usize))
+            .ok_or_else(|| invalid_data("signal pack index out of bounds"))?;
 
         let mut entries = HashMap::new();
         let mut in_embedded_spec = false;
         let mut spec_buf = String::new();
         let mut spec_format: Option<String> = None;
-        for line in String::from_utf8_lossy(&index).lines() {
+        for line in String::from_utf8_lossy(index).lines() {
             if line == "# spec_begin" {
                 in_embedded_spec = true;
                 continue;
@@ -1548,14 +1680,9 @@ impl SignalPcmPack {
             Some(spec_buf)
         };
 
-        // Memory-map the whole pack once; sample decode slices from this.
-        // Safety: the pack file is read-only for the cache's lifetime; we never
-        // write it, and external truncation would be a deployment error.
-        let mmap = Arc::new(unsafe { memmap2::Mmap::map(&file)? });
-
         Ok(Self {
-            path: path.to_owned(),
-            mmap,
+            path,
+            mmap: data,
             kind,
             entries,
             embedded_spec,
@@ -1599,9 +1726,9 @@ impl SignalPcmPack {
         self.entries.iter()
     }
 
-    /// The pack's mapping, for readers that stream out of it.
-    pub fn mmap_handle(&self) -> Arc<memmap2::Mmap> {
-        Arc::clone(&self.mmap)
+    /// The pack's backing bytes, for readers that stream out of it.
+    pub fn mmap_handle(&self) -> PackBytes {
+        self.mmap.clone()
     }
 
     /// Pack file path.
@@ -1653,15 +1780,18 @@ fn path_suffixes(path: &Path) -> Vec<PathBuf> {
 
 /// The queue's two halves: work still to do, and the set of paths
 /// already queued so a held chord doesn't enqueue one sample twice.
+#[cfg(feature = "engine-native")]
 type WarmPending = (Vec<(SampleCache, PathBuf)>, std::collections::HashSet<PathBuf>);
 
 /// Background loader for cache misses. One thread, deduplicated, so a held
 /// chord of unloaded notes queues each sample once.
+#[cfg(feature = "engine-native")]
 struct WarmQueue {
     queue: std::sync::Mutex<WarmPending>,
     wake: std::sync::Condvar,
 }
 
+#[cfg(feature = "engine-native")]
 impl WarmQueue {
     fn send(&self, cache: SampleCache, path: PathBuf) {
         if let Ok(mut q) = self.queue.lock() {
@@ -1691,6 +1821,7 @@ impl WarmQueue {
     }
 }
 
+#[cfg(feature = "engine-native")]
 fn warm_queue() -> &'static WarmQueue {
     static QUEUE: std::sync::OnceLock<WarmQueue> = std::sync::OnceLock::new();
     QUEUE.get_or_init(|| {
@@ -1735,7 +1866,7 @@ fn should_stream(entry: &PackEntry) -> bool {
 /// the voice plays it — the OS is the streaming engine. Compressed entries
 /// decode to float as before.
 fn load_pack_sample(
-    map: &Arc<memmap2::Mmap>,
+    map: &PackBytes,
     entry: &PackEntry,
 ) -> Result<SampleData, SamplerError> {
     if let Some(fmt) = entry.mapped_fmt() {
@@ -1746,7 +1877,7 @@ fn load_pack_sample(
             .ok_or_else(|| invalid_data("signal pack PCM entry out of bounds"))?;
         let _ = end;
         return Ok(SampleData::mapped(
-            Arc::clone(map),
+            map.clone(),
             start,
             entry.samples,
             fmt,
@@ -1761,7 +1892,7 @@ fn load_pack_sample(
     // never lands in the heap.
     if should_stream(entry) {
         if let Some(streamed) = super::stream::StreamedSample::open(
-            Arc::clone(map),
+            map.clone(),
             entry.offset as usize,
             entry.bytes as usize,
             entry.channels,
@@ -1816,6 +1947,7 @@ fn coerce_to_index_len(data: SampleData, entry: &PackEntry) -> SampleData {
     SampleData::from_f32(frames, data.channels, data.sample_rate, entry.num_frames)
 }
 
+#[cfg(feature = "engine-native")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PrepareStats {
     pub prepared: usize,
@@ -1831,6 +1963,7 @@ pub fn default_signal_pack_path(cache_dir: &Path) -> PathBuf {
     cache_dir.join("library.signalpack")
 }
 
+#[cfg(feature = "engine-native")]
 pub fn prepare_sample_cache<'a>(
     cache_dir: &Path,
     paths: impl Iterator<Item = &'a Path>,
@@ -1896,11 +2029,13 @@ pub fn prepare_sample_cache<'a>(
 /// Where a pack's embedded spec comes from: an on-disk file or in-memory text
 /// (builders that synthesize per-group specs — e.g. the Cinematic Studio
 /// splitter — never touch disk).
+#[cfg(feature = "engine-native")]
 pub enum PackSpecSource<'s> {
     Path(&'s Path),
     Text { text: &'s str, format: &'s str },
 }
 
+#[cfg(feature = "engine-native")]
 pub fn create_signal_pack<'a>(
     pack_path: &Path,
     spec_path: &Path,
@@ -1916,6 +2051,7 @@ pub fn create_signal_pack<'a>(
     )
 }
 
+#[cfg(feature = "engine-native")]
 pub fn create_signal_pack_with<'a>(
     pack_path: &Path,
     spec: PackSpecSource<'_>,
@@ -1972,6 +2108,7 @@ pub fn create_signal_pack_with<'a>(
 /// the embedded spec and per-entry index metadata (source frame counts —
 /// loop points stay sample-exact) verbatim. No source samples needed: this is
 /// how a lossless Full pack becomes an Ogg Vorbis Proxy pack (or back).
+#[cfg(feature = "engine-native")]
 pub fn transcode_signal_pack(
     in_path: &Path,
     out_path: &Path,
@@ -2052,6 +2189,7 @@ pub fn transcode_signal_pack(
 
 /// Shared pack-file writer: header + payload body + index (embedded spec +
 /// per-entry rows). `samples_root` (when given) relativizes row source paths.
+#[cfg(feature = "engine-native")]
 fn write_signal_pack_file(
     pack_path: &Path,
     spec_text: &str,
@@ -2137,6 +2275,7 @@ fn write_signal_pack_file(
     Ok(stats)
 }
 
+#[cfg(feature = "engine-native")]
 pub fn extract_signal_pack(
     pack_path: &Path,
     output_dir: &Path,
@@ -2216,6 +2355,7 @@ pub fn extract_signal_pack(
     Ok(stats)
 }
 
+#[cfg(feature = "engine-native")]
 struct PreparedIndexRow {
     source: PathBuf,
     pcm_file: PathBuf,
@@ -2225,6 +2365,7 @@ struct PreparedIndexRow {
     samples: usize,
 }
 
+#[cfg(feature = "engine-native")]
 struct PackIndexRow {
     source: PathBuf,
     offset: u64,
@@ -2238,6 +2379,7 @@ struct PackIndexRow {
 }
 
 /// f32 → interleaved little-endian 16-bit PCM.
+#[cfg(feature = "engine-native")]
 fn encode_pcm_i16(samples: &[f32]) -> Vec<u8> {
     let mut out = Vec::with_capacity(samples.len() * 2);
     for s in samples {
@@ -2248,6 +2390,7 @@ fn encode_pcm_i16(samples: &[f32]) -> Vec<u8> {
 }
 
 /// f32 → interleaved little-endian 24-bit PCM (3 bytes per sample).
+#[cfg(feature = "engine-native")]
 fn encode_pcm_i24(samples: &[f32]) -> Vec<u8> {
     let mut out = Vec::with_capacity(samples.len() * 3);
     for s in samples {
@@ -2258,6 +2401,7 @@ fn encode_pcm_i24(samples: &[f32]) -> Vec<u8> {
     out
 }
 
+#[cfg(feature = "engine-native")]
 fn pack_one_sample(path: &Path, codec: PackCodec) -> Result<PackIndexRow, (PathBuf, SamplerError)> {
     let data = load_sample(path).map_err(|err| (path.to_owned(), err))?;
     let uncompressed_bytes = data.len() * 3;
@@ -2300,6 +2444,7 @@ fn pack_one_sample(path: &Path, codec: PackCodec) -> Result<PackIndexRow, (PathB
     })
 }
 
+#[cfg(feature = "engine-native")]
 fn prepare_one_sample(
     cache_dir: &Path,
     i: usize,
@@ -2333,6 +2478,7 @@ fn parse_field<T: std::str::FromStr>(field: Option<&str>, name: &str) -> Result<
         .map_err(|_| invalid_data(format!("prepared cache index invalid {name}")))
 }
 
+#[cfg(feature = "engine-native")]
 fn write_wav_f32(
     path: &Path,
     channels: u16,
@@ -2366,6 +2512,7 @@ fn write_wav_f32(
     Ok(())
 }
 
+#[cfg(feature = "engine-native")]
 fn f32_to_i24_i32(sample: f32) -> i32 {
     let scaled = (sample.clamp(-1.0, 1.0) * 8_388_608.0).round();
     (scaled as i32).clamp(-8_388_608, 8_388_607)
@@ -2375,6 +2522,7 @@ fn f32_to_i24_i32(sample: f32) -> i32 {
 /// faster than the pure-Rust `flacenc` crate (5–10× on typical content).
 /// Falls back silently if `flac` isn't on `$PATH` so dev environments
 /// without it still function.
+#[cfg(feature = "engine-native")]
 fn encode_flac_via_cli(samples_i16: &[i16], channels: u16, sample_rate: u32) -> Option<Vec<u8>> {
     use std::io::{Read, Write};
     use std::process::{Command, Stdio};
@@ -2431,6 +2579,7 @@ fn encode_flac_via_cli(samples_i16: &[i16], channels: u16, sample_rate: u32) -> 
 
 // Test-only in spirit, but `pub` so signal-sampler's relocated voice test
 // (a held looping voice over a streamed sample) can still encode a fixture.
+#[cfg(feature = "engine-native")]
 #[doc(hidden)]
 pub fn encode_flac_i24_for_test(
     samples: &[i32],
@@ -2440,6 +2589,7 @@ pub fn encode_flac_i24_for_test(
     encode_flac_i24(samples, channels, sample_rate)
 }
 
+#[cfg(feature = "engine-native")]
 fn encode_flac_i24(
     samples: &[i32],
     channels: u16,
@@ -2687,6 +2837,7 @@ fn load_ogg_vorbis_bytes(bytes: &[u8]) -> Result<SampleData, SamplerError> {
 /// Encode interleaved f32 PCM to an Ogg Vorbis stream (builder-side only —
 /// runtime never encodes). `quality` is the libvorbis base-quality scale
 /// (-0.2..=1.0, oggenc's `-q` divided by 10).
+#[cfg(feature = "engine-native")]
 fn encode_ogg_vorbis(
     frames: &[f32],
     channels: u16,
@@ -3012,8 +3163,80 @@ mod tests {
         assert_eq!(data.sample_rate, 44_100);
     }
 
+    /// A pack written by the native writer reopens through `open_bytes` (the
+    /// wasm path: the whole pack as one in-memory buffer) and decodes
+    /// bit-identically to the mmap-backed `open`.
+    #[test]
+    fn open_bytes_decodes_identically_to_mmap_open() {
+        let dir = std::env::temp_dir().join(format!("fts-open-bytes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("tmp dir");
+
+        // A stereo tone, written as a wav the packer can read.
+        let (sr, n_frames) = (48_000u32, 4_096usize);
+        let wav = dir.join("tone.wav");
+        {
+            let spec = hound::WavSpec {
+                channels: 2,
+                sample_rate: sr,
+                bits_per_sample: 32,
+                sample_format: hound::SampleFormat::Float,
+            };
+            let mut w = hound::WavWriter::create(&wav, spec).expect("wav");
+            for i in 0..n_frames {
+                let s = ((i as f32) * 0.03).sin() * 0.6;
+                w.write_sample(s).expect("write");
+                w.write_sample(-s).expect("write");
+            }
+            w.finalize().expect("finalize");
+        }
+
+        let pack_path = dir.join("tone.signalpack");
+        create_signal_pack_with(
+            &pack_path,
+            PackSpecSource::Text { text: "name \"tone\"\n", format: "styx" },
+            &dir,
+            [wav.as_path()].into_iter(),
+            PackCodec::FlacI24,
+        )
+        .expect("build pack");
+
+        let mapped = SignalPcmPack::open(&pack_path).expect("mmap open");
+        let bytes = std::fs::read(&pack_path).expect("read pack bytes");
+        let owned = SignalPcmPack::open_bytes(bytes).expect("open_bytes");
+
+        assert_eq!(owned.kind(), mapped.kind());
+        assert_eq!(owned.entry_count(), mapped.entry_count());
+        assert_eq!(owned.embedded_spec(), mapped.embedded_spec());
+        assert!(matches!(owned.mmap, PackBytes::Owned(_)));
+
+        let rel = Path::new("tone.wav");
+        let m_entry = mapped.entry_for_path(rel).expect("mmap entry");
+        let o_entry = owned.entry_for_path(rel).expect("owned entry");
+        assert_eq!(m_entry.num_frames(), o_entry.num_frames());
+
+        // Full decode is forced (FTS_STREAM aside, decode via the whole-
+        // sample bulk path) so the comparison covers every sample.
+        let m_data = load_pack_sample(&mapped.mmap, m_entry).expect("decode mmap");
+        let o_data = load_pack_sample(&owned.mmap, o_entry).expect("decode owned");
+        assert_eq!(o_data.channels, m_data.channels);
+        assert_eq!(o_data.sample_rate, m_data.sample_rate);
+        assert_eq!(o_data.num_frames, m_data.num_frames);
+        assert_eq!(
+            o_data.to_f32().as_ref(),
+            m_data.to_f32().as_ref(),
+            "open_bytes must decode the same PCM as the mmap open"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn eviction_removes_largest_samples_until_under_budget() {
+        // Charges + releases the process-wide budget counter — serialise
+        // against the budget tests' delta assertions.
+        let _serial = crate::budget::TEST_COUNTER_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let cache = SampleCache::new();
         cache.insert_loaded(PathBuf::from("small.wav"), sample(4), false);
         cache.insert_loaded(PathBuf::from("large.wav"), sample(16), false);
@@ -3032,6 +3255,9 @@ mod tests {
 
     #[test]
     fn eviction_preserves_active_arc_handles() {
+        let _serial = crate::budget::TEST_COUNTER_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let cache = SampleCache::new();
         let held = sample(16);
         cache.insert_loaded(PathBuf::from("held.wav"), Arc::clone(&held), true);

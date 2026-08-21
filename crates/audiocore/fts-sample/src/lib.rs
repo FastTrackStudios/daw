@@ -16,9 +16,13 @@
 //!   DAW's streaming WAV path. memmap2 only, none of the `engine` codecs.
 //! - `budget` — the process-wide preload RAM budget (std-only; `engine`
 //!   implies it).
-//! - `engine` — the sample-engine file layer (RAM budgeting, the
-//!   decoded-sample cache + .signalpack access, FLAC seek index, chunked
-//!   streaming, on-disk stream cache), re-exported by signal-sampler as
+//! - `engine-core` — the wasm-clean half of the sample-engine file layer
+//!   (RAM budgeting, the decoded-sample cache, in-memory .signalpack access
+//!   via [`cache::SignalPcmPack::open_bytes`], FLAC seek index, chunked
+//!   decode). No mmap, no threads, no encoders.
+//! - `engine-native` — mmap'd pack open, parallel preload, the background
+//!   streamer/warm threads, the on-disk stream cache, and pack writing.
+//! - `engine` — alias for `engine-native`; re-exported by signal-sampler as
 //!   `signal_sampler::engine::*`.
 //!
 //! # Usage
@@ -53,13 +57,13 @@ mod write;
 // flac_index, stream, stream_cache}`.
 #[cfg(feature = "budget")]
 pub mod budget;
-#[cfg(feature = "engine")]
+#[cfg(feature = "engine-core")]
 pub mod cache;
-#[cfg(feature = "engine")]
+#[cfg(feature = "engine-core")]
 pub mod flac_index;
-#[cfg(feature = "engine")]
+#[cfg(feature = "engine-core")]
 pub mod stream;
-#[cfg(feature = "engine")]
+#[cfg(feature = "engine-native")]
 pub mod stream_cache;
 
 mod error;
