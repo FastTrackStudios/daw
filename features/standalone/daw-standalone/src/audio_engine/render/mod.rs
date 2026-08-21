@@ -583,11 +583,25 @@ impl ProjectRenderer {
         // Plugin instances for the per-track FX stage inside the loop.
         // The map lives separately from ProjectState so the audio
         // thread doesn't block project mutations on the proto side.
-        let mut plugins = self
-            .daw
-            .plugin_instances
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        //
+        // TRY, never block. A control thread holds this mutex while it
+        // swaps an instrument in (`insert_plugin_instance`) — normally
+        // microseconds, but the audio callback must not gamble on that: a
+        // blocking acquire here turns any control-side hold into a dropout,
+        // and in a wasm AudioWorklet a contended `Mutex` parks the audio
+        // thread on `memory_atomic_wait32`, which is precisely the thing
+        // the browser rig must never do (browser-keys-rig.md, W13).
+        //
+        // On contention this block renders WITHOUT its plugin stage: dry
+        // audio for one 128-frame quantum (~2.7 ms), which is inaudible
+        // next to the click of an underrun. The next block takes the lock
+        // normally. `poisoned` still recovers, same as before — a
+        // control-thread panic must not cascade into the callback.
+        let mut plugins = match self.daw.plugin_instances.try_lock() {
+            Ok(guard) => Some(guard),
+            Err(std::sync::TryLockError::Poisoned(p)) => Some(p.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => None,
+        };
 
         // 2–4) Per-track processing in topo order over the routing
         // graph (children before folder parents, senders before their
@@ -662,8 +676,12 @@ impl ProjectRenderer {
                     if !t.fx_enabled.get(i).copied().unwrap_or(true) {
                         continue;
                     }
-                    let Some(plugin) = plugins.get_mut(fx_guid) else {
-                        continue; // synthetic / not loaded
+                    // `None` = the map was busy this block (see the
+                    // try_lock above): render dry rather than block.
+                    let Some(plugin) =
+                        plugins.as_mut().and_then(|p| p.get_mut(fx_guid))
+                    else {
+                        continue; // synthetic / not loaded / map busy
                     };
                     if panicked_fx.contains(fx_guid) {
                         continue; // panicked earlier — permanently bypassed
