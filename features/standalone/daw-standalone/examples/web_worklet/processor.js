@@ -3,12 +3,25 @@
 // `this.port.postMessage`.
 //
 // Message kinds:
-//   init        { wasmBytes, glueUrl, sampleRate }   → 'ready'
+//   init        { wasmBytes, glueUrl, sampleRate, entry? }   → 'ready'
+//               entry: 'keys' constructs the keys-rig worklet
+//               (signal-keys-worklet's KeysWorklet) instead of the plain
+//               WebRenderer — requires a bundle built from that crate.
 //   load_rpp    { text, replyTo? }                   → trackCount
 //   take_sources { replyTo }                         → [take, path, …]
 //   attach_source { takeGuid, pcm, channels, sampleRate }
 //   detach_source { takeGuid }
 //   play | pause | stop | seek
+//
+// Keys-rig kinds (entry: 'keys'):
+//   attach_pack { key, bytes, replyTo? }             → true/error string
+//               bytes: ArrayBuffer of the .signalpack (post as a
+//               transferable: postMessage(msg, [bytes]))
+//   open_lanes  { program, replyTo? }                → lane count
+//               program: the LaneProgram wire JSON (string)
+//   reload_lanes { replyTo? }                        → true/error string
+//   midi        { bytes: [status, d1, d2] }          raw 3-byte MIDI
+//   all_notes_off | panic
 //
 // Messages with a `replyTo` field get a reply `{ replyTo, value }`
 // so the main side can `await rpc(...)`.
@@ -31,7 +44,9 @@ class DawStandaloneProcessor extends AudioWorkletProcessor {
       case 'init': {
         const wasm = await import(msg.glueUrl);
         await wasm.default(msg.wasmBytes);
-        this.renderer = new wasm.WebRenderer(msg.sampleRate);
+        this.renderer = msg.entry === 'keys'
+          ? new wasm.KeysWorklet(msg.sampleRate)
+          : new wasm.WebRenderer(msg.sampleRate);
         this.port.postMessage({ kind: 'ready' });
         break;
       }
@@ -56,6 +71,40 @@ class DawStandaloneProcessor extends AudioWorkletProcessor {
         this.renderer?.detachAudioSource(msg.takeGuid);
         break;
       }
+      // ── Keys-rig kinds (entry: 'keys') ─────────────────────────────
+      case 'attach_pack': {
+        try {
+          this.renderer?.attachPack(msg.key, new Uint8Array(msg.bytes));
+          this.reply(msg, true);
+        } catch (err) {
+          this.reply(msg, String(err));
+        }
+        break;
+      }
+      case 'open_lanes': {
+        try {
+          this.reply(msg, this.renderer?.openLanes(msg.program) ?? 0);
+        } catch (err) {
+          this.reply(msg, String(err));
+        }
+        break;
+      }
+      case 'reload_lanes': {
+        try {
+          this.renderer?.reloadLanes();
+          this.reply(msg, true);
+        } catch (err) {
+          this.reply(msg, String(err));
+        }
+        break;
+      }
+      case 'midi': {
+        const [status, d1, d2] = msg.bytes;
+        this.renderer?.midi(status, d1 ?? 0, d2 ?? 0);
+        break;
+      }
+      case 'all_notes_off': this.renderer?.allNotesOff(); break;
+      case 'panic': this.renderer?.panic(); break;
       case 'play':  this.renderer?.play();  break;
       case 'pause': this.renderer?.pause(); break;
       case 'stop':  this.renderer?.stop();  break;

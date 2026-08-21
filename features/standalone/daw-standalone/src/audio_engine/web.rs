@@ -424,6 +424,97 @@ impl WebRenderer {
         shared.advance(frames as u32);
     }
 
+    // ── Live MIDI (browser keys rig) ─────────────────────────────
+    //
+    // Raw + convenience producers for the wasm live-MIDI queue
+    // (`Standalone::push_live_midi`): events are queued targeted at a
+    // track of the SELECTED project and drained by the next render
+    // block, exactly like the native rtrb ring. Track addressing is by
+    // project track index (the order tracks were seeded), mirroring the
+    // mixer methods above.
+
+    /// The guid of the selected project's track at `index`.
+    fn track_guid(&self, index: u32) -> Option<String> {
+        use daw_proto::{ProjectContext, Tracks};
+        let ctx = ProjectContext::Project(self.current());
+        Tracks::all(&self.daw, ctx)
+            .into_iter()
+            .nth(index as usize)
+            .map(|t| t.guid)
+    }
+
+    /// Raw 3-byte MIDI message to one track. `true` when the event was
+    /// decoded and queued. Two-byte messages (program change / channel
+    /// pressure) pass `0` for `data2`.
+    #[wasm_bindgen(js_name = midiToTrack)]
+    pub fn midi_to_track(&self, track_index: u32, status: u8, data1: u8, data2: u8) -> bool {
+        let Some(guid) = self.track_guid(track_index) else {
+            return false;
+        };
+        let Ok((ev, _)) = daw_proto::MidiEvent::decode(&[status, data1, data2]) else {
+            return false;
+        };
+        self.daw.push_live_midi(&guid, ev)
+    }
+
+    /// Raw 3-byte MIDI message to EVERY track of the selected project —
+    /// the keys-rig lane shape (each lane's zone filters its own notes).
+    #[wasm_bindgen(js_name = midiToAllTracks)]
+    pub fn midi_to_all_tracks(&self, status: u8, data1: u8, data2: u8) -> bool {
+        let Ok((ev, _)) = daw_proto::MidiEvent::decode(&[status, data1, data2]) else {
+            return false;
+        };
+        use daw_proto::{ProjectContext, Tracks};
+        let ctx = ProjectContext::Project(self.current());
+        let mut any = false;
+        for t in Tracks::all(&self.daw, ctx) {
+            any |= self.daw.push_live_midi(&t.guid, ev.clone());
+        }
+        any
+    }
+
+    /// Note-On (`channel` 0–15) to one track. Velocity 0 decodes as a
+    /// Note-Off by MIDI convention.
+    #[wasm_bindgen(js_name = noteOn)]
+    pub fn note_on(&self, track_index: u32, channel: u8, key: u8, velocity: u8) -> bool {
+        self.midi_to_track(track_index, 0x90 | (channel & 0x0F), key, velocity)
+    }
+
+    /// Note-Off to one track.
+    #[wasm_bindgen(js_name = noteOff)]
+    pub fn note_off(&self, track_index: u32, channel: u8, key: u8) -> bool {
+        self.midi_to_track(track_index, 0x80 | (channel & 0x0F), key, 0)
+    }
+
+    /// Control Change to one track.
+    #[wasm_bindgen(js_name = controlChange)]
+    pub fn control_change(&self, track_index: u32, channel: u8, controller: u8, value: u8) -> bool {
+        self.midi_to_track(track_index, 0xB0 | (channel & 0x0F), controller, value)
+    }
+
+    /// Pitch bend (14-bit raw, 8192 = center) to one track.
+    #[wasm_bindgen(js_name = pitchBend)]
+    pub fn pitch_bend(&self, track_index: u32, channel: u8, value14: u16) -> bool {
+        let v = value14.min(16_383);
+        self.midi_to_track(
+            track_index,
+            0xE0 | (channel & 0x0F),
+            (v & 0x7F) as u8,
+            (v >> 7) as u8,
+        )
+    }
+
+    /// All Notes Off (CC 123) to every track of the selected project.
+    #[wasm_bindgen(js_name = allNotesOff)]
+    pub fn all_notes_off(&self) {
+        self.midi_to_all_tracks(0xB0, 123, 0);
+    }
+
+    /// Panic — All Sound Off (CC 120) to every track of the selected project.
+    pub fn panic(&self) {
+        self.midi_to_all_tracks(0xB0, 120, 0);
+    }
+
     // ── Transport ────────────────────────────────────────────────
 
     pub fn play(&self) {
@@ -502,5 +593,23 @@ impl WebRenderer {
                     .unwrap_or(0.0)
             })
             .collect()
+    }
+}
+
+/// Rust-only surface (NOT exported to JS) for in-tree wrapper crates that
+/// extend the worklet — e.g. the browser keys rig, which seeds a lane
+/// project + inserts `PluginInstance`s on this renderer's `Standalone` and
+/// wraps the whole thing in its own `#[wasm_bindgen]` type (daw-standalone
+/// cannot depend on signal-sampler: the dependency arrow runs the other
+/// way through the daw facade).
+impl WebRenderer {
+    /// The backing standalone daw (cheap to clone).
+    pub fn standalone(&self) -> &Standalone {
+        &self.daw
+    }
+
+    /// The renderer's output sample rate.
+    pub fn output_sample_rate(&self) -> u32 {
+        self.sample_rate
     }
 }

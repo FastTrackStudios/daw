@@ -150,10 +150,11 @@ pub(crate) fn mix_live_input_into_buses(
 /// block-start — programmatic pushes don't carry sub-block timing (this
 /// matches how `collect_midi_events` clamps item events to the block).
 ///
-/// Native-only: the live-MIDI ring is `rtrb`-backed (a `cfg(not(wasm32))`
-/// dep), mirroring [`LiveInput`]. On wasm32 the browser feeds MIDI a
-/// different way, so the whole consumer path is gated out.
-#[cfg(not(target_arch = "wasm32"))]
+/// Native: the live-MIDI ring is `rtrb`-backed (a `cfg(not(wasm32))` dep),
+/// mirroring [`LiveInput`]. On wasm32 the same event type is queued in a
+/// plain `VecDeque` on `Standalone` (the AudioWorkletGlobalScope is
+/// single-threaded, so a mutex-guarded deque is uncontended by
+/// construction) — see the wasm `LiveMidiQueue` below.
 #[derive(Clone, Debug)]
 pub(crate) struct LiveMidiEvent {
     /// Target project track guid (resolved to a snapshot index at drain).
@@ -173,6 +174,17 @@ pub(crate) struct LiveMidiQueue {
     pub(crate) cons: rtrb::Consumer<LiveMidiEvent>,
 }
 
+/// wasm32 variant: same public shape as the native queue, backed by a plain
+/// `VecDeque` instead of an rtrb ring. The AudioWorkletGlobalScope is
+/// single-threaded, so producer (a `WebRenderer` MIDI method) and consumer
+/// (the render block) never race; the deque lives on `Standalone`
+/// (`live_midi_wasm`) because the web render path constructs a fresh
+/// `ProjectRenderer` per block.
+#[cfg(target_arch = "wasm32")]
+pub(crate) struct LiveMidiQueue {
+    pub(crate) events: std::collections::VecDeque<LiveMidiEvent>,
+}
+
 /// Drain every queued live-MIDI event into a per-track scratch bucket.
 ///
 /// Resolves each event's track guid to a snapshot index via `idx_of`
@@ -189,6 +201,29 @@ pub(crate) fn drain_live_midi(
     let avail = queue.cons.slots();
     for _ in 0..avail {
         let Ok(ev) = queue.cons.pop() else { break };
+        let Some(ti) = idx_of(&ev.track) else {
+            continue;
+        };
+        let Some(bucket) = buckets.get_mut(ti) else {
+            continue;
+        };
+        bucket.push(crate::plugin::PluginMidiEvent {
+            offset: ev.offset,
+            message: ev.message,
+        });
+    }
+}
+
+/// wasm32 variant of [`drain_live_midi`] — identical semantics over the
+/// `VecDeque`-backed queue: resolve each event's track guid via `idx_of`,
+/// append to that track's bucket, drop unresolvable events.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn drain_live_midi(
+    queue: &mut LiveMidiQueue,
+    idx_of: impl Fn(&str) -> Option<usize>,
+    buckets: &mut [Vec<crate::plugin::PluginMidiEvent>],
+) {
+    while let Some(ev) = queue.events.pop_front() {
         let Some(ti) = idx_of(&ev.track) else {
             continue;
         };
@@ -365,6 +400,17 @@ impl ProjectRenderer {
         }
     }
 
+    /// Wire a fresh live-MIDI ring between this renderer and its backend —
+    /// the headless-native path (no `AudioEngine`): after this,
+    /// `Standalone::push_live_midi` feeds this renderer's per-block drain,
+    /// exactly as under a running engine. Replaces any previous ring.
+    #[cfg(all(not(target_arch = "wasm32"), feature = "audio"))]
+    pub fn connect_live_midi(&self, capacity: usize) {
+        let (prod, cons) = rtrb::RingBuffer::new(capacity.max(1));
+        self.daw.set_live_midi_producer(prod);
+        self.set_live_midi(cons);
+    }
+
     /// Render `frames` stereo frames starting at `start_frame` (in
     /// output-rate samples). Returns a fresh `StereoBuffer`.
     pub fn render_block(&self, start_frame: u64, frames: usize) -> StereoBuffer {
@@ -437,9 +483,10 @@ impl ProjectRenderer {
         // index. The buckets merge into each track's `collect_midi_events`
         // list at the FX stage below. Empty / no-op when no queue is
         // installed and when nothing was pushed this block.
-        // Native-only: the live-MIDI ring is `rtrb`-backed (native dep). On
-        // wasm32 the buckets stay empty and the merge at the FX stage is a
-        // no-op (`get_mut` returns `None`).
+        // Native: the live-MIDI ring is `rtrb`-backed (native dep). On
+        // wasm32 the queue is a `VecDeque` on `Standalone` (pushed by the
+        // `WebRenderer` MIDI methods) — drained here with the same
+        // guid-resolve + bucket merge.
         #[allow(unused_mut)]
         let mut live_midi_buckets: Vec<Vec<crate::plugin::PluginMidiEvent>> = Vec::new();
         #[cfg(not(target_arch = "wasm32"))]
@@ -456,6 +503,17 @@ impl ProjectRenderer {
                 let idx_of =
                     |guid: &str| -> Option<usize> { tracks.iter().position(|t| t.guid == guid) };
                 drain_live_midi(queue, idx_of, &mut live_midi_buckets);
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let events = self.daw.take_live_midi_wasm();
+            if !events.is_empty() {
+                live_midi_buckets.resize_with(n, Vec::new);
+                let idx_of =
+                    |guid: &str| -> Option<usize> { tracks.iter().position(|t| t.guid == guid) };
+                let mut queue = LiveMidiQueue { events };
+                drain_live_midi(&mut queue, idx_of, &mut live_midi_buckets);
             }
         }
 

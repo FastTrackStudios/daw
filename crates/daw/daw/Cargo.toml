@@ -95,6 +95,10 @@ tokio.workspace = true
 [features]
 reaper = ["dep:daw-reaper"]
 standalone = ["dep:daw-standalone"]
+# Resident source decoding + the render path WITHOUT cpal (wasm-compatible):
+# what a browser-worklet consumer of the standalone backend enables. Also
+# turns on the live-MIDI queue (`Standalone::push_live_midi`) on wasm32.
+standalone-decode = ["standalone", "daw-standalone/decode"]
 standalone-audio = ["standalone", "daw-standalone/audio"]
 # Native PipeWire duplex engine (`daw::standalone::audio_engine::DuplexAudioEngine`)
 # — one low-latency realtime callback (input+output, no ring). Linux-only.

@@ -612,6 +612,17 @@ pub struct Standalone {
     #[cfg(feature = "audio")]
     pub(crate) live_midi_tx:
         Arc<Mutex<Option<rtrb::Producer<crate::audio_engine::render::LiveMidiEvent>>>>,
+    /// wasm32 live / programmatic MIDI queue — the browser analog of
+    /// `live_midi_tx`. The AudioWorkletGlobalScope is single-threaded, so a
+    /// mutex-guarded `VecDeque` is uncontended by construction; it lives on
+    /// `Standalone` (not the renderer) because the web render path builds a
+    /// fresh `ProjectRenderer` per block. Pushed by `push_live_midi`;
+    /// swapped out whole by the renderer once per block
+    /// (`take_live_midi_wasm`).
+    #[cfg(all(target_arch = "wasm32", any(feature = "decode", feature = "audio")))]
+    pub(crate) live_midi_wasm: Arc<
+        Mutex<std::collections::VecDeque<crate::audio_engine::render::LiveMidiEvent>>,
+    >,
 }
 
 impl Default for Standalone {
@@ -644,6 +655,8 @@ impl Standalone {
             meter_pump_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             #[cfg(feature = "audio")]
             live_midi_tx: Arc::new(Mutex::new(None)),
+            #[cfg(all(target_arch = "wasm32", any(feature = "decode", feature = "audio")))]
+            live_midi_wasm: Arc::new(Mutex::new(std::collections::VecDeque::new())),
         }
     }
 
@@ -945,7 +958,7 @@ impl Standalone {
     /// [`push_note_on`](Self::push_note_on) / [`push_cc`](Self::push_cc) this
     /// carries the original channel, release velocity, pitch-bend and program
     /// change rather than collapsing to monotimbral channel 0.
-    #[cfg(feature = "audio")]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "audio"))]
     pub fn push_live_midi(&self, track_guid: &str, message: daw_proto::MidiEvent) -> bool {
         let mut guard = match self.live_midi_tx.lock() {
             Ok(g) => g,
@@ -962,9 +975,49 @@ impl Standalone {
         .is_ok()
     }
 
+    /// wasm32 variant of [`push_live_midi`](Self::push_live_midi): queue a
+    /// programmatic MIDI message for `track_guid` in the `VecDeque`-backed
+    /// live-MIDI queue; the web render path drains it once per block.
+    /// Bounded (drops + returns `false` past the cap) so a producer that
+    /// outruns a stalled renderer can't grow the queue without limit.
+    #[cfg(all(target_arch = "wasm32", any(feature = "decode", feature = "audio")))]
+    pub fn push_live_midi(&self, track_guid: &str, message: daw_proto::MidiEvent) -> bool {
+        /// Same order of magnitude as the native ring's capacity.
+        const MAX_QUEUED: usize = 1024;
+        let mut queue = self
+            .live_midi_wasm
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if queue.len() >= MAX_QUEUED {
+            return false;
+        }
+        queue.push_back(crate::audio_engine::render::LiveMidiEvent {
+            track: track_guid.to_string(),
+            offset: 0,
+            message,
+        });
+        true
+    }
+
+    /// Swap out every queued wasm live-MIDI event (renderer-side, once per
+    /// block). Returns the whole queue, leaving an empty one in place.
+    #[cfg(all(target_arch = "wasm32", any(feature = "decode", feature = "audio")))]
+    pub(crate) fn take_live_midi_wasm(
+        &self,
+    ) -> std::collections::VecDeque<crate::audio_engine::render::LiveMidiEvent> {
+        let mut queue = self
+            .live_midi_wasm
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        std::mem::take(&mut *queue)
+    }
+
     /// Programmatic Note-On (channel 0) to `track_guid`. A `velocity` of 0
     /// is a Note-Off by MIDI convention — most instruments treat it so.
-    #[cfg(feature = "audio")]
+    #[cfg(any(
+        all(not(target_arch = "wasm32"), feature = "audio"),
+        all(target_arch = "wasm32", any(feature = "decode", feature = "audio"))
+    ))]
     pub fn push_note_on(&self, track_guid: &str, note: u8, velocity: u8) -> bool {
         use daw_proto::{Channel, KeyNumber, MidiEvent, Velocity};
         self.push_live_midi(
@@ -978,7 +1031,10 @@ impl Standalone {
     }
 
     /// Programmatic Note-Off (channel 0, release velocity 0) to `track_guid`.
-    #[cfg(feature = "audio")]
+    #[cfg(any(
+        all(not(target_arch = "wasm32"), feature = "audio"),
+        all(target_arch = "wasm32", any(feature = "decode", feature = "audio"))
+    ))]
     pub fn push_note_off(&self, track_guid: &str, note: u8) -> bool {
         use daw_proto::{Channel, KeyNumber, MidiEvent, Velocity};
         self.push_live_midi(
@@ -992,7 +1048,10 @@ impl Standalone {
     }
 
     /// Programmatic Control-Change (channel 0) to `track_guid`.
-    #[cfg(feature = "audio")]
+    #[cfg(any(
+        all(not(target_arch = "wasm32"), feature = "audio"),
+        all(target_arch = "wasm32", any(feature = "decode", feature = "audio"))
+    ))]
     pub fn push_cc(&self, track_guid: &str, controller: u8, value: u8) -> bool {
         use daw_proto::{Channel, ControllerNumber, ControllerValue, MidiEvent};
         self.push_live_midi(
