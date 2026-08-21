@@ -340,12 +340,22 @@ impl StreamedSample {
         // very heap, so the request behaves exactly like the native one:
         // hand the sample to the streamer queue and return. A CAS and a
         // notify — no allocation, no blocking, no decode.
+        //
+        // The `queued` guard is NOT optional here, for the same reason the
+        // native arm has it: `request` is called from `sample()` on EVERY
+        // read that misses a chunk — thousands of times per block per
+        // voice. Enqueueing each one buried the workers under duplicate
+        // jobs (and allocated an `Arc` clone per call), which wedged the
+        // whole tab. One job per sample until a worker drains it; `fill`
+        // clears the flag and re-arms if anything is still wanted.
         #[cfg(all(
             not(feature = "engine-native"),
             target_arch = "wasm32",
             target_feature = "atomics"
         ))]
-        crate::stream_wasm::enqueue(self);
+        if !self.queued.swap(true, Ordering::AcqRel) {
+            crate::stream_wasm::enqueue(self);
+        }
         // No workers (single-threaded wasm build): the wanted set is
         // recorded and nothing decodes here. A voice that outruns its head
         // reads silence for those frames rather than taking the whole
