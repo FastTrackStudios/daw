@@ -22,7 +22,15 @@ static USED: AtomicU64 = AtomicU64::new(0);
 static WARNED: AtomicBool = AtomicBool::new(false);
 
 /// Fallback when the machine's RAM can't be read.
+#[cfg(not(target_arch = "wasm32"))]
 const DEFAULT_BUDGET_MB: u64 = 3072;
+/// wasm32 linear memory tops out at 4 GB (2 GB without an explicit
+/// --max-memory), and the same space also holds the resident pack BYTES and
+/// the app itself. A 3 GB decoded-PCM budget there is an OOM abort wearing a
+/// number — allocation failure traps the whole instance with no panic hook.
+/// Keep decoded PCM modest; budget-skipped notes warm on demand.
+#[cfg(target_arch = "wasm32")]
+const DEFAULT_BUDGET_MB: u64 = 768;
 /// Never take more than this share of the machine, however big it is — the
 /// engine shares the box with a DAW, a browser and the OS page cache.
 const MAX_SHARE: f64 = 0.15;
