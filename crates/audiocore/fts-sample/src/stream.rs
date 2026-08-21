@@ -131,6 +131,13 @@ impl StreamedSample {
         num_frames: usize,
     ) -> Option<Arc<Self>> {
         let map = map.into();
+        // Streaming reads the compressed entry over and over; an External
+        // pack (bytes outside this address space) cannot back that — its
+        // entries are materialized as Owned bytes BEFORE streaming (see
+        // `cache::load_pack_sample`). Refuse rather than trap on the deref.
+        if map.is_external() {
+            return None;
+        }
         let stream = map.get(offset..offset + bytes)?;
         let index = FlacIndex::build(stream)?;
         let head = decode_chunk(stream, &index, 0, HEAD_FRAMES, channels)?;

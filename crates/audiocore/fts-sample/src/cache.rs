@@ -6,6 +6,7 @@
 //! Loaded buffers are reference-counted so multiple voices can share one
 //! allocation without copying.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
@@ -38,6 +39,19 @@ pub enum PackBytes {
     Mapped(Arc<memmap2::Mmap>),
     /// The whole pack resident in memory.
     Owned(Arc<[u8]>),
+    /// The pack's bytes live OUTSIDE this process's address space, reachable
+    /// only through the pluggable [`set_external_pack_reader`] hook — the
+    /// browser seam, where multi-GB pack buffers stay on the JS heap instead
+    /// of wasm linear memory. Every read goes through
+    /// [`read_range`](Self::read_range) (which allocates a copy of just the
+    /// requested span); this arm can NEVER be `Deref`'d.
+    External {
+        /// Reader-side handle for the buffer (assigned by whoever installed
+        /// the reader, e.g. the worklet's JS pack map).
+        id: u32,
+        /// Total pack length in bytes.
+        len: u64,
+    },
 }
 
 impl std::ops::Deref for PackBytes {
@@ -49,6 +63,12 @@ impl std::ops::Deref for PackBytes {
             #[cfg(feature = "engine-native")]
             Self::Mapped(map) => map,
             Self::Owned(bytes) => bytes,
+            // Nothing may deref an External pack — its bytes are not in this
+            // address space. Every read site goes through `read_range`;
+            // reaching this is a bug, and a loud one beats silent silence.
+            Self::External { id, .. } => {
+                panic!("PackBytes::External({id}) cannot be deref'd — use read_range")
+            }
         }
     }
 }
@@ -68,14 +88,92 @@ impl From<Vec<u8>> for PackBytes {
 
 impl PackBytes {
     /// Ask the OS to read `offset..offset + len` ahead, asynchronously.
-    /// Meaningful only for the mapped arm; owned bytes are already resident.
+    /// Meaningful only for the mapped arm; owned bytes are already resident,
+    /// external bytes are another realm's problem.
     fn advise_will_need(&self, offset: usize, len: usize) {
         #[cfg(feature = "engine-native")]
         if let Self::Mapped(map) = self {
             let _ = map.advise_range(memmap2::Advice::WillNeed, offset, len);
         }
-        #[cfg(not(feature = "engine-native"))]
         let _ = (offset, len);
+    }
+
+    /// Total pack length in bytes. Inherent (shadowing the `Deref` slice's
+    /// `len`) so it works for every arm, External included.
+    #[inline]
+    pub fn len(&self) -> usize {
+        match self {
+            #[cfg(feature = "engine-native")]
+            Self::Mapped(map) => map.len(),
+            Self::Owned(bytes) => bytes.len(),
+            Self::External { len, .. } => *len as usize,
+        }
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Whether this pack's bytes live outside the process (see
+    /// [`PackBytes::External`]).
+    #[inline]
+    pub fn is_external(&self) -> bool {
+        matches!(self, Self::External { .. })
+    }
+
+    /// Read `offset..offset + len`, borrowed straight out of the backing
+    /// bytes for the in-process arms, copied through the external reader for
+    /// [`External`](Self::External). THE read path for pack bytes — nothing
+    /// may slice or deref an External pack any other way.
+    pub fn read_range(&self, offset: u64, len: usize) -> Result<Cow<'_, [u8]>, SamplerError> {
+        let start = usize::try_from(offset)
+            .map_err(|_| invalid_data("pack read offset exceeds address space"))?;
+        let end = start
+            .checked_add(len)
+            .filter(|&e| e <= self.len())
+            .ok_or_else(|| invalid_data("pack read out of bounds"))?;
+        match self {
+            #[cfg(feature = "engine-native")]
+            Self::Mapped(map) => Ok(Cow::Borrowed(&map[start..end])),
+            Self::Owned(bytes) => Ok(Cow::Borrowed(&bytes[start..end])),
+            Self::External { id, .. } => {
+                let mut buf = vec![0u8; len];
+                if !read_external(*id, offset, &mut buf) {
+                    return Err(invalid_data(format!(
+                        "external pack {id}: read of {len} bytes at {offset} failed \
+                         (no reader installed, or the reader refused the range)"
+                    )));
+                }
+                Ok(Cow::Owned(buf))
+            }
+        }
+    }
+}
+
+// ── The external pack reader (process-global, pluggable) ─────────────────────
+
+/// Reads `len = dst.len()` bytes at `offset` of external pack `id` into
+/// `dst`, returning `false` on failure. Installed once per process by the
+/// host that owns the out-of-process buffers (the browser worklet's JS glue);
+/// fts-sample itself has no idea what an id points at.
+pub type ExternalPackReader = Box<dyn Fn(u32, u64, &mut [u8]) -> bool + Send + Sync>;
+
+static EXTERNAL_READER: std::sync::OnceLock<ExternalPackReader> = std::sync::OnceLock::new();
+
+/// Install the process-wide reader behind [`PackBytes::External`]. First
+/// caller wins (returns `false` when a reader was already installed —
+/// harmless if it is the same one, which is the expected pattern).
+pub fn set_external_pack_reader(reader: ExternalPackReader) -> bool {
+    EXTERNAL_READER.set(reader).is_ok()
+}
+
+/// Read through the installed external reader. `false` when none is
+/// installed or the reader failed.
+fn read_external(id: u32, offset: u64, dst: &mut [u8]) -> bool {
+    match EXTERNAL_READER.get() {
+        Some(reader) => reader(id, offset, dst),
+        None => false,
     }
 }
 
@@ -209,7 +307,9 @@ impl Pcm {
             Self::I16(v) => v.get(index).map(|s| *s as f32 * I16_SCALE).unwrap_or(0.0),
             Self::Streamed(s) => s.sample(index),
             Self::Mapped { map, offset, samples, fmt } => {
-                if index >= *samples {
+                // A Mapped window is never built over an External pack; if
+                // one ever were, silence beats trapping the audio thread.
+                if index >= *samples || map.is_external() {
                     return 0.0;
                 }
                 let at = offset + index * fmt.width();
@@ -376,6 +476,12 @@ impl SampleData {
     /// this costs the process nothing it can be blamed for.
     pub fn warm(&self, head_frames: usize) {
         let Pcm::Mapped { map, offset, samples, fmt } = &self.pcm else { return };
+        // Belt-and-braces: `load_pack_sample` never builds a Mapped window
+        // over an External pack (it materializes the entry first), so this
+        // guard should be dead — but touching one would trap on the deref.
+        if map.is_external() {
+            return;
+        }
         let len = samples * fmt.width();
         // Read-ahead for the whole sample, asynchronously (mapped arm only —
         // owned bytes are already resident).
@@ -1609,20 +1715,40 @@ impl SignalPcmPack {
         Self::from_pack_bytes(PathBuf::from("<memory>"), PackBytes::from(bytes))
     }
 
+    /// Open a pack whose bytes live OUTSIDE this process, reachable only
+    /// through the installed [external reader](set_external_pack_reader) —
+    /// the browser seam, where pack buffers stay on the JS heap. Same
+    /// header + index parse as [`open`](Self::open), fetched through
+    /// [`PackBytes::read_range`]; no audio is decoded, and audio entries
+    /// materialize per entry at decode time.
+    pub fn open_external(id: u32, len: u64) -> Result<Self, SamplerError> {
+        Self::from_pack_bytes(
+            PathBuf::from(format!("<external:{id}>")),
+            PackBytes::External { id, len },
+        )
+    }
+
     /// Parse header + index out of the pack bytes, however they arrived.
+    /// All reads go through [`PackBytes::read_range`] — this must work for
+    /// the External arm too.
     fn from_pack_bytes(path: PathBuf, data: PackBytes) -> Result<Self, SamplerError> {
-        let raw: &[u8] = &data;
-        let header_raw: [u8; PackFileHeader::LEN] = raw
-            .get(..PackFileHeader::LEN)
-            .and_then(|b| b.try_into().ok())
-            .ok_or_else(|| invalid_data("signal pack is shorter than its header"))?;
+        if data.len() < PackFileHeader::LEN {
+            return Err(invalid_data("signal pack is shorter than its header"));
+        }
+        let header_bytes = data.read_range(0, PackFileHeader::LEN)?;
+        let header_raw: [u8; PackFileHeader::LEN] = header_bytes
+            .as_ref()
+            .try_into()
+            .map_err(|_| invalid_data("signal pack is shorter than its header"))?;
         let header = PackFileHeader::parse(header_raw)?;
         let kind = header.require_known_kind()?;
 
-        let index_start = header.index_offset() as usize;
-        let index = raw
-            .get(index_start..index_start.saturating_add(header.index_len() as usize))
-            .ok_or_else(|| invalid_data("signal pack index out of bounds"))?;
+        let index_len = usize::try_from(header.index_len())
+            .map_err(|_| invalid_data("signal pack index out of bounds"))?;
+        let index = data
+            .read_range(header.index_offset(), index_len)
+            .map_err(|_| invalid_data("signal pack index out of bounds"))?;
+        let index: &[u8] = &index;
 
         let mut entries = HashMap::new();
         let mut in_embedded_spec = false;
@@ -1869,6 +1995,25 @@ fn load_pack_sample(
     map: &PackBytes,
     entry: &PackEntry,
 ) -> Result<SampleData, SamplerError> {
+    // External packs: materialize THIS ENTRY's bytes once (a few MB — the
+    // pack itself never enters this address space) and continue on an Owned
+    // pack positioned at 0. Everything below — the mapped-PCM window, the
+    // streaming open, the whole-entry decode — then reads in-process bytes,
+    // and nothing ever derefs the External arm.
+    if map.is_external() {
+        let span = match entry.mapped_fmt() {
+            Some(fmt) => entry
+                .samples
+                .checked_mul(fmt.width())
+                .ok_or_else(|| invalid_data("signal pack PCM entry out of bounds"))?,
+            None => usize::try_from(entry.bytes)
+                .map_err(|_| invalid_data("signal pack entry out of bounds"))?,
+        };
+        let owned = map.read_range(entry.offset, span)?.into_owned();
+        let mut local = entry.clone();
+        local.offset = 0;
+        return load_pack_sample(&PackBytes::from(owned), &local);
+    }
     if let Some(fmt) = entry.mapped_fmt() {
         let start = entry.offset as usize;
         let end = start
@@ -1902,13 +2047,10 @@ fn load_pack_sample(
             return Ok(SampleData::streamed(streamed));
         }
     }
-    let pack_data: &[u8] = map;
-    let start = entry.offset as usize;
-    let end = start
-        .checked_add(entry.bytes as usize)
-        .filter(|&e| e <= pack_data.len())
-        .ok_or_else(|| invalid_data("signal pack entry out of bounds"))?;
-    let bytes = &pack_data[start..end];
+    let bytes = map
+        .read_range(entry.offset, entry.bytes as usize)
+        .map_err(|_| invalid_data("signal pack entry out of bounds"))?;
+    let bytes: &[u8] = &bytes;
     // Dispatch on the entry's own payload magic (not the pack-level kind) —
     // robust and leaves room for mixed-codec packs.
     let data = if bytes.starts_with(b"OggS") {
@@ -3227,6 +3369,100 @@ mod tests {
             m_data.to_f32().as_ref(),
             "open_bytes must decode the same PCM as the mmap open"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The External arm: a reader registered over an in-memory Vec must
+    /// parse and decode identically to `open_bytes` over the same bytes —
+    /// header, index, spec and PCM — with every read going through
+    /// `read_range` (nothing may deref an External).
+    #[test]
+    fn open_external_decodes_identically_to_open_bytes() {
+        static PACKS: std::sync::Mutex<Option<HashMap<u32, Vec<u8>>>> =
+            std::sync::Mutex::new(None);
+
+        let dir = std::env::temp_dir().join(format!("fts-open-external-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("tmp dir");
+
+        let (sr, n_frames) = (48_000u32, 4_096usize);
+        let wav = dir.join("tone.wav");
+        {
+            let spec = hound::WavSpec {
+                channels: 2,
+                sample_rate: sr,
+                bits_per_sample: 32,
+                sample_format: hound::SampleFormat::Float,
+            };
+            let mut w = hound::WavWriter::create(&wav, spec).expect("wav");
+            for i in 0..n_frames {
+                let s = ((i as f32) * 0.03).sin() * 0.6;
+                w.write_sample(s).expect("write");
+                w.write_sample(-s).expect("write");
+            }
+            w.finalize().expect("finalize");
+        }
+        let pack_path = dir.join("tone.signalpack");
+        create_signal_pack_with(
+            &pack_path,
+            PackSpecSource::Text { text: "name \"tone\"\n", format: "styx" },
+            &dir,
+            [wav.as_path()].into_iter(),
+            PackCodec::FlacI24,
+        )
+        .expect("build pack");
+        let bytes = std::fs::read(&pack_path).expect("read pack bytes");
+        let len = bytes.len() as u64;
+
+        // Register the bytes with the process-global reader (first install
+        // wins — a prior install by another test would use the same map).
+        const ID: u32 = 7001;
+        PACKS
+            .lock()
+            .unwrap()
+            .get_or_insert_with(HashMap::new)
+            .insert(ID, bytes.clone());
+        set_external_pack_reader(Box::new(|id, offset, dst| {
+            let packs = PACKS.lock().unwrap();
+            let Some(bytes) = packs.as_ref().and_then(|m| m.get(&id)) else {
+                return false;
+            };
+            let start = offset as usize;
+            let Some(src) = bytes.get(start..start + dst.len()) else {
+                return false;
+            };
+            dst.copy_from_slice(src);
+            true
+        }));
+
+        let external = SignalPcmPack::open_external(ID, len).expect("open_external");
+        let owned = SignalPcmPack::open_bytes(bytes).expect("open_bytes");
+
+        assert!(external.mmap.is_external());
+        assert_eq!(external.kind(), owned.kind());
+        assert_eq!(external.entry_count(), owned.entry_count());
+        assert_eq!(external.embedded_spec(), owned.embedded_spec());
+
+        let rel = Path::new("tone.wav");
+        let e_entry = external.entry_for_path(rel).expect("external entry").clone();
+        let o_entry = owned.entry_for_path(rel).expect("owned entry");
+        assert_eq!(e_entry.num_frames(), o_entry.num_frames());
+
+        let e_data = load_pack_sample(&external.mmap, &e_entry).expect("decode external");
+        let o_data = load_pack_sample(&owned.mmap, o_entry).expect("decode owned");
+        assert_eq!(e_data.channels, o_data.channels);
+        assert_eq!(e_data.sample_rate, o_data.sample_rate);
+        assert_eq!(e_data.num_frames, o_data.num_frames);
+        assert_eq!(
+            e_data.to_f32().as_ref(),
+            o_data.to_f32().as_ref(),
+            "open_external must decode the same PCM as open_bytes"
+        );
+
+        // Out-of-bounds and truncated reads refuse instead of trapping.
+        assert!(external.mmap.read_range(len, 1).is_err());
+        assert!(external.mmap.read_range(0, len as usize + 1).is_err());
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 
