@@ -591,6 +591,10 @@ pub struct SignalPcmPack {
     mmap: PackBytes,
     /// Header kind field (5 = FLAC i24 lossless, 6 = Ogg Vorbis proxy).
     kind: u32,
+    /// The header's index span `(offset, len)` — what a range-streaming
+    /// planner must deliver (with the 64-byte header) before the pack can
+    /// open at all.
+    index_span: (u64, u64),
     entries: HashMap<PathBuf, PackEntry>,
     /// Embedded styx/toml spec text recovered from the pack index.
     embedded_spec: Option<String>,
@@ -1810,10 +1814,18 @@ impl SignalPcmPack {
             path,
             mmap: data,
             kind,
+            index_span: (header.index_offset(), header.index_len()),
             entries,
             embedded_spec,
             embedded_spec_format: spec_format,
         })
+    }
+
+    /// The header's index span `(offset, len)` — together with the fixed
+    /// 64-byte header, the exact bytes [`open`](Self::open) reads before
+    /// any audio: the rank-0 set for range streaming.
+    pub fn index_span(&self) -> (u64, u64) {
+        self.index_span
     }
 
     /// Embedded library spec text, if the pack carried one.
