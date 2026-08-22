@@ -149,6 +149,8 @@ pub fn drain() -> usize {
         // pack bytes are not there yet; the next press re-queues it.
         if job.cache.get(&job.path).is_ok() {
             OPENED.fetch_add(1, Ordering::Relaxed);
+        } else {
+            OPEN_FAILED.fetch_add(1, Ordering::Relaxed);
         }
         n += 1;
     }
@@ -182,6 +184,10 @@ static OPEN_SLOTS: [AtomicUsize; RING] = [const { AtomicUsize::new(0) }; RING];
 static OPEN_HEAD: AtomicUsize = AtomicUsize::new(0);
 static OPEN_TAIL: AtomicUsize = AtomicUsize::new(0);
 static OPENED: AtomicUsize = AtomicUsize::new(0);
+/// Open jobs a worker DEQUEUED but whose `cache.get` failed. Separates
+/// "the workers never ran" (both zero) from "they ran and could not do
+/// the work" (failures climbing) — `OPENED` alone cannot tell them apart.
+static OPEN_FAILED: AtomicUsize = AtomicUsize::new(0);
 
 /// Queue a zone to be opened off-thread. **Audio-thread safe**: one
 /// allocation for the job box and a CAS. Duplicates are harmless — the
@@ -233,6 +239,16 @@ fn dequeue_open() -> Option<Box<OpenJob>> {
 /// Zones opened off-thread since boot.
 pub fn opened() -> usize {
     OPENED.load(Ordering::Relaxed)
+}
+
+/// Open jobs that were dequeued but failed to open.
+pub fn open_failed() -> usize {
+    OPEN_FAILED.load(Ordering::Relaxed)
+}
+
+/// Open jobs still queued (distinct from the chunk-ring [`depth`]).
+pub fn open_depth() -> usize {
+    OPEN_HEAD.load(Ordering::Relaxed).wrapping_sub(OPEN_TAIL.load(Ordering::Relaxed))
 }
 
 /// Samples dropped because the ring was full — decoders falling behind.
