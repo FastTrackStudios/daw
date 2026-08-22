@@ -70,11 +70,16 @@ pub fn enqueue(sample: &Arc<StreamedSample>) {
     ) {
         Ok(_) => head & MASK,
         Err(_) => {
-            // Contended: another producer took it. One retry is enough —
-            // this is the audio thread, and a missed enqueue costs a chunk
-            // of latency, never correctness.
-            let head = HEAD.fetch_add(1, Ordering::AcqRel);
-            head & MASK
+            // Contended: another producer took the index. Re-check
+            // fullness before claiming — a bare fetch_add here let HEAD
+            // run more than RING ahead of TAIL under contention, which
+            // silently overwrites live slots.
+            let head = HEAD.load(Ordering::Relaxed);
+            if head.wrapping_sub(TAIL.load(Ordering::Acquire)) >= RING {
+                DROPPED.fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+            HEAD.fetch_add(1, Ordering::AcqRel) & MASK
         }
     };
     let ptr = Arc::into_raw(Arc::clone(sample)) as usize;
@@ -95,6 +100,17 @@ fn dequeue() -> Option<Arc<StreamedSample>> {
         if tail == HEAD.load(Ordering::Acquire) {
             return None;
         }
+        // Read the slot BEFORE claiming it. The producer reserves its index
+        // and stores a moment later, so a slot can be legitimately empty
+        // while HEAD is already past it. Advancing TAIL first (what this
+        // did originally) stepped over that item permanently: nothing ever
+        // revisits it, and because `StreamedSample::queued` stays true
+        // until `fill` runs, that sample is never re-queued either — the
+        // voice reads silence past its head for the rest of the session.
+        let ptr = SLOTS[tail & MASK].load(Ordering::Acquire);
+        if ptr == 0 {
+            return None; // not stored yet — leave TAIL where it is
+        }
         if TAIL
             .compare_exchange_weak(
                 tail,
@@ -104,14 +120,10 @@ fn dequeue() -> Option<Arc<StreamedSample>> {
             )
             .is_err()
         {
-            continue;
+            continue; // another consumer took it; look again
         }
-        let ptr = SLOTS[tail & MASK].swap(0, Ordering::AcqRel);
-        if ptr == 0 {
-            // Producer claimed the index but has not stored yet; treat as
-            // empty and let the next wake pick it up.
-            continue;
-        }
+        // We own this index now; clear it.
+        SLOTS[tail & MASK].store(0, Ordering::Release);
         return Some(unsafe { Arc::from_raw(ptr as *const StreamedSample) });
     }
 }
@@ -217,6 +229,10 @@ fn dequeue_open() -> Option<Box<OpenJob>> {
         if tail == OPEN_HEAD.load(Ordering::Acquire) {
             return None;
         }
+        let probe = OPEN_SLOTS[tail & MASK].load(Ordering::Acquire);
+        if probe == 0 {
+            return None; // reserved but not stored yet — see `dequeue`
+        }
         if OPEN_TAIL
             .compare_exchange_weak(
                 tail,
@@ -228,10 +244,11 @@ fn dequeue_open() -> Option<Box<OpenJob>> {
         {
             continue;
         }
-        let ptr = OPEN_SLOTS[tail & MASK].swap(0, Ordering::AcqRel);
+        let ptr = OPEN_SLOTS[tail & MASK].load(Ordering::Acquire);
         if ptr == 0 {
-            continue;
+            return None; // reserved but not stored yet — see `dequeue`
         }
+        OPEN_SLOTS[tail & MASK].store(0, Ordering::Release);
         return Some(unsafe { Box::from_raw(ptr as *mut OpenJob) });
     }
 }

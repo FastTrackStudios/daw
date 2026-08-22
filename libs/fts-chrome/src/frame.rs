@@ -322,11 +322,14 @@ pub fn PanelRail() -> Element {
                 {
                     let open = chrome.panel_open(&panel.id);
                     let id = panel.id.clone();
-                    let testid = panel.testid.clone().unwrap_or_default();
+                    // Only emit the attribute when there IS one: an
+                    // empty `data-testid` on every untagged panel button
+                    // makes `[data-testid]` unqueryable as "has a testid".
+                    let testid = panel.testid.clone();
                     rsx! {
                         button {
                             key: "{panel.id}",
-                            "data-testid": "{testid}",
+                            "data-testid": testid,
                             style: format!(
                                 "appearance: none; display: flex; align-items: center; justify-content: center; \
                                  width: {HIT}px; height: {HIT}px; border: none; border-radius: 9px; \

@@ -999,6 +999,44 @@ impl Standalone {
         true
     }
 
+    /// Discard every queued live-MIDI event (wasm), returning how many
+    /// went.
+    ///
+    /// For a LIVE instrument a stale note is worse than no note. When
+    /// rendering stops for a while — the context suspends, the tab goes to
+    /// the background, a long handler stalls the thread — pressed notes
+    /// keep queueing, and draining them when rendering resumes fires the
+    /// lot at once: the player hears notes they pressed seconds ago, all
+    /// together, which is worse than silence. The host flushes instead.
+    #[cfg(all(target_arch = "wasm32", any(feature = "decode", feature = "audio")))]
+    pub fn flush_live_midi(&self) -> usize {
+        self.live_midi_wasm
+            .lock()
+            .map(|mut q| {
+                let n = q.len();
+                q.clear();
+                n
+            })
+            .unwrap_or(0)
+    }
+
+    /// Live-MIDI events waiting to be drained (wasm).
+    ///
+    /// The renderer swaps this queue out once per block, so in a healthy
+    /// rig it is 0 or a handful. A depth that STAYS above zero means events
+    /// are being pushed faster than blocks are rendering — i.e. the notes a
+    /// player pressed are sitting in a queue instead of sounding, and will
+    /// arrive late in a burst when rendering catches up. That is exactly
+    /// the "it plays my notes seconds later" failure, so it needs to be
+    /// visible rather than inferred.
+    #[cfg(all(target_arch = "wasm32", any(feature = "decode", feature = "audio")))]
+    pub fn live_midi_depth(&self) -> usize {
+        self.live_midi_wasm
+            .lock()
+            .map(|q| q.len())
+            .unwrap_or(0)
+    }
+
     /// Swap out every queued wasm live-MIDI event (renderer-side, once per
     /// block). Returns the whole queue, leaving an empty one in place.
     #[cfg(all(target_arch = "wasm32", any(feature = "decode", feature = "audio")))]
