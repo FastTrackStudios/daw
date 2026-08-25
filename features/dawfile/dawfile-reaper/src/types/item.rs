@@ -1263,17 +1263,28 @@ impl Item {
         let inner_lines = &lines[1..lines.len().saturating_sub(1)];
         for line in inner_lines {
             let line = line.trim();
-            if line.starts_with("FILE") {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() > 1 {
-                    file_path = parts[1..].join(" ");
-                    // Remove quotes if present
-                    if file_path.starts_with('"') && file_path.ends_with('"') {
-                        file_path = file_path[1..file_path.len() - 1].to_string();
-                    }
-                    // Fix double-escaped backslashes
-                    file_path = file_path.replace("\\\\", "\\");
-                }
+            if let Some(rest) = line.strip_prefix("FILE") {
+                let rest = rest.trim();
+                // REAPER writes a trailing flag after the path —
+                // `FILE "Media/song.mp3" 1` — so the path is the quoted
+                // run, not the rest of the line. Joining every token
+                // after FILE swept that flag into the filename, and
+                // because the result then ended in `1` rather than a
+                // quote the quote-stripping never fired either. The
+                // source failed to open, the project loaded with
+                // `decoded=0`, and it played silence: a missing-file
+                // error naming a file that is right there on disk.
+                file_path = match rest.strip_prefix('"') {
+                    // Quoted: up to the closing quote. This is the only
+                    // form that can hold a path with spaces in it, which
+                    // most media paths from a browser download do.
+                    Some(inner) => inner.split('"').next().unwrap_or_default().to_string(),
+                    // Unquoted paths cannot contain spaces, so the path
+                    // is the first token and anything after it is flags.
+                    None => rest.split_whitespace().next().unwrap_or_default().to_string(),
+                };
+                // Fix double-escaped backslashes
+                file_path = file_path.replace("\\\\", "\\");
                 break;
             }
         }
@@ -1618,6 +1629,38 @@ impl fmt::Display for SourceBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// REAPER writes a flag after the quoted path. Swept into the
+    /// filename it produces a "no such file" naming a file that is
+    /// there — the project loads with zero decoded sources and plays
+    /// silence, which reads as a broken audio device.
+    #[test]
+    fn a_trailing_flag_is_not_part_of_the_path() {
+        let block = "<SOURCE MP3\n  FILE \"Media/_NSYNC - Bye Bye Bye (Official Audio) 0.mp3\" 1\n>";
+        let source = Item::parse_source_block(block).expect("parses");
+        assert_eq!(
+            source.file_path,
+            "Media/_NSYNC - Bye Bye Bye (Official Audio) 0.mp3"
+        );
+    }
+
+    /// The same line without a flag, which is what most projects carry
+    /// and what used to work — the fix must not regress it.
+    #[test]
+    fn a_quoted_path_with_no_flag_still_parses() {
+        let block = "<SOURCE WAVE\n  FILE \"Media/take one.wav\"\n>";
+        let source = Item::parse_source_block(block).expect("parses");
+        assert_eq!(source.file_path, "Media/take one.wav");
+    }
+
+    /// Unquoted paths cannot contain spaces, so anything after the
+    /// first token is a flag rather than the rest of a filename.
+    #[test]
+    fn an_unquoted_path_stops_at_the_first_token() {
+        let block = "<SOURCE WAVE\n  FILE Media/kick.wav 1\n>";
+        let source = Item::parse_source_block(block).expect("parses");
+        assert_eq!(source.file_path, "Media/kick.wav");
+    }
 
     #[test]
     fn test_parse_complex_item() {
