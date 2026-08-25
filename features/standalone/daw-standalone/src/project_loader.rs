@@ -181,7 +181,7 @@ fn populate_tracks(
             // is the project's one tempo, and everything that converts
             // time — the grid, the ruler, quantize targets — reads it
             // from here. r[impl drums.group.tempo]
-            p.transport.tempo = Tempo::from_bpm((bpm.max(1)) as f64);
+            p.transport.tempo = Tempo::from_bpm(bpm.max(1.0));
             p.transport.time_signature = TimeSignature::new(num.max(1) as u32, denom.max(1) as u32);
         }
 

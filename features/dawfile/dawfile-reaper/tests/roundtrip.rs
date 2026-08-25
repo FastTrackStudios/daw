@@ -130,7 +130,7 @@ fn roundtrip_reaper_project_semantic() {
     // ── Project properties ──
     let props = &project.properties;
     assert_eq!(props.sample_rate, Some((48000, 0, 0)));
-    assert_eq!(props.tempo, Some((101, 4, 4, 0)));
+    assert_eq!(props.tempo, Some((101.0, 4, 4, 0)));
 
     // ── Tracks ──
     assert_eq!(project.tracks.len(), 10);

@@ -1471,13 +1471,13 @@ impl ReaperProjectBuilder {
 
     /// Set the project tempo in BPM.
     pub fn tempo(mut self, bpm: f64) -> Self {
-        self.properties.tempo = Some((bpm as i32, 4, 4, 0));
+        self.properties.tempo = Some((bpm, 4, 4, 0));
         self
     }
 
     /// Set the project tempo with a specific time signature.
     pub fn tempo_with_time_sig(mut self, bpm: f64, num: i32, den: i32) -> Self {
-        self.properties.tempo = Some((bpm as i32, num, den, 0));
+        self.properties.tempo = Some((bpm, num, den, 0));
         self
     }
 

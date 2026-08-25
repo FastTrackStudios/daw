@@ -142,7 +142,7 @@ fn extract_ending_tempo(project: &ReaperProject) -> (f64, u32) {
         return (pt.tempo, beats.max(1));
     }
     if let Some((bpm, num, _denom, _flags)) = project.properties.tempo {
-        return (bpm as f64, (num as u32).max(1));
+        return (bpm, (num as u32).max(1));
     }
     (120.0, 4)
 }
@@ -164,7 +164,7 @@ fn extract_project_tempo(project: &ReaperProject) -> (f64, u32) {
     }
     // Fall back to TEMPO property: (bpm, numerator, denominator, flags)
     if let Some((bpm, num, _denom, _flags)) = project.properties.tempo {
-        return (bpm as f64, (num as u32).max(1));
+        return (bpm, (num as u32).max(1));
     }
     (120.0, 4) // default
 }
@@ -431,7 +431,7 @@ fn snap_to_prev_measure(position: f64, project: &ReaperProject) -> f64 {
     }
 
     let (default_tempo, default_ts) = if let Some((bpm, num, denom, _)) = project.properties.tempo {
-        (bpm as f64, (num, denom))
+        (bpm, (num, denom))
     } else {
         (120.0, (4i32, 4i32))
     };
@@ -512,7 +512,7 @@ fn snap_to_next_measure(position: f64, project: &ReaperProject) -> f64 {
 
     // Get default tempo and time signature from project
     let (default_tempo, default_ts) = if let Some((bpm, num, denom, _)) = project.properties.tempo {
-        (bpm as f64, (num, denom))
+        (bpm, (num, denom))
     } else {
         (120.0, (4i32, 4i32))
     };

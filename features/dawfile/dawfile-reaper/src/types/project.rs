@@ -317,7 +317,14 @@ pub struct ProjectProperties {
     pub lock: Option<i32>,                    // LOCK 1
 
     // Tempo and playback
-    pub tempo: Option<(i32, i32, i32, i32)>, // TEMPO 120 4 4 0
+    /// `TEMPO 120 4 4 0` — BPM, time-signature numerator, denominator,
+    /// flags.
+    ///
+    /// BPM is `f64` because REAPER writes it fractionally and songs use
+    /// it: `TEMPO 86.28` truncated to 86 is 9 ms of error per bar, which
+    /// is two thirds of a second by the end of a three-minute song — far
+    /// past where a lighting cue or a click track stops landing.
+    pub tempo: Option<(f64, i32, i32, i32)>,
     pub play_rate: Option<(i32, i32, i32, i32)>, // PLAYRATE 1 0 0.25 4
     pub selection: Option<(i32, i32)>,       // SELECTION 0 0
     pub selection2: Option<(i32, i32)>,      // SELECTION2 0 0
@@ -987,7 +994,7 @@ impl ProjectProperties {
                         tokens[3].as_number(),
                     )
                 {
-                    self.tempo = Some((a as i32, b as i32, c as i32, d as i32));
+                    self.tempo = Some((a, b as i32, c as i32, d as i32));
                 }
             }
             "PLAYRATE" => {
@@ -1715,7 +1722,7 @@ mod tests {
         assert_eq!(props.take_lane, Some(1));
         assert_eq!(props.sample_rate, Some((44100, 0, 0)));
         assert_eq!(props.lock, Some(1));
-        assert_eq!(props.tempo, Some((120, 4, 4, 0)));
+        assert_eq!(props.tempo, Some((120.0, 4, 4, 0)));
         assert_eq!(props.play_rate, Some((1, 0, 0, 4)));
         assert_eq!(props.selection, Some((0, 0)));
         assert_eq!(props.selection2, Some((0, 0)));
@@ -1749,6 +1756,29 @@ mod tests {
         assert_eq!(master_view.field12, 0);
         assert_eq!(master_view.field13, 0);
         assert_eq!(master_view.field14, 0);
+    }
+
+    /// REAPER writes tempo fractionally and songs use it. This was
+    /// parsed through `as i32`, so `TEMPO 86.28` became 86 — 9 ms of
+    /// error per bar, two thirds of a second by the end of a
+    /// three-minute song, which is well past where a lighting cue or a
+    /// click stops landing.
+    #[test]
+    fn fractional_tempo_survives_parsing() {
+        let mut props = ProjectProperties::default();
+        for (line, want) in [
+            ("TEMPO 86.28 4 4 0", 86.28),
+            // Four decimal places, which is what REAPER's tempo field
+            // offers and what a tempo-mapped song actually contains.
+            ("TEMPO 128.0001 4 4 0", 128.0001),
+            ("TEMPO 120 4 4 0", 120.0),
+        ] {
+            let tokens = crate::primitives::token::parse_token_line(line).unwrap().1;
+            props.parse_property("TEMPO", &tokens[1..]);
+            let (bpm, num, den, _) = props.tempo.expect("TEMPO parsed");
+            assert_eq!(bpm, want, "{line}");
+            assert_eq!((num, den), (4, 4));
+        }
     }
 
     #[test]
@@ -1819,7 +1849,7 @@ mod tests {
             .expect("Failed to convert to ReaperProject");
 
         // Verify basic project properties
-        assert_eq!(project.properties.tempo, Some((120, 4, 4, 0)));
+        assert_eq!(project.properties.tempo, Some((120.0, 4, 4, 0)));
         assert_eq!(project.properties.sample_rate, Some((44100, 0, 0)));
         assert_eq!(project.properties.ripple, Some((0, 0)));
         assert_eq!(project.properties.auto_xfade, Some(393));
