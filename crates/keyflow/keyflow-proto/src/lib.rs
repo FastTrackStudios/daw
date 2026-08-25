@@ -12,6 +12,7 @@ pub mod chord;
 pub mod core;
 pub mod guide;
 pub mod key;
+pub mod lrc;
 pub mod metadata;
 pub mod primitives;
 pub mod sections;
