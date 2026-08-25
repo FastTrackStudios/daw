@@ -1240,6 +1240,40 @@ impl Item {
         Ok(item)
     }
 
+    /// The media path out of a tokenized `FILE` line, or `None` if this
+    /// is not one.
+    ///
+    /// The single place that knows what a `FILE` line looks like. Both
+    /// SOURCE parsers call it, and they did not always: each had its own
+    /// copy, both copies were wrong in the same way, and fixing one of
+    /// them fixed nothing because the other was the one that ran.
+    ///
+    /// What they got wrong: the path is the **first** token after
+    /// `FILE`, not everything after it. REAPER writes a flag behind the
+    /// path —
+    ///
+    /// ```text
+    /// FILE "Media/_NSYNC - Bye Bye Bye (Official Audio) 0.mp3" 1
+    /// ```
+    ///
+    /// — and joining the remaining tokens folds that `1` into the
+    /// filename. The source then fails to open with a "no such file"
+    /// naming a file that is sitting right there on disk, the project
+    /// loads with zero decoded sources, and it plays silence.
+    ///
+    /// Joining was presumably meant to hold together a path with spaces
+    /// in it. It never did that job: the tokenizer keeps a quoted path
+    /// as one token, spaces and all.
+    fn file_path_from_tokens(tokens: &[Token]) -> Result<Option<String>, String> {
+        if !matches!(tokens.first(), Some(Token::Identifier(id)) if id == "FILE") {
+            return Ok(None);
+        }
+        match tokens.get(1) {
+            Some(token) => Ok(Some(Self::parse_string(token)?.replace("\\\\", "\\"))),
+            None => Ok(None),
+        }
+    }
+
     /// Parse a SOURCE block
     fn parse_source_block(block_content: &str) -> Result<SourceBlock, String> {
         let lines: Vec<&str> = block_content.lines().collect();
@@ -1263,28 +1297,15 @@ impl Item {
         let inner_lines = &lines[1..lines.len().saturating_sub(1)];
         for line in inner_lines {
             let line = line.trim();
-            if let Some(rest) = line.strip_prefix("FILE") {
-                let rest = rest.trim();
-                // REAPER writes a trailing flag after the path —
-                // `FILE "Media/song.mp3" 1` — so the path is the quoted
-                // run, not the rest of the line. Joining every token
-                // after FILE swept that flag into the filename, and
-                // because the result then ended in `1` rather than a
-                // quote the quote-stripping never fired either. The
-                // source failed to open, the project loaded with
-                // `decoded=0`, and it played silence: a missing-file
-                // error naming a file that is right there on disk.
-                file_path = match rest.strip_prefix('"') {
-                    // Quoted: up to the closing quote. This is the only
-                    // form that can hold a path with spaces in it, which
-                    // most media paths from a browser download do.
-                    Some(inner) => inner.split('"').next().unwrap_or_default().to_string(),
-                    // Unquoted paths cannot contain spaces, so the path
-                    // is the first token and anything after it is flags.
-                    None => rest.split_whitespace().next().unwrap_or_default().to_string(),
-                };
-                // Fix double-escaped backslashes
-                file_path = file_path.replace("\\\\", "\\");
+            if line.starts_with("FILE") {
+                // Tokenize and go through the one shared extractor, so
+                // this parser and the token-based one cannot drift apart
+                // on what a FILE line means — which is exactly how the
+                // trailing-flag bug survived being fixed once.
+                let tokens = Self::parse_item_token_line(line)?;
+                if let Some(path) = Self::file_path_from_tokens(&tokens)? {
+                    file_path = path;
+                }
                 break;
             }
         }
@@ -1363,14 +1384,10 @@ impl Item {
             if !matches!(tokens.first(), Some(Token::Identifier(id)) if id == "FILE") {
                 continue;
             }
-            let mut buf = String::new();
-            for token in tokens.iter().skip(1) {
-                if !buf.is_empty() {
-                    buf.push(' ');
-                }
-                buf.push_str(&Self::parse_string(token)?);
-            }
-            file_path = buf.replace("\\\\", "\\");
+            let Some(path) = Self::file_path_from_tokens(tokens)? else {
+                continue;
+            };
+            file_path = path;
             break;
         }
 
@@ -1660,6 +1677,34 @@ mod tests {
         let block = "<SOURCE WAVE\n  FILE Media/kick.wav 1\n>";
         let source = Item::parse_source_block(block).expect("parses");
         assert_eq!(source.file_path, "Media/kick.wav");
+    }
+
+    /// The same file through a whole `<ITEM>`, by **both** entry points.
+    ///
+    /// This is the test that was missing. The trailing-flag bug was
+    /// fixed once in `parse_source_block` and nothing changed, because a
+    /// real project goes through `from_block` — the token route — and
+    /// that had its own copy of the logic with the same defect. Asserting
+    /// both routes agree is what stops the pair drifting again.
+    #[test]
+    fn both_item_parsers_resolve_the_same_media_path() {
+        let rpp = "<ITEM\n  POSITION 0\n  LENGTH 200\n  NAME \"song.mp3\"\n  \
+                   <SOURCE MP3\n    FILE \"Media/_NSYNC - Bye Bye Bye (Official Audio) 0.mp3\" 1\n  >\n>";
+        let want = "Media/_NSYNC - Bye Bye Bye (Official Audio) 0.mp3";
+
+        let from_text = Item::from_rpp_block(rpp).expect("string route parses");
+        let path = |item: &Item| {
+            item.takes
+                .first()
+                .and_then(|t| t.source.as_ref())
+                .map(|s| s.file_path.clone())
+                .expect("a source with a path")
+        };
+        assert_eq!(path(&from_text), want, "string route kept the flag");
+
+        let (_, block) = crate::primitives::block::parse_block(rpp).expect("block parses");
+        let from_tokens = Item::from_block(&block).expect("token route parses");
+        assert_eq!(path(&from_tokens), want, "token route kept the flag");
     }
 
     #[test]
