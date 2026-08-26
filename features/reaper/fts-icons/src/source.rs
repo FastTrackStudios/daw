@@ -39,7 +39,9 @@ fn embed(svg: &str, x: f32) -> Result<String> {
     let head_end = svg.find('>').context("malformed svg")?;
     let (head, rest) = svg.split_at(head_end);
     let head = strip_attr(strip_attr(head.to_string(), "width"), "height");
-    Ok(format!(r#"{head} x="{x}" y="0" width="24" height="24"{rest}"#))
+    Ok(format!(
+        r#"{head} x="{x}" y="0" width="24" height="24"{rest}"#
+    ))
 }
 
 fn strip_attr(head: String, name: &str) -> String {
@@ -105,5 +107,7 @@ fn fit(text: &str, max: f32, budget: f32) -> f32 {
 }
 
 fn escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }

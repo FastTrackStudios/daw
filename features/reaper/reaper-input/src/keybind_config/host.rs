@@ -99,11 +99,7 @@ impl InputConfigHost {
 
 /// Reject ids that could escape the config tree.
 fn sanitize(id: &str) -> Option<&str> {
-    (!id.is_empty()
-        && !id.contains(['/', '\\'])
-        && id != "."
-        && id != ".."
-        && id != "overlays")
+    (!id.is_empty() && !id.contains(['/', '\\']) && id != "." && id != ".." && id != "overlays")
         .then_some(id)
 }
 

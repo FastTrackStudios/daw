@@ -113,8 +113,8 @@ pub struct ConfigFile {
 }
 
 pub fn load(path: &std::path::Path) -> Result<ConfigFile> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("read config {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("read config {}", path.display()))?;
     toml::from_str(&text).with_context(|| format!("parse config {}", path.display()))
 }
 
@@ -135,7 +135,10 @@ pub fn resolve(defaults: &StateSet, icon: &IconEntry) -> Result<[StateStyle; 3]>
             &icon.all,
             &icon.normal,
             pick_icon(icon, state),
-        ].into_iter().flatten() {
+        ]
+        .into_iter()
+        .flatten()
+        {
             ov.apply(&mut st)
                 .with_context(|| format!("icon {:?}, state {state}", icon.file))?;
         }

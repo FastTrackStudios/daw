@@ -7,16 +7,16 @@ use crate::context::DockProvider;
 use crate::prelude::*;
 use crate::signals::*;
 use dock_proto::*;
-use tokio::time::{Duration, sleep};
+use tokio::time::{sleep, Duration};
 
 #[cfg(feature = "native")]
 use dioxus::desktop::{
-    Config,
     tao::{
         dpi::{LogicalPosition, LogicalSize},
         event::{Event as TaoEvent, WindowEvent},
         window::WindowBuilder,
     },
+    Config,
 };
 
 /// Collection of dock action callbacks for UI components.

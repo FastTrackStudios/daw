@@ -445,9 +445,17 @@ mod tests {
     fn a_detection_before_its_strike_is_rejected_sooner_than_one_after() {
         let c = case(Side::Before, 40.0);
         // 10 ms early: outside the 6 ms early window.
-        assert!(match_cases(&[0.990], &[c], Tolerance::default())[0].ghost.is_none());
+        assert!(
+            match_cases(&[0.990], &[c], Tolerance::default())[0]
+                .ghost
+                .is_none()
+        );
         // 10 ms late: inside the 15 ms late window, because flux lags.
-        assert!(match_cases(&[1.010], &[c], Tolerance::default())[0].ghost.is_some());
+        assert!(
+            match_cases(&[1.010], &[c], Tolerance::default())[0]
+                .ghost
+                .is_some()
+        );
     }
 
     #[test]
@@ -477,9 +485,30 @@ mod tests {
     #[test]
     fn the_knee_requires_recall_to_hold() {
         let curve = Curve(vec![
-            CurvePoint { side: Side::Before, spacing_ms: 10.0, cases: 4, ghost_found: 4, accent_found: 4, both_found: 4 },
-            CurvePoint { side: Side::Before, spacing_ms: 20.0, cases: 4, ghost_found: 1, accent_found: 4, both_found: 1 },
-            CurvePoint { side: Side::Before, spacing_ms: 30.0, cases: 4, ghost_found: 4, accent_found: 4, both_found: 4 },
+            CurvePoint {
+                side: Side::Before,
+                spacing_ms: 10.0,
+                cases: 4,
+                ghost_found: 4,
+                accent_found: 4,
+                both_found: 4,
+            },
+            CurvePoint {
+                side: Side::Before,
+                spacing_ms: 20.0,
+                cases: 4,
+                ghost_found: 1,
+                accent_found: 4,
+                both_found: 1,
+            },
+            CurvePoint {
+                side: Side::Before,
+                spacing_ms: 30.0,
+                cases: 4,
+                ghost_found: 4,
+                accent_found: 4,
+                both_found: 4,
+            },
         ]);
         // 10 ms hits the target but does not hold, so the knee is 30.
         assert_eq!(curve.knee_ms(Side::Before, 1.0), Some(30.0));

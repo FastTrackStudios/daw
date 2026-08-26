@@ -74,7 +74,10 @@ pub async fn install_reapack(reaper_dir: &Path, tx: &EventSender) -> eyre::Resul
                 eyre::bail!("ReaPack download failed: HTTP {}", response.status());
             }
 
-            let bytes = response.bytes().await.wrap_err("ReaPack download interrupted")?;
+            let bytes = response
+                .bytes()
+                .await
+                .wrap_err("ReaPack download interrupted")?;
             tokio::fs::write(&dest, &bytes).await?;
 
             let _ = tx

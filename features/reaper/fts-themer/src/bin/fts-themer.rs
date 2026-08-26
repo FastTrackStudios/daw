@@ -337,10 +337,7 @@ fn main() -> Result<()> {
             }
         }
 
-        Command::Generate {
-            dry_run,
-            traced,
-        } => {
+        Command::Generate { dry_run, traced } => {
             let report = fts_themer::generate::generate(&theme, dry_run, !traced)?;
             for (name, err) in &report.failed {
                 eprintln!("FAILED {name}: {err}");

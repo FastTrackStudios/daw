@@ -212,7 +212,9 @@ fn a_gesture_survives_into_the_document_at_its_written_depth() {
         .find(|n| n.row == 64)
         .expect("the scooped note");
     let first = scooped.curve(Dimension::Pitch).sample(scooped.start, 0.0);
-    let last = scooped.curve(Dimension::Pitch).sample(scooped.end - 1.0, 0.0);
+    let last = scooped
+        .curve(Dimension::Pitch)
+        .sample(scooped.end - 1.0, 0.0);
     assert!(
         (first + 1.0).abs() < 0.05,
         "scoop starts at {first}, not a semitone flat"

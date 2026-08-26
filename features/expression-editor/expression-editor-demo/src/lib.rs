@@ -33,4 +33,4 @@ pub mod material;
 pub mod project;
 
 pub use material::{Material, Song};
-pub use project::{build, Demo, DemoTrack, TrackRole};
+pub use project::{Demo, DemoTrack, TrackRole, build};

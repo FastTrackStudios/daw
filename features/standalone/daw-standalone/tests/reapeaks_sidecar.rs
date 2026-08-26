@@ -3,11 +3,7 @@
 //! sidecar next to the file, the first scan writes that sidecar, and a
 //! stale sidecar (wrong mtime / wrong length) is recomputed.
 
-#![cfg(all(
-    feature = "reapeaks",
-    feature = "decode",
-    not(target_arch = "wasm32")
-))]
+#![cfg(all(feature = "reapeaks", feature = "decode", not(target_arch = "wasm32")))]
 
 use std::path::{Path, PathBuf};
 

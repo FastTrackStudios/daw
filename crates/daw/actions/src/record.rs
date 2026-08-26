@@ -57,9 +57,10 @@ pub fn dispatch(action: RecordAction) {
         RecordAction::ToggleMonitorOnOff => {
             toggle_monitor_between(InputMonitoringMode::Normal, InputMonitoringMode::Off)
         }
-        RecordAction::ToggleMonitorTapeOff => {
-            toggle_monitor_between(InputMonitoringMode::NotWhenPlaying, InputMonitoringMode::Off)
-        }
+        RecordAction::ToggleMonitorTapeOff => toggle_monitor_between(
+            InputMonitoringMode::NotWhenPlaying,
+            InputMonitoringMode::Off,
+        ),
         RecordAction::Record => {
             let _ = daw.record(ProjectContext::Current);
             info!("[record] Record");
@@ -95,7 +96,11 @@ fn set_arm_selected(armed: bool) {
     };
     daw.begin_undo_block(ProjectContext::Current, label);
     for track in &selected {
-        let _ = daw.set_armed(ProjectContext::Current, TrackRef::Guid(track.guid.clone()), armed);
+        let _ = daw.set_armed(
+            ProjectContext::Current,
+            TrackRef::Guid(track.guid.clone()),
+            armed,
+        );
     }
     daw.end_undo_block(ProjectContext::Current, label, None);
     info!(
@@ -130,8 +135,11 @@ fn toggle_monitor_between(a: InputMonitoringMode, b: InputMonitoringMode) {
     );
     daw.begin_undo_block(ProjectContext::Current, &label);
     for track in &selected {
-        let _ =
-            daw.set_input_monitor(ProjectContext::Current, TrackRef::Guid(track.guid.clone()), target);
+        let _ = daw.set_input_monitor(
+            ProjectContext::Current,
+            TrackRef::Guid(track.guid.clone()),
+            target,
+        );
     }
     daw.end_undo_block(ProjectContext::Current, &label, None);
     info!(

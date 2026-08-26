@@ -12,7 +12,9 @@
 use facet::Facet;
 
 use crate::event::MidiEvent;
-use crate::number::{Channel, ControllerNumber, ControllerValue, KeyNumber, PitchBend, U7, Velocity};
+use crate::number::{
+    Channel, ControllerNumber, ControllerValue, KeyNumber, PitchBend, Velocity, U7,
+};
 
 /// Number of meaningful bytes for a short-message status byte.
 const fn message_len(status: u8) -> usize {
@@ -71,7 +73,9 @@ impl RawShortMessage {
     /// Convert to the structured form; `None` only for status bytes the codec
     /// doesn't model.
     pub fn to_event(self) -> Option<MidiEvent> {
-        MidiEvent::decode(&self.0[..self.len()]).ok().map(|(e, _)| e)
+        MidiEvent::decode(&self.0[..self.len()])
+            .ok()
+            .map(|(e, _)| e)
     }
 
     /// Pack a structured event, or `None` if it is SysEx (not a short message).
@@ -176,7 +180,11 @@ mod tests {
         let raw = RawShortMessage::note_on(Channel::new(2), KeyNumber::new(64), Velocity::new(96));
         assert_eq!(raw.len(), 3);
         match raw.to_event().unwrap() {
-            MidiEvent::NoteOn { channel, key, velocity } => {
+            MidiEvent::NoteOn {
+                channel,
+                key,
+                velocity,
+            } => {
                 assert_eq!(channel.number(), 3);
                 assert_eq!(key.get(), 64);
                 assert_eq!(velocity.get(), 96);

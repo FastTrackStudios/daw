@@ -5,7 +5,9 @@
 //! When running inside Reaper, the full action list can be read via
 //! the Reaper-specific API extension.
 
-use architect_launcher_core::{ActionModifier, ActivationResult, Item, ItemAction, Provider, ProviderConfig};
+use architect_launcher_core::{
+    ActionModifier, ActivationResult, Item, ItemAction, Provider, ProviderConfig,
+};
 use reaper_medium::{CommandId, ProjectContext, SectionContext, SectionId};
 
 pub struct DawActionsProvider {

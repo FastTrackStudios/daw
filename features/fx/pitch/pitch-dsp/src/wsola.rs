@@ -61,8 +61,7 @@ impl AaFilter {
                 (std::f64::consts::TAU * c * x).sin() / (std::f64::consts::PI * x)
             };
             // Hann window.
-            let w =
-                0.5 * (1.0 - (std::f64::consts::TAU * i as f64 / (AA_LEN - 1) as f64).cos());
+            let w = 0.5 * (1.0 - (std::f64::consts::TAU * i as f64 / (AA_LEN - 1) as f64).cos());
             self.coeffs[i] = sinc * w;
             sum += self.coeffs[i];
         }
@@ -279,9 +278,8 @@ impl TdStretch {
                 let inv = 1.0 / self.overlap_len as f64;
                 for i in 0..self.overlap_len {
                     let t = i as f64 * inv;
-                    self.output.push_back(
-                        self.prev_overlap[i] * (1.0 - t) + self.input[best + i] * t,
-                    );
+                    self.output
+                        .push_back(self.prev_overlap[i] * (1.0 - t) + self.input[best + i] * t);
                 }
 
                 // Copy middle (non-overlapping) section directly.
@@ -592,12 +590,7 @@ mod tests {
         }
         let mut best_lag = min_period;
         let mut best_val = f64::MAX;
-        for (lag, &val) in cmnd
-            .iter()
-            .enumerate()
-            .take(max_lag + 1)
-            .skip(min_period)
-        {
+        for (lag, &val) in cmnd.iter().enumerate().take(max_lag + 1).skip(min_period) {
             if val < best_val {
                 best_val = val;
                 best_lag = lag;

@@ -1,7 +1,7 @@
 //! YIN + note + correction sanity checks on synthesized pitched tones.
 
 use tune_dsp::{
-    analyze, correct_notes, hz_to_midi, AnalyzeConfig, CorrectConfig, Scale, YinDetector, YinConfig,
+    analyze, correct_notes, hz_to_midi, AnalyzeConfig, CorrectConfig, Scale, YinConfig, YinDetector,
 };
 
 const SR: f64 = 48_000.0;
@@ -77,7 +77,11 @@ fn naive_yin_f0(frame: &[f64], sr: f64, window: usize, threshold: f64) -> Option
     let mut running = 0.0;
     for tau in 1..half {
         running += diff[tau];
-        cmnd[tau] = if running > 0.0 { diff[tau] * tau as f64 / running } else { 1.0 };
+        cmnd[tau] = if running > 0.0 {
+            diff[tau] * tau as f64 / running
+        } else {
+            1.0
+        };
     }
     let min_lag = (sr / 1200.0) as usize;
     let max_lag = ((sr / 65.0) as usize).min(half - 1);
@@ -113,15 +117,16 @@ fn fft_difference_matches_naive_reference() {
         // Sine + light noise + a 2nd harmonic (realistic-ish).
         let frame: Vec<f64> = (0..window)
             .map(|i| {
-                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                seed = seed
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 let n = ((seed >> 33) as f64 / (1u64 << 31) as f64) - 1.0;
                 let ph = core::f64::consts::TAU * freq * i as f64 / sr;
                 0.5 * ph.sin() + 0.15 * (2.0 * ph).sin() + 0.01 * n
             })
             .collect();
         let fft_f0 = det.detect(&frame).f0_hz.expect("fft path voiced");
-        let naive_f0 =
-            naive_yin_f0(&frame, sr, window, 0.12).expect("naive path voiced");
+        let naive_f0 = naive_yin_f0(&frame, sr, window, 0.12).expect("naive path voiced");
         let cents = 1200.0 * (fft_f0 / naive_f0).log2();
         assert!(
             cents.abs() < 1.0,
@@ -162,7 +167,9 @@ fn analysis_repairs_octave_glitches_and_gates_noise() {
     let mut seed = 23u64;
     let samples: Vec<f64> = (0..n_voiced + n_noise)
         .map(|i| {
-            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let noise = ((seed >> 33) as f64 / (1u64 << 31) as f64) - 1.0;
             if i < n_voiced {
                 0.5 * (core::f64::consts::TAU * 220.0 * i as f64 / sr).sin() + 0.02 * noise
@@ -178,7 +185,13 @@ fn analysis_repairs_octave_glitches_and_gates_noise() {
     let hop = analysis.hop;
     let voiced_frames = (n_voiced / hop).saturating_sub(8);
     let mut worst = 0.0f64;
-    for (i, f) in analysis.frames.iter().enumerate().take(voiced_frames).skip(4) {
+    for (i, f) in analysis
+        .frames
+        .iter()
+        .enumerate()
+        .take(voiced_frames)
+        .skip(4)
+    {
         if let Some(hz) = f.f0_hz {
             let dev = (tune_dsp::detect::hz_to_midi(hz) - 57.0).abs();
             worst = worst.max(dev);
@@ -186,7 +199,10 @@ fn analysis_repairs_octave_glitches_and_gates_noise() {
             panic!("frame {i} in the tone should be voiced");
         }
     }
-    assert!(worst < 1.0, "no octave glitches survive: worst dev {worst:.2} st");
+    assert!(
+        worst < 1.0,
+        "no octave glitches survive: worst dev {worst:.2} st"
+    );
 
     // Noise region: the confidence gate keeps it unvoiced.
     let noise_start = n_voiced / hop + 4;

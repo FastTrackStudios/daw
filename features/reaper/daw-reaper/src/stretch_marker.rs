@@ -67,9 +67,7 @@ impl StretchMarkers for crate::Reaper {
         for i in 0..count {
             let mut pos = 0.0f64;
             let mut src = 0.0f64;
-            let ok = unsafe {
-                low.GetTakeStretchMarker(take_ptr.as_ptr(), i, &mut pos, &mut src)
-            };
+            let ok = unsafe { low.GetTakeStretchMarker(take_ptr.as_ptr(), i, &mut pos, &mut src) };
             if ok < 0 {
                 continue;
             }
@@ -108,9 +106,8 @@ impl StretchMarkers for crate::Reaper {
     fn delete_stretch_marker(&self, location: StretchTakeRef, index: u32) -> DawResult<()> {
         let take = resolve(&location)?;
         let low = ReaperHigh::get().medium_reaper().low();
-        let removed = unsafe {
-            low.DeleteTakeStretchMarkers(take.as_ptr(), index as i32, std::ptr::null())
-        };
+        let removed =
+            unsafe { low.DeleteTakeStretchMarkers(take.as_ptr(), index as i32, std::ptr::null()) };
         if removed > 0 {
             Ok(())
         } else {

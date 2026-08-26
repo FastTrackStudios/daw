@@ -13,7 +13,7 @@
 
 use audiocore_dsp::db::{db_to_linear, linear_to_db};
 
-use crate::classify::{BlockClass, ClassifyConfig, Classifier};
+use crate::classify::{BlockClass, Classifier, ClassifyConfig};
 
 /// Rider tuning.
 #[derive(Clone, Copy, Debug)]

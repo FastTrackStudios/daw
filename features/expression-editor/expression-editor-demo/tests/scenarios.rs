@@ -11,7 +11,7 @@
 //! half the downloads still reports on the other half instead of going
 //! uniformly red.
 
-use expression_editor_demo::{build, material_or_skip, Demo, TrackRole};
+use expression_editor_demo::{Demo, TrackRole, build, material_or_skip};
 
 /// Build once per test. Cheap: it reads directory listings, not audio.
 fn demo() -> Demo {
@@ -71,7 +71,7 @@ fn scenario_1_a_vocal_take_composites_four_envelopes() {
     role_or_skip!(d, TrackRole::Vocal);
 
     use expression_editor_audio::dynamics::{
-        analyse, BreathConfig, CompressorConfig, DynamicsConfig, GateConfig, SibilanceConfig,
+        BreathConfig, CompressorConfig, DynamicsConfig, GateConfig, SibilanceConfig, analyse,
     };
     use expression_editor_audio::frames::frame_features;
 
@@ -112,9 +112,8 @@ fn scenario_1_a_vocal_take_composites_four_envelopes() {
         "the composite must cover the whole take"
     );
 
-    let any = |v: &[expression_editor_audio::dynamics::GainPoint]| {
-        v.iter().any(|p| p.db.abs() > 1e-9)
-    };
+    let any =
+        |v: &[expression_editor_audio::dynamics::GainPoint]| v.iter().any(|p| p.db.abs() > 1e-9);
     assert!(
         any(&dynamics.gate)
             || any(&dynamics.compressor)

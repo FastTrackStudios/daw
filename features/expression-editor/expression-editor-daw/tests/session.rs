@@ -26,14 +26,8 @@ fn fixture() -> (Standalone, MidiTakeLocation) {
     });
     let project = ProjectContext::Current;
     <Standalone as Tracks>::add(&daw, project.clone(), "Test", None).expect("add track");
-    let location = Midi::create_midi_item(
-        &daw,
-        project.clone(),
-        TrackRef::Index(0),
-        0.0,
-        8.0,
-    )
-    .expect("standalone must be able to create a MIDI item");
+    let location = Midi::create_midi_item(&daw, project.clone(), TrackRef::Index(0), 0.0, 8.0)
+        .expect("standalone must be able to create a MIDI item");
     (daw, location)
 }
 
@@ -98,7 +92,11 @@ fn a_write_back_replaces_rather_than_appends() {
     session.write_back(&daw);
 
     let back = Midi::read_take(&daw, location);
-    assert_eq!(back.notes.len(), 2, "the deleted notes are gone from the take");
+    assert_eq!(
+        back.notes.len(),
+        2,
+        "the deleted notes are gone from the take"
+    );
 }
 
 #[test]
@@ -116,10 +114,17 @@ fn reload_discards_local_edits_but_keeps_the_camera() {
 
     session.reload(&daw);
     assert!(!session.is_dirty());
-    assert_eq!(session.editor.doc.notes.len(), 2, "the take is authoritative");
+    assert_eq!(
+        session.editor.doc.notes.len(),
+        2,
+        "the take is authoritative"
+    );
     // Throwing away the user's view on every refresh would be its own
     // kind of data loss.
-    assert_eq!(session.editor.camera, camera, "the camera survives a reload");
+    assert_eq!(
+        session.editor.camera, camera,
+        "the camera survives a reload"
+    );
 }
 
 #[test]

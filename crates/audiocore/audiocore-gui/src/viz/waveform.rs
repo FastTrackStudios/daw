@@ -503,7 +503,11 @@ impl PeakWaveformPainter {
             .iter()
             .map(|&s| {
                 let amp = s.clamp(0.0, 1.0) as f64;
-                if from_bottom { h - amp * h } else { amp * h }
+                if from_bottom {
+                    h - amp * h
+                } else {
+                    amp * h
+                }
             })
             .collect();
 
@@ -553,7 +557,11 @@ impl PeakWaveformPainter {
             .iter()
             .map(|&s| {
                 let amp = s.clamp(0.0, 1.0) as f64;
-                if from_bottom { h - amp * h } else { amp * h }
+                if from_bottom {
+                    h - amp * h
+                } else {
+                    amp * h
+                }
             })
             .collect();
 

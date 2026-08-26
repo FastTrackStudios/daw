@@ -3,9 +3,9 @@
 
 #[cfg(feature = "standalone")]
 fn main() {
-    use dioxus_native::prelude::*;
-    use architect_ui::prelude::{ThemeMode, ThemeProvider, ThemeState, default_theme_preset};
     use architect_launcher_ui::components::Launcher;
+    use architect_ui::prelude::{ThemeMode, ThemeProvider, ThemeState, default_theme_preset};
+    use dioxus_native::prelude::*;
 
     tracing_subscriber::fmt()
         .with_env_filter("info,wgpu_hal=error,wgpu_core=error")

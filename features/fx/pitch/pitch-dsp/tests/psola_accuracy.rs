@@ -21,7 +21,10 @@ fn psola_is_cents_accurate_at_small_and_moderate_shifts() {
         chain.algorithm = pitch_dsp::chain::Algorithm::Psola;
         chain.semitones = st;
         chain.mix = 1.0;
-        chain.update(AudioConfig { sample_rate: SR, max_buffer_size: 512 });
+        chain.update(AudioConfig {
+            sample_rate: SR,
+            max_buffer_size: 512,
+        });
         let n = 96_000;
         let mut l: Vec<f64> = (0..n)
             .map(|i| 0.5 * (core::f64::consts::TAU * 452.0 * i as f64 / SR).sin())
@@ -46,13 +49,19 @@ fn psola_is_cents_accurate_at_small_and_moderate_shifts() {
 
 #[test]
 fn print_psola_vs_wsola_cents() {
-    for algo in [pitch_dsp::chain::Algorithm::Psola, pitch_dsp::chain::Algorithm::Wsola] {
+    for algo in [
+        pitch_dsp::chain::Algorithm::Psola,
+        pitch_dsp::chain::Algorithm::Wsola,
+    ] {
         for st in [-0.467f64, -2.0, 2.0] {
             let mut chain = pitch_dsp::chain::PitchChain::new();
             chain.algorithm = algo;
             chain.semitones = st;
             chain.mix = 1.0;
-            chain.update(AudioConfig { sample_rate: SR, max_buffer_size: 512 });
+            chain.update(AudioConfig {
+                sample_rate: SR,
+                max_buffer_size: 512,
+            });
             let n = 96_000;
             let mut l: Vec<f64> = (0..n)
                 .map(|i| 0.5 * (core::f64::consts::TAU * 452.0 * i as f64 / SR).sin())
@@ -67,8 +76,10 @@ fn print_psola_vs_wsola_cents() {
             }
             let expected = 452.0 * 2.0f64.powf(st / 12.0);
             let got = zc_freq(&l[n / 2..]);
-            println!("{algo:?} {st:+.2} st: {got:.2} Hz vs {expected:.2} ({:+.1} cents)",
-                1200.0 * (got / expected).log2());
+            println!(
+                "{algo:?} {st:+.2} st: {got:.2} Hz vs {expected:.2} ({:+.1} cents)",
+                1200.0 * (got / expected).log2()
+            );
         }
     }
 }

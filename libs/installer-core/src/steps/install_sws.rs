@@ -45,11 +45,7 @@ pub async fn install_sws(reaper_dir: &Path, tx: &EventSender) -> eyre::Result<()
     }
 }
 
-async fn install_sws_macos(
-    user_plugins: &Path,
-    arch: &str,
-    tx: &EventSender,
-) -> eyre::Result<()> {
+async fn install_sws_macos(user_plugins: &Path, arch: &str, tx: &EventSender) -> eyre::Result<()> {
     let url = format!(
         "https://www.sws-extension.org/download/pre-release/sws-{SWS_VERSION}-Darwin-{arch}-{SWS_COMMIT}.dmg"
     );
@@ -88,14 +84,20 @@ async fn install_sws_macos(
                 eyre::bail!("SWS download failed: HTTP {}", response.status());
             }
 
-            let bytes = response.bytes().await.wrap_err("SWS download interrupted")?;
+            let bytes = response
+                .bytes()
+                .await
+                .wrap_err("SWS download interrupted")?;
             tokio::fs::write(&dmg, &bytes).await?;
 
             let _ = tx
                 .send(InstallEvent::StepProgress {
                     step: InstallStep::InstallSws,
                     fraction: 0.5,
-                    message: format!("Downloaded SWS ({:.1} MB)", bytes.len() as f32 / 1_048_576.0),
+                    message: format!(
+                        "Downloaded SWS ({:.1} MB)",
+                        bytes.len() as f32 / 1_048_576.0
+                    ),
                 })
                 .await;
             Ok(())

@@ -40,7 +40,10 @@ fn marker(p: [u8; 4]) -> bool {
 
 /// One pixel's mean channel value, composited over black.
 fn level(p: [u8; 4]) -> f32 {
-    (0..3).map(|i| p[i] as f32 * p[3] as f32 / 255.0).sum::<f32>() / 3.0
+    (0..3)
+        .map(|i| p[i] as f32 * p[3] as f32 / 255.0)
+        .sum::<f32>()
+        / 3.0
 }
 
 fn scored(src: &RgbaImage, ours: &RgbaImage) -> Option<f32> {
@@ -53,7 +56,10 @@ fn scored(src: &RgbaImage, ours: &RgbaImage) -> Option<f32> {
             continue;
         }
         for i in 0..3 {
-            let (x, y) = (a.0[i] as f32 * a.0[3] as f32 / 255.0, b.0[i] as f32 * b.0[3] as f32 / 255.0);
+            let (x, y) = (
+                a.0[i] as f32 * a.0[3] as f32 / 255.0,
+                b.0[i] as f32 * b.0[3] as f32 / 255.0,
+            );
             total += (x - y).abs() as f64;
             n += 1;
         }
@@ -83,8 +89,7 @@ fn print_map(name: &str, src: &RgbaImage, ours: &RgbaImage) {
 }
 
 fn main() {
-    let dir =
-        std::path::Path::new("features/reaper/fts-theme/FastTrackStudio/.source-art");
+    let dir = std::path::Path::new("features/reaper/fts-theme/FastTrackStudio/.source-art");
     let theme = std::path::Path::new("features/reaper/fts-theme/FastTrackStudio");
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let map = args.first().is_some_and(|a| a == "--map");
@@ -93,7 +98,10 @@ fn main() {
     }
 
     let names: Vec<String> = if args.is_empty() {
-        export::generatable().into_iter().map(str::to_string).collect()
+        export::generatable()
+            .into_iter()
+            .map(str::to_string)
+            .collect()
     } else {
         args
     };

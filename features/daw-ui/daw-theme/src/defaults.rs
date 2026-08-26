@@ -206,10 +206,7 @@ pub const RAZOR: &str = "#22d3ee";
 /// every note is a slightly different colour.
 pub const TUNE_RAMP: [&str; 5] = [
     "#3b82f6", // dead on
-    "#6366f1",
-    "#a855f7",
-    "#e0398a",
-    "#ef4444", // badly out
+    "#6366f1", "#a855f7", "#e0398a", "#ef4444", // badly out
 ];
 
 /// The tracked pitch contour on the audio surface.

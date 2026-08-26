@@ -57,7 +57,9 @@ pub fn reattach<H>(
     match open(sel) {
         Ok(Some(handle)) => {
             store(handle);
-            let which = port.filter(|p| !p.is_empty()).unwrap_or("omni (all inputs)");
+            let which = port
+                .filter(|p| !p.is_empty())
+                .unwrap_or("omni (all inputs)");
             tracing::info!(port = %which, "{rig}: MIDI attached");
             true
         }
@@ -128,7 +130,11 @@ pub fn rescan_stream(
     }
     // Release the old stream's OS clients BEFORE opening anew.
     *stream = None;
-    *stream = if ports.is_empty() { None } else { midicore_midir::MidiStream::open_all() };
+    *stream = if ports.is_empty() {
+        None
+    } else {
+        midicore_midir::MidiStream::open_all()
+    };
     match &stream {
         Some(s) => tracing::info!("MIDI capture active on {:?}", s.opened),
         None if ports.is_empty() && !known_ports.is_empty() => {
@@ -209,7 +215,10 @@ mod tests {
             controller: midicore_proto::ControllerNumber::new(101),
             value: midicore_proto::ControllerValue::new(127),
         };
-        sink(TimedEvent { timestamp_us: 0, event: ev.clone() });
+        sink(TimedEvent {
+            timestamp_us: 0,
+            event: ev.clone(),
+        });
         assert_eq!(monitor.count(), 1);
         assert_eq!(*forwarded.lock().unwrap(), vec![ev]);
     }
@@ -237,8 +246,14 @@ mod tests {
             move |_| vec![conv.clone(), conv.clone()],
             move |ev| fwd.lock().unwrap().push(ev),
         );
-        sink(TimedEvent { timestamp_us: 0, event: original.clone() });
+        sink(TimedEvent {
+            timestamp_us: 0,
+            event: original.clone(),
+        });
         assert_eq!(monitor.recent(), vec![original]);
-        assert_eq!(*forwarded.lock().unwrap(), vec![converted.clone(), converted]);
+        assert_eq!(
+            *forwarded.lock().unwrap(),
+            vec![converted.clone(), converted]
+        );
     }
 }

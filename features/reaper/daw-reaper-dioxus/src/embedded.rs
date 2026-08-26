@@ -248,7 +248,12 @@ impl EmbeddedView {
         let (doc_tx, doc_rx) = unbounded();
         let doc_proxy = Rc::new(DocumentProxy::new(doc_tx));
 
-        let viewport = Viewport::new(self.width, self.height, self.scale_factor, ColorScheme::Dark);
+        let viewport = Viewport::new(
+            self.width,
+            self.height,
+            self.scale_factor,
+            ColorScheme::Dark,
+        );
         let mut doc = DioxusDocument::new(
             VirtualDom::new(self.app),
             DocumentConfig {

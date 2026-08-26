@@ -75,8 +75,7 @@ fn main() {
             // `All` and `Fixed` are the same drawing to REAPER — see
             // `Guides::slice`.
             Some(a)
-                if a.slice.x.guided() == got.x.guided()
-                    && a.slice.y.guided() == got.y.guided() =>
+                if a.slice.x.guided() == got.x.guided() && a.slice.y.guided() == got.y.guided() =>
             {
                 "ok"
             }

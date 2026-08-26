@@ -222,10 +222,14 @@ fn diff_and_emit(
     // Removed: in prev but not in curr.
     for p in prev {
         if !p.guid.is_empty() && !curr_by_guid.contains_key(p.guid.as_str()) {
-            emit(tx, project_guid, FxEvent::Removed {
-                context: ctx.clone(),
-                fx_guid: p.guid.clone(),
-            });
+            emit(
+                tx,
+                project_guid,
+                FxEvent::Removed {
+                    context: ctx.clone(),
+                    fx_guid: p.guid.clone(),
+                },
+            );
         }
     }
 
@@ -238,30 +242,42 @@ fn diff_and_emit(
             None => {
                 // Added — send the full Fx struct from curr_full.
                 if let Some(fx) = curr_full.get(i) {
-                    emit(tx, project_guid, FxEvent::Added {
-                        context: ctx.clone(),
-                        fx: fx.clone(),
-                    });
+                    emit(
+                        tx,
+                        project_guid,
+                        FxEvent::Added {
+                            context: ctx.clone(),
+                            fx: fx.clone(),
+                        },
+                    );
                 }
             }
             Some(prev) => {
                 if prev.enabled != c.enabled {
-                    emit(tx, project_guid, FxEvent::EnabledChanged {
-                        context: ctx.clone(),
-                        fx_guid: c.guid.clone(),
-                        enabled: c.enabled,
-                    });
+                    emit(
+                        tx,
+                        project_guid,
+                        FxEvent::EnabledChanged {
+                            context: ctx.clone(),
+                            fx_guid: c.guid.clone(),
+                            enabled: c.enabled,
+                        },
+                    );
                 }
                 // Moved: index changed. Emit if the chain length stayed
                 // the same — otherwise add/remove dominates and the
                 // index shift is just bookkeeping.
                 if prev.index != c.index && prev.name == c.name {
-                    emit(tx, project_guid, FxEvent::Moved {
-                        context: ctx.clone(),
-                        fx_guid: c.guid.clone(),
-                        old_index: prev.index,
-                        new_index: c.index,
-                    });
+                    emit(
+                        tx,
+                        project_guid,
+                        FxEvent::Moved {
+                            context: ctx.clone(),
+                            fx_guid: c.guid.clone(),
+                            old_index: prev.index,
+                            new_index: c.index,
+                        },
+                    );
                 }
             }
         }

@@ -582,10 +582,7 @@ impl TranslateAccel for InputHandler {
         // which is what makes typing at the editor safe from global
         // shortcuts.
         if context == Context::ExpressionEditor {
-            let bound = crate::input::processor::resolve_exact_context(
-                &keybind_context,
-                &key_str,
-            );
+            let bound = crate::input::processor::resolve_exact_context(&keybind_context, &key_str);
             return match bound {
                 Some(action_id) => {
                     let (clean, _) = classify_action(action_id.as_str());

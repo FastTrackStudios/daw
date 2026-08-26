@@ -265,7 +265,9 @@ fn systemctl(verb: &str, engine: &Engine) -> io::Result<()> {
     if status.success() {
         Ok(())
     } else {
-        Err(io::Error::other(format!("systemctl --user {verb} {unit}: {status}")))
+        Err(io::Error::other(format!(
+            "systemctl --user {verb} {unit}: {status}"
+        )))
     }
 }
 

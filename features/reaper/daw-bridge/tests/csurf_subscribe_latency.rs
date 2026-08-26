@@ -109,7 +109,10 @@ fn csurf_subscribe_latency() -> Result<()> {
     )
 }
 
-async fn drain_for(rx: &mut daw::rpc::EventStream<daw_proto::track::TrackStreamEvent>, window: Duration) {
+async fn drain_for(
+    rx: &mut daw::rpc::EventStream<daw_proto::track::TrackStreamEvent>,
+    window: Duration,
+) {
     let deadline = Instant::now() + window;
     while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
         if tokio::time::timeout(remaining, rx.recv()).await.is_err() {

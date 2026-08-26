@@ -5,8 +5,8 @@
 //! `daw_module`'s `action_for_id` chain. All work runs on REAPER's main
 //! thread (the action-callback context), delegating to [`crate::group_manager`].
 
-use daw::service::groups::{GroupActions, register_group_actions};
 use crate::group_manager;
+use daw::service::groups::{GroupActions, register_group_actions};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupAction {

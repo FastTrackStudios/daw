@@ -121,18 +121,10 @@ const DRIFT_CUTOFF_HZ: f64 = 3.0;
 /// drift/vibrato split.
 pub fn decompose(note: &TrackedNote, hop: usize, sample_rate: f64) -> NoteBlob {
     let center = note.median_midi;
-    let residual: Vec<f64> = note
-        .f0
-        .iter()
-        .map(|&hz| hz_to_midi(hz) - center)
-        .collect();
+    let residual: Vec<f64> = note.f0.iter().map(|&hz| hz_to_midi(hz) - center).collect();
     let frame_rate = sample_rate / hop.max(1) as f64;
     let drift = zero_phase_lowpass(&residual, DRIFT_CUTOFF_HZ, frame_rate);
-    let modulation: Vec<f64> = residual
-        .iter()
-        .zip(&drift)
-        .map(|(r, d)| r - d)
-        .collect();
+    let modulation: Vec<f64> = residual.iter().zip(&drift).map(|(r, d)| r - d).collect();
     NoteBlob {
         start_frame: note.start_frame,
         end_frame: note.end_frame,
@@ -176,7 +168,10 @@ impl PitchDoc {
     /// Build from tracked notes.
     pub fn from_notes(notes: &[TrackedNote], hop: usize, sample_rate: f64) -> Self {
         Self {
-            blobs: notes.iter().map(|n| decompose(n, hop, sample_rate)).collect(),
+            blobs: notes
+                .iter()
+                .map(|n| decompose(n, hop, sample_rate))
+                .collect(),
             markers: Vec::new(),
             hop,
             sample_rate,
@@ -196,9 +191,7 @@ impl PitchDoc {
 
     /// Insert a marker keeping `markers` sorted.
     pub fn add_marker(&mut self, m: WarpMarker) {
-        let idx = self
-            .markers
-            .partition_point(|x| x.sample < m.sample);
+        let idx = self.markers.partition_point(|x| x.sample < m.sample);
         self.markers.insert(idx, m);
     }
 
@@ -231,20 +224,14 @@ impl PitchDoc {
             .iter()
             .zip(&targets)
             .map(|(f0, t)| match (f0, t) {
-                (Some(hz), Some(target_midi)) if *hz > 0.0 => {
-                    midi_to_hz(*target_midi) / hz
-                }
+                (Some(hz), Some(target_midi)) if *hz > 0.0 => midi_to_hz(*target_midi) / hz,
                 _ => 1.0,
             })
             .collect()
     }
 }
 
-fn interp_markers<F: Fn(&WarpMarker) -> f64>(
-    markers: &[WarpMarker],
-    sample: f64,
-    field: F,
-) -> f64 {
+fn interp_markers<F: Fn(&WarpMarker) -> f64>(markers: &[WarpMarker], sample: f64, field: F) -> f64 {
     if markers.is_empty() {
         return 0.0;
     }
@@ -337,7 +324,10 @@ mod tests {
             let mean = vals.iter().sum::<f64>() / n as f64;
             (vals.iter().map(|v| (v - mean) * (v - mean)).sum::<f64>() / n as f64).sqrt()
         };
-        assert!(vib_rms > 0.1, "vibrato survives drift flattening: {vib_rms:.3}");
+        assert!(
+            vib_rms > 0.1,
+            "vibrato survives drift flattening: {vib_rms:.3}"
+        );
     }
 
     #[test]
@@ -369,7 +359,11 @@ mod tests {
         let note = synth_note(69.0, 100, FRAME_RATE); // A4 region
         let doc = {
             let mut d = PitchDoc::from_notes(core::slice::from_ref(&note), 512, 48_000.0);
-            d.add_marker(WarpMarker { sample: 0.0, d_time: 0.0, pitch_bend: 0.0 });
+            d.add_marker(WarpMarker {
+                sample: 0.0,
+                d_time: 0.0,
+                pitch_bend: 0.0,
+            });
             d.add_marker(WarpMarker {
                 sample: 100.0 * 512.0,
                 d_time: 0.0,
@@ -379,7 +373,10 @@ mod tests {
         };
         // Bend halfway through ≈ 0.5 st.
         let mid_bend = doc.bend_at(50.0 * 512.0);
-        assert!((mid_bend - 0.5).abs() < 0.02, "linear bend interp: {mid_bend:.3}");
+        assert!(
+            (mid_bend - 0.5).abs() < 0.02,
+            "linear bend interp: {mid_bend:.3}"
+        );
 
         // Shift ratios: at a frame where analysis == target(+bend), the
         // ratio reflects only the bend.
@@ -393,7 +390,10 @@ mod tests {
             })
             .collect();
         let ratios = doc.shift_ratios(&analyzed);
-        assert!((ratios[0] - 1.0).abs() < 1.0e-12, "unvoiced frames stay 1.0");
+        assert!(
+            (ratios[0] - 1.0).abs() < 1.0e-12,
+            "unvoiced frames stay 1.0"
+        );
         let r = ratios[60];
         assert!(
             r > 1.0 && r < 1.2,

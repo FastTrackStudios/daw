@@ -63,23 +63,23 @@ pub mod cache;
 pub mod flac_index;
 #[cfg(feature = "engine-core")]
 pub mod stream;
+#[cfg(feature = "engine-native")]
+pub mod stream_cache;
 /// The browser's streamer queue — the wasm stand-in for the native streamer
 /// thread pool (see the module docs; W13 of browser-keys-rig.md). Rides the
 /// same feature gate as `stream`, whose types it queues.
 #[cfg(all(feature = "engine-core", target_arch = "wasm32"))]
 pub mod stream_wasm;
-#[cfg(feature = "engine-native")]
-pub mod stream_cache;
 
 mod error;
 
 pub use error::SamplerError;
-pub use probe::{AudioInfo, WavFormat, probe};
+pub use probe::{probe, AudioInfo, WavFormat};
 
 #[cfg(feature = "load")]
 pub use load::{
-    AudioData, LoadedAudio, ResampleQuality, decode_bytes, load_audio, load_audio_async,
-    load_mono_f32, load_planar_f32,
+    decode_bytes, load_audio, load_audio_async, load_mono_f32, load_planar_f32, AudioData,
+    LoadedAudio, ResampleQuality,
 };
 #[cfg(feature = "mapped")]
 pub use mapped::{PcmFile, PcmFormat};

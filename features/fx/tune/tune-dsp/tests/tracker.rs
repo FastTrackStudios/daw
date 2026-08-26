@@ -3,8 +3,8 @@
 //! separator must place each note's audio only in its own time region — the
 //! thing whole-buffer separation cannot do.
 
-use tune_dsp::{spans_from_frames, track_notes, DnaConfig, DnaEngine, TrackConfig};
 use tune_dsp::detect::{hz_to_midi, midi_to_hz};
+use tune_dsp::{spans_from_frames, track_notes, DnaConfig, DnaEngine, TrackConfig};
 
 const SR: f64 = 48_000.0;
 
@@ -84,7 +84,10 @@ fn separation_respects_time_spans() {
     let (low, high): (Vec<_>, Vec<_>) = notes
         .iter()
         .partition(|n| (n.f0_hz - 220.0).abs() < (n.f0_hz - 350.0).abs());
-    assert!(!low.is_empty() && !high.is_empty(), "need a low and a high note");
+    assert!(
+        !low.is_empty() && !high.is_empty(),
+        "need a low and a high note"
+    );
 
     // Low note's energy must live in the first half; high note's in the second.
     let low_first = energy(&low[0].audio[..mid]);

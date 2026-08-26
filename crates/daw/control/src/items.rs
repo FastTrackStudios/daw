@@ -727,7 +727,12 @@ impl TakeHandle {
         let peaks = self
             .clients
             .peaks
-            .take_peaks(self.context(), self.item_ref(), self.take_ref.clone(), block_size)
+            .take_peaks(
+                self.context(),
+                self.item_ref(),
+                self.take_ref.clone(),
+                block_size,
+            )
             .await?;
         Ok(peaks)
     }

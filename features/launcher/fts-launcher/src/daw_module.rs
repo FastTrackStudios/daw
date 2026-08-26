@@ -1,11 +1,11 @@
 //! DawModule implementation for fts-launcher.
 
+use architect_launcher_ui::components::Launcher;
+use architect_ui::prelude::{ThemeMode, ThemeProvider, ThemeState, default_theme_preset};
 use daw::module::{
     ActionDef, DawModule, DockPosition, ModuleContext, PanelComponent, PanelDef, PanelRenderer,
 };
 use daw::reaper_ui::prelude::*;
-use architect_ui::prelude::{ThemeMode, ThemeProvider, ThemeState, default_theme_preset};
-use architect_launcher_ui::components::Launcher;
 
 use crate::LauncherEngine;
 

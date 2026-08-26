@@ -30,7 +30,12 @@ pub struct Session {
 
 impl Session {
     /// Load a specific take.
-    pub fn load<D: Midi>(daw: &D, location: MidiTakeLocation, bend_range: f64, viewport: Viewport) -> Self {
+    pub fn load<D: Midi>(
+        daw: &D,
+        location: MidiTakeLocation,
+        bend_range: f64,
+        viewport: Viewport,
+    ) -> Self {
         let snapshot = daw.read_take(location.clone());
         let doc = to_doc(&snapshot, bend_range);
         let baseline = doc.clone();
@@ -56,11 +61,8 @@ impl Session {
         viewport: Viewport,
     ) -> Option<Self> {
         let item = daw.get_selected_items(project.clone()).into_iter().next()?;
-        let location = MidiTakeLocation::new(
-            project,
-            ItemRef::Guid(item.guid.clone()),
-            TakeRef::Active,
-        );
+        let location =
+            MidiTakeLocation::new(project, ItemRef::Guid(item.guid.clone()), TakeRef::Active);
         let mut session = Self::load(daw, location, bend_range, viewport);
         // The host owns track identity. Adopting it here is what lets
         // anything persisted against this track — a mode correction, a

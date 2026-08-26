@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use resvg::tiny_skia::Color;
 
 /// Parse `#rgb`, `#rrggbb`, or `#rrggbbaa` (leading `#` optional).

@@ -24,7 +24,7 @@ use expression_editor_core::Viewport;
 // rather than restated here, so the range the editor reads at is the
 // same one the MPE fixture declares on the wire — a mismatch rescales
 // every pitch curve silently.
-use expression_editor_daw::{DEFAULT_BEND_RANGE, Session};
+use expression_editor_daw::{Session, DEFAULT_BEND_RANGE};
 use expression_editor_ui::ExpressionEditor;
 
 pub const PANEL_ID: &str = "FTS_EXPRESSION_EDITOR";
@@ -158,7 +158,10 @@ pub fn load_selected() -> bool {
         viewport,
     ) {
         Some(s) => {
-            tracing::info!(notes = s.editor.doc.notes.len(), "loaded MIDI take into editor");
+            tracing::info!(
+                notes = s.editor.doc.notes.len(),
+                "loaded MIDI take into editor"
+            );
             *label().lock().unwrap() = item_label.unwrap_or_else(|| "MIDI take".into());
             *loaded_guid().lock().unwrap() = item_guid;
             *session().lock().unwrap() = Some(Loaded::Midi(Box::new(s)));
@@ -680,9 +683,8 @@ pub fn write_test_dynamics() -> bool {
     if frames == 0 {
         return false;
     }
-    let flat = |db: f64| -> Vec<GainPoint> {
-        (0..frames).map(|frame| GainPoint { frame, db }).collect()
-    };
+    let flat =
+        |db: f64| -> Vec<GainPoint> { (0..frames).map(|frame| GainPoint { frame, db }).collect() };
     let mut lanes = Lanes::from_dynamics(&Default::default(), frames);
     lanes.set(DynamicsLane::Gate, flat(-3.0));
     lanes.set(DynamicsLane::Sibilance, flat(-5.0));

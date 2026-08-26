@@ -150,7 +150,10 @@ mod tests {
 
     #[test]
     fn tonic_triad_of_c_major_is_middle_c_e_g() {
-        assert_eq!(chord_notes(&c_major(), 1, ChordSize::Triad, 4), vec![60, 64, 67]);
+        assert_eq!(
+            chord_notes(&c_major(), 1, ChordSize::Triad, 4),
+            vec![60, 64, 67]
+        );
     }
 
     /// Degree 5 of C major is G major — the point of harmonizing rather
@@ -158,7 +161,10 @@ mod tests {
     /// quality for free.
     #[test]
     fn degree_five_of_c_major_is_g_major() {
-        assert_eq!(chord_notes(&c_major(), 5, ChordSize::Triad, 4), vec![67, 71, 74]);
+        assert_eq!(
+            chord_notes(&c_major(), 5, ChordSize::Triad, 4),
+            vec![67, 71, 74]
+        );
     }
 
     /// Degree 2 is minor and degree 7 diminished, without anyone saying so.
@@ -176,7 +182,11 @@ mod tests {
         let seventh = chord_notes(&c_major(), 1, ChordSize::Seventh, 4);
         assert_eq!(triad.len(), 3);
         assert_eq!(seventh.len(), 4);
-        assert_eq!(&seventh[..3], &triad[..], "the triad is preserved underneath");
+        assert_eq!(
+            &seventh[..3],
+            &triad[..],
+            "the triad is preserved underneath"
+        );
     }
 
     #[test]

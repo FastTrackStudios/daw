@@ -73,12 +73,20 @@ pub struct Crumb {
 impl Crumb {
     /// A plain crumb — a label with somewhere to go.
     pub fn new(label: impl Into<String>, on_click: Callback<()>) -> Self {
-        Self { label: label.into(), on_click: Some(on_click), menu: Vec::new() }
+        Self {
+            label: label.into(),
+            on_click: Some(on_click),
+            menu: Vec::new(),
+        }
     }
 
     /// The last crumb: where you are, so nothing to click.
     pub fn here(label: impl Into<String>) -> Self {
-        Self { label: label.into(), on_click: None, menu: Vec::new() }
+        Self {
+            label: label.into(),
+            on_click: None,
+            menu: Vec::new(),
+        }
     }
 
     /// A crumb that opens a picker of its siblings.
@@ -119,7 +127,12 @@ impl ChromeTab {
         active: bool,
         on_select: Callback<()>,
     ) -> Self {
-        Self { id: id.into(), label: label.into(), active, on_select }
+        Self {
+            id: id.into(),
+            label: label.into(),
+            active,
+            on_select,
+        }
     }
 }
 
@@ -134,34 +147,59 @@ impl PartialEq for ChromeTab {
 #[derive(Clone, PartialEq)]
 pub enum StatusItem {
     /// A coloured pill — the active stack lens, the loaded preset.
-    Pill { text: String, fg: String, bg: String },
+    Pill {
+        text: String,
+        fg: String,
+        bg: String,
+    },
     /// Quiet text.
     Text { text: String },
     /// A state LED, lit or not.
     Dot { on: bool, color: String },
     /// A level meter, 0..1.
-    Meter { level: f32, color: String, width_px: u32 },
+    Meter {
+        level: f32,
+        color: String,
+        width_px: u32,
+    },
     /// Any other item, wrapped with a `data-testid` so an e2e suite can find
     /// it in the bar. Purely additive — renders exactly like the wrapped item.
-    Tagged { testid: String, item: Box<StatusItem> },
+    Tagged {
+        testid: String,
+        item: Box<StatusItem>,
+    },
 }
 
 impl StatusItem {
     pub fn pill(text: impl Into<String>, fg: impl Into<String>, bg: impl Into<String>) -> Self {
-        Self::Pill { text: text.into(), fg: fg.into(), bg: bg.into() }
+        Self::Pill {
+            text: text.into(),
+            fg: fg.into(),
+            bg: bg.into(),
+        }
     }
     pub fn text(text: impl Into<String>) -> Self {
         Self::Text { text: text.into() }
     }
     pub fn dot(on: bool, color: impl Into<String>) -> Self {
-        Self::Dot { on, color: color.into() }
+        Self::Dot {
+            on,
+            color: color.into(),
+        }
     }
     pub fn meter(level: f32, color: impl Into<String>) -> Self {
-        Self::Meter { level, color: color.into(), width_px: 72 }
+        Self::Meter {
+            level,
+            color: color.into(),
+            width_px: 72,
+        }
     }
     /// Wrap an item with a `data-testid` (for e2e suites).
     pub fn tagged(testid: impl Into<String>, item: StatusItem) -> Self {
-        Self::Tagged { testid: testid.into(), item: Box::new(item) }
+        Self::Tagged {
+            testid: testid.into(),
+            item: Box::new(item),
+        }
     }
 }
 
@@ -183,7 +221,13 @@ impl RailItem {
         active: bool,
         on_select: Callback<()>,
     ) -> Self {
-        Self { id: id.into(), label: label.into(), icon, active, on_select }
+        Self {
+            id: id.into(),
+            label: label.into(),
+            icon,
+            active,
+            on_select,
+        }
     }
 }
 
@@ -210,7 +254,13 @@ pub struct PanelSpec {
 
 impl PanelSpec {
     pub fn new(id: impl Into<String>, title: impl Into<String>, icon: Icon) -> Self {
-        Self { id: id.into(), title: title.into(), icon, width_px: 320, testid: None }
+        Self {
+            id: id.into(),
+            title: title.into(),
+            icon,
+            width_px: 320,
+            testid: None,
+        }
     }
 
     pub fn width(mut self, px: u32) -> Self {
@@ -268,7 +318,13 @@ impl Chrome {
     /// The deepest level's pages — tabs describe one view, so they replace
     /// rather than stack.
     pub fn active_tabs(&self) -> Vec<ChromeTab> {
-        self.tabs.read().values().rev().find(|v| !v.is_empty()).cloned().unwrap_or_default()
+        self.tabs
+            .read()
+            .values()
+            .rev()
+            .find(|v| !v.is_empty())
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Every level's readouts, shallowest first — the rig's meters and the
@@ -326,7 +382,11 @@ impl Chrome {
     /// Open it, or close it if it was already open.
     pub fn toggle_panel(&self, id: &str) {
         let mut open = self.open_panel;
-        let next = if open.peek().as_deref() == Some(id) { None } else { Some(id.to_string()) };
+        let next = if open.peek().as_deref() == Some(id) {
+            None
+        } else {
+            Some(id.to_string())
+        };
         open.set(next);
     }
 
@@ -374,7 +434,13 @@ impl ChromeLevel {
         // strand its flyout open with nothing to render it.
         let open = self.chrome.open_panel.peek().clone();
         if let Some(id) = open {
-            let mine = self.chrome.panels.peek().get(&self.depth).cloned().unwrap_or_default();
+            let mine = self
+                .chrome
+                .panels
+                .peek()
+                .get(&self.depth)
+                .cloned()
+                .unwrap_or_default();
             let was_mine = mine.iter().any(|p| p.id == id);
             if was_mine && !panels.iter().any(|p| p.id == id) {
                 self.chrome.close_panel();

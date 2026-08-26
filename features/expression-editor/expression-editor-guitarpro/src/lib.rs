@@ -105,12 +105,7 @@ pub fn bend_curve(points: &[BendPoint], length: f64) -> Curve {
     Curve::from_points(
         points
             .iter()
-            .map(|p| {
-                Point::new(
-                    (p.position / 60.0).clamp(0.0, 1.0) * length,
-                    p.value / 50.0,
-                )
-            })
+            .map(|p| Point::new((p.position / 60.0).clamp(0.0, 1.0) * length, p.value / 50.0))
             .collect(),
     )
 }
@@ -213,8 +208,8 @@ pub fn import_bytes(bytes: &[u8], format: parse::Format) -> Result<Imported, Str
 
 /// Import from a path, choosing the reader by extension.
 pub fn import_file(path: &str) -> Result<Imported, String> {
-    let format = parse::Format::of_path(path)
-        .ok_or_else(|| format!("not a Guitar Pro file: {path}"))?;
+    let format =
+        parse::Format::of_path(path).ok_or_else(|| format!("not a Guitar Pro file: {path}"))?;
     let bytes = std::fs::read(path).map_err(|e| format!("reading {path}: {e}"))?;
     import_bytes(&bytes, format)
 }

@@ -150,7 +150,8 @@ fn the_default_config_cannot_separate_a_flam_at_any_spacing_below_its_floor() {
     let curve = measured(cfg);
     for p in curve.0.iter().filter(|p| p.spacing_ms < 50.0) {
         assert_eq!(
-            p.both_found, 0,
+            p.both_found,
+            0,
             "{} at {} ms resolved under the default 50 ms spacing floor",
             p.side.as_str(),
             p.spacing_ms

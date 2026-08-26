@@ -139,7 +139,10 @@ impl DocumentTester {
 
     /// The blitz-dom node id that currently holds focus (test diagnostics).
     pub fn blitz_focus(&self) -> Option<usize> {
-        self.document.borrow_mut().inner_mut().get_focussed_node_id()
+        self.document
+            .borrow_mut()
+            .inner_mut()
+            .get_focussed_node_id()
     }
 
     /// Presses and releases the primary mouse button at page coordinates

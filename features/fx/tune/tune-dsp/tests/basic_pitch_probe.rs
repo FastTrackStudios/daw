@@ -7,13 +7,8 @@ use tract_onnx::prelude::*;
 
 #[test]
 fn dump_model_io() {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/assets/basic_pitch/nmp.onnx"
-    );
-    let model = tract_onnx::onnx()
-        .model_for_path(path)
-        .expect("load onnx");
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/basic_pitch/nmp.onnx");
+    let model = tract_onnx::onnx().model_for_path(path).expect("load onnx");
 
     println!("=== INPUTS ===");
     for (i, id) in model.input_outlets().unwrap().iter().enumerate() {

@@ -678,9 +678,7 @@ impl ProjectRenderer {
                     }
                     // `None` = the map was busy this block (see the
                     // try_lock above): render dry rather than block.
-                    let Some(plugin) =
-                        plugins.as_mut().and_then(|p| p.get_mut(fx_guid))
-                    else {
+                    let Some(plugin) = plugins.as_mut().and_then(|p| p.get_mut(fx_guid)) else {
                         continue; // synthetic / not loaded / map busy
                     };
                     if panicked_fx.contains(fx_guid) {

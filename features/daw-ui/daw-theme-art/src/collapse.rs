@@ -115,4 +115,3 @@ pub const INPUT_SECTION_FULL: f32 = 54.0;
 pub const INPUT_SECTION_NO_FX: f32 = 42.0;
 pub const INPUT_SECTION_MINIMAL: f32 = 22.0;
 pub const BOTTOM_SECTION: f32 = 47.0;
-

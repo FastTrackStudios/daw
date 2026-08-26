@@ -195,7 +195,8 @@ mod tests {
         impl Guard {
             pub fn new(name: &str) -> Self {
                 let _held = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-                let dir = std::env::temp_dir().join(format!("fts-prefs-{name}-{}", std::process::id()));
+                let dir =
+                    std::env::temp_dir().join(format!("fts-prefs-{name}-{}", std::process::id()));
                 let _ = std::fs::create_dir_all(&dir);
                 let prev = std::env::var_os("XDG_CONFIG_HOME");
                 unsafe { std::env::set_var("XDG_CONFIG_HOME", &dir) };
@@ -216,7 +217,10 @@ mod tests {
     #[test]
     fn a_preference_round_trips() {
         let (_g, key) = scoped("roundtrip");
-        let grid = Grid { division: 16, snap: true };
+        let grid = Grid {
+            division: 16,
+            snap: true,
+        };
         store(&key, grid.clone());
         assert_eq!(load::<Grid>(&key), Some(grid));
     }
@@ -231,7 +235,13 @@ mod tests {
     fn a_corrupt_key_costs_only_that_key() {
         let (_g, key) = scoped("corrupt");
         let other = format!("{key}-other");
-        store(&other, Grid { division: 8, snap: false });
+        store(
+            &other,
+            Grid {
+                division: 8,
+                snap: false,
+            },
+        );
         set_raw(&key, "this is not styx {{{");
 
         assert_eq!(load::<Grid>(&key), None, "the bad one is gone");
@@ -246,13 +256,12 @@ mod tests {
         let (_g, key) = scoped("future");
         set_raw(
             &key,
-            &format!("version {}\nvalue {{ division 4 snap true }}\n", CURRENT_VERSION + 1),
+            &format!(
+                "version {}\nvalue {{ division 4 snap true }}\n",
+                CURRENT_VERSION + 1
+            ),
         );
-        assert_eq!(
-            load::<Grid>(&key),
-            None,
-            "discarded rather than half-read"
-        );
+        assert_eq!(load::<Grid>(&key), None, "discarded rather than half-read");
     }
 
     #[test]
@@ -270,7 +279,13 @@ mod tests {
     #[test]
     fn removing_forgets_it() {
         let (_g, key) = scoped("remove");
-        store(&key, Grid { division: 4, snap: true });
+        store(
+            &key,
+            Grid {
+                division: 4,
+                snap: true,
+            },
+        );
         remove(&key);
         assert_eq!(load::<Grid>(&key), None);
     }

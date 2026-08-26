@@ -150,14 +150,13 @@ pub fn correct_notes(notes: &[Note], scale: Scale, cfg: CorrectConfig) -> Vec<No
             let full_delta = snapped - n.median_midi; // semitones
             let applied = full_delta * cfg.strength;
             let applied_cents = applied * 100.0;
-            let (target_midi, ratio, applied_cents) =
-                if applied_cents.abs() < cfg.deadband_cents {
-                    (n.median_midi, 1.0, 0.0)
-                } else {
-                    let target = n.median_midi + applied;
-                    let ratio = midi_to_hz(target) / midi_to_hz(n.median_midi);
-                    (target, ratio, applied_cents)
-                };
+            let (target_midi, ratio, applied_cents) = if applied_cents.abs() < cfg.deadband_cents {
+                (n.median_midi, 1.0, 0.0)
+            } else {
+                let target = n.median_midi + applied;
+                let ratio = midi_to_hz(target) / midi_to_hz(n.median_midi);
+                (target, ratio, applied_cents)
+            };
             NoteCorrection {
                 start_frame: n.start_frame,
                 end_frame: n.end_frame,

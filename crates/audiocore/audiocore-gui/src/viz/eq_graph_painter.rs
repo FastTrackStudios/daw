@@ -6,14 +6,14 @@
 
 use std::sync::Arc;
 
-use nice_plug_dioxus::prelude::SceneOverlay;
-use nice_plug_dioxus::prelude::vello::Scene;
 use nice_plug_dioxus::prelude::vello::kurbo::{Affine, BezPath, Circle, Line, Rect, Stroke};
 use nice_plug_dioxus::prelude::vello::peniko::{Color, Fill};
+use nice_plug_dioxus::prelude::vello::Scene;
+use nice_plug_dioxus::prelude::SceneOverlay;
 use parking_lot::RwLock;
 
 use super::eq_graph::{
-    EqBand, calculate_band_response, calculate_combined_response, get_band_color,
+    calculate_band_response, calculate_combined_response, get_band_color, EqBand,
 };
 
 // ── Shared state ────────────────────────────────────────────────────

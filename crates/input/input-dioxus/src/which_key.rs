@@ -14,8 +14,8 @@
 //! rebuild. The host is responsible for injecting a Tailwind stylesheet if it
 //! wants the class-based colours (this component only injects the theme).
 
-use dioxus::prelude::*;
 use architect_ui::prelude::*;
+use dioxus::prelude::*;
 
 // ---------------------------------------------------------------------------
 // Shared state

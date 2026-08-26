@@ -215,7 +215,10 @@ pub async fn register_actions(daw: &Daw, actions: &[ActionDef]) -> Result<Action
                     // starts reading is queued rather than dropped —
                     // REAPER can run an action the moment it is registered,
                     // and a startup script does exactly that.
-                    if tx.send(daw_proto::ActionEvent::Triggered { command_name }).is_err() {
+                    if tx
+                        .send(daw_proto::ActionEvent::Triggered { command_name })
+                        .is_err()
+                    {
                         break;
                     }
                 }

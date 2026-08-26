@@ -205,7 +205,6 @@ fn lookup_finds_what_the_theme_asks_for() {
     assert!(generated::by_name("definitely_not_a_theme_image").is_none());
 }
 
-
 /// The label on a button sits where the source puts it.
 ///
 /// Vertical placement is not something `dominant-baseline: central` gets
@@ -247,7 +246,8 @@ fn button_labels_sit_where_the_source_puts_them() {
             0,
             daw_theme_art::render_svg(
                 vector::MuteButton,
-                vector::ToggleProps { unlit: None,
+                vector::ToggleProps {
+                    unlit: None,
                     hover: 0.35,
                     sinks: true,
                     depth: 0.15,
@@ -266,7 +266,8 @@ fn button_labels_sit_where_the_source_puts_them() {
             0,
             daw_theme_art::render_svg(
                 vector::SoloButton,
-                vector::SoloProps { unlit: None,
+                vector::SoloProps {
+                    unlit: None,
                     hover: 0.35,
                     sinks: true,
                     depth: 0.11,
@@ -303,8 +304,8 @@ fn button_labels_sit_where_the_source_puts_them() {
             .to_rgba8();
         let cw = src.width() / art.cells.max(1);
         let cropped = image::imageops::crop_imm(&src, cell * cw, 0, cw, src.height()).to_image();
-        let want = glyph_rows(&cropped)
-            .unwrap_or_else(|| panic!("{name}: no glyph found in the source"));
+        let want =
+            glyph_rows(&cropped).unwrap_or_else(|| panic!("{name}: no glyph found in the source"));
 
         // Rasterise at REAPER's own size — a label can be perfectly placed
         // at 300px and a row out at 20px, and 20px is where it ships.
@@ -313,10 +314,7 @@ fn button_labels_sit_where_the_source_puts_them() {
         let (tw, th) = (tree.size().width(), tree.size().height());
         resvg::render(
             &tree,
-            resvg::tiny_skia::Transform::from_scale(
-                cw as f32 / tw,
-                src.height() as f32 / th,
-            ),
+            resvg::tiny_skia::Transform::from_scale(cw as f32 / tw, src.height() as f32 / th),
             &mut pixmap.as_mut(),
         );
         let got = glyph_rows(&daw_theme_art::render::to_rgba(&pixmap))
@@ -328,7 +326,6 @@ fn button_labels_sit_where_the_source_puts_them() {
         );
     }
 }
-
 
 /// A vector control exports as a REAPER strip with its guides intact.
 ///
@@ -342,13 +339,18 @@ fn button_labels_sit_where_the_source_puts_them() {
 fn exported_controls_keep_the_sources_guides() {
     let Some(dir) = source_dir() else { return };
 
-    for name in ["mcp_mute_on", "mcp_fx_norm", "mcp_io_s_r", "mcp_recarm_auto"] {
+    for name in [
+        "mcp_mute_on",
+        "mcp_fx_norm",
+        "mcp_io_s_r",
+        "mcp_recarm_auto",
+    ] {
         let src = image::open(dir.join(format!("{name}.png")))
             .expect("source png")
             .to_rgba8();
         let spec = daw_theme_art::DerivedSpec::from_image(&src);
-        let out = daw_theme_art::render_control(name, &spec)
-            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let out =
+            daw_theme_art::render_control(name, &spec).unwrap_or_else(|e| panic!("{name}: {e}"));
 
         assert_eq!(
             out.dimensions(),
@@ -382,7 +384,6 @@ fn exported_controls_keep_the_sources_guides() {
         }
     }
 }
-
 
 /// Cell layouts, against the real art rather than a fixture.
 ///
@@ -438,7 +439,6 @@ fn strips_are_split_where_the_art_says() {
     }
 }
 
-
 /// Every declared slice still equals the guides in the art it replaces.
 ///
 /// The highest-value assertion in the set, and the reason the slice table
@@ -455,7 +455,11 @@ fn strips_are_split_where_the_art_says() {
 fn declared_slices_match_the_source_art() {
     let Some(dir) = source_dir() else { return };
     let bad = daw_theme_art::export::slice_mismatches(&dir);
-    assert!(bad.is_empty(), "the slice table disagrees with the art:\n  {}", bad.join("\n  "));
+    assert!(
+        bad.is_empty(),
+        "the slice table disagrees with the art:\n  {}",
+        bad.join("\n  ")
+    );
 }
 
 /// The table covers every MCP image the exporter can draw.

@@ -200,7 +200,9 @@ pub fn notes_of(track: &guitarpro::model::legacy::track::Track, strings: usize) 
                                     value: p.value as f64 * 25.0,
                                 })
                                 .collect(),
-                            b.points.first().is_some_and(|p| p.position == 0 && p.value != 0),
+                            b.points
+                                .first()
+                                .is_some_and(|p| p.position == 0 && p.value != 0),
                         ),
                         None => (Vec::new(), false),
                     };

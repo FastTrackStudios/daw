@@ -504,7 +504,10 @@ fn resolve_wheel_in_bindings(
         .or_else(|| {
             bindings.iter().rev().find(|b| {
                 mods_dir_match(b)
-                    && b.context.clone().unwrap_or(KeybindContext::Global).matches(&context)
+                    && b.context
+                        .clone()
+                        .unwrap_or(KeybindContext::Global)
+                        .matches(&context)
             })
         })
         .map(|binding| binding.action.clone())

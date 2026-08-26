@@ -6,8 +6,8 @@ pub mod transfer_curve;
 pub mod waveform;
 
 pub use eq_graph::{
-    EqBand, EqBandShape, EqGraph, MAX_BANDS, StereoMode, get_band_color, get_band_fill_color,
-    q_to_slope_db, slope_db_to_q,
+    get_band_color, get_band_fill_color, q_to_slope_db, slope_db_to_q, EqBand, EqBandShape,
+    EqGraph, StereoMode, MAX_BANDS,
 };
 pub use eq_graph_painter::{EqGraphPainter, EqGraphRenderState, GraphConfig, InteractionState};
 pub use transfer_curve::TransferCurve;

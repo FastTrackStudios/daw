@@ -28,7 +28,7 @@
 use std::path::{Path, PathBuf};
 
 use dawfile_reaper::builder::{MidiSourceBuilder, ReaperProjectBuilder};
-use expression_editor_demo::{build, Material, TrackRole};
+use expression_editor_demo::{Material, TrackRole, build};
 
 fn main() {
     let Some(material) = Material::discover() else {
@@ -55,9 +55,7 @@ fn main() {
         .as_ref()
         .and_then(|s| s.midi.as_ref())
         .and_then(|p| std::fs::read(p).ok());
-    let smf = smf_bytes
-        .as_deref()
-        .and_then(|b| midly::Smf::parse(b).ok());
+    let smf = smf_bytes.as_deref().and_then(|b| midly::Smf::parse(b).ok());
     let bpm = smf.as_ref().and_then(first_tempo).unwrap_or(120.0);
 
     let mut project = ReaperProjectBuilder::new()
@@ -104,7 +102,8 @@ fn main() {
             let len = ticks_to_seconds(end_ticks, ppq, bpm);
             project = project.track(format!("{name} [MIDI]"), |tr| {
                 tr.item(0.0, len, |item| {
-                    item.name(&name).midi(|m| smf_track_events(m.ticks_per_qn(ppq), track))
+                    item.name(&name)
+                        .midi(|m| smf_track_events(m.ticks_per_qn(ppq), track))
                 })
             });
             println!("  midi   {name}  ({len:.1}s)");
@@ -122,7 +121,10 @@ fn main() {
                 .midi(|m| snapshot_events(m.ticks_per_qn(snap.ppq as u32), &snap))
         })
     });
-    println!("  mpe    MPE Fixture  ({mpe_len:.1}s, {} notes)", snap.notes.len());
+    println!(
+        "  mpe    MPE Fixture  ({mpe_len:.1}s, {} notes)",
+        snap.notes.len()
+    );
 
     // ── Guitar: the GP transcription's notes as a MIDI item ──────────
     if let Some(gp) = demo
@@ -258,9 +260,7 @@ fn smf_track_events<'a>(
         let ch = channel.as_int();
         m = m.at(tick);
         m = match message {
-            midly::MidiMessage::NoteOn { key, vel } => {
-                m.note_on(0, ch, key.as_int(), vel.as_int())
-            }
+            midly::MidiMessage::NoteOn { key, vel } => m.note_on(0, ch, key.as_int(), vel.as_int()),
             midly::MidiMessage::NoteOff { key, vel } => {
                 m.note_off(0, ch, key.as_int(), vel.as_int())
             }
@@ -269,7 +269,11 @@ fn smf_track_events<'a>(
             }
             midly::MidiMessage::PitchBend { bend } => {
                 // midly is -8192..8191; the source wants the raw 14-bit word.
-                m.pitch_bend(0, ch, (bend.0.as_int() as i32 + 8192).clamp(0, 16383) as u16)
+                m.pitch_bend(
+                    0,
+                    ch,
+                    (bend.0.as_int() as i32 + 8192).clamp(0, 16383) as u16,
+                )
             }
             midly::MidiMessage::ProgramChange { program } => {
                 m.program_change(0, ch, program.as_int())

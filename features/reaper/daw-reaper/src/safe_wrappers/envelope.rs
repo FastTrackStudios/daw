@@ -323,9 +323,7 @@ pub fn get_automation_item_info(
     let Ok(desc) = CString::new(desc) else {
         return 0.0;
     };
-    unsafe {
-        low.GetSetAutomationItemInfo(envelope, index as i32, desc.as_ptr(), 0.0, false)
-    }
+    unsafe { low.GetSetAutomationItemInfo(envelope, index as i32, desc.as_ptr(), 0.0, false) }
 }
 
 /// Write one numeric field of an automation item.
@@ -423,7 +421,13 @@ pub fn get_automation_item_points(
             )
         };
         if ok {
-            out.push(PointSample { time, value, shape, tension, selected });
+            out.push(PointSample {
+                time,
+                value,
+                shape,
+                tension,
+                selected,
+            });
         }
     }
     out
@@ -453,9 +457,8 @@ pub fn get_envelope_state_chunk(low: &Reaper, envelope: *mut TrackEnvelope) -> O
         return None;
     }
     let mut buf = vec![0i8; 64 * 1024];
-    let ok = unsafe {
-        low.GetEnvelopeStateChunk(envelope, buf.as_mut_ptr(), buf.len() as i32, false)
-    };
+    let ok =
+        unsafe { low.GetEnvelopeStateChunk(envelope, buf.as_mut_ptr(), buf.len() as i32, false) };
     if !ok {
         return None;
     }
@@ -537,8 +540,7 @@ pub fn parse_lane_state(chunk: &str) -> LaneState {
             }
             Some("ACT") => {
                 state.active = words.next().map(|v| v != "0").unwrap_or(true);
-                state.automation_mode =
-                    words.next().and_then(|v| v.parse().ok()).unwrap_or(-1);
+                state.automation_mode = words.next().and_then(|v| v.parse().ok()).unwrap_or(-1);
             }
             _ => {}
         }
@@ -649,10 +651,19 @@ mod lane_tests {
 
         assert!(out.contains("VIS 1 1 1"), "{out}");
         assert!(out.contains("LANEHEIGHT 44 0"), "{out}");
-        assert!(out.contains("PT 0 0.5 0"), "the points were dropped:\n{out}");
-        assert!(out.contains("DEFSHAPE 0 -1 -1"), "the shape was dropped:\n{out}");
+        assert!(
+            out.contains("PT 0 0.5 0"),
+            "the points were dropped:\n{out}"
+        );
+        assert!(
+            out.contains("DEFSHAPE 0 -1 -1"),
+            "the shape was dropped:\n{out}"
+        );
         // Untouched by this caller, so unchanged in the output.
-        assert!(out.contains("ARM 1"), "an armed envelope was disarmed:\n{out}");
+        assert!(
+            out.contains("ARM 1"),
+            "an armed envelope was disarmed:\n{out}"
+        );
         assert!(out.contains("ACT 1 -1"), "the active flag moved:\n{out}");
         assert_eq!(out.lines().count(), chunk().lines().count());
 
@@ -674,7 +685,12 @@ mod lane_tests {
 
         let out = splice_lane_state(
             &chunk(),
-            LaneState { armed: false, automation_mode: 2, active: true, ..state },
+            LaneState {
+                armed: false,
+                automation_mode: 2,
+                active: true,
+                ..state
+            },
         );
         assert!(out.contains("ARM 0"), "{out}");
         assert!(out.contains("ACT 1 2"), "{out}");
@@ -700,7 +716,12 @@ mod lane_tests {
         let bare = "<PARMENV 2 0 1 1\n  VIS 1 0 1\n  PT 0 0.5 0\n>";
         let out = splice_lane_state(
             bare,
-            LaneState { visible: true, in_own_lane: true, height: 30, ..Default::default() },
+            LaneState {
+                visible: true,
+                in_own_lane: true,
+                height: 30,
+                ..Default::default()
+            },
         );
         assert!(out.contains("LANEHEIGHT 30 0"), "{out}");
         assert!(out.contains("PT 0 0.5 0"));

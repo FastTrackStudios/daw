@@ -22,9 +22,23 @@ fn rgb565_be(r: u8, g: u8, b: u8) -> [u8; 2] {
     (((r as u16 & 0xF8) << 8) | ((g as u16 & 0xFC) << 3) | ((b as u16) >> 3)).to_be_bytes()
 }
 fn bars() -> Vec<u8> {
-    let cols = [(255u8,0,0),(0,255,0),(0,0,255),(255,255,0),(0,255,255),(255,0,255),(255,255,255),(255,128,0)];
-    let mut p = Vec::with_capacity(W*H*2);
-    for _y in 0..H { for x in 0..W { let (r,g,b)=cols[(x*cols.len())/W]; p.extend_from_slice(&rgb565_be(r,g,b)); } }
+    let cols = [
+        (255u8, 0, 0),
+        (0, 255, 0),
+        (0, 0, 255),
+        (255, 255, 0),
+        (0, 255, 255),
+        (255, 0, 255),
+        (255, 255, 255),
+        (255, 128, 0),
+    ];
+    let mut p = Vec::with_capacity(W * H * 2);
+    for _y in 0..H {
+        for x in 0..W {
+            let (r, g, b) = cols[(x * cols.len()) / W];
+            p.extend_from_slice(&rgb565_be(r, g, b));
+        }
+    }
     p
 }
 
@@ -36,25 +50,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stopc = stop.clone();
     let ka = thread::spawn(move || {
         let mut d = MidiOut::open_contains("DAW").unwrap();
-        while !stopc.load(Ordering::Relaxed) { let _ = d.send(&[0xBF,0x01,0x03]); thread::sleep(Duration::from_millis(400)); }
+        while !stopc.load(Ordering::Relaxed) {
+            let _ = d.send(&[0xBF, 0x01, 0x03]);
+            thread::sleep(Duration::from_millis(400));
+        }
     });
     thread::sleep(Duration::from_millis(800));
     println!("device in DAW mode; now trying USB-bulk image framings…");
 
     // 2) USB bulk to the vendor interface.
     let ctx = Context::new()?;
-    let h = ctx.open_device_with_vid_pid(VID, PID).ok_or("no device / sudo?")?;
+    let h = ctx
+        .open_device_with_vid_pid(VID, PID)
+        .ok_or("no device / sudo?")?;
     let _ = h.set_auto_detach_kernel_driver(true);
     h.claim_interface(IFACE)?;
     let px = bars();
 
     // framing A: tillt MK2 header 0x84
-    let mut a = vec![0x84u8,0x00,0x00,0x60,0,0,0,0];
-    for v in [0u16,0,W as u16,H as u16] { a.extend_from_slice(&v.to_be_bytes()); }
-    a.extend_from_slice(&[0x02,0,0,0,0,0]);
-    a.extend_from_slice(&((W*H/2) as u16).to_be_bytes());
+    let mut a = vec![0x84u8, 0x00, 0x00, 0x60, 0, 0, 0, 0];
+    for v in [0u16, 0, W as u16, H as u16] {
+        a.extend_from_slice(&v.to_be_bytes());
+    }
+    a.extend_from_slice(&[0x02, 0, 0, 0, 0, 0]);
+    a.extend_from_slice(&((W * H / 2) as u16).to_be_bytes());
     a.extend_from_slice(&px);
-    a.extend_from_slice(&[0x02,0,0,0,0x03,0,0,0,0x40,0,0,0]);
+    a.extend_from_slice(&[0x02, 0, 0, 0, 0x03, 0, 0, 0, 0x40, 0, 0, 0]);
 
     for (label, ep, buf) in [
         ("A 0x84 → EP04", 0x04u8, &a),

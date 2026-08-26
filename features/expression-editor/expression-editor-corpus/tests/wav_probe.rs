@@ -14,7 +14,14 @@ use expression_editor_corpus::wav::{Format, probe, probe_tree, read_channel, sum
 
 /// A `fmt ` chunk, and whatever leading chunks a test wants in front of
 /// it.
-fn wav(leading: &[(&[u8; 4], &[u8])], tag: u16, channels: u16, rate: u32, bits: u16, ext: &[u8]) -> Vec<u8> {
+fn wav(
+    leading: &[(&[u8; 4], &[u8])],
+    tag: u16,
+    channels: u16,
+    rate: u32,
+    bits: u16,
+    ext: &[u8],
+) -> Vec<u8> {
     let mut fmt = Vec::new();
     fmt.extend(tag.to_le_bytes());
     fmt.extend(channels.to_le_bytes());
@@ -96,7 +103,14 @@ fn a_chunk_in_front_of_fmt_does_not_derail_the_reader() {
     let path = write(
         &dir,
         "hit.wav",
-        &wav(&[(b"JUNK", &[0u8; 30]), (b"bext", &[7u8; 15])], 1, 2, 44_100, 24, &[]),
+        &wav(
+            &[(b"JUNK", &[0u8; 30]), (b"bext", &[7u8; 15])],
+            1,
+            2,
+            44_100,
+            24,
+            &[],
+        ),
     );
     let header = probe(&path).expect("probes");
     assert_eq!(header.channels, 2);
@@ -136,9 +150,21 @@ fn probing_a_tree_groups_identical_headers() {
     // rendering.
     let dir = tmp("tree");
     std::fs::create_dir_all(dir.join("Snare/samples")).expect("mkdir");
-    write(&dir, "Snare/samples/1.wav", &wav(&[], 3, 15, 48_000, 32, &[]));
-    write(&dir, "Snare/samples/2.wav", &wav(&[], 3, 15, 48_000, 32, &[]));
-    write(&dir, "Snare/samples/3.wav", &wav(&[], 3, 15, 44_100, 32, &[]));
+    write(
+        &dir,
+        "Snare/samples/1.wav",
+        &wav(&[], 3, 15, 48_000, 32, &[]),
+    );
+    write(
+        &dir,
+        "Snare/samples/2.wav",
+        &wav(&[], 3, 15, 48_000, 32, &[]),
+    );
+    write(
+        &dir,
+        "Snare/samples/3.wav",
+        &wav(&[], 3, 15, 44_100, 32, &[]),
+    );
     write(&dir, "Snare/notes.txt", b"ignored");
 
     let probed = probe_tree(&dir).expect("probes");

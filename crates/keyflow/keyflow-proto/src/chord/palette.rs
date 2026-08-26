@@ -33,7 +33,10 @@ pub enum ChordRole {
     /// Borrowed from the parallel major/minor — same tonic, other mode.
     ParallelKey,
     /// Points at a diatonic degree (1-7). See [`ApproachKind`].
-    Approach { target_degree: u8, kind: ApproachKind },
+    Approach {
+        target_degree: u8,
+        kind: ApproachKind,
+    },
 }
 
 /// How an approach chord reaches its target.
@@ -202,7 +205,10 @@ pub fn parallel_key(key: &Key) -> Vec<ChordCandidate> {
 
     diatonic(&parallel)
         .into_iter()
-        .filter(|c| !own.iter().any(|(pc, s)| *pc == c.root_pc && *s == c.semitones))
+        .filter(|c| {
+            !own.iter()
+                .any(|(pc, s)| *pc == c.root_pc && *s == c.semitones)
+        })
         .map(|mut c| {
             c.role = ChordRole::ParallelKey;
             c.in_scale = false;
@@ -218,7 +224,10 @@ pub fn parallel_key(key: &Key) -> Vec<ChordCandidate> {
 
 /// Whether `key`'s third is minor — good enough to pick the parallel.
 fn is_minor_ish(key: &Key) -> bool {
-    key.mode.interval_pattern().get(2).is_some_and(|third| *third == 3)
+    key.mode
+        .interval_pattern()
+        .get(2)
+        .is_some_and(|third| *third == 3)
 }
 
 /// Secondary dominants and tritone subs for each diatonic degree.
@@ -287,7 +296,10 @@ mod tests {
                 "expected {expected} among {labels:?}"
             );
         }
-        assert!(!labels.iter().any(|l| l == "C"), "C is shared, not borrowed");
+        assert!(
+            !labels.iter().any(|l| l == "C"),
+            "C is shared, not borrowed"
+        );
     }
 
     /// The secondary dominant of ii in C is A7 — a fifth above D.
@@ -397,19 +409,58 @@ pub struct ChordType {
 /// listed. Ported from ChordGun's `chords.lua`, whose binary patterns
 /// (`"10001001"` = root, major third, fifth) are just semitone sets.
 pub const CHORD_TYPES: &[ChordType] = &[
-    ChordType { display: "", semitones: &[0, 4, 7] },
-    ChordType { display: "m", semitones: &[0, 3, 7] },
-    ChordType { display: "5", semitones: &[0, 7] },
-    ChordType { display: "sus2", semitones: &[0, 2, 7] },
-    ChordType { display: "sus4", semitones: &[0, 5, 7] },
-    ChordType { display: "dim", semitones: &[0, 3, 6] },
-    ChordType { display: "aug", semitones: &[0, 4, 8] },
-    ChordType { display: "6", semitones: &[0, 4, 7, 9] },
-    ChordType { display: "m6", semitones: &[0, 3, 7, 9] },
-    ChordType { display: "7", semitones: &[0, 4, 7, 10] },
-    ChordType { display: "maj7", semitones: &[0, 4, 7, 11] },
-    ChordType { display: "m7", semitones: &[0, 3, 7, 10] },
-    ChordType { display: "b5", semitones: &[0, 4, 6] },
+    ChordType {
+        display: "",
+        semitones: &[0, 4, 7],
+    },
+    ChordType {
+        display: "m",
+        semitones: &[0, 3, 7],
+    },
+    ChordType {
+        display: "5",
+        semitones: &[0, 7],
+    },
+    ChordType {
+        display: "sus2",
+        semitones: &[0, 2, 7],
+    },
+    ChordType {
+        display: "sus4",
+        semitones: &[0, 5, 7],
+    },
+    ChordType {
+        display: "dim",
+        semitones: &[0, 3, 6],
+    },
+    ChordType {
+        display: "aug",
+        semitones: &[0, 4, 8],
+    },
+    ChordType {
+        display: "6",
+        semitones: &[0, 4, 7, 9],
+    },
+    ChordType {
+        display: "m6",
+        semitones: &[0, 3, 7, 9],
+    },
+    ChordType {
+        display: "7",
+        semitones: &[0, 4, 7, 10],
+    },
+    ChordType {
+        display: "maj7",
+        semitones: &[0, 4, 7, 11],
+    },
+    ChordType {
+        display: "m7",
+        semitones: &[0, 3, 7, 10],
+    },
+    ChordType {
+        display: "b5",
+        semitones: &[0, 4, 6],
+    },
 ];
 
 /// Pitch classes of `key`'s scale.
@@ -490,7 +541,10 @@ mod grid_tests {
             .map(|c| c.label)
             .collect();
         for expected in ["C", "Csus2", "Csus4", "C6", "Cmaj7"] {
-            assert!(labels.iter().any(|l| l == expected), "missing {expected} in {labels:?}");
+            assert!(
+                labels.iter().any(|l| l == expected),
+                "missing {expected} in {labels:?}"
+            );
         }
         // Still offered, but marked as outsiders rather than removed.
         let out: Vec<String> = variations(&c_major(), 1)
@@ -499,7 +553,10 @@ mod grid_tests {
             .map(|c| c.label)
             .collect();
         for absent in ["Cm", "Caug", "Cdim", "C7"] {
-            assert!(out.iter().any(|l| l == absent), "{absent} should be flagged out-of-scale");
+            assert!(
+                out.iter().any(|l| l == absent),
+                "{absent} should be flagged out-of-scale"
+            );
         }
     }
 
@@ -575,7 +632,10 @@ mod inversion_tests {
     /// caller can increment without bounds-checking.
     #[test]
     fn inversion_wraps_at_the_voice_count() {
-        assert_eq!(c_triad().notes_inverted(4, 3), c_triad().notes_inverted(4, 0));
+        assert_eq!(
+            c_triad().notes_inverted(4, 3),
+            c_triad().notes_inverted(4, 0)
+        );
     }
 
     /// Inversion must never push a voice out of MIDI range.

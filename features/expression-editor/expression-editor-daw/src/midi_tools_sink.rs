@@ -11,8 +11,8 @@
 
 use std::sync::Mutex;
 
-use daw::service::{Items, Midi, MidiNoteCreate, MidiTakeLocation, ProjectContext};
 use daw::service::item::ItemRef;
+use daw::service::{Items, Midi, MidiNoteCreate, MidiTakeLocation, ProjectContext};
 use expression_editor_tools::velocity::{Note, Session, VelocityEdit};
 
 /// What velocity editing needs from a backend.

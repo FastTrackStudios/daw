@@ -74,11 +74,11 @@ pub fn section_type_midi_note(section_type: &SectionType) -> Option<u8> {
             SectionType::Chorus => Some(91), // G6 — Post-Chorus
             _ => None,
         },
-        SectionType::Breakdown => Some(92), // G#6
-        SectionType::Interlude => Some(93), // A6
-        SectionType::Solo => Some(96),      // C7
-        SectionType::Vamp => Some(97),      // C#7
-        SectionType::Refrain => Some(99),   // D#7 — recurring hook
+        SectionType::Breakdown => Some(92),   // G#6
+        SectionType::Interlude => Some(93),   // A6
+        SectionType::Solo => Some(96),        // C7
+        SectionType::Vamp => Some(97),        // C#7
+        SectionType::Refrain => Some(99),     // D#7 — recurring hook
         SectionType::Turnaround => Some(101), // F7 — transitional link
         SectionType::Custom(name) => custom_section_midi_note(name),
         SectionType::CountIn | SectionType::Opening | SectionType::End | SectionType::Hits => None,

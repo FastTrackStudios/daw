@@ -94,9 +94,15 @@ pub struct Slice {
 
 impl Slice {
     /// Neither axis stretches — the drawing scales whole.
-    pub const FIXED: Self = Self { x: Band::Fixed, y: Band::Fixed };
+    pub const FIXED: Self = Self {
+        x: Band::Fixed,
+        y: Band::Fixed,
+    };
     /// Both axes stretch everywhere — a flat plate.
-    pub const ALL: Self = Self { x: Band::All, y: Band::All };
+    pub const ALL: Self = Self {
+        x: Band::All,
+        y: Band::All,
+    };
 
     pub const fn new(x: Band, y: Band) -> Self {
         Self { x, y }
@@ -152,16 +158,28 @@ impl NamedArt {
     /// The horizontal twin is [`NamedArt::row`].
     pub fn stack(&self) -> Vec<Pane> {
         let (w, h) = self.source;
-        let whole = |grow| Pane { view: (0.0, 0.0, w, h), grow };
+        let whole = |grow| Pane {
+            view: (0.0, 0.0, w, h),
+            grow,
+        };
         match self.slice.y {
             // Nothing to decompose: the drawing scales whole, or it is a
             // plate that stretches everywhere. Either way one pane, and it
             // takes whatever height it is given.
             Band::Fixed | Band::All => vec![whole(matches!(self.slice.y, Band::All))],
             Band::Middle(lo, hi) => vec![
-                Pane { view: (0.0, 0.0, w, lo), grow: false },
-                Pane { view: (0.0, lo, w, hi - lo), grow: true },
-                Pane { view: (0.0, hi, w, h - hi), grow: false },
+                Pane {
+                    view: (0.0, 0.0, w, lo),
+                    grow: false,
+                },
+                Pane {
+                    view: (0.0, lo, w, hi - lo),
+                    grow: true,
+                },
+                Pane {
+                    view: (0.0, hi, w, h - hi),
+                    grow: false,
+                },
             ],
         }
     }
@@ -176,14 +194,26 @@ impl NamedArt {
         let (w, h) = self.source;
         match self.slice.x {
             Band::Fixed | Band::All => {
-                vec![Pane { view: (0.0, 0.0, w, h), grow: matches!(self.slice.x, Band::All) }]
+                vec![Pane {
+                    view: (0.0, 0.0, w, h),
+                    grow: matches!(self.slice.x, Band::All),
+                }]
             }
             // A band that runs to an edge leaves a zero-width pane there,
             // which is a `<div>` of nothing — dropped rather than rendered.
             Band::Middle(lo, hi) => [
-                Pane { view: (0.0, 0.0, lo, h), grow: false },
-                Pane { view: (lo, 0.0, hi - lo, h), grow: true },
-                Pane { view: (hi, 0.0, w - hi, h), grow: false },
+                Pane {
+                    view: (0.0, 0.0, lo, h),
+                    grow: false,
+                },
+                Pane {
+                    view: (lo, 0.0, hi - lo, h),
+                    grow: true,
+                },
+                Pane {
+                    view: (hi, 0.0, w - hi, h),
+                    grow: false,
+                },
             ]
             .into_iter()
             .filter(|p| p.view.2 > 0.0)
@@ -192,7 +222,11 @@ impl NamedArt {
     }
 
     const fn new(name: &'static str, source: (f32, f32), slice: Slice) -> Self {
-        Self { name, source, slice }
+        Self {
+            name,
+            source,
+            slice,
+        }
     }
 }
 
@@ -248,38 +282,107 @@ pub const MCP_ART: &[NamedArt] = &[
     fixed("mcp_solo_off", (21.0, 20.0)),
     fixed("mcp_solo_on", (21.0, 20.0)),
     fixed("mcp_solodefeat_on", (21.0, 20.0)),
-    NamedArt::new("track_mute_off", (21.0, 24.0), Slice::new(Middle(1.0, 20.0), Middle(21.0, 23.0))),
-    NamedArt::new("track_mute_on", (21.0, 24.0), Slice::new(Middle(1.0, 20.0), Middle(21.0, 23.0))),
-    NamedArt::new("track_solo_off", (21.0, 24.0), Slice::new(Middle(1.0, 20.0), Middle(21.0, 23.0))),
-    NamedArt::new("track_solo_on", (21.0, 24.0), Slice::new(Middle(1.0, 20.0), Middle(21.0, 23.0))),
-    NamedArt::new("track_solodefeat_on", (21.0, 24.0), Slice::new(Middle(1.0, 20.0), Middle(21.0, 23.0))),
-    NamedArt::new("tcp_solodefeat_on", (21.0, 24.0), Slice::new(Middle(1.0, 20.0), Middle(21.0, 23.0))),
-
+    NamedArt::new(
+        "track_mute_off",
+        (21.0, 24.0),
+        Slice::new(Middle(1.0, 20.0), Middle(21.0, 23.0)),
+    ),
+    NamedArt::new(
+        "track_mute_on",
+        (21.0, 24.0),
+        Slice::new(Middle(1.0, 20.0), Middle(21.0, 23.0)),
+    ),
+    NamedArt::new(
+        "track_solo_off",
+        (21.0, 24.0),
+        Slice::new(Middle(1.0, 20.0), Middle(21.0, 23.0)),
+    ),
+    NamedArt::new(
+        "track_solo_on",
+        (21.0, 24.0),
+        Slice::new(Middle(1.0, 20.0), Middle(21.0, 23.0)),
+    ),
+    NamedArt::new(
+        "track_solodefeat_on",
+        (21.0, 24.0),
+        Slice::new(Middle(1.0, 20.0), Middle(21.0, 23.0)),
+    ),
+    NamedArt::new(
+        "tcp_solodefeat_on",
+        (21.0, 24.0),
+        Slice::new(Middle(1.0, 20.0), Middle(21.0, 23.0)),
+    ),
     // ── the FX pill's labelled half ──────────────────────────────────────
     //
     // The one slice that was already known and
     // already patched by hand: `mcp.fx` is 43 wide against 28 of art, and
     // only the flat run before the seam grows — `Middle(23, 28)` says so
     // in the art's own units.
-    NamedArt::new("mcp_fx_empty", (28.0, 22.0), Slice::new(Middle(23.0, 28.0), Middle(14.0, 18.0))),
-    NamedArt::new("mcp_fx_norm", (28.0, 22.0), Slice::new(Middle(23.0, 28.0), Middle(14.0, 18.0))),
-    NamedArt::new("mcp_fx_dis", (28.0, 22.0), Slice::new(Middle(23.0, 28.0), Middle(14.0, 18.0))),
-    NamedArt::new("track_fx_empty", (20.0, 22.0), Slice::new(Middle(18.0, 19.0), Middle(5.0, 6.0))),
-    NamedArt::new("track_fx_norm", (20.0, 22.0), Slice::new(Middle(18.0, 19.0), Middle(5.0, 6.0))),
-    NamedArt::new("track_fx_dis", (20.0, 22.0), Slice::new(Middle(18.0, 19.0), Middle(5.0, 6.0))),
-
+    NamedArt::new(
+        "mcp_fx_empty",
+        (28.0, 22.0),
+        Slice::new(Middle(23.0, 28.0), Middle(14.0, 18.0)),
+    ),
+    NamedArt::new(
+        "mcp_fx_norm",
+        (28.0, 22.0),
+        Slice::new(Middle(23.0, 28.0), Middle(14.0, 18.0)),
+    ),
+    NamedArt::new(
+        "mcp_fx_dis",
+        (28.0, 22.0),
+        Slice::new(Middle(23.0, 28.0), Middle(14.0, 18.0)),
+    ),
+    NamedArt::new(
+        "track_fx_empty",
+        (20.0, 22.0),
+        Slice::new(Middle(18.0, 19.0), Middle(5.0, 6.0)),
+    ),
+    NamedArt::new(
+        "track_fx_norm",
+        (20.0, 22.0),
+        Slice::new(Middle(18.0, 19.0), Middle(5.0, 6.0)),
+    ),
+    NamedArt::new(
+        "track_fx_dis",
+        (20.0, 22.0),
+        Slice::new(Middle(18.0, 19.0), Middle(5.0, 6.0)),
+    ),
     // ── the FX pill's bypass half ────────────────────────────────────────
     //
     // `_v` is the mixer's and `_h` the track
     // panel's, despite both carrying the `track_` prefix — they are named
     // for their layout, not their panel.
-    NamedArt::new("track_fxempty_v", (18.0, 22.0), Slice::new(Middle(2.0, 3.0), Middle(1.0, 21.0))),
-    NamedArt::new("track_fxon_v", (18.0, 22.0), Slice::new(Middle(2.0, 3.0), Middle(1.0, 21.0))),
-    NamedArt::new("track_fxoff_v", (18.0, 22.0), Slice::new(Middle(2.0, 3.0), Middle(1.0, 21.0))),
-    NamedArt::new("track_fxempty_h", (16.0, 22.0), Slice::new(Middle(2.0, 3.0), Middle(4.0, 5.0))),
-    NamedArt::new("track_fxon_h", (16.0, 22.0), Slice::new(Middle(2.0, 3.0), Middle(4.0, 5.0))),
-    NamedArt::new("track_fxoff_h", (16.0, 22.0), Slice::new(Middle(2.0, 3.0), Middle(4.0, 5.0))),
-
+    NamedArt::new(
+        "track_fxempty_v",
+        (18.0, 22.0),
+        Slice::new(Middle(2.0, 3.0), Middle(1.0, 21.0)),
+    ),
+    NamedArt::new(
+        "track_fxon_v",
+        (18.0, 22.0),
+        Slice::new(Middle(2.0, 3.0), Middle(1.0, 21.0)),
+    ),
+    NamedArt::new(
+        "track_fxoff_v",
+        (18.0, 22.0),
+        Slice::new(Middle(2.0, 3.0), Middle(1.0, 21.0)),
+    ),
+    NamedArt::new(
+        "track_fxempty_h",
+        (16.0, 22.0),
+        Slice::new(Middle(2.0, 3.0), Middle(4.0, 5.0)),
+    ),
+    NamedArt::new(
+        "track_fxon_h",
+        (16.0, 22.0),
+        Slice::new(Middle(2.0, 3.0), Middle(4.0, 5.0)),
+    ),
+    NamedArt::new(
+        "track_fxoff_h",
+        (16.0, 22.0),
+        Slice::new(Middle(2.0, 3.0), Middle(4.0, 5.0)),
+    ),
     // ── record arm ───────────────────────────────────────────────────────
     //
     // No guides in either family: REAPER scales the button whole.
@@ -295,28 +398,90 @@ pub const MCP_ART: &[NamedArt] = &[
     fixed("track_recarm_auto", (20.0, 20.0)),
     fixed("track_recarm_auto_on", (20.0, 20.0)),
     fixed("track_recarm_auto_norec", (20.0, 20.0)),
-
     // ── routing ──────────────────────────────────────────────────────────
     //
     // The mixer's is the tall one, and 29 of its 32 rows are pinned
     // — only the strip below the output lane takes slack.
-    NamedArt::new("mcp_io", (23.0, 32.0), Slice::new(Fixed, Middle(29.0, 31.0))),
-    NamedArt::new("mcp_io_dis", (23.0, 32.0), Slice::new(Fixed, Middle(29.0, 31.0))),
-    NamedArt::new("mcp_io_s", (23.0, 32.0), Slice::new(Fixed, Middle(29.0, 31.0))),
-    NamedArt::new("mcp_io_s_dis", (23.0, 32.0), Slice::new(Fixed, Middle(29.0, 31.0))),
-    NamedArt::new("mcp_io_r", (23.0, 32.0), Slice::new(Fixed, Middle(29.0, 31.0))),
-    NamedArt::new("mcp_io_r_dis", (23.0, 32.0), Slice::new(Fixed, Middle(29.0, 31.0))),
-    NamedArt::new("mcp_io_s_r", (23.0, 32.0), Slice::new(Fixed, Middle(29.0, 31.0))),
-    NamedArt::new("mcp_io_s_r_dis", (23.0, 32.0), Slice::new(Fixed, Middle(29.0, 31.0))),
-    NamedArt::new("track_io", (28.0, 22.0), Slice::new(Middle(3.0, 4.0), Middle(4.0, 5.0))),
-    NamedArt::new("track_io_dis", (28.0, 22.0), Slice::new(Middle(3.0, 4.0), Middle(4.0, 5.0))),
-    NamedArt::new("track_io_s", (28.0, 22.0), Slice::new(Middle(3.0, 4.0), Middle(4.0, 5.0))),
-    NamedArt::new("track_io_s_dis", (28.0, 22.0), Slice::new(Middle(3.0, 4.0), Middle(4.0, 5.0))),
-    NamedArt::new("track_io_r", (28.0, 22.0), Slice::new(Middle(3.0, 4.0), Middle(4.0, 5.0))),
-    NamedArt::new("track_io_r_dis", (28.0, 22.0), Slice::new(Middle(3.0, 4.0), Middle(4.0, 5.0))),
-    NamedArt::new("track_io_s_r", (28.0, 22.0), Slice::new(Middle(3.0, 4.0), Middle(4.0, 5.0))),
-    NamedArt::new("track_io_s_r_dis", (28.0, 22.0), Slice::new(Middle(3.0, 4.0), Middle(4.0, 5.0))),
-
+    NamedArt::new(
+        "mcp_io",
+        (23.0, 32.0),
+        Slice::new(Fixed, Middle(29.0, 31.0)),
+    ),
+    NamedArt::new(
+        "mcp_io_dis",
+        (23.0, 32.0),
+        Slice::new(Fixed, Middle(29.0, 31.0)),
+    ),
+    NamedArt::new(
+        "mcp_io_s",
+        (23.0, 32.0),
+        Slice::new(Fixed, Middle(29.0, 31.0)),
+    ),
+    NamedArt::new(
+        "mcp_io_s_dis",
+        (23.0, 32.0),
+        Slice::new(Fixed, Middle(29.0, 31.0)),
+    ),
+    NamedArt::new(
+        "mcp_io_r",
+        (23.0, 32.0),
+        Slice::new(Fixed, Middle(29.0, 31.0)),
+    ),
+    NamedArt::new(
+        "mcp_io_r_dis",
+        (23.0, 32.0),
+        Slice::new(Fixed, Middle(29.0, 31.0)),
+    ),
+    NamedArt::new(
+        "mcp_io_s_r",
+        (23.0, 32.0),
+        Slice::new(Fixed, Middle(29.0, 31.0)),
+    ),
+    NamedArt::new(
+        "mcp_io_s_r_dis",
+        (23.0, 32.0),
+        Slice::new(Fixed, Middle(29.0, 31.0)),
+    ),
+    NamedArt::new(
+        "track_io",
+        (28.0, 22.0),
+        Slice::new(Middle(3.0, 4.0), Middle(4.0, 5.0)),
+    ),
+    NamedArt::new(
+        "track_io_dis",
+        (28.0, 22.0),
+        Slice::new(Middle(3.0, 4.0), Middle(4.0, 5.0)),
+    ),
+    NamedArt::new(
+        "track_io_s",
+        (28.0, 22.0),
+        Slice::new(Middle(3.0, 4.0), Middle(4.0, 5.0)),
+    ),
+    NamedArt::new(
+        "track_io_s_dis",
+        (28.0, 22.0),
+        Slice::new(Middle(3.0, 4.0), Middle(4.0, 5.0)),
+    ),
+    NamedArt::new(
+        "track_io_r",
+        (28.0, 22.0),
+        Slice::new(Middle(3.0, 4.0), Middle(4.0, 5.0)),
+    ),
+    NamedArt::new(
+        "track_io_r_dis",
+        (28.0, 22.0),
+        Slice::new(Middle(3.0, 4.0), Middle(4.0, 5.0)),
+    ),
+    NamedArt::new(
+        "track_io_s_r",
+        (28.0, 22.0),
+        Slice::new(Middle(3.0, 4.0), Middle(4.0, 5.0)),
+    ),
+    NamedArt::new(
+        "track_io_s_r_dis",
+        (28.0, 22.0),
+        Slice::new(Middle(3.0, 4.0), Middle(4.0, 5.0)),
+    ),
     // ── input monitoring ─────────────────────────────────────────────────
     //
     // The track panel's is **15 wide, not 16**: the measured cell is
@@ -330,16 +495,26 @@ pub const MCP_ART: &[NamedArt] = &[
     fixed("mcp_monitor_off", (21.0, 20.0)),
     fixed("mcp_monitor_on", (21.0, 20.0)),
     fixed("mcp_monitor_auto", (21.0, 20.0)),
-    NamedArt::new("track_monitor_off", (15.0, 24.0), Slice::new(Fixed, Middle(2.0, 22.0))),
-    NamedArt::new("track_monitor_on", (15.0, 24.0), Slice::new(Fixed, Middle(2.0, 22.0))),
-    NamedArt::new("track_monitor_auto", (15.0, 24.0), Slice::new(Fixed, Middle(2.0, 22.0))),
-
+    NamedArt::new(
+        "track_monitor_off",
+        (15.0, 24.0),
+        Slice::new(Fixed, Middle(2.0, 22.0)),
+    ),
+    NamedArt::new(
+        "track_monitor_on",
+        (15.0, 24.0),
+        Slice::new(Fixed, Middle(2.0, 22.0)),
+    ),
+    NamedArt::new(
+        "track_monitor_auto",
+        (15.0, 24.0),
+        Slice::new(Fixed, Middle(2.0, 22.0)),
+    ),
     // ── phase ────────────────────────────────────────────────────────────
     fixed("mcp_phase_norm", (16.0, 18.0)),
     fixed("mcp_phase_inv", (16.0, 18.0)),
     fixed("track_phase_norm", (16.0, 20.0)),
     fixed("track_phase_inv", (16.0, 20.0)),
-
     // ── the pan and width knobs ──────────────────────────────────────────
     //
     // Pan and width share art — the two source PNGs
@@ -351,7 +526,6 @@ pub const MCP_ART: &[NamedArt] = &[
     fixed("tcp_width_knob_small", (24.0, 25.0)),
     fixed("mcp_pan_knob_large", (28.0, 29.0)),
     fixed("mcp_width_knob_large", (28.0, 29.0)),
-
     // ── the volume fader ─────────────────────────────────────────────────
     //
     // The reason the slice model exists. The rail's end
@@ -362,35 +536,112 @@ pub const MCP_ART: &[NamedArt] = &[
     // does not read: five magenta rows down the *top* of its right-hand
     // column, where the documented convention puts the top guide on the
     // left. Read by the rule REAPER states, its top end is not pinned.
-    NamedArt::new("mcp_volbg", (23.0, 55.0), Slice::new(Middle(1.0, 22.0), Middle(16.0, 39.0))),
-    NamedArt::new("mcp_volthumb", (27.0, 53.0), Slice::new(Middle(0.0, 26.0), Middle(0.0, 48.0))),
-
+    NamedArt::new(
+        "mcp_volbg",
+        (23.0, 55.0),
+        Slice::new(Middle(1.0, 22.0), Middle(16.0, 39.0)),
+    ),
+    NamedArt::new(
+        "mcp_volthumb",
+        (27.0, 53.0),
+        Slice::new(Middle(0.0, 26.0), Middle(0.0, 48.0)),
+    ),
     // ── the panel sliders ────────────────────────────────────────────────
     fixed("tcp_volbg", (19.0, 24.0)),
-    NamedArt::new("tcp_volthumb", (27.0, 29.0), Slice::new(Middle(0.0, 26.0), Middle(0.0, 28.0))),
-    NamedArt::new("mcp_panbg", (69.0, 11.0), Slice::new(Middle(5.0, 64.0), Middle(4.0, 8.0))),
-    NamedArt::new("mcp_widthbg", (69.0, 11.0), Slice::new(Middle(5.0, 64.0), Middle(4.0, 8.0))),
-    NamedArt::new("tcp_panbg", (43.0, 11.0), Slice::new(Middle(2.0, 41.0), Middle(3.0, 8.0))),
-    NamedArt::new("tcp_widthbg", (43.0, 11.0), Slice::new(Middle(2.0, 41.0), Middle(4.0, 9.0))),
-    NamedArt::new("mcp_panthumb", (13.0, 23.0), Slice::new(Middle(0.0, 12.0), Middle(0.0, 22.0))),
-    NamedArt::new("mcp_widththumb", (13.0, 23.0), Slice::new(Middle(0.0, 12.0), Middle(0.0, 22.0))),
-    NamedArt::new("tcp_panthumb", (13.0, 23.0), Slice::new(Middle(0.0, 12.0), Middle(0.0, 22.0))),
-    NamedArt::new("tcp_widththumb", (13.0, 23.0), Slice::new(Middle(0.0, 12.0), Middle(0.0, 22.0))),
-    NamedArt::new("mcp_folder_on", (55.0, 15.0), Slice::new(Middle(14.0, 54.0), Middle(13.0, 14.0))),
-
+    NamedArt::new(
+        "tcp_volthumb",
+        (27.0, 29.0),
+        Slice::new(Middle(0.0, 26.0), Middle(0.0, 28.0)),
+    ),
+    NamedArt::new(
+        "mcp_panbg",
+        (69.0, 11.0),
+        Slice::new(Middle(5.0, 64.0), Middle(4.0, 8.0)),
+    ),
+    NamedArt::new(
+        "mcp_widthbg",
+        (69.0, 11.0),
+        Slice::new(Middle(5.0, 64.0), Middle(4.0, 8.0)),
+    ),
+    NamedArt::new(
+        "tcp_panbg",
+        (43.0, 11.0),
+        Slice::new(Middle(2.0, 41.0), Middle(3.0, 8.0)),
+    ),
+    NamedArt::new(
+        "tcp_widthbg",
+        (43.0, 11.0),
+        Slice::new(Middle(2.0, 41.0), Middle(4.0, 9.0)),
+    ),
+    NamedArt::new(
+        "mcp_panthumb",
+        (13.0, 23.0),
+        Slice::new(Middle(0.0, 12.0), Middle(0.0, 22.0)),
+    ),
+    NamedArt::new(
+        "mcp_widththumb",
+        (13.0, 23.0),
+        Slice::new(Middle(0.0, 12.0), Middle(0.0, 22.0)),
+    ),
+    NamedArt::new(
+        "tcp_panthumb",
+        (13.0, 23.0),
+        Slice::new(Middle(0.0, 12.0), Middle(0.0, 22.0)),
+    ),
+    NamedArt::new(
+        "tcp_widththumb",
+        (13.0, 23.0),
+        Slice::new(Middle(0.0, 12.0), Middle(0.0, 22.0)),
+    ),
+    NamedArt::new(
+        "mcp_folder_on",
+        (55.0, 15.0),
+        Slice::new(Middle(14.0, 54.0), Middle(13.0, 14.0)),
+    ),
     // ── the FX and send lists ────────────────────────────────────────────
     //
     // Three pills stacked vertically: one drawing, not
     // a three-cell strip.
-    NamedArt::new("mcp_fxlist_norm", (38.0, 53.0), Slice::new(Middle(8.0, 30.0), Middle(7.0, 46.0))),
-    NamedArt::new("mcp_fxlist_byp", (38.0, 53.0), Slice::new(Middle(8.0, 30.0), Middle(7.0, 46.0))),
-    NamedArt::new("mcp_fxlist_off", (38.0, 53.0), Slice::new(Middle(8.0, 30.0), Middle(7.0, 46.0))),
-    NamedArt::new("mcp_fxlist_empty", (38.0, 53.0), Slice::new(Middle(8.0, 30.0), Middle(7.0, 46.0))),
-    NamedArt::new("mcp_sendlist_norm", (38.0, 50.0), Slice::new(Middle(9.0, 28.0), Middle(5.0, 41.0))),
-    NamedArt::new("mcp_sendlist_mute", (38.0, 50.0), Slice::new(Middle(7.0, 28.0), Middle(5.0, 41.0))),
-    NamedArt::new("mcp_sendlist_empty", (38.0, 50.0), Slice::new(Middle(7.0, 28.0), Middle(6.0, 41.0))),
-    NamedArt::new("mcp_sendlist_midihw", (38.0, 50.0), Slice::new(Middle(7.0, 28.0), Middle(5.0, 41.0))),
-
+    NamedArt::new(
+        "mcp_fxlist_norm",
+        (38.0, 53.0),
+        Slice::new(Middle(8.0, 30.0), Middle(7.0, 46.0)),
+    ),
+    NamedArt::new(
+        "mcp_fxlist_byp",
+        (38.0, 53.0),
+        Slice::new(Middle(8.0, 30.0), Middle(7.0, 46.0)),
+    ),
+    NamedArt::new(
+        "mcp_fxlist_off",
+        (38.0, 53.0),
+        Slice::new(Middle(8.0, 30.0), Middle(7.0, 46.0)),
+    ),
+    NamedArt::new(
+        "mcp_fxlist_empty",
+        (38.0, 53.0),
+        Slice::new(Middle(8.0, 30.0), Middle(7.0, 46.0)),
+    ),
+    NamedArt::new(
+        "mcp_sendlist_norm",
+        (38.0, 50.0),
+        Slice::new(Middle(9.0, 28.0), Middle(5.0, 41.0)),
+    ),
+    NamedArt::new(
+        "mcp_sendlist_mute",
+        (38.0, 50.0),
+        Slice::new(Middle(7.0, 28.0), Middle(5.0, 41.0)),
+    ),
+    NamedArt::new(
+        "mcp_sendlist_empty",
+        (38.0, 50.0),
+        Slice::new(Middle(7.0, 28.0), Middle(6.0, 41.0)),
+    ),
+    NamedArt::new(
+        "mcp_sendlist_midihw",
+        (38.0, 50.0),
+        Slice::new(Middle(7.0, 28.0), Middle(5.0, 41.0)),
+    ),
     // ── the panel plates ─────────────────────────────────────────────────
     //
     // Flat bands inside a frame REAPER holds still while it
@@ -398,28 +649,75 @@ pub const MCP_ART: &[NamedArt] = &[
     // backgrounds are here because `PanelPlate` draws them too — the line
     // this table draws is the component, not the surface; the envelope
     // panel's own buttons keep their `cell` prop.
-    NamedArt::new("mcp_mainbg", (6.0, 6.0), Slice::new(Middle(1.0, 5.0), Middle(1.0, 5.0))),
-    NamedArt::new("mcp_mainbgsel", (6.0, 6.0), Slice::new(Middle(2.0, 5.0), Middle(1.0, 5.0))),
-    NamedArt::new("mcp_bg", (4.0, 4.0), Slice::new(Middle(1.0, 3.0), Middle(1.0, 3.0))),
-    NamedArt::new("mcp_bgsel", (4.0, 3.0), Slice::new(Middle(2.0, 3.0), Middle(1.0, 2.0))),
-    NamedArt::new("mcp_extmixbg", (3.0, 3.0), Slice::new(Middle(1.0, 2.0), Middle(1.0, 2.0))),
-    NamedArt::new("mcp_extmixbgsel", (3.0, 3.0), Slice::new(Middle(1.0, 2.0), Middle(1.0, 2.0))),
+    NamedArt::new(
+        "mcp_mainbg",
+        (6.0, 6.0),
+        Slice::new(Middle(1.0, 5.0), Middle(1.0, 5.0)),
+    ),
+    NamedArt::new(
+        "mcp_mainbgsel",
+        (6.0, 6.0),
+        Slice::new(Middle(2.0, 5.0), Middle(1.0, 5.0)),
+    ),
+    NamedArt::new(
+        "mcp_bg",
+        (4.0, 4.0),
+        Slice::new(Middle(1.0, 3.0), Middle(1.0, 3.0)),
+    ),
+    NamedArt::new(
+        "mcp_bgsel",
+        (4.0, 3.0),
+        Slice::new(Middle(2.0, 3.0), Middle(1.0, 2.0)),
+    ),
+    NamedArt::new(
+        "mcp_extmixbg",
+        (3.0, 3.0),
+        Slice::new(Middle(1.0, 2.0), Middle(1.0, 2.0)),
+    ),
+    NamedArt::new(
+        "mcp_extmixbgsel",
+        (3.0, 3.0),
+        Slice::new(Middle(1.0, 2.0), Middle(1.0, 2.0)),
+    ),
     fixed("mcp_mainextmixbg", (9.0, 8.0)),
     fixed("mcp_mainextmixbgsel", (9.0, 8.0)),
-    NamedArt::new("mcp_main_namebg", (8.0, 9.0), Slice::new(Middle(2.0, 7.0), Middle(4.0, 7.0))),
+    NamedArt::new(
+        "mcp_main_namebg",
+        (8.0, 9.0),
+        Slice::new(Middle(2.0, 7.0), Middle(4.0, 7.0)),
+    ),
     fixed("mcp_main_namebg_sel", (8.0, 9.0)),
-    NamedArt::new("mcp_iconbg", (6.0, 11.0), Slice::new(Middle(2.0, 5.0), Middle(4.0, 7.0))),
-    NamedArt::new("mcp_iconbgsel", (6.0, 11.0), Slice::new(Middle(2.0, 5.0), Middle(4.0, 7.0))),
+    NamedArt::new(
+        "mcp_iconbg",
+        (6.0, 11.0),
+        Slice::new(Middle(2.0, 5.0), Middle(4.0, 7.0)),
+    ),
+    NamedArt::new(
+        "mcp_iconbgsel",
+        (6.0, 11.0),
+        Slice::new(Middle(2.0, 5.0), Middle(4.0, 7.0)),
+    ),
     fixed("tcp_mainbg", (22.0, 9.0)),
     fixed("tcp_mainbgsel", (22.0, 9.0)),
     fixed("tcp_iconbg", (11.0, 13.0)),
     fixed("tcp_iconbgsel", (11.0, 13.0)),
     fixed("tcp_idxbg", (23.0, 6.0)),
     fixed("tcp_idxbg_sel", (25.0, 6.0)),
-    NamedArt::new("envcp_bg", (48.0, 12.0), Slice::new(Middle(1.0, 15.0), Middle(1.0, 10.0))),
-    NamedArt::new("envcp_bgsel", (48.0, 12.0), Slice::new(Middle(1.0, 15.0), Middle(1.0, 10.0))),
-    NamedArt::new("envcp_namebg", (22.0, 24.0), Slice::new(Middle(2.0, 8.0), Middle(2.0, 22.0))),
-
+    NamedArt::new(
+        "envcp_bg",
+        (48.0, 12.0),
+        Slice::new(Middle(1.0, 15.0), Middle(1.0, 10.0)),
+    ),
+    NamedArt::new(
+        "envcp_bgsel",
+        (48.0, 12.0),
+        Slice::new(Middle(1.0, 15.0), Middle(1.0, 10.0)),
+    ),
+    NamedArt::new(
+        "envcp_namebg",
+        (22.0, 24.0),
+        Slice::new(Middle(2.0, 8.0), Middle(2.0, 22.0)),
+    ),
     // ── the plates REAPER draws itself ───────────────────────────────────
     //
     // Every pixel is transparent, so there is nothing to hold still and
@@ -448,8 +746,7 @@ mod tests {
     #[test]
     fn a_declared_stretch_band_lies_inside_its_source_box() {
         for a in MCP_ART {
-            for (axis, band, extent) in
-                [("x", a.slice.x, a.source.0), ("y", a.slice.y, a.source.1)]
+            for (axis, band, extent) in [("x", a.slice.x, a.source.0), ("y", a.slice.y, a.source.1)]
             {
                 if let Some((lo, hi)) = band.guided() {
                     assert!(
@@ -471,7 +768,11 @@ mod tests {
             let panes = a.stack();
             let mut y = 0.0;
             for p in &panes {
-                assert_eq!(p.view.1, y, "{}: a pane starts off the last one's end", a.name);
+                assert_eq!(
+                    p.view.1, y,
+                    "{}: a pane starts off the last one's end",
+                    a.name
+                );
                 assert!(p.view.3 >= 0.0, "{}: a pane has negative height", a.name);
                 y += p.view.3;
             }

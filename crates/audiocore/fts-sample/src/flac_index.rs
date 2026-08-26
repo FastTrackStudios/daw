@@ -82,12 +82,10 @@ impl FlacIndex {
         }
         let min_block = u16::from_be_bytes([info[0], info[1]]);
         let max_block = u16::from_be_bytes([info[2], info[3]]);
-        let sample_rate = (u32::from(info[10]) << 12)
-            | (u32::from(info[11]) << 4)
-            | (u32::from(info[12]) >> 4);
+        let sample_rate =
+            (u32::from(info[10]) << 12) | (u32::from(info[11]) << 4) | (u32::from(info[12]) >> 4);
         let channels = ((info[12] >> 1) & 0x07) as u16 + 1;
-        let bits_per_sample =
-            ((((info[12] & 0x01) as u16) << 4) | ((info[13] >> 4) as u16)) + 1;
+        let bits_per_sample = ((((info[12] & 0x01) as u16) << 4) | ((info[13] >> 4) as u16)) + 1;
         let total_frames = ((info[13] & 0x0f) as u64) << 32
             | (info[14] as u64) << 24
             | (info[15] as u64) << 16
@@ -101,7 +99,11 @@ impl FlacIndex {
             // Our packs encode with a FIXED blocking strategy, so a frame's
             // "number" counts frames and the sample position is number ×
             // block size. Variable-strategy streams carry the sample number.
-            fixed_block: if min_block == max_block { min_block as u64 } else { 0 },
+            fixed_block: if min_block == max_block {
+                min_block as u64
+            } else {
+                0
+            },
             total_frames,
             channels,
             sample_rate,
@@ -117,11 +119,15 @@ impl FlacIndex {
 
     /// Extend the frame map until it covers `frame`, or the stream ends.
     fn scan_to(&self, bytes: &[u8], frame: u32) {
-        let Ok(mut points) = self.points.lock() else { return };
+        let Ok(mut points) = self.points.lock() else {
+            return;
+        };
         if points.last().is_some_and(|p| p.first_frame >= frame) {
             return;
         }
-        let Ok(mut pos) = self.scanned_to.lock() else { return };
+        let Ok(mut pos) = self.scanned_to.lock() else {
+            return;
+        };
         while *pos + 2 < bytes.len() {
             let Some(fh) = FrameHeader::parse(&bytes[*pos..]) else {
                 *pos += 1;
@@ -255,7 +261,12 @@ impl FrameHeader {
         if crc8(&b[..at]) != crc_byte {
             return None;
         }
-        Some(Self { len: at + 1, number, block_size, variable_blocking })
+        Some(Self {
+            len: at + 1,
+            number,
+            block_size,
+            variable_blocking,
+        })
     }
 }
 
@@ -293,7 +304,11 @@ fn crc8(bytes: &[u8]) -> u8 {
     for b in bytes {
         crc ^= b;
         for _ in 0..8 {
-            crc = if crc & 0x80 != 0 { (crc << 1) ^ 0x07 } else { crc << 1 };
+            crc = if crc & 0x80 != 0 {
+                (crc << 1) ^ 0x07
+            } else {
+                crc << 1
+            };
         }
     }
     crc

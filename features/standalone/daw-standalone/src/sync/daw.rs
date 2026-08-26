@@ -620,9 +620,8 @@ pub struct Standalone {
     /// swapped out whole by the renderer once per block
     /// (`take_live_midi_wasm`).
     #[cfg(all(target_arch = "wasm32", any(feature = "decode", feature = "audio")))]
-    pub(crate) live_midi_wasm: Arc<
-        Mutex<std::collections::VecDeque<crate::audio_engine::render::LiveMidiEvent>>,
-    >,
+    pub(crate) live_midi_wasm:
+        Arc<Mutex<std::collections::VecDeque<crate::audio_engine::render::LiveMidiEvent>>>,
 }
 
 impl Default for Standalone {
@@ -1031,10 +1030,7 @@ impl Standalone {
     /// visible rather than inferred.
     #[cfg(all(target_arch = "wasm32", any(feature = "decode", feature = "audio")))]
     pub fn live_midi_depth(&self) -> usize {
-        self.live_midi_wasm
-            .lock()
-            .map(|q| q.len())
-            .unwrap_or(0)
+        self.live_midi_wasm.lock().map(|q| q.len()).unwrap_or(0)
     }
 
     /// Swap out every queued wasm live-MIDI event (renderer-side, once per

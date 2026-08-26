@@ -299,7 +299,11 @@ impl DockLayout {
         // Get the sibling
         let sibling_id =
             if let Some(FlatNode::Split { first, second, .. }) = self.nodes.get(&parent_id) {
-                if is_first_child { *second } else { *first }
+                if is_first_child {
+                    *second
+                } else {
+                    *first
+                }
             } else {
                 return false;
             };

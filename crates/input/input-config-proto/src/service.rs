@@ -63,11 +63,17 @@ pub struct WriteResult {
 
 impl WriteResult {
     pub fn ok() -> Self {
-        Self { ok: true, message: None }
+        Self {
+            ok: true,
+            message: None,
+        }
     }
 
     pub fn err(message: impl Into<String>) -> Self {
-        Self { ok: false, message: Some(message.into()) }
+        Self {
+            ok: false,
+            message: Some(message.into()),
+        }
     }
 }
 

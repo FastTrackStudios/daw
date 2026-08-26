@@ -7,7 +7,9 @@
 use expression_editor_core::doc::Dimension;
 use expression_editor_core::rows::{RowSpace, StringTuning};
 use expression_editor_guitarpro::parse::Format;
-use expression_editor_guitarpro::{BendFidelity, BendPoint, GpNote, bend_curve, row_of, to_document};
+use expression_editor_guitarpro::{
+    BendFidelity, BendPoint, GpNote, bend_curve, row_of, to_document,
+};
 
 fn standard() -> StringTuning {
     StringTuning::guitar_standard()
@@ -145,10 +147,22 @@ fn a_bend_that_holds_keeps_its_plateau() {
     // curve that lost them would ramp continuously and sound wrong.
     let curve = bend_curve(
         &[
-            BendPoint { position: 0.0, value: 0.0 },
-            BendPoint { position: 15.0, value: 50.0 },
-            BendPoint { position: 45.0, value: 50.0 },
-            BendPoint { position: 60.0, value: 0.0 },
+            BendPoint {
+                position: 0.0,
+                value: 0.0,
+            },
+            BendPoint {
+                position: 15.0,
+                value: 50.0,
+            },
+            BendPoint {
+                position: 45.0,
+                value: 50.0,
+            },
+            BendPoint {
+                position: 60.0,
+                value: 0.0,
+            },
         ],
         960.0,
     );
@@ -162,8 +176,14 @@ fn a_bend_that_holds_keeps_its_plateau() {
 fn the_curve_lands_on_the_notes_pitch_dimension() {
     let mut n = note(1, 7, 0.0, 480.0);
     n.bend = vec![
-        BendPoint { position: 0.0, value: 0.0 },
-        BendPoint { position: 60.0, value: 50.0 },
+        BendPoint {
+            position: 0.0,
+            value: 0.0,
+        },
+        BendPoint {
+            position: 60.0,
+            value: 50.0,
+        },
     ];
     let out = to_document(&[n], standard());
     let curve = out.doc.notes[0].curve(Dimension::Pitch);
@@ -182,10 +202,22 @@ fn an_unbent_note_carries_no_curve() {
 fn a_full_point_list_is_reported_as_full_fidelity() {
     let mut n = note(0, 3, 0.0, 960.0);
     n.bend = vec![
-        BendPoint { position: 0.0, value: 0.0 },
-        BendPoint { position: 20.0, value: 50.0 },
-        BendPoint { position: 40.0, value: 50.0 },
-        BendPoint { position: 60.0, value: 0.0 },
+        BendPoint {
+            position: 0.0,
+            value: 0.0,
+        },
+        BendPoint {
+            position: 20.0,
+            value: 50.0,
+        },
+        BendPoint {
+            position: 40.0,
+            value: 50.0,
+        },
+        BendPoint {
+            position: 60.0,
+            value: 0.0,
+        },
     ];
     assert_eq!(to_document(&[n], standard()).bends, BendFidelity::Full);
 }
@@ -196,8 +228,14 @@ fn a_two_point_bend_is_reported_as_endpoints_only() {
     // built on GPIF bends knows it is looking at a straight line.
     let mut n = note(0, 3, 0.0, 960.0);
     n.bend = vec![
-        BendPoint { position: 0.0, value: 0.0 },
-        BendPoint { position: 60.0, value: 100.0 },
+        BendPoint {
+            position: 0.0,
+            value: 0.0,
+        },
+        BendPoint {
+            position: 60.0,
+            value: 100.0,
+        },
     ];
     assert_eq!(
         to_document(&[n], standard()).bends,
@@ -224,7 +262,10 @@ fn the_extension_picks_the_reader() {
 fn only_the_binary_formats_keep_bend_shape() {
     assert!(Format::Gp5.keeps_bend_shape());
     assert!(!Format::Gpif.keeps_bend_shape(), "GPIF loses the middles");
-    assert!(!Format::Gpx.keeps_bend_shape(), "and so does the GP6 container");
+    assert!(
+        !Format::Gpx.keeps_bend_shape(),
+        "and so does the GP6 container"
+    );
 }
 
 // ── The document ─────────────────────────────────────────────────────
@@ -242,7 +283,10 @@ fn notes_keep_their_place_on_the_timeline() {
 
 #[test]
 fn the_document_spans_the_material() {
-    let out = to_document(&[note(0, 0, 0.0, 480.0), note(0, 0, 1920.0, 960.0)], standard());
+    let out = to_document(
+        &[note(0, 0, 0.0, 480.0), note(0, 0, 1920.0, 960.0)],
+        standard(),
+    );
     assert_eq!(out.doc.end, 2880.0);
 }
 

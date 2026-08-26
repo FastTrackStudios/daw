@@ -63,7 +63,12 @@ fn cache_file(source: &Path, data: &SampleData) -> PathBuf {
 
 /// Map an already-materialised sample, if this one has been through here
 /// before. Cheap enough to try before decoding.
-pub fn lookup(source: &Path, channels: u16, sample_rate: u32, num_frames: usize) -> Option<SampleData> {
+pub fn lookup(
+    source: &Path,
+    channels: u16,
+    sample_rate: u32,
+    num_frames: usize,
+) -> Option<SampleData> {
     let dir = dir()?;
     let probe = SampleData::from_f32(Vec::new(), channels, sample_rate, num_frames);
     let path = dir.join(cache_file(source, &probe));
@@ -143,10 +148,17 @@ mod tests {
         let src = Path::new("/nonexistent/ramp.flac");
 
         let mapped = materialize(src, &data).expect("materialise");
-        assert_eq!(mapped.decoded_bytes(), 0, "mapped PCM costs no anonymous memory");
+        assert_eq!(
+            mapped.decoded_bytes(),
+            0,
+            "mapped PCM costs no anonymous memory"
+        );
         assert_eq!(mapped.num_frames, 512);
         for (i, want) in frames.iter().enumerate() {
-            assert!((mapped.pcm.sample(i) - want).abs() < 1.0 / 32_000.0, "sample {i}");
+            assert!(
+                (mapped.pcm.sample(i) - want).abs() < 1.0 / 32_000.0,
+                "sample {i}"
+            );
         }
         // Second time round it maps without being handed the decoded audio.
         let again = lookup(src, 1, 48_000, 512).expect("cached lookup");

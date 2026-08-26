@@ -50,7 +50,9 @@ pub async fn download_library(
                 .await;
             return extract_archive(&local, install_root, tx).await;
         } else {
-            tracing::warn!("FTS_LIBRARY_ARCHIVE set to {local_path} but file not found, falling back to download");
+            tracing::warn!(
+                "FTS_LIBRARY_ARCHIVE set to {local_path} but file not found, falling back to download"
+            );
         }
     }
 
@@ -96,17 +98,22 @@ pub async fn download_library(
             // Skip download if already cached and correct size
             if archive_path.exists()
                 && let Ok(meta) = tokio::fs::metadata(&archive_path).await
-                    && total_size > 0 && meta.len() == total_size {
-                        info!("Library archive already cached at {}", archive_path.display());
-                        let _ = tx
-                            .send(InstallEvent::StepProgress {
-                                step: InstallStep::DownloadLibrary,
-                                fraction: 0.7,
-                                message: "Using cached download...".into(),
-                            })
-                            .await;
-                        return Ok(());
-                    }
+                && total_size > 0
+                && meta.len() == total_size
+            {
+                info!(
+                    "Library archive already cached at {}",
+                    archive_path.display()
+                );
+                let _ = tx
+                    .send(InstallEvent::StepProgress {
+                        step: InstallStep::DownloadLibrary,
+                        fraction: 0.7,
+                        message: "Using cached download...".into(),
+                    })
+                    .await;
+                return Ok(());
+            }
 
             let mut file = tokio::fs::File::create(&archive_path)
                 .await

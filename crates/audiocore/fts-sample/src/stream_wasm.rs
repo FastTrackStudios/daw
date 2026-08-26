@@ -265,7 +265,9 @@ pub fn open_failed() -> usize {
 
 /// Open jobs still queued (distinct from the chunk-ring [`depth`]).
 pub fn open_depth() -> usize {
-    OPEN_HEAD.load(Ordering::Relaxed).wrapping_sub(OPEN_TAIL.load(Ordering::Relaxed))
+    OPEN_HEAD
+        .load(Ordering::Relaxed)
+        .wrapping_sub(OPEN_TAIL.load(Ordering::Relaxed))
 }
 
 /// Samples dropped because the ring was full — decoders falling behind.
@@ -275,5 +277,6 @@ pub fn dropped() -> usize {
 
 /// Queue depth right now (diagnostic).
 pub fn depth() -> usize {
-    HEAD.load(Ordering::Relaxed).wrapping_sub(TAIL.load(Ordering::Relaxed))
+    HEAD.load(Ordering::Relaxed)
+        .wrapping_sub(TAIL.load(Ordering::Relaxed))
 }

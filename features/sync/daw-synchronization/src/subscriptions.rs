@@ -180,10 +180,7 @@ fn spawn_bus_forwarder(ctx: ForwarderCtx, daw: daw::rpc::Daw, filter: BusFilter)
 /// Map one `DawEvent` to its `(project_guid, SyncDomain)`. Returns `None`
 /// for events the sync layer doesn't replicate (position ticks, project
 /// events).
-async fn to_sync_domain(
-    daw: &daw::rpc::Daw,
-    ev: &DawEvent,
-) -> Option<(String, SyncDomain)> {
+async fn to_sync_domain(daw: &daw::rpc::Daw, ev: &DawEvent) -> Option<(String, SyncDomain)> {
     use daw::service::{ItemEvent, RoutingEvent, TakeEvent, TransportEvent};
     Some(match ev {
         DawEvent::Track(e) => (e.project_guid.clone(), SyncDomain::Track(e.event.clone())),

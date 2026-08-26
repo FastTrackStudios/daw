@@ -104,7 +104,12 @@ pub struct HatThresholds {
 
 impl Default for HatThresholds {
     fn default() -> Self {
-        Self { tight: 110, closed: 80, open1: 55, open2: 25 }
+        Self {
+            tight: 110,
+            closed: 80,
+            open1: 55,
+            open2: 25,
+        }
     }
 }
 
@@ -369,7 +374,13 @@ fn tables(map: DrumMap) -> MapTables {
         }
     }
 
-    MapTables { a2n, n2a, hat_cc, hh_bow, hh_edge }
+    MapTables {
+        a2n,
+        n2a,
+        hat_cc,
+        hh_bow,
+        hh_edge,
+    }
 }
 
 fn is_hat_zone(art: usize) -> bool {
@@ -422,9 +433,17 @@ impl DrumMapConverter {
         let t = &self.thresholds;
         let c = self.hh_cc;
         if c >= t.tight {
-            if edge { H_TIGHT_EDG } else { H_TIGHT_TIP }
+            if edge {
+                H_TIGHT_EDG
+            } else {
+                H_TIGHT_TIP
+            }
         } else if c >= t.closed {
-            if edge { H_CLSD_EDG } else { H_CLSD_TIP }
+            if edge {
+                H_CLSD_EDG
+            } else {
+                H_CLSD_TIP
+            }
         } else if c >= t.open1 {
             H_OPEN1
         } else if c >= t.open2 {
@@ -466,20 +485,34 @@ impl DrumMapConverter {
     /// unmapped messages pass through unchanged.
     pub fn convert(&mut self, ev: MidiEvent) -> Vec<MidiEvent> {
         match ev {
-            MidiEvent::ControlChange { channel, controller, value }
-                if controller.get() == CC_HAT =>
-            {
+            MidiEvent::ControlChange {
+                channel,
+                controller,
+                value,
+            } if controller.get() == CC_HAT => {
                 self.hh_cc = value.get();
-                vec![MidiEvent::ControlChange { channel, controller, value }]
+                vec![MidiEvent::ControlChange {
+                    channel,
+                    controller,
+                    value,
+                }]
             }
-            MidiEvent::NoteOn { channel, key, velocity } if velocity.get() > 0 => {
-                self.convert_note_on(channel, key.get(), velocity.get())
-            }
+            MidiEvent::NoteOn {
+                channel,
+                key,
+                velocity,
+            } if velocity.get() > 0 => self.convert_note_on(channel, key.get(), velocity.get()),
             // Note-off, or note-on with velocity 0 (running-status note-off).
-            MidiEvent::NoteOff { channel, key, velocity } => {
-                self.convert_note_off(channel, key.get(), velocity.get())
-            }
-            MidiEvent::NoteOn { channel, key, velocity } => {
+            MidiEvent::NoteOff {
+                channel,
+                key,
+                velocity,
+            } => self.convert_note_off(channel, key.get(), velocity.get()),
+            MidiEvent::NoteOn {
+                channel,
+                key,
+                velocity,
+            } => {
                 // velocity == 0
                 self.convert_note_off(channel, key.get(), velocity.get())
             }
@@ -564,7 +597,11 @@ mod tests {
         Channel::new(9)
     }
     fn non(note: u8, vel: u8) -> MidiEvent {
-        MidiEvent::NoteOn { channel: ch(), key: KeyNumber::new(note), velocity: Velocity::new(vel) }
+        MidiEvent::NoteOn {
+            channel: ch(),
+            key: KeyNumber::new(note),
+            velocity: Velocity::new(vel),
+        }
     }
     fn cc4(v: u8) -> MidiEvent {
         MidiEvent::ControlChange {

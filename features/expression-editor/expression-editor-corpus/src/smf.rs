@@ -34,7 +34,9 @@
 use std::io;
 
 use midly::num::{u4, u7, u15, u24, u28};
-use midly::{Format as MidiFormat, Header, MetaMessage, MidiMessage, Smf, Timing, TrackEvent, TrackEventKind};
+use midly::{
+    Format as MidiFormat, Header, MetaMessage, MidiMessage, Smf, Timing, TrackEvent, TrackEventKind,
+};
 
 use crate::flam::FlamCase;
 

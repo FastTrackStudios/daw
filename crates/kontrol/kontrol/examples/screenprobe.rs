@@ -13,8 +13,8 @@
 //!   <RGB565 pixels, big-endian>
 //!   {0x02,0,0,0,0x03,0,0,0,0x40,0,0,0}
 
-use std::time::Duration;
 use rusb::{Context, UsbContext};
+use std::time::Duration;
 
 const VID: u16 = 0x17cc;
 const PID: u16 = 0x2120;
@@ -30,15 +30,23 @@ fn rgb565_be(r: u8, g: u8, b: u8) -> [u8; 2] {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ctx = Context::new()?;
-    let h = ctx.open_device_with_vid_pid(VID, PID).ok_or("S88 MK3 not found / no perm (sudo?)")?;
+    let h = ctx
+        .open_device_with_vid_pid(VID, PID)
+        .ok_or("S88 MK3 not found / no perm (sudo?)")?;
     let _ = h.set_auto_detach_kernel_driver(true);
     h.claim_interface(IFACE)?;
     println!("claimed interface {IFACE}; sending 1280x480 colour bars to the screens…");
 
     // 8 vertical colour bars + a vertical brightness gradient.
     let bars = [
-        (255u8, 0, 0), (255, 128, 0), (255, 255, 0), (0, 255, 0),
-        (0, 255, 255), (0, 0, 255), (160, 0, 255), (255, 255, 255),
+        (255u8, 0, 0),
+        (255, 128, 0),
+        (255, 255, 0),
+        (0, 255, 0),
+        (0, 255, 255),
+        (0, 0, 255),
+        (160, 0, 255),
+        (255, 255, 255),
     ];
     let mut pixels = Vec::with_capacity(W * H * 2);
     for y in 0..H {
@@ -59,10 +67,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let image_longs = (W * H / 2) as u16;
     frame.extend_from_slice(&image_longs.to_be_bytes());
     frame.extend_from_slice(&pixels);
-    frame.extend_from_slice(&[0x02, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00]);
+    frame.extend_from_slice(&[
+        0x02, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00,
+    ]);
 
     match h.write_bulk(EP, &frame, Duration::from_secs(3)) {
-        Ok(n) => println!("wrote {n}/{} bytes to EP {EP:#04x} — do the SCREENS show colour bars?", frame.len()),
+        Ok(n) => println!(
+            "wrote {n}/{} bytes to EP {EP:#04x} — do the SCREENS show colour bars?",
+            frame.len()
+        ),
         Err(e) => println!("bulk write to EP {EP:#04x} FAILED: {e}"),
     }
     let _ = h.release_interface(IFACE);

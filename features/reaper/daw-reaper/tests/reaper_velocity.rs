@@ -14,7 +14,9 @@ use daw::rpc::TakeHandle;
 use daw::test::reaper_test;
 use daw_proto::midi::MidiNoteCreate;
 use daw_proto::primitives::{Duration, PositionInSeconds};
-use expression_editor_tools::velocity::{CurvePreset, Dynamics, Note, Pattern, Pivot, Range, Session};
+use expression_editor_tools::velocity::{
+    CurvePreset, Dynamics, Note, Pattern, Pivot, Range, Session,
+};
 
 const PPQ: f64 = 960.0;
 
@@ -130,9 +132,7 @@ async fn velocity_edits_address_the_right_notes(
 /// keeps a slider drag from being hundreds of redundant writes, and it's
 /// only observable against a real backend.
 #[reaper_test(isolated)]
-async fn velocity_neutral_writes_nothing(
-    ctx: &daw::test::ReaperTestContext,
-) -> eyre::Result<()> {
+async fn velocity_neutral_writes_nothing(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     let seed: Vec<u8> = (0..12).map(|i| 40 + i * 3).collect();
     let take = take_with(ctx, "Velocity Neutral", &seed).await?;
 
@@ -140,7 +140,10 @@ async fn velocity_neutral_writes_nothing(
     assert!(session.edits().is_empty(), "neutral resolves to no edits");
 
     let actual: Vec<u8> = read(&take).await?.iter().map(|n| n.velocity).collect();
-    assert_eq!(actual, seed, "an untouched session must not disturb the take");
+    assert_eq!(
+        actual, seed,
+        "an untouched session must not disturb the take"
+    );
     Ok(())
 }
 

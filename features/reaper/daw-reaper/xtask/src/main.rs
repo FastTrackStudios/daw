@@ -66,86 +66,88 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  Keep open: REAPER stays up after the run");
     }
 
-    let packages = vec![TestPackage {
-        package: "daw-reaper".into(),
-        features: vec![],
-        test_threads: 1,
-        default_skips: vec![
-            // Soak test — 60s of wall-clock per run; opt in with an
-            // explicit filter (`just daw-reaper-test timer_responsive_for_60s`).
-            "timer_responsive_for_60s".into(),
-            // Registers actions via `architect::action::ActionBackend for
-            // Reaper` IN the test process — that seam calls Reaper::get()
-            // directly and can only run inside REAPER (an in-process guest
-            // extension), not from the external test client.
-            "action_backend_handler_runs_on_trigger".into(),
-            // KNOWN BROKEN (vox schema negotiation): restore_layout's
-            // response schema is never sent — client dies with
-            // InvalidPayload("no remote response schema received").
-            "save_restore_layout_round_trip".into(),
-            // KNOWN BROKEN (crashes daw-bridge): the reaper_project_isolation
-            // suite creates tabs with tracks/FX and closes them; something in
-            // daw-bridge still references the closed tab off the main thread
-            // and panics reaper-rs's require_valid_project ("ReaProject
-            // doesn't exist anymore"), killing the daw runtime and poisoning
-            // every later test. Fix belongs in daw-reaper's pointer
-            // validation / audio-sync registry; until then the whole file is
-            // skipped (its coverage overlaps the batch/track suites).
-            "fx_operations_in_isolated_project".into(),
-            "multi_track_manipulation".into(),
-            "project_has_unique_guid".into(),
-            "tracks_are_isolated".into(),
-            // KNOWN BROKEN (same stale-ReaProject class): the reaper_takes
-            // suite adds media items/takes and tears the tab down; the run
-            // either crashes daw-bridge or blocks for the full timeout.
-            "take_".into(),
-            // KNOWN BROKEN (assertion drift): mixer-visibility flag no
-            // longer round-trips through the screenset service.
-            "track_set_round_trips_visibility".into(),
-            // KNOWN BROKEN (drift): tempo add_point grows the point list
-            // by 2 instead of 1 on REAPER 7.75 — service or REAPER-side
-            // behavior change; remove_point depends on the same count.
-            "add_then_query_tempo_point".into(),
-            "remove_point_drops_from_list".into(),
-            // KNOWN BROKEN (drift/environment): toolbar button
-            // registration fails in the isolated headless rig.
-            "add_button_succeeds_and_returns_command_id".into(),
-            "remove_button_succeeds".into(),
-            "workflow_remove_cleans_up_batch".into(),
-            // Headless: no WM to round-trip the main-window geometry.
-            "nudge_round_trips_main_window".into(),
-        ],
-        test_binary: None,
-    },
-    // session's Key-track tests: proof that a key stored as an item label
-    // survives a real project.
-    TestPackage {
-        package: "session".into(),
-        features: vec![],
-        test_threads: 1,
-        default_skips: vec![],
-        test_binary: Some("reaper_key_track".into()),
-    },
-    // chord-tool's insert path. Everything about it up to the DAW seam is
-    // unit-tested; these are the only tests that prove the pitches keyflow
-    // computes are the pitches REAPER ends up holding.
-    TestPackage {
-        package: "chord-tool-daw".into(),
-        features: vec![],
-        test_threads: 1,
-        default_skips: vec![],
-        test_binary: None,
-    },
-    // midi-tools' velocity write path. The engines are unit-tested against
-    // `&[Note]`; these are the only tests that prove a resolved session
-    // lands on the right REAPER notes with the right values.
-    TestPackage {
-        package: "midi-tools-daw".into(),
-        features: vec![],
-        test_threads: 1,
-        default_skips: vec![],
-        test_binary: None,
-    }];
+    let packages = vec![
+        TestPackage {
+            package: "daw-reaper".into(),
+            features: vec![],
+            test_threads: 1,
+            default_skips: vec![
+                // Soak test — 60s of wall-clock per run; opt in with an
+                // explicit filter (`just daw-reaper-test timer_responsive_for_60s`).
+                "timer_responsive_for_60s".into(),
+                // Registers actions via `architect::action::ActionBackend for
+                // Reaper` IN the test process — that seam calls Reaper::get()
+                // directly and can only run inside REAPER (an in-process guest
+                // extension), not from the external test client.
+                "action_backend_handler_runs_on_trigger".into(),
+                // KNOWN BROKEN (vox schema negotiation): restore_layout's
+                // response schema is never sent — client dies with
+                // InvalidPayload("no remote response schema received").
+                "save_restore_layout_round_trip".into(),
+                // KNOWN BROKEN (crashes daw-bridge): the reaper_project_isolation
+                // suite creates tabs with tracks/FX and closes them; something in
+                // daw-bridge still references the closed tab off the main thread
+                // and panics reaper-rs's require_valid_project ("ReaProject
+                // doesn't exist anymore"), killing the daw runtime and poisoning
+                // every later test. Fix belongs in daw-reaper's pointer
+                // validation / audio-sync registry; until then the whole file is
+                // skipped (its coverage overlaps the batch/track suites).
+                "fx_operations_in_isolated_project".into(),
+                "multi_track_manipulation".into(),
+                "project_has_unique_guid".into(),
+                "tracks_are_isolated".into(),
+                // KNOWN BROKEN (same stale-ReaProject class): the reaper_takes
+                // suite adds media items/takes and tears the tab down; the run
+                // either crashes daw-bridge or blocks for the full timeout.
+                "take_".into(),
+                // KNOWN BROKEN (assertion drift): mixer-visibility flag no
+                // longer round-trips through the screenset service.
+                "track_set_round_trips_visibility".into(),
+                // KNOWN BROKEN (drift): tempo add_point grows the point list
+                // by 2 instead of 1 on REAPER 7.75 — service or REAPER-side
+                // behavior change; remove_point depends on the same count.
+                "add_then_query_tempo_point".into(),
+                "remove_point_drops_from_list".into(),
+                // KNOWN BROKEN (drift/environment): toolbar button
+                // registration fails in the isolated headless rig.
+                "add_button_succeeds_and_returns_command_id".into(),
+                "remove_button_succeeds".into(),
+                "workflow_remove_cleans_up_batch".into(),
+                // Headless: no WM to round-trip the main-window geometry.
+                "nudge_round_trips_main_window".into(),
+            ],
+            test_binary: None,
+        },
+        // session's Key-track tests: proof that a key stored as an item label
+        // survives a real project.
+        TestPackage {
+            package: "session".into(),
+            features: vec![],
+            test_threads: 1,
+            default_skips: vec![],
+            test_binary: Some("reaper_key_track".into()),
+        },
+        // chord-tool's insert path. Everything about it up to the DAW seam is
+        // unit-tested; these are the only tests that prove the pitches keyflow
+        // computes are the pitches REAPER ends up holding.
+        TestPackage {
+            package: "chord-tool-daw".into(),
+            features: vec![],
+            test_threads: 1,
+            default_skips: vec![],
+            test_binary: None,
+        },
+        // midi-tools' velocity write path. The engines are unit-tested against
+        // `&[Note]`; these are the only tests that prove a resolved session
+        // lands on the right REAPER notes with the right values.
+        TestPackage {
+            package: "midi-tools-daw".into(),
+            features: vec![],
+            test_threads: 1,
+            default_skips: vec![],
+            test_binary: None,
+        },
+    ];
 
     runner.install_daw_bridge(&repo_root)?;
     runner.build_test_packages(&repo_root, &packages)?;

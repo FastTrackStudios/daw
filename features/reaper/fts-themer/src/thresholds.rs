@@ -57,11 +57,26 @@ pub fn generated_lines() -> Vec<Threshold> {
     // Kept in the order the file states them, so a diff reads top to bottom.
     let t = daw_theme_art::collapse::REAPER;
     vec![
-        Threshold { name: "hide_inputFX", value: t.input_fx },
-        Threshold { name: "hide_input", value: t.record_input },
-        Threshold { name: "hide_pan_labels", value: t.pan_labels },
-        Threshold { name: "hide_pan", value: t.pan_section },
-        Threshold { name: "hide_volume_label", value: t.volume_label },
+        Threshold {
+            name: "hide_inputFX",
+            value: t.input_fx,
+        },
+        Threshold {
+            name: "hide_input",
+            value: t.record_input,
+        },
+        Threshold {
+            name: "hide_pan_labels",
+            value: t.pan_labels,
+        },
+        Threshold {
+            name: "hide_pan",
+            value: t.pan_section,
+        },
+        Threshold {
+            name: "hide_volume_label",
+            value: t.volume_label,
+        },
     ]
 }
 
@@ -103,7 +118,9 @@ pub fn section_heights_agree(text: &str) -> Vec<String> {
 /// belongs to a different mode (narrowMode's 54 beside wide's 86).
 fn first_set_states<'t>(text: &'t str, name: &str, wanted: &str) -> Option<(&'t str, bool)> {
     let line = text.lines().find(|l| is_set_of(l, name))?;
-    let states = line.split_whitespace().any(|w| w.trim_end_matches("@h") == wanted);
+    let states = line
+        .split_whitespace()
+        .any(|w| w.trim_end_matches("@h") == wanted);
     Some((line, states))
 }
 
@@ -139,7 +156,11 @@ pub fn offsets_agree(text: &str) -> Vec<String> {
     // named constant — a literal that existed only inside this guard was
     // a check nobody could act on when it fired.
     let stated = [
-        ("mcp.recarm", quad(0.0, 0.0, g::ARM_CELL_W, g::ARM_CELL_H), "the record arm's cell"),
+        (
+            "mcp.recarm",
+            quad(0.0, 0.0, g::ARM_CELL_W, g::ARM_CELL_H),
+            "the record arm's cell",
+        ),
         (
             "mcp.recmon",
             quad(g::RECMON_DX, g::RECMON_FROM_ARM, g::BUTTON_W, g::BUTTON_H),
@@ -167,7 +188,12 @@ pub fn offsets_agree(text: &str) -> Vec<String> {
         ),
         (
             "mcp.phase",
-            quad(g::PHASE_DX, -g::PHASE_FROM_ENV, g::PHASE_W, g::PHASE_FROM_ENV),
+            quad(
+                g::PHASE_DX,
+                -g::PHASE_FROM_ENV,
+                g::PHASE_W,
+                g::PHASE_FROM_ENV,
+            ),
             "phase's step off envelope",
         ),
         (
@@ -325,8 +351,8 @@ pub fn parse(text: &str, names: &[&str]) -> Result<Vec<(String, f32)>> {
     names
         .iter()
         .map(|name| {
-            let idx = find_set(&lines, name)
-                .with_context(|| format!("reading `set {name}` back"))?;
+            let idx =
+                find_set(&lines, name).with_context(|| format!("reading `set {name}` back"))?;
             let body = lines[idx].split(';').next().unwrap_or_default();
             let value: f32 = body
                 .split_whitespace()
@@ -364,9 +390,18 @@ mod tests {
 
     fn sample_thresholds() -> Vec<Threshold> {
         vec![
-            Threshold { name: "hide_inputFX", value: 400.0 },
-            Threshold { name: "hide_input", value: 350.0 },
-            Threshold { name: "fx_sec_h", value: 33.0 },
+            Threshold {
+                name: "hide_inputFX",
+                value: 400.0,
+            },
+            Threshold {
+                name: "hide_input",
+                value: 350.0,
+            },
+            Threshold {
+                name: "fx_sec_h",
+                value: 33.0,
+            },
         ]
     }
 
@@ -400,7 +435,10 @@ mod tests {
         let (out, _) = splice(&sample(), &values).unwrap();
         let line = out.lines().next().unwrap();
 
-        assert!(line.starts_with("    set hide_inputFX\t\t\t    "), "indent or gap lost: {line:?}");
+        assert!(
+            line.starts_with("    set hide_inputFX\t\t\t    "),
+            "indent or gap lost: {line:?}"
+        );
         assert!(line.contains("420"), "value not written: {line:?}");
         assert!(
             line.ends_with("; height below which input effects is hidden."),
@@ -423,7 +461,10 @@ mod tests {
     /// A name the file does not define is refused rather than invented.
     #[test]
     fn an_unknown_threshold_is_an_error_not_an_insertion() {
-        let bogus = [Threshold { name: "hide_nothing", value: 1.0 }];
+        let bogus = [Threshold {
+            name: "hide_nothing",
+            value: 1.0,
+        }];
         assert!(splice(&sample(), &bogus).is_err());
     }
 

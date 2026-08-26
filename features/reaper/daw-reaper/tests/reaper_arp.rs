@@ -14,7 +14,9 @@ use daw::rpc::TakeHandle;
 use daw::test::reaper_test;
 use daw_proto::midi::MidiNoteCreate;
 use daw_proto::primitives::{Duration, PositionInSeconds};
-use expression_editor_tools::arp::{Arp, ArpSession, DEFAULT_GAP_PPQ, Direction, PPQ, TimedNote, group_chords};
+use expression_editor_tools::arp::{
+    Arp, ArpSession, DEFAULT_GAP_PPQ, Direction, PPQ, TimedNote, group_chords,
+};
 
 /// Write a chord as simultaneous whole notes on a fresh track.
 async fn chord_take(
@@ -206,10 +208,7 @@ async fn arp_keeps_a_progression_in_separate_chords(
     commit(&take, &session).await?;
 
     let after = take.midi().notes().await?;
-    let split = after
-        .iter()
-        .filter(|n| n.start_ppq < PPQ * 4.0)
-        .count();
+    let split = after.iter().filter(|n| n.start_ppq < PPQ * 4.0).count();
     ctx.log(&format!("{split} notes in bar 1 of {}", after.len()));
     assert_eq!(split, 16, "the first bar gets its own sixteen sixteenths");
     assert_eq!(after.len(), 32, "and so does the second");

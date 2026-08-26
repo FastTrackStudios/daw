@@ -792,8 +792,8 @@ fn save_new_binding(state: &AddBindingState) -> Result<(), String> {
         },
         context: context_label_to_styx(&state.context),
         passthrough: state.passthrough.then_some(true),
-            mnemonic: None,
-            why: None,
+        mnemonic: None,
+        why: None,
     });
     editor.save_and_reload().map_err(|e| format!("{e}"))?;
     tracing::info!(

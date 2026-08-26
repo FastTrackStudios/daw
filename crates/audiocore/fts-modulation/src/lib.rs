@@ -31,9 +31,9 @@ pub mod tempo;
 pub mod transient;
 pub mod trigger;
 
+pub use curves::CurveType;
+pub use follower::EnvFollower;
 pub use modulator::{DualModulator, Modulator};
 pub use pattern::{Pattern, PatternBank, Point};
 pub use tempo::TransportInfo;
-pub use curves::CurveType;
-pub use follower::EnvFollower;
 pub use trigger::{TriggerEngine, TriggerMode};

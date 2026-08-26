@@ -688,7 +688,6 @@ impl FxFamily {
             },
         }
     }
-
 }
 
 #[derive(Props, Clone, PartialEq)]
@@ -907,7 +906,10 @@ pub fn FxControl(props: FxControlProps) -> Element {
     // `split` as well as the box: widen moves it for Label and Whole but
     // not Toggle, so two parts can share (w, h, widen) with different
     // outlines.
-    let clip_id = vary("fxpill", &[&format!("{}x{}x{}x{}", p.w, p.h, widen, p.split)]);
+    let clip_id = vary(
+        "fxpill",
+        &[&format!("{}x{}x{}x{}", p.w, p.h, widen, p.split)],
+    );
     let (fill, alpha) = if p.scrim {
         ("#000000".to_string(), 0.35)
     } else {
@@ -963,7 +965,13 @@ pub fn FxControl(props: FxControlProps) -> Element {
     // toggle's natural 18 — so a widened toggle carries the lamp along with
     // half the slack rather than leaving it against the seam.
     let (tx, ty) = (
-        p.split + p.h * 0.364 + if props.part == FxPart::Toggle { widen * 0.5 } else { 0.0 },
+        p.split
+            + p.h * 0.364
+            + if props.part == FxPart::Toggle {
+                widen * 0.5
+            } else {
+                0.0
+            },
         body_y + body_h * 0.5,
     );
     // Measured: a 4px pill and an 8x8 plus with 2px arms, in both
@@ -1879,7 +1887,11 @@ pub fn PanningKnob(props: PanProps) -> Element {
     // At rest the cap is dead centre — the knob shows pan by *sliding* it
     // across, not by pointing at a rim, so centre has to read as centre.
     let pos = props.position.clamp(-1.0, 1.0);
-    let dx = if props.indicator { 0.0 } else { pos * (r - cap_r - 1.0) };
+    let dx = if props.indicator {
+        0.0
+    } else {
+        pos * (r - cap_r - 1.0)
+    };
     // The pointer sweeps 135° each way from straight up, which is the
     // throw REAPER gives a pan control. Measured off a rendered knob: two
     // pixels wide on a 24-pixel body, running from just inside the rim
@@ -2527,7 +2539,11 @@ pub fn RecordModeButton(props: RecordModeProps) -> Element {
     };
     // +1 draws the bracket on the right and the arrow flying into it;
     // -1 mirrors both.
-    let dir = if matches!(props.mode, RecordMode::Input) { 1.0f32 } else { -1.0 };
+    let dir = if matches!(props.mode, RecordMode::Input) {
+        1.0f32
+    } else {
+        -1.0
+    };
     let spine = cx + dir * 5.5;
     let arm = cx + dir * 1.0;
     let tip = cx + dir * 1.5;
@@ -2629,9 +2645,17 @@ pub fn FolderCompactButton(props: FolderCompactProps) -> Element {
     // one set of stops the hover cell came out a flat 37 levels dark.
     let hovered = props.at == Interaction::Hover;
     let wash: [(&str, &str, f32); 3] = if hovered {
-        [("0", "#f4f4f4", 0.275), ("0.40", "#d6d6d6", 0.200), ("1", "#ffffff", 0.149)]
+        [
+            ("0", "#f4f4f4", 0.275),
+            ("0.40", "#d6d6d6", 0.200),
+            ("1", "#ffffff", 0.149),
+        ]
     } else {
-        [("0", "#e9e9e9", 0.149), ("0.55", "#4a4a4a", 0.043), ("1", "#0a0a0a", 0.008)]
+        [
+            ("0", "#e9e9e9", 0.149),
+            ("0.55", "#4a4a4a", 0.043),
+            ("1", "#0a0a0a", 0.008),
+        ]
     };
     // Two washes, so a hovered button beside a resting one is two ids —
     // keyed on every stop, not just the first, per vary()'s contract.
@@ -2653,16 +2677,8 @@ pub fn FolderCompactButton(props: FolderCompactProps) -> Element {
             vw * 0.671,
             vw * 0.5
         ),
-        FolderCompact::Small => format!(
-            "M {} 8.0 H {} V 2.8 Z",
-            vw * 0.26,
-            vw * 0.71
-        ),
-        FolderCompact::Tiny => format!(
-            "M {} 1.7 V 8.7 L {} 5.2 Z",
-            vw * 0.353,
-            vw * 0.618
-        ),
+        FolderCompact::Small => format!("M {} 8.0 H {} V 2.8 Z", vw * 0.26, vw * 0.71),
+        FolderCompact::Tiny => format!("M {} 1.7 V 8.7 L {} 5.2 Z", vw * 0.353, vw * 0.618),
     };
 
     rsx! {
@@ -3049,12 +3065,14 @@ pub fn TransportButton(props: TransportProps) -> Element {
 
     // The glyph reads against whatever is behind it.
     let ink = match (props.glyph, props.on) {
-        (TransportGlyph::Record | TransportGlyph::RecordItem | TransportGlyph::RecordLoop, false) => {
-            t.signal.rec.shade(-0.10)
-        }
-        (TransportGlyph::Record | TransportGlyph::RecordItem | TransportGlyph::RecordLoop, true) => {
-            t.chrome.hardware_mark.shade(0.94)
-        }
+        (
+            TransportGlyph::Record | TransportGlyph::RecordItem | TransportGlyph::RecordLoop,
+            false,
+        ) => t.signal.rec.shade(-0.10),
+        (
+            TransportGlyph::Record | TransportGlyph::RecordItem | TransportGlyph::RecordLoop,
+            true,
+        ) => t.chrome.hardware_mark.shade(0.94),
         (TransportGlyph::Repeat, true) => Color::rgb(0xf8, 0xcf, 0x5e),
         (_, true) => t.chrome.hardware_edge,
         (_, false) => t.chrome.hardware_mark.shade(0.32),
@@ -3098,25 +3116,43 @@ pub fn TransportButton(props: TransportProps) -> Element {
     };
     let d = match props.glyph {
         // 8x8, dead centre.
-        TransportGlyph::Stop => format!(
-            "M {} {} h 8 v 8 h -8 z", cx - 4.0, cy - 4.0
-        ),
+        TransportGlyph::Stop => format!("M {} {} h 8 v 8 h -8 z", cx - 4.0, cy - 4.0),
         // Two 3px bars with a 2px gap.
         TransportGlyph::Pause => format!(
             "M {} {} h 3 v 8 h -3 z M {} {} h 3 v 8 h -3 z",
-            cx - 4.0, cy - 4.0, cx + 1.0, cy - 4.0
+            cx - 4.0,
+            cy - 4.0,
+            cx + 1.0,
+            cy - 4.0
         ),
         TransportGlyph::Play => format!(
-            "M {} {} V {} L {} {} Z", cx - 4.0, cy - 5.0, cy + 5.0, cx + 4.5, cy
+            "M {} {} V {} L {} {} Z",
+            cx - 4.0,
+            cy - 5.0,
+            cy + 5.0,
+            cx + 4.5,
+            cy
         ),
         // A triangle running into a bar, and its mirror.
         TransportGlyph::End | TransportGlyph::Next => format!(
             "M {} {} V {} L {} {} Z M {} {} h 2.5 v 10 h -2.5 z",
-            cx - 5.0, cy - 5.0, cy + 5.0, cx + 2.0, cy, cx + 2.0, cy - 5.0
+            cx - 5.0,
+            cy - 5.0,
+            cy + 5.0,
+            cx + 2.0,
+            cy,
+            cx + 2.0,
+            cy - 5.0
         ),
         TransportGlyph::Home | TransportGlyph::Previous => format!(
             "M {} {} V {} L {} {} Z M {} {} h 2.5 v 10 h -2.5 z",
-            cx + 5.0, cy - 5.0, cy + 5.0, cx - 2.0, cy, cx - 4.5, cy - 5.0
+            cx + 5.0,
+            cy - 5.0,
+            cy + 5.0,
+            cx - 2.0,
+            cy,
+            cx - 4.5,
+            cy - 5.0
         ),
         // A ring, and the same ring struck through or bracketed.
         TransportGlyph::Record => ring(cx, cy, 6.0, 3.0),
@@ -3166,8 +3202,18 @@ pub fn TransportButton(props: TransportProps) -> Element {
         // look right on its own.
         TransportGlyph::Repeat => format!(
             "M {} {} L {} {} L {} {} Z M {} {} L {} {} L {} {} Z",
-            cx + 1.80, cy - 0.90, cx + 6.40, cy - 0.90, cx + 4.10, cy - 4.60,
-            cx - 1.80, cy + 0.90, cx - 6.40, cy + 0.90, cx - 4.10, cy + 4.60
+            cx + 1.80,
+            cy - 0.90,
+            cx + 6.40,
+            cy - 0.90,
+            cx + 4.10,
+            cy - 4.60,
+            cx - 1.80,
+            cy + 0.90,
+            cx - 6.40,
+            cy + 0.90,
+            cx - 4.10,
+            cy + 4.60
         ),
         // A padlock beside the triangle.
         //
@@ -3184,11 +3230,24 @@ pub fn TransportButton(props: TransportProps) -> Element {
              M {} {} V {} A 2.5 2.5 0 0 1 {} {} V {} H {} V {} \
              A 1.5 1.5 0 0 0 {} {} V {} Z \
              M {} {} V {} L {} {} Z",
-            cx - 10.0, cy - 1.0,
-            cx - 9.0, cy - 1.0, cy - 2.5, cx - 4.0, cy - 2.5, cy - 1.0,
-            cx - 5.0, cy - 2.5,
-            cx - 8.0, cy - 2.5, cy - 1.0,
-            cx + 1.0, cy - 5.0, cy + 5.0, cx + 9.5, cy
+            cx - 10.0,
+            cy - 1.0,
+            cx - 9.0,
+            cy - 1.0,
+            cy - 2.5,
+            cx - 4.0,
+            cy - 2.5,
+            cy - 1.0,
+            cx - 5.0,
+            cy - 2.5,
+            cx - 8.0,
+            cy - 2.5,
+            cy - 1.0,
+            cx + 1.0,
+            cy - 5.0,
+            cy + 5.0,
+            cx + 9.5,
+            cy
         ),
     };
 
@@ -4298,7 +4357,11 @@ pub fn EnvcpArmButton(props: EnvcpArmProps) -> Element {
     // The glow moves with hover (`bump`), so a hovered armed button beside
     // a resting one is two gradients.
     let arm_id = vary("envarm", &[&glow.css(), &body.css(), &sink.css()]);
-    let body_fill = if props.armed { format!("url(#{arm_id})") } else { flat.css() };
+    let body_fill = if props.armed {
+        format!("url(#{arm_id})")
+    } else {
+        flat.css()
+    };
 
     rsx! {
         svg {
@@ -4778,13 +4841,16 @@ mod tests {
     #[test]
     fn defs_that_vary_per_instance_do_not_share_ids() {
         let pill = |at| {
-            render_svg(FxButton, FxProps {
-                family: Default::default(),
-                state: FxChain::Active,
-                width: None,
-                height: None,
-                at,
-            })
+            render_svg(
+                FxButton,
+                FxProps {
+                    family: Default::default(),
+                    state: FxChain::Active,
+                    width: None,
+                    height: None,
+                    at,
+                },
+            )
         };
         // Hover is what moves the *plate* — chain state only moves the ink.
         let resting = pill(Interaction::Normal);
@@ -4821,13 +4887,113 @@ mod tests {
     fn every_control_is_shaped_like_the_cell_it_replaces() {
         let n = (None, None);
         let cases: [(&str, String); 7] = [
-            ("mcp_recarm_on", render_svg(RecordArmButton, RecordArmProps { art: crate::slice::expect_art("mcp_recarm_on"), housing: true, state: RecordArm::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { unlit: None, hover: 0.35, sinks: true, depth: 0.15, legend: None, art: crate::slice::expect_art("mcp_mute_on"), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_solo_on", render_svg(SoloButton, SoloProps { unlit: None, hover: 0.35, sinks: true, depth: 0.11, legend: None, art: crate::slice::expect_art("mcp_solo_on"), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_fx_norm", render_svg(FxButton, FxProps { family: Default::default(), state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { art: crate::slice::expect_art("mcp_io_s_r"), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { art: crate::slice::expect_art("mcp_monitor_on"), axis: Default::default(), state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_volthumb", render_svg(VolumeFaderCap, FaderCapProps { accent: None, pane: None, width: n.0, height: n.1 })),
+            (
+                "mcp_recarm_on",
+                render_svg(
+                    RecordArmButton,
+                    RecordArmProps {
+                        art: crate::slice::expect_art("mcp_recarm_on"),
+                        housing: true,
+                        state: RecordArm::On,
+                        width: n.0,
+                        height: n.1,
+                        at: Interaction::Normal,
+                    },
+                ),
+            ),
+            (
+                "mcp_mute_on",
+                render_svg(
+                    MuteButton,
+                    ToggleProps {
+                        unlit: None,
+                        hover: 0.35,
+                        sinks: true,
+                        depth: 0.15,
+                        legend: None,
+                        art: crate::slice::expect_art("mcp_mute_on"),
+                        body: (0.0, 1.0),
+                        on: true,
+                        width: n.0,
+                        height: n.1,
+                        at: Interaction::Normal,
+                    },
+                ),
+            ),
+            (
+                "mcp_solo_on",
+                render_svg(
+                    SoloButton,
+                    SoloProps {
+                        unlit: None,
+                        hover: 0.35,
+                        sinks: true,
+                        depth: 0.11,
+                        legend: None,
+                        art: crate::slice::expect_art("mcp_solo_on"),
+                        body: (0.0, 1.0),
+                        state: Solo::On,
+                        width: n.0,
+                        height: n.1,
+                        at: Interaction::Normal,
+                    },
+                ),
+            ),
+            (
+                "mcp_fx_norm",
+                render_svg(
+                    FxButton,
+                    FxProps {
+                        family: Default::default(),
+                        state: FxChain::Active,
+                        width: n.0,
+                        height: n.1,
+                        at: Interaction::Normal,
+                    },
+                ),
+            ),
+            (
+                "mcp_io_s_r",
+                render_svg(
+                    RoutingButton,
+                    RoutingProps {
+                        art: crate::slice::expect_art("mcp_io_s_r"),
+                        axis: Default::default(),
+                        has_sends: true,
+                        has_receives: true,
+                        disabled: false,
+                        width: n.0,
+                        height: n.1,
+                        at: Interaction::Normal,
+                    },
+                ),
+            ),
+            (
+                "mcp_monitor_on",
+                render_svg(
+                    InputMonitorIndicator,
+                    MonitoringProps {
+                        art: crate::slice::expect_art("mcp_monitor_on"),
+                        axis: Default::default(),
+                        state: Monitoring::On,
+                        width: n.0,
+                        height: n.1,
+                        at: Interaction::Normal,
+                    },
+                ),
+            ),
+            (
+                "mcp_volthumb",
+                render_svg(
+                    VolumeFaderCap,
+                    FaderCapProps {
+                        accent: None,
+                        pane: None,
+                        width: n.0,
+                        height: n.1,
+                    },
+                ),
+            ),
         ];
 
         for (name, svg) in &cases {
@@ -4858,7 +5024,8 @@ mod tests {
             let cases = [
                 render_svg(
                     MuteButton,
-                    ToggleProps { unlit: None,
+                    ToggleProps {
+                        unlit: None,
                         hover: 0.35,
                         sinks: true,
                         depth: 0.15,
@@ -4873,7 +5040,8 @@ mod tests {
                 ),
                 render_svg(
                     SoloButton,
-                    SoloProps { unlit: None,
+                    SoloProps {
+                        unlit: None,
                         hover: 0.35,
                         sinks: true,
                         depth: 0.11,
@@ -4946,7 +5114,7 @@ mod tests {
                     FaderCapProps {
                         accent: None,
                         pane: None,
-                                                width: w,
+                        width: w,
                         height: h,
                     },
                 ),
@@ -4955,7 +5123,7 @@ mod tests {
                     FaderCapProps {
                         accent: None,
                         pane: None,
-                                                width: w,
+                        width: w,
                         height: h,
                     },
                 ),
@@ -4974,7 +5142,8 @@ mod tests {
         // so scaling the box must scale the drawing.
         let small = render_svg(
             MuteButton,
-            ToggleProps { unlit: None,
+            ToggleProps {
+                unlit: None,
                 hover: 0.35,
                 sinks: true,
                 depth: 0.15,
@@ -4989,7 +5158,8 @@ mod tests {
         );
         let large = render_svg(
             MuteButton,
-            ToggleProps { unlit: None,
+            ToggleProps {
+                unlit: None,
                 hover: 0.35,
                 sinks: true,
                 depth: 0.15,
@@ -5061,7 +5231,7 @@ mod tests {
                     indicator: false,
                     position: p,
                     large: false,
-                width: None,
+                    width: None,
                     height: None,
                 },
             );
@@ -5075,7 +5245,8 @@ mod tests {
         // control that ignores them loses feedback the theme had.
         let n = render_svg(
             MuteButton,
-            ToggleProps { unlit: None,
+            ToggleProps {
+                unlit: None,
                 hover: 0.35,
                 sinks: true,
                 depth: 0.15,
@@ -5090,7 +5261,8 @@ mod tests {
         );
         let h = render_svg(
             MuteButton,
-            ToggleProps { unlit: None,
+            ToggleProps {
+                unlit: None,
                 hover: 0.35,
                 sinks: true,
                 depth: 0.15,
@@ -5105,7 +5277,8 @@ mod tests {
         );
         let p = render_svg(
             MuteButton,
-            ToggleProps { unlit: None,
+            ToggleProps {
+                unlit: None,
                 hover: 0.35,
                 sinks: true,
                 depth: 0.15,
@@ -5127,7 +5300,8 @@ mod tests {
     fn states_stay_visually_distinct() {
         let off = render_svg(
             SoloButton,
-            SoloProps { unlit: None,
+            SoloProps {
+                unlit: None,
                 hover: 0.35,
                 sinks: true,
                 depth: 0.11,
@@ -5142,7 +5316,8 @@ mod tests {
         );
         let on = render_svg(
             SoloButton,
-            SoloProps { unlit: None,
+            SoloProps {
+                unlit: None,
                 hover: 0.35,
                 sinks: true,
                 depth: 0.11,
@@ -5157,7 +5332,8 @@ mod tests {
         );
         let defeat = render_svg(
             SoloButton,
-            SoloProps { unlit: None,
+            SoloProps {
+                unlit: None,
                 hover: 0.35,
                 sinks: true,
                 depth: 0.11,
@@ -5184,7 +5360,7 @@ mod tests {
                 FaderCapProps {
                     accent: None,
                     pane: None,
-                width: None,
+                    width: None,
                     height: Some(h),
                 },
             );
@@ -5243,7 +5419,12 @@ mod rail_band_tests {
     fn render(pane: Pane, height: Option<u32>) -> String {
         let mut dom = dioxus::prelude::VirtualDom::new_with_props(
             VolumeFaderTrack,
-            FaderCapProps { accent: None, pane: Some(pane), width: Some(23), height },
+            FaderCapProps {
+                accent: None,
+                pane: Some(pane),
+                width: Some(23),
+                height,
+            },
         );
         dom.rebuild_in_place();
         dioxus_ssr::render(&dom)
@@ -5256,19 +5437,46 @@ mod rail_band_tests {
     /// a 300-row strip.
     #[test]
     fn a_growing_band_does_not_state_a_pixel_height() {
-        let html = render(Pane { view: (0.0, 14.0, 23.0, 27.0), grow: true }, None);
-        assert!(html.contains("height=\"100%\""), "the growing band pinned a height:\n{html}");
+        let html = render(
+            Pane {
+                view: (0.0, 14.0, 23.0, 27.0),
+                grow: true,
+            },
+            None,
+        );
+        assert!(
+            html.contains("height=\"100%\""),
+            "the growing band pinned a height:\n{html}"
+        );
     }
 
     /// A fixed band still states one, and a caller that asks for a height
     /// still gets it — the exporter always asks.
     #[test]
     fn a_fixed_band_and_an_asked_for_height_are_unchanged() {
-        let fixed = render(Pane { view: (0.0, 0.0, 23.0, 16.0), grow: false }, None);
-        assert!(fixed.contains("height=\"16\""), "the fixed band lost its height:\n{fixed}");
+        let fixed = render(
+            Pane {
+                view: (0.0, 0.0, 23.0, 16.0),
+                grow: false,
+            },
+            None,
+        );
+        assert!(
+            fixed.contains("height=\"16\""),
+            "the fixed band lost its height:\n{fixed}"
+        );
 
-        let asked = render(Pane { view: (0.0, 14.0, 23.0, 27.0), grow: true }, Some(55));
-        assert!(asked.contains("height=\"55\""), "an asked-for height was ignored:\n{asked}");
+        let asked = render(
+            Pane {
+                view: (0.0, 14.0, 23.0, 27.0),
+                grow: true,
+            },
+            Some(55),
+        );
+        assert!(
+            asked.contains("height=\"55\""),
+            "an asked-for height was ignored:\n{asked}"
+        );
     }
 }
 
@@ -5444,7 +5652,12 @@ mod volume_knob_tests {
     fn render(value: f32) -> String {
         let mut dom = dioxus::prelude::VirtualDom::new_with_props(
             VolumeKnob,
-            VolumeKnobProps { value, width: Some(21), height: Some(21), at: Interaction::Normal },
+            VolumeKnobProps {
+                value,
+                width: Some(21),
+                height: Some(21),
+                at: Interaction::Normal,
+            },
         );
         dom.rebuild_in_place();
         dioxus_ssr::render(&dom)
@@ -5455,7 +5668,11 @@ mod volume_knob_tests {
     #[test]
     fn the_ring_lights_only_as_far_as_the_value() {
         let silent = render(0.0);
-        assert_eq!(silent.matches("<path").count(), 1, "a lit arc at zero:\n{silent}");
+        assert_eq!(
+            silent.matches("<path").count(),
+            1,
+            "a lit arc at zero:\n{silent}"
+        );
 
         let unity = render(0.708);
         assert_eq!(unity.matches("<path").count(), 2, "no value arc:\n{unity}");
@@ -5478,8 +5695,17 @@ mod volume_knob_tests {
 
         // The value arc is the last path; its `A` ends at the value's angle.
         let last = html.rsplit("<path").next().expect("a value arc");
-        let end = last.split(" A ").nth(1).expect("an arc").split('"').next().unwrap();
-        let n: Vec<f32> = end.split_whitespace().filter_map(|w| w.parse().ok()).collect();
+        let end = last
+            .split(" A ")
+            .nth(1)
+            .expect("an arc")
+            .split('"')
+            .next()
+            .unwrap();
+        let n: Vec<f32> = end
+            .split_whitespace()
+            .filter_map(|w| w.parse().ok())
+            .collect();
         let (x, y) = (n[n.len() - 2], n[n.len() - 1]);
 
         // Clockwise from twelve, which is how the component measures.
@@ -5570,7 +5796,11 @@ mod glyph_tests {
     use crate::render::render_svg as render;
 
     fn glyph(colour: &str) -> GlyphProps {
-        GlyphProps { colour: colour.into(), width: None, height: None }
+        GlyphProps {
+            colour: colour.into(),
+            width: None,
+            height: None,
+        }
     }
 
     /// A pushpin, not a star: a round head, and a needle that reaches the
@@ -5583,7 +5813,10 @@ mod glyph_tests {
         assert_eq!(svg.matches("<circle").count(), 1, "no round head:\n{svg}");
         let d = svg.split("d=\"").nth(1).unwrap().split('"').next().unwrap();
         assert_eq!(d.matches('M').count(), 3, "not three parts:\n{d}");
-        assert!(d.contains("10.6 10.2"), "the needle does not reach the corner:\n{d}");
+        assert!(
+            d.contains("10.6 10.2"),
+            "the needle does not reach the corner:\n{d}"
+        );
     }
 
     /// The folder's tab is square — the art has no slanted edge, so the
@@ -5666,7 +5899,12 @@ mod fixed_lanes_tests {
     fn render(on: bool) -> String {
         let mut dom = dioxus::prelude::VirtualDom::new_with_props(
             FixedLanesButton,
-            FixedLanesProps { on, width: Some(20), height: Some(24), at: Interaction::Normal },
+            FixedLanesProps {
+                on,
+                width: Some(20),
+                height: Some(24),
+                at: Interaction::Normal,
+            },
         );
         dom.rebuild_in_place();
         dioxus_ssr::render(&dom)
@@ -5686,7 +5924,13 @@ mod fixed_lanes_tests {
     /// the lower one is a shadow of the upper.
     #[test]
     fn the_lower_dot_is_faint_until_the_mode_is_on() {
-        assert!(render(false).contains(r#"fill-opacity="0.4""#), "the dots read as equals");
-        assert!(render(true).contains(r#"fill-opacity="1""#), "the lit dots are not solid");
+        assert!(
+            render(false).contains(r#"fill-opacity="0.4""#),
+            "the dots read as equals"
+        );
+        assert!(
+            render(true).contains(r#"fill-opacity="1""#),
+            "the lit dots are not solid"
+        );
     }
 }

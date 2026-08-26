@@ -623,4 +623,3 @@ impl Midi for crate::Reaper {
         readonly_warn("set_note_expression_value");
     }
 }
-

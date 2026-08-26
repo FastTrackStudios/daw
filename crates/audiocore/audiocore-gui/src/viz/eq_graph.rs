@@ -364,8 +364,8 @@ pub fn EqGraph(
     let mut drag_start: Signal<Option<(f64, f64)>> = use_signal(|| None);
     // Track original band positions for proportional scaling during multi-drag
     let mut drag_start_bands: Signal<Vec<(usize, f32, f32)>> = use_signal(Vec::new); // (idx, freq, gain)
-    // Dropdown states for the popup
-    // Right-click context menu state: (band_idx, viewBox_x, viewBox_y)
+                                                                                     // Dropdown states for the popup
+                                                                                     // Right-click context menu state: (band_idx, viewBox_x, viewBox_y)
     let mut context_menu: Signal<Option<(usize, f64, f64)>> = use_signal(|| None);
     // Track when mouse left the focused band area (for fade timeout)
     // Stores (timestamp_ms, band_idx) when mouse leaves focus area
@@ -1298,13 +1298,8 @@ fn generate_all_eq_curves(
         .map(|&freq| calculate_combined_response(bands, freq, sample_rate))
         .collect();
 
-    let (combined_stroke, combined_fill) = build_curve_paths(
-        &frequencies,
-        &combined_response,
-        freq_to_x,
-        db_to_y,
-        zero_y,
-    );
+    let (combined_stroke, combined_fill) =
+        build_curve_paths(&frequencies, &combined_response, freq_to_x, db_to_y, zero_y);
 
     // Generate per-band curves (with band index for color mapping)
     let mut band_curves = Vec::new();

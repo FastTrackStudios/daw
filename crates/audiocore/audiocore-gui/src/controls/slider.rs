@@ -6,7 +6,7 @@
 //!
 //! Redesigned with recessed track, illuminated fill bar, and 3D thumb.
 
-use crate::drag::{DragState, begin_drag};
+use crate::drag::{begin_drag, DragState};
 use crate::theme::use_theme;
 use nice_plug::prelude::ParamPtr;
 use nice_plug_dioxus::prelude::*;

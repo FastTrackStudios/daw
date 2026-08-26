@@ -104,7 +104,10 @@ pub fn build(
             out.resource_paths.clone()
         };
         resources = install::resolve_targets(&explicit)?;
-        resources.iter().map(|r| install::toolbar_icons_dir(r)).collect()
+        resources
+            .iter()
+            .map(|r| install::toolbar_icons_dir(r))
+            .collect()
     } else {
         let dir = out
             .out_dir

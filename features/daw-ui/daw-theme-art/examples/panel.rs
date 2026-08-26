@@ -178,8 +178,20 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
     // The track colour is the row: REAPER tints the whole panel, not a
     // stripe on it.
     s.push_str(&rect(0.0, y, 296.0, 70.0, &tk.tint.css()));
-    s.push_str(&rect(0.0, y + 70.0, 296.0, 1.0, &t.chrome.hardware.shade(-0.72).css()));
-    s.push_str(&label(9.0, y + 44.0, 11.0, &t.chrome.hardware_mark.shade(0.1).css(), &n.to_string()));
+    s.push_str(&rect(
+        0.0,
+        y + 70.0,
+        296.0,
+        1.0,
+        &t.chrome.hardware.shade(-0.72).css(),
+    ));
+    s.push_str(&label(
+        9.0,
+        y + 44.0,
+        11.0,
+        &t.chrome.hardware_mark.shade(0.1).css(),
+        &n.to_string(),
+    ));
 
     // Row one: arm, name, pan, meter, FX, IN.
     s.push_str(&at(
@@ -188,7 +200,11 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
         &render_svg(
             v::RecordArmButton,
             v::RecordArmProps {
-                state: if tk.armed { v::RecordArm::On } else { v::RecordArm::Off },
+                state: if tk.armed {
+                    v::RecordArm::On
+                } else {
+                    v::RecordArm::Off
+                },
                 art: art("track_recarm_on"),
                 housing: false,
                 width: NONE.0,
@@ -197,8 +213,20 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
             },
         ),
     ));
-    s.push_str(&rect(50.0, y + 7.0, 130.0, 17.0, &t.chrome.hardware.shade(-0.40).css()));
-    s.push_str(&label(56.0, y + 20.0, 11.5, &t.chrome.hardware_mark.shade(0.62).css(), tk.name));
+    s.push_str(&rect(
+        50.0,
+        y + 7.0,
+        130.0,
+        17.0,
+        &t.chrome.hardware.shade(-0.40).css(),
+    ));
+    s.push_str(&label(
+        56.0,
+        y + 20.0,
+        11.5,
+        &t.chrome.hardware_mark.shade(0.62).css(),
+        tk.name,
+    ));
     s.push_str(&at(
         186.0,
         y + 3.0,
@@ -207,7 +235,13 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
             // Centred, like every track in the reference shot. A panned
             // knob here is honest demo data and reads as a broken
             // pointer, which is not what this render is for.
-            v::PanProps { position: 0.0, large: false, indicator: true, width: NONE.0, height: NONE.1 },
+            v::PanProps {
+                position: 0.0,
+                large: false,
+                indicator: true,
+                width: NONE.0,
+                height: NONE.1,
+            },
         ),
     ));
     s.push_str(&meter(214.0, y + 8.0, 20.0, 15.0, vec![0.7, 0.5, 0.6], &[]));
@@ -231,7 +265,11 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
         &render_svg(
             v::InputMonitorIndicator,
             v::MonitoringProps {
-                state: if tk.armed { v::Monitoring::On } else { v::Monitoring::Off },
+                state: if tk.armed {
+                    v::Monitoring::On
+                } else {
+                    v::Monitoring::Off
+                },
                 art: art("track_monitor_on"),
                 axis: v::Axis::Horizontal,
                 width: NONE.0,
@@ -257,11 +295,35 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
             },
         ),
     ));
-    s.push_str(&rect(56.0, y + 34.0, 34.0, 17.0, &t.chrome.hardware.shade(-0.40).css()));
-    s.push_str(&label(62.0, y + 47.0, 10.0, &t.chrome.hardware_mark.shade(-0.1).css(), "FX"));
+    s.push_str(&rect(
+        56.0,
+        y + 34.0,
+        34.0,
+        17.0,
+        &t.chrome.hardware.shade(-0.40).css(),
+    ));
+    s.push_str(&label(
+        62.0,
+        y + 47.0,
+        10.0,
+        &t.chrome.hardware_mark.shade(-0.1).css(),
+        "FX",
+    ));
     // The input combo: no component, so a rectangle and a caret.
-    s.push_str(&rect(94.0, y + 34.0, 186.0, 17.0, &t.chrome.hardware.shade(-0.40).css()));
-    s.push_str(&label(100.0, y + 47.0, 11.0, &t.chrome.hardware_mark.shade(0.5).css(), "Input 1"));
+    s.push_str(&rect(
+        94.0,
+        y + 34.0,
+        186.0,
+        17.0,
+        &t.chrome.hardware.shade(-0.40).css(),
+    ));
+    s.push_str(&label(
+        100.0,
+        y + 47.0,
+        11.0,
+        &t.chrome.hardware_mark.shade(0.5).css(),
+        "Input 1",
+    ));
     s.push_str(&format!(
         "<path d=\"M {} {} h 7 l -3.5 4 z\" fill=\"{}\"/>",
         266.0,
@@ -270,9 +332,33 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
     ));
 
     // Mute and solo live outside the tint, stacked.
-    s.push_str(&rect(296.0, y, 44.0, 71.0, &t.chrome.hardware.shade(-0.40).css()));
-    s.push_str(&at(306.0, y + 4.0, &mute(art("track_mute_on"), (1.0 / 24.0, 20.0 / 24.0), true, tk.muted)));
-    s.push_str(&at(306.0, y + 36.0, &solo(art("track_solo_on"), (1.0 / 24.0, 20.0 / 24.0), true, tk.soloed)));
+    s.push_str(&rect(
+        296.0,
+        y,
+        44.0,
+        71.0,
+        &t.chrome.hardware.shade(-0.40).css(),
+    ));
+    s.push_str(&at(
+        306.0,
+        y + 4.0,
+        &mute(
+            art("track_mute_on"),
+            (1.0 / 24.0, 20.0 / 24.0),
+            true,
+            tk.muted,
+        ),
+    ));
+    s.push_str(&at(
+        306.0,
+        y + 36.0,
+        &solo(
+            art("track_solo_on"),
+            (1.0 / 24.0, 20.0 / 24.0),
+            true,
+            tk.soloed,
+        ),
+    ));
     s
 }
 
@@ -442,7 +528,11 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
         &render_svg(
             v::RecordArmButton,
             v::RecordArmProps {
-                state: if tk.armed { v::RecordArm::On } else { v::RecordArm::Off },
+                state: if tk.armed {
+                    v::RecordArm::On
+                } else {
+                    v::RecordArm::Off
+                },
                 art: art("mcp_recarm_on"),
                 housing: true,
                 width: NONE.0,
@@ -468,7 +558,11 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
         &render_svg(
             v::InputMonitorIndicator,
             v::MonitoringProps {
-                state: if tk.armed { v::Monitoring::On } else { v::Monitoring::Off },
+                state: if tk.armed {
+                    v::Monitoring::On
+                } else {
+                    v::Monitoring::Off
+                },
                 art: art("mcp_monitor_on"),
                 axis: v::Axis::Vertical,
                 width: NONE.0,
@@ -477,8 +571,16 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
             },
         ),
     ));
-    s.push_str(&at(x + COL - 10.5, mute_y, &mute(art("mcp_mute_on"), (0.0, 1.0), false, tk.muted)));
-    s.push_str(&at(x + COL - 10.5, solo_y, &solo(art("mcp_solo_on"), (0.0, 1.0), false, tk.soloed)));
+    s.push_str(&at(
+        x + COL - 10.5,
+        mute_y,
+        &mute(art("mcp_mute_on"), (0.0, 1.0), false, tk.muted),
+    ));
+    s.push_str(&at(
+        x + COL - 10.5,
+        solo_y,
+        &solo(art("mcp_solo_on"), (0.0, 1.0), false, tk.soloed),
+    ));
     s.push_str(&at(
         x + COL - 11.5,
         io_y,
@@ -535,7 +637,12 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
         stretch_y + 22.0,
         &render_svg(
             v::VolumeFaderCap,
-            v::FaderCapProps { accent: None, pane: None, width: Some(21), height: Some(44) },
+            v::FaderCapProps {
+                accent: None,
+                pane: None,
+                width: Some(21),
+                height: Some(44),
+            },
         ),
     ));
 
@@ -552,8 +659,20 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
     // grey line where the red should already have started. It carries the
     // same `hl_color` top row the track tint does.
     s.push_str(&rect(x + 1.0, bot_y + 27.0, W - 2.0, 20.0, &tk.tint.css()));
-    s.push_str(&rect(x + 1.0, bot_y + 27.0, W - 2.0, 1.0, &tk.tint.shade(0.13).css()));
-    s.push_str(&label(x + 40.0, bot_y + 41.0, 11.0, "#f0f0f0", &n.to_string()));
+    s.push_str(&rect(
+        x + 1.0,
+        bot_y + 27.0,
+        W - 2.0,
+        1.0,
+        &tk.tint.shade(0.13).css(),
+    ));
+    s.push_str(&label(
+        x + 40.0,
+        bot_y + 41.0,
+        11.0,
+        "#f0f0f0",
+        &n.to_string(),
+    ));
     s
 }
 
@@ -561,11 +680,41 @@ fn main() {
     let t = daw_theme::Theme::default();
     let hex = |r, g, b| Color::rgb(r, g, b);
     let tracks = [
-        Track { name: "Kick", tint: hex(0xa6, 0x3a, 0x56), armed: true, muted: false, soloed: false },
-        Track { name: "Snare", tint: hex(0xa6, 0x3a, 0x56), armed: true, muted: false, soloed: true },
-        Track { name: "OH", tint: hex(0xa6, 0x3a, 0x56), armed: false, muted: false, soloed: false },
-        Track { name: "Bass", tint: hex(0x3c, 0x5f, 0x9e), armed: false, muted: true, soloed: false },
-        Track { name: "Gtr", tint: hex(0x2e, 0x8e, 0xc4), armed: false, muted: false, soloed: false },
+        Track {
+            name: "Kick",
+            tint: hex(0xa6, 0x3a, 0x56),
+            armed: true,
+            muted: false,
+            soloed: false,
+        },
+        Track {
+            name: "Snare",
+            tint: hex(0xa6, 0x3a, 0x56),
+            armed: true,
+            muted: false,
+            soloed: true,
+        },
+        Track {
+            name: "OH",
+            tint: hex(0xa6, 0x3a, 0x56),
+            armed: false,
+            muted: false,
+            soloed: false,
+        },
+        Track {
+            name: "Bass",
+            tint: hex(0x3c, 0x5f, 0x9e),
+            armed: false,
+            muted: true,
+            soloed: false,
+        },
+        Track {
+            name: "Gtr",
+            tint: hex(0x2e, 0x8e, 0xc4),
+            armed: false,
+            muted: false,
+            soloed: false,
+        },
     ];
 
     let (w, h) = (760.0f32, 660.0f32);
@@ -578,7 +727,13 @@ fn main() {
         body.push_str(&track_row(i as f32 * 71.0, i as u32 + 1, tk));
     }
     // The transport, in the bar under the track panel, as REAPER has it.
-    body.push_str(&rect(0.0, 360.0, w, 34.0, &t.chrome.hardware.shade(-0.38).css()));
+    body.push_str(&rect(
+        0.0,
+        360.0,
+        w,
+        34.0,
+        &t.chrome.hardware.shade(-0.38).css(),
+    ));
     for (i, glyph) in [
         v::TransportGlyph::Home,
         v::TransportGlyph::End,
@@ -621,8 +776,20 @@ fn main() {
             },
         ),
     ));
-    body.push_str(&rect(270.0, 365.0, 190.0, 24.0, &t.chrome.hardware.shade(-0.40).css()));
-    body.push_str(&label(280.0, 381.0, 13.0, &t.chrome.hardware_mark.shade(0.5).css(), "1.1.00 / 0:00.000"));
+    body.push_str(&rect(
+        270.0,
+        365.0,
+        190.0,
+        24.0,
+        &t.chrome.hardware.shade(-0.40).css(),
+    ));
+    body.push_str(&label(
+        280.0,
+        381.0,
+        13.0,
+        &t.chrome.hardware_mark.shade(0.5).css(),
+        "1.1.00 / 0:00.000",
+    ));
 
     // And the mixer along the bottom.
     body.push_str(&rect(0.0, 400.0, w, 245.0, &ground.css()));

@@ -123,11 +123,8 @@ fn main() {
     let cell_h = tiles.iter().map(|(_, t)| t.height()).max().unwrap_or(1) + PAD;
     let cols = (1600 / cell_w).max(1);
     let rows = tiles.len().div_ceil(cols as usize) as u32;
-    let mut sheet = RgbaImage::from_pixel(
-        PAD + cols * cell_w,
-        PAD + rows * cell_h,
-        image::Rgba(BG),
-    );
+    let mut sheet =
+        RgbaImage::from_pixel(PAD + cols * cell_w, PAD + rows * cell_h, image::Rgba(BG));
     for (i, (_, t)) in tiles.iter().enumerate() {
         let (cx, cy) = (i as u32 % cols, i as u32 / cols);
         image::imageops::overlay(

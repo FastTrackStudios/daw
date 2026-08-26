@@ -135,10 +135,7 @@ impl Material {
                     inner
                         .flatten()
                         .map(|e| e.path())
-                        .filter(|p| {
-                            p.extension()
-                                .is_some_and(|e| e.eq_ignore_ascii_case("gp"))
-                        })
+                        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("gp")))
                         .collect::<Vec<_>>()
                 })
             })
@@ -179,10 +176,7 @@ fn collect_wavs(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
         let p = e.path();
         if p.is_dir() {
             collect_wavs(&p, depth - 1, out);
-        } else if p
-            .extension()
-            .is_some_and(|x| x.eq_ignore_ascii_case("wav"))
-        {
+        } else if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("wav")) {
             out.push(p);
         }
     }

@@ -166,7 +166,10 @@ pub fn track_notes(frames: &[Vec<f64>], cfg: TrackConfig) -> Vec<TrackedNote> {
 
 /// Convenience: track then convert straight to spans.
 pub fn spans_from_frames(frames: &[Vec<f64>], cfg: TrackConfig) -> Vec<NoteSpan> {
-    track_notes(frames, cfg).iter().map(|n| n.to_span()).collect()
+    track_notes(frames, cfg)
+        .iter()
+        .map(|n| n.to_span())
+        .collect()
 }
 
 /// Expand a track's sparse observations into a contiguous contour, filter by

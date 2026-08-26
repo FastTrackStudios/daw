@@ -14,7 +14,7 @@
 
 use std::path::Path;
 
-use crate::probe::{WavFormat, probe};
+use crate::probe::{probe, WavFormat};
 use crate::SamplerError;
 
 /// Sample encodings we read directly from WAV `data` chunks.
@@ -208,7 +208,8 @@ mod tests {
         let data_len = samples.len() * 2;
         let mut f = std::fs::File::create(path).unwrap();
         f.write_all(b"RIFF").unwrap();
-        f.write_all(&((36 + data_len) as u32).to_le_bytes()).unwrap();
+        f.write_all(&((36 + data_len) as u32).to_le_bytes())
+            .unwrap();
         f.write_all(b"WAVE").unwrap();
         f.write_all(b"fmt ").unwrap();
         f.write_all(&16u32.to_le_bytes()).unwrap();

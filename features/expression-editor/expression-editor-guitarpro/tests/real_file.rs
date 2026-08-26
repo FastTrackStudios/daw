@@ -201,7 +201,10 @@ fn a_bend_written_to_a_real_file_comes_back_as_a_curve() {
         .expect("the bent note lost its curve on the way through the format");
 
     let pts = bent.curve(Dimension::Pitch).points();
-    assert!(pts.len() >= 3, "a held bend needs its middle points: {pts:?}");
+    assert!(
+        pts.len() >= 3,
+        "a held bend needs its middle points: {pts:?}"
+    );
 
     let peak = pts.iter().map(|p| p.value).fold(f64::MIN, f64::max);
     assert!(
@@ -229,8 +232,7 @@ fn articulations_survive_the_format() {
     use expression_editor_core::rows::Articulation;
     let out = import_bytes(&write_gp5(), Format::Gp5).expect("import");
 
-    let arts: Vec<Option<Articulation>> =
-        out.doc.notes.iter().map(|n| n.articulation).collect();
+    let arts: Vec<Option<Articulation>> = out.doc.notes.iter().map(|n| n.articulation).collect();
     assert!(
         arts.contains(&Some(Articulation::PalmMute)),
         "the palm mute did not survive: {arts:?}"

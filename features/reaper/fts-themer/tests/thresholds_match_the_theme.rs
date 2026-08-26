@@ -65,7 +65,10 @@ fn the_stated_offsets_agree_with_the_geometry() {
 fn splicing_the_shipped_theme_changes_nothing() {
     let text = theme();
     let (out, changed) = thresholds::splice(&text, &thresholds::generated_lines()).unwrap();
-    assert_eq!(changed, 0, "the shipped theme is not at the constant's values");
+    assert_eq!(
+        changed, 0,
+        "the shipped theme is not at the constant's values"
+    );
     assert_eq!(out, text, "a no-op splice still rewrote the file");
 }
 
@@ -88,6 +91,13 @@ fn the_splice_is_idempotent_on_the_real_file() {
         .zip(once.lines())
         .filter(|(a, b)| a != b)
         .count();
-    assert_eq!(differing, 1, "the splice touched more than the line it owns");
-    assert_eq!(text.lines().count(), once.lines().count(), "line count changed");
+    assert_eq!(
+        differing, 1,
+        "the splice touched more than the line it owns"
+    );
+    assert_eq!(
+        text.lines().count(),
+        once.lines().count(),
+        "line count changed"
+    );
 }

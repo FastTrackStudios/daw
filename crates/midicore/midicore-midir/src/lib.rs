@@ -25,7 +25,9 @@ use midir::{
     MidiInput as MidirInput, MidiInputConnection, MidiOutput as MidirOutput, MidiOutputConnection,
 };
 
-use midicore_proto::{Direction, MidiEvent, PortId, PortInfo, PortSelector, RawShortMessage, TimedEvent};
+use midicore_proto::{
+    Direction, MidiEvent, PortId, PortInfo, PortSelector, RawShortMessage, TimedEvent,
+};
 
 const CLIENT: &str = "midicore-midir";
 
@@ -109,19 +111,28 @@ impl MidiInput {
                 let name = midi.port_name(&port).unwrap_or_default();
                 let conn = connect_port(midi, &port, &name, sink)?;
                 tracing::info!(port = %name, "midicore-midir: opened input");
-                Ok(Self { _conns: vec![conn], opened: vec![name] })
+                Ok(Self {
+                    _conns: vec![conn],
+                    opened: vec![name],
+                })
             }
             PortSelector::Id(PortId(id)) => {
                 // PortId is the port name for this backend — match exactly.
                 let (conn, name) = connect_where(sink, |n| n == id)?;
                 tracing::info!(port = %name, "midicore-midir: opened input");
-                Ok(Self { _conns: vec![conn], opened: vec![name] })
+                Ok(Self {
+                    _conns: vec![conn],
+                    opened: vec![name],
+                })
             }
             PortSelector::NameContains(needle) => {
                 let needle = needle.to_lowercase();
                 let (conn, name) = connect_where(sink, |n| n.to_lowercase().contains(&needle))?;
                 tracing::info!(port = %name, "midicore-midir: opened input");
-                Ok(Self { _conns: vec![conn], opened: vec![name] })
+                Ok(Self {
+                    _conns: vec![conn],
+                    opened: vec![name],
+                })
             }
             PortSelector::All => {
                 let midi = MidirInput::new(&client_name())?;
@@ -138,7 +149,9 @@ impl MidiInput {
                         continue;
                     }
                     // Each connection consumes its own MidirInput handle.
-                    let Ok(handle) = MidirInput::new(&client_name()) else { continue };
+                    let Ok(handle) = MidirInput::new(&client_name()) else {
+                        continue;
+                    };
                     match connect_port(handle, port, &name, sink.clone()) {
                         Ok(conn) => {
                             tracing::info!(port = %name, "midicore-midir: opened input");
@@ -151,12 +164,18 @@ impl MidiInput {
                 if conns.is_empty() {
                     return Err(eyre!("failed to open any MIDI input port"));
                 }
-                Ok(Self { _conns: conns, opened })
+                Ok(Self {
+                    _conns: conns,
+                    opened,
+                })
             }
             PortSelector::Virtual(name) => {
                 let conn = connect_virtual(&name, sink)?;
                 tracing::info!(port = %name, "midicore-midir: created virtual input");
-                Ok(Self { _conns: vec![conn], opened: vec![name] })
+                Ok(Self {
+                    _conns: vec![conn],
+                    opened: vec![name],
+                })
             }
         }
     }
@@ -195,7 +214,10 @@ where
             CLIENT,
             move |ts, bytes, _| {
                 if let Ok((event, _)) = MidiEvent::decode(bytes) {
-                    sink(TimedEvent { timestamp_us: ts, event });
+                    sink(TimedEvent {
+                        timestamp_us: ts,
+                        event,
+                    });
                 }
             },
             (),
@@ -214,7 +236,10 @@ where
         name,
         move |ts, bytes, _| {
             if let Ok((event, _)) = MidiEvent::decode(bytes) {
-                sink(TimedEvent { timestamp_us: ts, event });
+                sink(TimedEvent {
+                    timestamp_us: ts,
+                    event,
+                });
             }
         },
         (),
@@ -265,7 +290,11 @@ impl MidiStream {
         // See the field's doc comment: drop-only, never dereferenced.
         #[allow(clippy::arc_with_non_send_sync)]
         let input = std::sync::Arc::new(input);
-        Ok(Self { _input: input, rx, opened })
+        Ok(Self {
+            _input: input,
+            rx,
+            opened,
+        })
     }
 
     /// Open every available MIDI input port. `None` if none are available.
@@ -344,9 +373,7 @@ impl MidiOutput {
                 Self::open_where(move |n| n.to_lowercase().contains(&needle))
             }
             PortSelector::Virtual(name) => Self::open_virtual(&name),
-            PortSelector::All => {
-                Err(eyre!("PortSelector::All is not supported for MIDI output"))
-            }
+            PortSelector::All => Err(eyre!("PortSelector::All is not supported for MIDI output")),
         }
     }
 
@@ -399,7 +426,10 @@ impl MidiOutput {
             .create_virtual(name)
             .map_err(|e| eyre!("create virtual MIDI output '{name}': {e}"))?;
         tracing::info!(port = %name, "midicore-midir: created virtual output");
-        Ok(Self { conn, opened: name.to_string() })
+        Ok(Self {
+            conn,
+            opened: name.to_string(),
+        })
     }
 }
 

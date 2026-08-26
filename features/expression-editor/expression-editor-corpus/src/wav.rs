@@ -92,7 +92,10 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
         let path = entry?.path();
         if path.is_dir() {
             collect(&path, out)?;
-        } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav")) {
+        } else if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("wav"))
+        {
             out.push(path);
         }
     }

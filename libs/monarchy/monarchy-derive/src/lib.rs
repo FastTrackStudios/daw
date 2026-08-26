@@ -2,7 +2,7 @@ use convert_case::{Case, Casing};
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::quote;
-use syn::{Data, DeriveInput, Fields, Ident, Type, parse_macro_input};
+use syn::{parse_macro_input, Data, DeriveInput, Fields, Ident, Type};
 
 /// Derive macro for the Metadata trait
 ///

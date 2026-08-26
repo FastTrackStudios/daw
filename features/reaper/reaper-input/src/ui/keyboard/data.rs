@@ -560,9 +560,7 @@ pub fn collect_bindings_with_sources() -> Vec<KeyBindingInfo> {
                         crate::input::keybinds::KeybindContext::MediaExplorer => {
                             BindingContext::MediaExplorer
                         }
-                        crate::input::keybinds::KeybindContext::Custom(_) => {
-                            BindingContext::Global
-                        }
+                        crate::input::keybinds::KeybindContext::Custom(_) => BindingContext::Global,
                     },
                     None => BindingContext::Global,
                 };

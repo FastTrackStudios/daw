@@ -56,7 +56,12 @@ impl Default for StateStyle {
 
 /// Render the 3-state strip at the given scale. `base_w` is the cell width
 /// at 100% (30 = square, 60 = double-wide); height is always 30 at 100%.
-pub fn render_strip(svg: &str, states: &[StateStyle; 3], scale: f32, base_w: f32) -> Result<Pixmap> {
+pub fn render_strip(
+    svg: &str,
+    states: &[StateStyle; 3],
+    scale: f32,
+    base_w: f32,
+) -> Result<Pixmap> {
     let cw = (base_w * scale).round() as u32;
     let ch = (BASE_CELL * scale).round() as u32;
     let mut strip = Pixmap::new(cw * 3, ch).context("pixmap alloc")?;
@@ -86,7 +91,13 @@ fn render_cell(svg: &str, st: &StateStyle, scale: f32, cw: u32, ch: u32) -> Resu
         let mut paint = Paint::default();
         paint.set_color(bg);
         paint.anti_alias = true;
-        pm.fill_path(&rect, &paint, FillRule::Winding, Transform::identity(), None);
+        pm.fill_path(
+            &rect,
+            &paint,
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
     }
 
     // Icon: substitute currentColor with the rgb part, composite with its alpha.

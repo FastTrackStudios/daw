@@ -27,8 +27,8 @@ pub mod family;
 mod intervals; // Internal module - extends Chord with interval methods
 pub mod midi;
 mod normalization; // Internal module - extends Chord with normalization
-pub mod quality;
 pub mod palette;
+pub mod quality;
 pub mod realize;
 pub mod root;
 pub mod semitone_sequence;
@@ -45,17 +45,17 @@ pub use detail_level::{DetailLevel, UpperStructure};
 pub use duration::{ChordRhythm, LilySyntax, PushPullAmount, PushPullBase};
 pub use error::{ChordParseError, ChordParseErrors};
 pub use extensions::{ExtensionQuality, Extensions};
-pub use palette::{
-    ApproachKind, CHORD_TYPES, ChordCandidate, ChordRole, ChordType, approach, diatonic, grid,
-    palette, parallel_key, variations,
-};
-pub use realize::{ChordSize, chord_notes, scale_chords, scale_note};
 pub use family::ChordFamily;
 pub use midi::{
     DetectedChord, MidiNote, MidiNoteName, detect_chords_from_midi_notes,
     detect_chords_from_midi_notes_with_spelling, midi_pitch_to_note_name,
 };
+pub use palette::{
+    ApproachKind, CHORD_TYPES, ChordCandidate, ChordRole, ChordType, approach, diatonic, grid,
+    palette, parallel_key, variations,
+};
 pub use quality::{ChordQuality, SuspendedType};
+pub use realize::{ChordSize, chord_notes, scale_chords, scale_note};
 pub use root::NotationSystem;
 pub use root::{RootParseResult, parse_root};
 pub use semitone_sequence::{

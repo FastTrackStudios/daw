@@ -47,12 +47,7 @@ fn box_of(img: &RgbaImage, x0: u32, w: u32) -> Option<(u32, u32, u32, u32)> {
     // caller declared — that is a real finding about the image, and an
     // audit that panics on it reports nothing at all about the other
     // hundred and fifty.
-    (lo_x != u32::MAX).then_some((
-        lo_x.saturating_sub(x0),
-        lo_y,
-        hi_x.saturating_sub(x0),
-        hi_y,
-    ))
+    (lo_x != u32::MAX).then_some((lo_x.saturating_sub(x0), lo_y, hi_x.saturating_sub(x0), hi_y))
 }
 
 /// The mean colour of a cell, composited over black.

@@ -126,8 +126,7 @@ impl UnisonEngine {
             v.gain_l = angle.cos();
             v.gain_r = angle.sin();
             // Decorrelation: later voices wait longer.
-            let d_ms = self.config.delay_ms.clamp(0.0, MAX_DELAY_MS)
-                * (1.0 + k as f64 * 0.5);
+            let d_ms = self.config.delay_ms.clamp(0.0, MAX_DELAY_MS) * (1.0 + k as f64 * 0.5);
             v.delay_samples = ((d_ms / 1000.0) * self.sample_rate) as usize;
         }
     }
@@ -142,8 +141,7 @@ impl UnisonEngine {
         let n_voices = self.config.voices.clamp(2, MAX_VOICES);
         let dry = self.config.dry_level.clamp(0.0, 1.0);
         // Voice gain compensation: constant loudness as voices stack.
-        let wet =
-            self.config.wet_level.clamp(0.0, 1.0) / (n_voices as f64).sqrt();
+        let wet = self.config.wet_level.clamp(0.0, 1.0) / (n_voices as f64).sqrt();
 
         for v in self.voices.iter_mut().take(n_voices) {
             // Mono feed (center image into each voice's shifter).
@@ -159,8 +157,7 @@ impl UnisonEngine {
             for v in self.voices.iter_mut().take(n_voices) {
                 let ring_len = v.ring.len();
                 v.ring[v.ring_pos] = v.scratch[i];
-                let read =
-                    (v.ring_pos + ring_len - v.delay_samples.min(ring_len - 1)) % ring_len;
+                let read = (v.ring_pos + ring_len - v.delay_samples.min(ring_len - 1)) % ring_len;
                 let s = v.ring[read];
                 v.ring_pos = (v.ring_pos + 1) % ring_len;
                 out_l += s * v.gain_l * wet;

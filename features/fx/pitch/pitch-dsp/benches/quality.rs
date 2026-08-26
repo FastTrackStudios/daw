@@ -542,10 +542,9 @@ fn bench_sine() -> Vec<QualityResult> {
 
             for &(algo, name) in TEST_ALGOS {
                 // FreqDivider/PLL only do octave down.
-                if matches!(algo, Algorithm::FreqDivider | Algorithm::Pll)
-                    && shift != -12.0 {
-                        continue;
-                    }
+                if matches!(algo, Algorithm::FreqDivider | Algorithm::Pll) && shift != -12.0 {
+                    continue;
+                }
 
                 let input = Arc::clone(&input);
                 let rb_output = Arc::clone(&rb_output);

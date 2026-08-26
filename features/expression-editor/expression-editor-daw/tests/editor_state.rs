@@ -341,7 +341,10 @@ fn the_camera_is_not_part_of_it() {
     let raw = d
         .get_project(project.clone(), "fts.side", NAMESPACE)
         .unwrap_or_default();
-    assert!(!raw.contains("12345"), "no camera reached the project: {raw}");
+    assert!(
+        !raw.contains("12345"),
+        "no camera reached the project: {raw}"
+    );
 
     let mut fresh = editor();
     let before = fresh.camera;
@@ -349,7 +352,10 @@ fn the_camera_is_not_part_of_it() {
         .view_for(TAKE)
         .unwrap()
         .apply(&mut fresh);
-    assert_eq!(fresh.camera, before, "applying a view does not move the camera");
+    assert_eq!(
+        fresh.camera, before,
+        "applying a view does not move the camera"
+    );
 }
 
 #[test]
@@ -412,8 +418,14 @@ fn each_take_keeps_its_own_view() {
     state.set_view(TakeView::capture("take-a", &a));
     state.set_view(TakeView::capture("take-b", &b));
 
-    assert_eq!(state.view_for("take-a").unwrap().dimension, Dimension::Pressure);
-    assert_eq!(state.view_for("take-b").unwrap().dimension, Dimension::Timbre);
+    assert_eq!(
+        state.view_for("take-a").unwrap().dimension,
+        Dimension::Pressure
+    );
+    assert_eq!(
+        state.view_for("take-b").unwrap().dimension,
+        Dimension::Timbre
+    );
     assert_eq!(state.take_views.len(), 2);
 }
 
@@ -546,7 +558,10 @@ fn a_track_added_since_the_layout_was_written_is_matched_in() {
 
     let vox = fresh.index_of("Lead Vox").unwrap();
     let comp = fresh.index_of("Lead Vox Audio").unwrap();
-    let vox_lane = fresh.layout().lane_of(&fresh.track(vox).unwrap().guid.clone()).unwrap();
+    let vox_lane = fresh
+        .layout()
+        .lane_of(&fresh.track(vox).unwrap().guid.clone())
+        .unwrap();
     assert!(
         fresh.lane_tracks(vox_lane).contains(&comp),
         "the new comp joined the vocal's lane rather than being appended"
@@ -668,7 +683,10 @@ fn hold_survives_the_round_trip() {
     state.set_envelopes(ItemEnvelopes::capture(ITEM, &some_curves(), 1));
     state::save(&d, project.clone(), &state).unwrap();
 
-    let back = state::load(&d, project).envelopes_for(ITEM).unwrap().restore();
+    let back = state::load(&d, project)
+        .envelopes_for(ITEM)
+        .unwrap()
+        .restore();
     assert!(back.gate.iter().all(|p| p.hold));
     assert!(back.breath.iter().all(|p| !p.hold));
 }
@@ -684,7 +702,10 @@ fn bypass_travels_with_the_envelopes() {
     state.set_envelopes(ItemEnvelopes::capture(ITEM, &curves, 1));
     state::save(&d, project.clone(), &state).unwrap();
 
-    let back = state::load(&d, project).envelopes_for(ITEM).unwrap().restore();
+    let back = state::load(&d, project)
+        .envelopes_for(ITEM)
+        .unwrap()
+        .restore();
     assert!(back.bypass.gate, "a mix decision travels");
     assert!(back.bypass.sibilance);
     assert!(!back.bypass.ride);
@@ -738,8 +759,14 @@ fn each_item_keeps_its_own_envelopes() {
     state.set_envelopes(ItemEnvelopes::capture("item-b", &other, 2));
 
     assert_eq!(state.envelopes.len(), 2);
-    assert_eq!(state.envelopes_for("item-a").unwrap().ride.points[0].db, 3.0);
-    assert_eq!(state.envelopes_for("item-b").unwrap().ride.points[0].db, -9.0);
+    assert_eq!(
+        state.envelopes_for("item-a").unwrap().ride.points[0].db,
+        3.0
+    );
+    assert_eq!(
+        state.envelopes_for("item-b").unwrap().ride.points[0].db,
+        -9.0
+    );
 }
 
 #[test]

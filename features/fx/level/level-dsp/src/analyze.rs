@@ -13,7 +13,7 @@
 use audiocore_dsp::db::db_to_linear;
 
 use crate::classify::{
-    adaptive_silence_db, smooth_tonal_mask, BlockClass, BlockFeatures, ClassifyConfig, Classifier,
+    adaptive_silence_db, smooth_tonal_mask, BlockClass, BlockFeatures, Classifier, ClassifyConfig,
 };
 use crate::segment::{auto_target_db, build_segments, Segment, SegmentConfig};
 
@@ -149,10 +149,7 @@ pub fn render_gain_envelope(analysis: &Analysis, cfg: RenderConfig) -> Vec<GainP
     let n = analysis.blocks.len();
     let mut gain_db = vec![0.0f64; n];
 
-    let target_db = cfg
-        .target_db
-        .or(analysis.auto_target_db)
-        .unwrap_or(-18.0);
+    let target_db = cfg.target_db.or(analysis.auto_target_db).unwrap_or(-18.0);
 
     for seg in &analysis.segments {
         if cfg.per_block {

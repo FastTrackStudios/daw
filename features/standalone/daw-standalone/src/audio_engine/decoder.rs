@@ -103,7 +103,10 @@ pub fn decode_audio(data: &[u8]) -> Option<DecodedAudio> {
 /// extension is a hint only: the content is probed, and a file named
 /// `.wav` that is really a FLAC still decodes.
 pub fn decode_audio_with_extension(data: &[u8], extension: &str) -> Option<DecodedAudio> {
-    from_loaded(fts_sample::decode_bytes(data, Some(extension)).ok()?, extension)
+    from_loaded(
+        fts_sample::decode_bytes(data, Some(extension)).ok()?,
+        extension,
+    )
 }
 
 /// Interleave fts-sample's planar channels into the mixer's layout and

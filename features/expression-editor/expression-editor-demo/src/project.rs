@@ -2,10 +2,10 @@
 
 use std::path::{Path, PathBuf};
 
-use dawfile_standalone::document::{DawDocument, ItemNode, SourceRef, TakeNode, TrackNode};
-use dawfile_standalone::id::EntityId;
 use daw_proto::item::{Item, Take};
 use daw_proto::track::Track;
+use dawfile_standalone::document::{DawDocument, ItemNode, SourceRef, TakeNode, TrackNode};
+use dawfile_standalone::id::EntityId;
 
 use crate::Material;
 
@@ -168,10 +168,7 @@ fn close_mics(dir: &Path, limit: usize) -> Vec<PathBuf> {
     let mut wavs: Vec<PathBuf> = entries
         .flatten()
         .map(|e| e.path())
-        .filter(|p| {
-            p.extension()
-                .is_some_and(|x| x.eq_ignore_ascii_case("wav"))
-        })
+        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("wav")))
         .collect();
     wavs.sort();
     let close = matching(&wavs, &["kick", "snare", "hat", "tom"], limit);

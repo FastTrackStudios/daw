@@ -63,9 +63,7 @@ pub async fn setup_rigs(
 
     let total = selected_profiles.len();
     for (i, profile_id) in selected_profiles.iter().enumerate() {
-        let profile = ALL_PROFILES
-            .iter()
-            .find(|p| p.id == profile_id.as_str());
+        let profile = ALL_PROFILES.iter().find(|p| p.id == profile_id.as_str());
 
         let profile = match profile {
             Some(p) => p,

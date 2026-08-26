@@ -7,7 +7,7 @@ use std::io::Cursor;
 
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use tiny_skia::{
-    BlendMode, Color, ColorU8, FillRule, PathBuilder, Pixmap, PixmapPaint, Paint, Stroke, Transform,
+    BlendMode, Color, ColorU8, FillRule, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, Transform,
 };
 
 /// RGB + badge for a rig type.
@@ -20,15 +20,60 @@ struct RigStyle {
 
 fn rig_style(rig_type: &str) -> Option<RigStyle> {
     Some(match rig_type {
-        "reaper" => RigStyle { r: 0.545, g: 0.361, b: 0.965, badge: "FTS" },
-        "live" => RigStyle { r: 0.15, g: 0.65, b: 0.45, badge: "LIVE" },
-        "guitar" => RigStyle { r: 0.231, g: 0.510, b: 0.965, badge: "GUITAR" },
-        "bass" => RigStyle { r: 0.918, g: 0.702, b: 0.031, badge: "BASS" },
-        "keys" => RigStyle { r: 0.133, g: 0.773, b: 0.369, badge: "KEYS" },
-        "drums" => RigStyle { r: 0.937, g: 0.267, b: 0.267, badge: "DRUMS" },
-        "drum-enhancement" => RigStyle { r: 0.976, g: 0.451, b: 0.086, badge: "DRUM\nENHANCE" },
-        "vocals" => RigStyle { r: 0.925, g: 0.282, b: 0.600, badge: "VOCALS" },
-        "session" => RigStyle { r: 0.400, g: 0.620, b: 0.900, badge: "TRACKS" },
+        "reaper" => RigStyle {
+            r: 0.545,
+            g: 0.361,
+            b: 0.965,
+            badge: "FTS",
+        },
+        "live" => RigStyle {
+            r: 0.15,
+            g: 0.65,
+            b: 0.45,
+            badge: "LIVE",
+        },
+        "guitar" => RigStyle {
+            r: 0.231,
+            g: 0.510,
+            b: 0.965,
+            badge: "GUITAR",
+        },
+        "bass" => RigStyle {
+            r: 0.918,
+            g: 0.702,
+            b: 0.031,
+            badge: "BASS",
+        },
+        "keys" => RigStyle {
+            r: 0.133,
+            g: 0.773,
+            b: 0.369,
+            badge: "KEYS",
+        },
+        "drums" => RigStyle {
+            r: 0.937,
+            g: 0.267,
+            b: 0.267,
+            badge: "DRUMS",
+        },
+        "drum-enhancement" => RigStyle {
+            r: 0.976,
+            g: 0.451,
+            b: 0.086,
+            badge: "DRUM\nENHANCE",
+        },
+        "vocals" => RigStyle {
+            r: 0.925,
+            g: 0.282,
+            b: 0.600,
+            badge: "VOCALS",
+        },
+        "session" => RigStyle {
+            r: 0.400,
+            g: 0.620,
+            b: 0.900,
+            badge: "TRACKS",
+        },
         _ => return None,
     })
 }
@@ -42,8 +87,7 @@ pub fn generate_rig_icns(
     output_path: &std::path::Path,
     rig_type: &str,
 ) -> eyre::Result<()> {
-    let style = rig_style(rig_type)
-        .ok_or_else(|| eyre::eyre!("Unknown rig type: {rig_type}"))?;
+    let style = rig_style(rig_type).ok_or_else(|| eyre::eyre!("Unknown rig type: {rig_type}"))?;
 
     let base_data = std::fs::read(base_icns_path)?;
     let family = icns::IconFamily::read(Cursor::new(&base_data))?;
@@ -117,8 +161,8 @@ fn render_icon(
     let resized = image::imageops::resize(base, size, size, image::imageops::FilterType::Lanczos3);
 
     // Convert to tiny-skia pixmap
-    let mut pixmap = Pixmap::new(size, size)
-        .ok_or_else(|| eyre::eyre!("Failed to create pixmap"))?;
+    let mut pixmap =
+        Pixmap::new(size, size).ok_or_else(|| eyre::eyre!("Failed to create pixmap"))?;
     for (i, pixel) in resized.pixels().enumerate() {
         let [r, g, b, a] = pixel.0;
         pixmap.pixels_mut()[i] = ColorU8::from_rgba(r, g, b, a).premultiply();
@@ -128,10 +172,17 @@ fn render_icon(
     let tint = Color::from_rgba(style.r, style.g, style.b, 0.3).unwrap();
     let mut tint_pm = Pixmap::new(size, size).unwrap();
     tint_pm.fill(tint);
-    pixmap.draw_pixmap(0, 0, tint_pm.as_ref(), &PixmapPaint {
-        blend_mode: BlendMode::SourceAtop,
-        ..Default::default()
-    }, Transform::identity(), None);
+    pixmap.draw_pixmap(
+        0,
+        0,
+        tint_pm.as_ref(),
+        &PixmapPaint {
+            blend_mode: BlendMode::SourceAtop,
+            ..Default::default()
+        },
+        Transform::identity(),
+        None,
+    );
 
     // Skip badge on very small icons
     if size >= 64 {
@@ -157,10 +208,18 @@ fn draw_badge(pixmap: &mut Pixmap, style: &RigStyle, font: &FontRef, sz: f32) {
     let is_multiline = line_count > 1;
 
     let badge_w = sz * 0.70;
-    let badge_h = if is_multiline { sz * 0.18 * line_count as f32 } else { sz * 0.22 };
+    let badge_h = if is_multiline {
+        sz * 0.18 * line_count as f32
+    } else {
+        sz * 0.22
+    };
     let badge_x = (sz - badge_w) / 2.0;
     let badge_y = sz - badge_h - sz * 0.08;
-    let badge_radius = if is_multiline { badge_h * 0.25 } else { badge_h / 2.0 };
+    let badge_radius = if is_multiline {
+        badge_h * 0.25
+    } else {
+        badge_h / 2.0
+    };
 
     let badge_rect = make_rounded_rect(badge_x, badge_y, badge_w, badge_h, badge_radius);
 
@@ -177,12 +236,24 @@ fn draw_badge(pixmap: &mut Pixmap, style: &RigStyle, font: &FontRef, sz: f32) {
 
     // Fill
     paint.set_color(Color::from_rgba(style.r, style.g, style.b, 0.95).unwrap());
-    pixmap.fill_path(&badge_rect, &paint, FillRule::Winding, Transform::identity(), None);
+    pixmap.fill_path(
+        &badge_rect,
+        &paint,
+        FillRule::Winding,
+        Transform::identity(),
+        None,
+    );
 
     // Border
-    paint.set_color(Color::from_rgba(
-        (style.r * 0.5).min(1.0), (style.g * 0.5).min(1.0), (style.b * 0.5).min(1.0), 0.8
-    ).unwrap());
+    paint.set_color(
+        Color::from_rgba(
+            (style.r * 0.5).min(1.0),
+            (style.g * 0.5).min(1.0),
+            (style.b * 0.5).min(1.0),
+            0.8,
+        )
+        .unwrap(),
+    );
     let stroke = Stroke {
         width: (sz * 0.012).max(1.0),
         ..Stroke::default()
@@ -190,7 +261,11 @@ fn draw_badge(pixmap: &mut Pixmap, style: &RigStyle, font: &FontRef, sz: f32) {
     pixmap.stroke_path(&badge_rect, &paint, &stroke, Transform::identity(), None);
 
     // Text
-    let font_size = if is_multiline { badge_h * 0.30 } else { badge_h * 0.55 };
+    let font_size = if is_multiline {
+        badge_h * 0.30
+    } else {
+        badge_h * 0.55
+    };
     let scale = PxScale::from(font_size);
     let scaled = font.as_scaled(scale);
     let line_height = scaled.height();
@@ -203,12 +278,20 @@ fn draw_badge(pixmap: &mut Pixmap, style: &RigStyle, font: &FontRef, sz: f32) {
     }
 }
 
-fn draw_text_centered(pixmap: &mut Pixmap, font: &ab_glyph::PxScaleFont<&FontRef>, text: &str, cx: f32, y: f32) {
+fn draw_text_centered(
+    pixmap: &mut Pixmap,
+    font: &ab_glyph::PxScaleFont<&FontRef>,
+    text: &str,
+    cx: f32,
+    y: f32,
+) {
     let mut w = 0.0_f32;
     let mut prev: Option<ab_glyph::GlyphId> = None;
     for ch in text.chars() {
         let id = font.glyph_id(ch);
-        if let Some(p) = prev { w += font.kern(p, id); }
+        if let Some(p) = prev {
+            w += font.kern(p, id);
+        }
         w += font.h_advance(id);
         prev = Some(id);
     }
@@ -220,7 +303,9 @@ fn draw_text_centered(pixmap: &mut Pixmap, font: &ab_glyph::PxScaleFont<&FontRef
     prev = None;
     for ch in text.chars() {
         let id = font.glyph_id(ch);
-        if let Some(p) = prev { x += font.kern(p, id); }
+        if let Some(p) = prev {
+            x += font.kern(p, id);
+        }
         let glyph = id.with_scale_and_position(font.scale(), ab_glyph::point(x, y));
         if let Some(o) = font.outline_glyph(glyph) {
             let b = o.px_bounds();
@@ -236,8 +321,16 @@ fn draw_text_centered(pixmap: &mut Pixmap, font: &ab_glyph::PxScaleFont<&FontRef
                         let da = e.alpha() as f32 / 255.0;
                         let oa = sa + da * (1.0 - sa);
                         if oa > 0.0 {
-                            let bl = |s: u8, d: u8| ((s as f32 * sa + d as f32 * da * (1.0 - sa)) / oa) as u8;
-                            pixels[idx] = ColorU8::from_rgba(bl(255, e.red()), bl(255, e.green()), bl(255, e.blue()), (oa * 255.0) as u8).premultiply();
+                            let bl = |s: u8, d: u8| {
+                                ((s as f32 * sa + d as f32 * da * (1.0 - sa)) / oa) as u8
+                            };
+                            pixels[idx] = ColorU8::from_rgba(
+                                bl(255, e.red()),
+                                bl(255, e.green()),
+                                bl(255, e.blue()),
+                                (oa * 255.0) as u8,
+                            )
+                            .premultiply();
                         }
                     }
                 }

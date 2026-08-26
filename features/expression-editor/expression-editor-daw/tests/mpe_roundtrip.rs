@@ -98,11 +98,10 @@ fn channel_pressure_survives_the_facade() {
         .doc
         .note_mut(id)
         .unwrap()
-        .curve_mut(Dimension::Pressure) =
-        expression_editor_core::Curve::from_points(vec![
-            Point::new(0.0, 0.2),
-            Point::new(PPQ, 0.9),
-        ]);
+        .curve_mut(Dimension::Pressure) = expression_editor_core::Curve::from_points(vec![
+        Point::new(0.0, 0.2),
+        Point::new(PPQ, 0.9),
+    ]);
 
     let back = round_trip(&daw, &location, s);
     let curve = back.editor.doc.notes[0].curve(Dimension::Pressure);
@@ -185,7 +184,11 @@ fn the_bend_range_the_session_loads_with_is_the_one_it_writes_with() {
 
     let mut s = s;
     let id = s.editor.doc.notes[0].id;
-    *s.editor.doc.note_mut(id).unwrap().curve_mut(Dimension::Pitch) =
+    *s.editor
+        .doc
+        .note_mut(id)
+        .unwrap()
+        .curve_mut(Dimension::Pitch) =
         expression_editor_core::Curve::from_points(vec![Point::new(0.0, 12.0)]);
     s.write_back(&daw);
 

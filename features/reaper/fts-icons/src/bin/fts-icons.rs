@@ -1,9 +1,9 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
 use fts_icons::config::{self, ConfigFile, IconEntry, Settings, StateSet, StyleOverride};
-use fts_icons::{build, iconify, install, Output, Report};
+use fts_icons::{Output, Report, build, iconify, install};
 
 #[derive(Parser)]
 #[command(
@@ -144,7 +144,12 @@ fn run() -> Result<()> {
             if cfg.icons.is_empty() {
                 bail!("config has no [[icon]] entries");
             }
-            report(build(&cfg.defaults, &cfg.icons, &cfg.settings, &(&out).into())?);
+            report(build(
+                &cfg.defaults,
+                &cfg.icons,
+                &cfg.settings,
+                &(&out).into(),
+            )?);
         }
         Cmd::Init { path } => {
             if path.exists() {

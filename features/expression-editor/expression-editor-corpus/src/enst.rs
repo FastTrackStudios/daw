@@ -145,7 +145,11 @@ impl Histogram {
                 width = width
             ));
         }
-        s.push_str(&format!("        ≥{:5.1} ms   {}\n", self.counts.len() as f64 * self.bin_ms, self.over));
+        s.push_str(&format!(
+            "        ≥{:5.1} ms   {}\n",
+            self.counts.len() as f64 * self.bin_ms,
+            self.over
+        ));
         s
     }
 }

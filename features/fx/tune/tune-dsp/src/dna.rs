@@ -144,8 +144,8 @@ impl DnaEngine {
                 if fundamental >= self.cfg.salience_floor * peak {
                     let mut score = 2.0 * fundamental; // weight the fundamental
                     for h in 2..=self.cfg.harmonics {
-                        let bin = (h as f64 * f * self.cfg.window as f64 / self.sample_rate)
-                            .round() as usize;
+                        let bin = (h as f64 * f * self.cfg.window as f64 / self.sample_rate).round()
+                            as usize;
                         if bin < residual.len() {
                             score += residual[bin] / h as f64;
                         }

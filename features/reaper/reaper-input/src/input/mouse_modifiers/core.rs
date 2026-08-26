@@ -99,7 +99,6 @@ impl MouseModifierFlag {
         } // Bit 11 = no-select
         flag
     }
-
 }
 
 impl std::fmt::Display for MouseModifierFlag {

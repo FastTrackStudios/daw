@@ -15,7 +15,10 @@ use expression_editor_corpus::recall::{self, Tolerance, flam_config};
 use expression_editor_corpus::{DRUMGIZMO_ATTRIBUTION, wav};
 
 #[derive(Parser)]
-#[command(name = "drum-corpus", about = "Build the drum corpus. Ship none of it.")]
+#[command(
+    name = "drum-corpus",
+    about = "Build the drum corpus. Ship none of it."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -163,18 +166,28 @@ fn run(cli: Cli) -> Result<(), String> {
 
             let (samples, rate, cases) = match wav_path {
                 Some(path) => {
-                    let truth = truth.ok_or("--wav needs --truth: the ground truth is not in the audio")?;
+                    let truth =
+                        truth.ok_or("--wav needs --truth: the ground truth is not in the audio")?;
                     let text = std::fs::read_to_string(&truth).map_err(|e| e.to_string())?;
                     let cases = parse_truth_csv(&text)?;
                     let (samples, rate) =
                         wav::read_channel(&path, channel).map_err(|e| e.to_string())?;
-                    println!("{} — {:.1}s at {rate} Hz, {} cases", path.display(), samples.len() as f64 / rate, cases.len());
+                    println!(
+                        "{} — {:.1}s at {rate} Hz, {} cases",
+                        path.display(),
+                        samples.len() as f64 / rate,
+                        cases.len()
+                    );
                     println!("{DRUMGIZMO_ATTRIBUTION}");
                     (samples, rate, cases)
                 }
                 None => {
                     let r = sweep(spacings_ms).render();
-                    println!("synthetic sweep — {:.1}s, {} cases", r.samples.len() as f64 / r.sample_rate, r.cases.len());
+                    println!(
+                        "synthetic sweep — {:.1}s, {} cases",
+                        r.samples.len() as f64 / r.sample_rate,
+                        r.cases.len()
+                    );
                     (r.samples, r.sample_rate, r.cases)
                 }
             };
@@ -261,10 +274,7 @@ fn print_curve(curve: &recall::Curve) {
     println!();
     for side in [Side::Before, Side::After] {
         match curve.knee_ms(side, 1.0) {
-            Some(ms) => println!(
-                "  {}: both strikes resolved from {ms} ms up",
-                side.as_str()
-            ),
+            Some(ms) => println!("  {}: both strikes resolved from {ms} ms up", side.as_str()),
             None => println!(
                 "  {}: never resolves both strikes in 5–60 ms",
                 side.as_str()
@@ -273,7 +283,12 @@ fn print_curve(curve: &recall::Curve) {
     }
 }
 
-fn enst_report(path: &std::path::Path, label: &str, bpm: f64, subdivision: f64) -> Result<(), String> {
+fn enst_report(
+    path: &std::path::Path,
+    label: &str,
+    bpm: f64,
+    subdivision: f64,
+) -> Result<(), String> {
     eprintln!(
         "ENST-Drums is CC BY-NC-ND 4.0: internal evaluation only. \
          Nothing read here may be vendored, shipped, or derived into a release asset."

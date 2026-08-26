@@ -51,18 +51,19 @@ pub async fn download_reaper(plan: &InstallPlan, tx: &EventSender) -> eyre::Resu
     // Skip if already downloaded and correct size
     if let Some(size) = expected_size
         && dest.exists()
-            && let Ok(meta) = tokio::fs::metadata(&dest).await
-                && meta.len() == size {
-                    info!("REAPER already downloaded at {}", dest.display());
-                    let _ = tx
-                        .send(InstallEvent::StepProgress {
-                            step: InstallStep::DownloadReaper,
-                            fraction: 1.0,
-                            message: "Already downloaded".into(),
-                        })
-                        .await;
-                    return Ok(dest);
-                }
+        && let Ok(meta) = tokio::fs::metadata(&dest).await
+        && meta.len() == size
+    {
+        info!("REAPER already downloaded at {}", dest.display());
+        let _ = tx
+            .send(InstallEvent::StepProgress {
+                step: InstallStep::DownloadReaper,
+                fraction: 1.0,
+                message: "Already downloaded".into(),
+            })
+            .await;
+        return Ok(dest);
+    }
 
     let _ = tx
         .send(InstallEvent::StepProgress {

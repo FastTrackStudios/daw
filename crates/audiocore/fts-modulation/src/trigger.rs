@@ -5,7 +5,7 @@
 //!
 //! Based on tiagolr's trigger system shared across gate12, filtr, time12, reevr.
 
-use crate::tempo::{self, SYNC_TABLE, SyncDivision, TransportInfo};
+use crate::tempo::{self, SyncDivision, TransportInfo, SYNC_TABLE};
 
 /// Trigger mode for pattern playback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

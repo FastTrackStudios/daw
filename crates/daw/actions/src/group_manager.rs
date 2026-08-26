@@ -55,9 +55,11 @@ pub fn assign_selected_to_category(category: &str) -> usize {
         return 0;
     }
 
-    let Some(slot) =
-        daw.first_free_group_slot(ProjectContext::Current, band.start as u32, band.end() as u32)
-    else {
+    let Some(slot) = daw.first_free_group_slot(
+        ProjectContext::Current,
+        band.start as u32,
+        band.end() as u32,
+    ) else {
         warn!(band = band.label, "[group] no free slot in band");
         return 0;
     };
@@ -69,8 +71,12 @@ pub fn assign_selected_to_category(category: &str) -> usize {
     );
     daw.begin_undo_block(ProjectContext::Current, &undo);
     for guid in &selected {
-        let _ =
-            daw.set_group_membership(ProjectContext::Current, TrackRef::Guid(guid.clone()), slot, true);
+        let _ = daw.set_group_membership(
+            ProjectContext::Current,
+            TrackRef::Guid(guid.clone()),
+            slot,
+            true,
+        );
     }
     daw.end_undo_block(ProjectContext::Current, &undo, None);
 

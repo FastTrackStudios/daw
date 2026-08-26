@@ -3,7 +3,7 @@
 use dioxus::prelude::*;
 
 use crate::icon::{Glyph, Icon};
-use crate::{RailItem, StatusItem, use_chrome};
+use crate::{use_chrome, RailItem, StatusItem};
 
 /// Chrome metrics, in one place — the rails and the bar are the app's only
 /// fixed furniture, so their sizes are a contract, not a per-view choice.
@@ -284,7 +284,11 @@ fn StatusView(item: StatusItem) -> Element {
                 ),
             }
         },
-        StatusItem::Meter { level, color, width_px } => {
+        StatusItem::Meter {
+            level,
+            color,
+            width_px,
+        } => {
             let pct = (level.clamp(0.0, 1.0) * 100.0) as u32;
             rsx! {
                 div {
@@ -391,7 +395,8 @@ pub fn WindowButton(
     title: String,
     #[props(default = false)] active: bool,
     /// Close gets a red hover; everything else stays quiet.
-    #[props(default = false)] danger: bool,
+    #[props(default = false)]
+    danger: bool,
     on_click: EventHandler<()>,
 ) -> Element {
     rsx! {

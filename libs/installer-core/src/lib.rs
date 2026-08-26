@@ -13,5 +13,5 @@ pub mod steps;
 
 pub use plan::InstallPlan;
 pub use progress::{EventSender, InstallEvent, InstallStep};
-pub use runner::{run_all_steps, InstallContext};
+pub use runner::{InstallContext, run_all_steps};
 pub use steps::install_fts_extensions::BundledExtension;

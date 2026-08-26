@@ -66,14 +66,16 @@ pub use art_data::{ArtData, ArtImage, ColorMode, Rect};
 // `Band` is deliberately *not* re-exported: `vector_controls::Band` is a
 // plate's colour band and already lives at that name. The stretch band stays
 // spelled `slice::Band`, which is where its meaning is legible.
-pub use slice::{NamedArt, Slice};
 #[cfg(feature = "render")]
 pub use compare::{Fidelity, compare};
 #[cfg(feature = "render")]
 pub use derive::DerivedSpec;
+pub use slice::{NamedArt, Slice};
 #[cfg(feature = "render")]
 pub use trace::trace;
 
+#[cfg(feature = "render")]
+pub use export::{cell_markup, composite_cells, generatable, render_control};
 pub use mixer_controls::{
     FxButton, FxChain, InputMonitorIndicator, Monitoring, MuteButton, PanningKnob, RecordArm,
     RecordArmButton, RoutingButton, Solo, SoloButton, VolumeFaderCap, VolumeFaderTrack,
@@ -81,6 +83,4 @@ pub use mixer_controls::{
 pub use primitives::{Button, ControlState, Groove, Meter, Panel, Thumb};
 #[cfg(feature = "render")]
 pub use render::{RenderError, render_for, render_sized, render_svg};
-#[cfg(feature = "render")]
-pub use export::{cell_markup, composite_cells, generatable, render_control};
 pub use strip::{Mixer, MixerStrip};

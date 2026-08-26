@@ -106,7 +106,11 @@ pub fn label_legend(panel: Panel, lit: bool, solo: bool) -> Option<Color> {
 /// The track panel's buttons occupy rows 1..20 of a 24-row cell; the
 /// mixer's fill theirs.
 pub fn label_body(panel: Panel) -> (f32, f32) {
-    if panel.is_track() { (1.0 / 24.0, 20.0 / 24.0) } else { (0.0, 1.0) }
+    if panel.is_track() {
+        (1.0 / 24.0, 20.0 / 24.0)
+    } else {
+        (0.0, 1.0)
+    }
 }
 
 /// Everything a mute button needs, for the image `art` names.
@@ -157,7 +161,6 @@ pub fn mute_art(panel: Panel, on: bool) -> NamedArt {
     })
 }
 
-
 /// The track colour, as REAPER actually paints it on a panel.
 ///
 /// REAPER does not paint the raw track colour: it darkens it. Measured in
@@ -205,7 +208,10 @@ mod tests {
     fn the_measured_numbers_are_the_measured_numbers() {
         let m = mute(mute_art(Panel::Mixer, true), true);
         assert_eq!(m.hover, 0.25, "mute's hover is the gentlest of the three");
-        assert_eq!(m.depth, 0.11, "measured 0.89 on every channel, top to bottom");
+        assert_eq!(
+            m.depth, 0.11,
+            "measured 0.89 on every channel, top to bottom"
+        );
     }
 
     #[test]

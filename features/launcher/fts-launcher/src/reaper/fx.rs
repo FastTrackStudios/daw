@@ -1,6 +1,8 @@
 //! DAW FX provider — installed plugins from the DAW's FX database.
 
-use architect_launcher_core::{ActionModifier, ActivationResult, Item, ItemAction, Provider, ProviderConfig};
+use architect_launcher_core::{
+    ActionModifier, ActivationResult, Item, ItemAction, Provider, ProviderConfig,
+};
 
 pub struct DawFxProvider {
     config: ProviderConfig,

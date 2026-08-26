@@ -326,8 +326,8 @@ pub struct ProjectProperties {
     /// past where a lighting cue or a click track stops landing.
     pub tempo: Option<(f64, i32, i32, i32)>,
     pub play_rate: Option<(i32, i32, i32, i32)>, // PLAYRATE 1 0 0.25 4
-    pub selection: Option<(i32, i32)>,       // SELECTION 0 0
-    pub selection2: Option<(i32, i32)>,      // SELECTION2 0 0
+    pub selection: Option<(i32, i32)>,           // SELECTION 0 0
+    pub selection2: Option<(i32, i32)>,          // SELECTION2 0 0
 
     // Master track settings
     pub master_auto_mode: Option<i32>,           // MASTERAUTOMODE 0

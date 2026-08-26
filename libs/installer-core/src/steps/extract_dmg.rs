@@ -11,11 +11,7 @@ use tracing::info;
 use crate::progress::{EventSender, InstallEvent, InstallStep};
 
 /// Extract REAPER.app from a DMG into `reaper_dir`.
-pub async fn extract_dmg(
-    dmg_path: &Path,
-    reaper_dir: &Path,
-    tx: &EventSender,
-) -> eyre::Result<()> {
+pub async fn extract_dmg(dmg_path: &Path, reaper_dir: &Path, tx: &EventSender) -> eyre::Result<()> {
     let _ = tx
         .send(InstallEvent::StepProgress {
             step: InstallStep::ExtractDmg,
@@ -50,15 +46,14 @@ async fn extract_with_dpp(
 
     // dpp is sync, run in blocking thread
     tokio::task::spawn_blocking(move || -> eyre::Result<()> {
-        let mut pipeline = dpp::DmgPipeline::open(&dmg)
-            .wrap_err("Failed to open DMG")?;
+        let mut pipeline = dpp::DmgPipeline::open(&dmg).wrap_err("Failed to open DMG")?;
 
-        let mut fs = pipeline.open_filesystem()
+        let mut fs = pipeline
+            .open_filesystem()
             .wrap_err("Failed to open DMG filesystem")?;
 
         // Find REAPER.app in the root
-        let entries = fs.list_directory("/")
-            .wrap_err("Failed to list DMG root")?;
+        let entries = fs.list_directory("/").wrap_err("Failed to list DMG root")?;
 
         let reaper_app = entries
             .iter()
@@ -75,14 +70,14 @@ async fn extract_with_dpp(
         // Remove existing if present
         let app_dest = dest.join(app_name);
         if app_dest.exists() {
-            std::fs::remove_dir_all(&app_dest)
-                .wrap_err("Failed to remove existing REAPER.app")?;
+            std::fs::remove_dir_all(&app_dest).wrap_err("Failed to remove existing REAPER.app")?;
         }
         std::fs::create_dir_all(&app_dest)?;
 
         // Extract REAPER.app contents into the app_dest directory.
         // extract_path strips the base prefix, so we extract into the .app dir.
-        let stats = fs.extract_path(&format!("/{app_name}"), &app_dest)
+        let stats = fs
+            .extract_path(&format!("/{app_name}"), &app_dest)
             .wrap_err("Failed to extract REAPER.app from DMG")?;
 
         info!(

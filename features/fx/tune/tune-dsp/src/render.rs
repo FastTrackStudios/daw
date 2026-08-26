@@ -97,21 +97,14 @@ pub fn render_world_warped(doc: &PitchDoc, audio: &[f64], sample_rate: u32) -> V
             }
         }
         let src_sample = 0.5 * (lo + hi);
-        let src_frame =
-            ((src_sample / period_samples).round() as usize).min(n_src - 1);
+        let src_frame = ((src_sample / period_samples).round() as usize).min(n_src - 1);
         f0.push(f0_src[src_frame]);
-        sp.extend_from_slice(
-            &analysis.sp[src_frame * bins..(src_frame + 1) * bins],
-        );
-        ap.extend_from_slice(
-            &analysis.ap[src_frame * bins..(src_frame + 1) * bins],
-        );
+        sp.extend_from_slice(&analysis.sp[src_frame * bins..(src_frame + 1) * bins]);
+        ap.extend_from_slice(&analysis.ap[src_frame * bins..(src_frame + 1) * bins]);
     }
     let warped = WorldAnalysis {
         f0: f0.clone(),
-        temporal_positions: (0..n_out)
-            .map(|k| k as f64 * period_samples / sr)
-            .collect(),
+        temporal_positions: (0..n_out).map(|k| k as f64 * period_samples / sr).collect(),
         sp,
         ap,
         fft_size: analysis.fft_size,
@@ -253,7 +246,11 @@ mod warp_tests {
         let mut doc = PitchDoc::from_notes(&[note], hop, SR as f64);
         doc.blobs[0].drift_amount = 0.0;
         doc.blobs[0].modulation_amount = 0.0;
-        doc.add_marker(WarpMarker { sample: 0.0, d_time: 0.0, pitch_bend: 0.0 });
+        doc.add_marker(WarpMarker {
+            sample: 0.0,
+            d_time: 0.0,
+            pitch_bend: 0.0,
+        });
         doc.add_marker(WarpMarker {
             sample: n as f64,
             d_time: n as f64 * 0.5, // +50% length at the end

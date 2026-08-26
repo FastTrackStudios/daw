@@ -88,7 +88,11 @@ impl U4 {
         Self(if raw > 15 { 15 } else { raw })
     }
     pub const fn try_new(raw: u8) -> Option<Self> {
-        if raw < 16 { Some(Self(raw)) } else { None }
+        if raw < 16 {
+            Some(Self(raw))
+        } else {
+            None
+        }
     }
     pub const fn get(self) -> u8 {
         self.0
@@ -114,7 +118,11 @@ impl U14 {
         Self(if raw > 16383 { 16383 } else { raw })
     }
     pub const fn try_new(raw: u16) -> Option<Self> {
-        if raw < 16384 { Some(Self(raw)) } else { None }
+        if raw < 16384 {
+            Some(Self(raw))
+        } else {
+            None
+        }
     }
     pub const fn get(self) -> u16 {
         self.0
@@ -144,7 +152,11 @@ impl Channel {
         Self(if raw > 15 { 15 } else { raw })
     }
     pub const fn try_new(raw: u8) -> Option<Self> {
-        if raw < 16 { Some(Self(raw)) } else { None }
+        if raw < 16 {
+            Some(Self(raw))
+        } else {
+            None
+        }
     }
     /// The raw `0..=15` value used on the wire.
     pub const fn index(self) -> u8 {

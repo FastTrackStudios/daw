@@ -603,8 +603,8 @@ fn launch_reaper(ini: &Path, project: &Path, display: &str, home: &Path) -> Resu
     // load, or a window that fails to create, says so here and nowhere else.
     match std::env::var("FTS_SHOT_LOG") {
         Ok(path) if !path.is_empty() => {
-            let log = std::fs::File::create(&path)
-                .with_context(|| format!("open shot log {path}"))?;
+            let log =
+                std::fs::File::create(&path).with_context(|| format!("open shot log {path}"))?;
             let dup = log.try_clone()?;
             cmd.stdout(Stdio::from(log)).stderr(Stdio::from(dup));
             eprintln!("  log:     {path}");
@@ -747,9 +747,12 @@ mod tests {
         std::fs::write(&ini, original).unwrap();
 
         {
-            let _g =
-                Overrides::apply(&ini, &Overrides::for_screenshot(Path::new("/tmp/empty")), true)
-                    .unwrap();
+            let _g = Overrides::apply(
+                &ini,
+                &Overrides::for_screenshot(Path::new("/tmp/empty")),
+                true,
+            )
+            .unwrap();
             assert!(
                 std::fs::read_to_string(&ini)
                     .unwrap()
@@ -768,9 +771,12 @@ mod tests {
         let ini = dir.join("reaper.ini");
         std::fs::write(&ini, "[REAPER]\nvstpath=x\n").unwrap();
         {
-            let _g =
-                Overrides::apply(&ini, &Overrides::for_screenshot(Path::new("/tmp/empty")), false)
-                    .unwrap();
+            let _g = Overrides::apply(
+                &ini,
+                &Overrides::for_screenshot(Path::new("/tmp/empty")),
+                false,
+            )
+            .unwrap();
         }
         assert!(
             std::fs::read_to_string(&ini)

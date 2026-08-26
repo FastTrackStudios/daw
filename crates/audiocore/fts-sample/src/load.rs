@@ -4,8 +4,8 @@
 
 use std::path::Path;
 
-use symphonium::SymphoniumLoader;
 pub use symphonium::ResampleQuality;
+use symphonium::SymphoniumLoader;
 use tracing::error;
 
 use crate::SamplerError;

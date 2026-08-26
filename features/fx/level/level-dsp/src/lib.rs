@@ -20,22 +20,20 @@
 //! DSP style matches the sibling fx crates (`comp-dsp`, `pitch-dsp`): plain
 //! `std`, `f64`, allocation confined to construction/`set_sample_rate`.
 
-pub mod envelope;
 pub mod analyze;
 pub mod classify;
 pub mod debreath;
 pub mod deess;
+pub mod envelope;
 pub mod filter;
 pub mod gate;
 pub mod rider;
 pub mod segment;
 
 pub use analyze::{
-    analyze, apply_envelope, render_gain_envelope, AnalyzedBlock, Analysis, GainPoint, RenderConfig,
+    analyze, apply_envelope, render_gain_envelope, Analysis, AnalyzedBlock, GainPoint, RenderConfig,
 };
-pub use classify::{
-    adaptive_silence_db, BlockClass, BlockFeatures, ClassifyConfig, Classifier,
-};
+pub use classify::{adaptive_silence_db, BlockClass, BlockFeatures, Classifier, ClassifyConfig};
 pub use debreath::{DeBreathConfig, DeBreather};
 pub use deess::{DeEssConfig, DeEsser};
 pub use gate::{Gate, GateConfig};

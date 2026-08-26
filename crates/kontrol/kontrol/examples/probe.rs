@@ -61,7 +61,11 @@ fn fire(out: &mut MidiOut, bytes: &[u8], what: &str) {
 fn midi_sweep(out: &mut MidiOut, enc: Encoding) {
     banner(&format!("MIDI note-on sweep on {:?} ({enc:?})", out.name));
     for note in S88_LOWEST_NOTE..=S88_HIGHEST_NOTE {
-        fire(out, &enc.encode(note, LightColor::GREEN), &format!("light note {note}"));
+        fire(
+            out,
+            &enc.encode(note, LightColor::GREEN),
+            &format!("light note {note}"),
+        );
         sleep(Duration::from_millis(30));
     }
     sleep(Duration::from_millis(500));
@@ -104,7 +108,11 @@ fn main() {
         "list" => {
             banner("available MIDI OUTPUT ports");
             for p in kontrol::output_ports() {
-                let mark = if p.contains(ports::DEVICE) { "  <-- S88 MK3" } else { "" };
+                let mark = if p.contains(ports::DEVICE) {
+                    "  <-- S88 MK3"
+                } else {
+                    ""
+                };
                 println!("  {p}{mark}");
             }
             list_ni_usb();
@@ -129,8 +137,10 @@ fn main() {
                 }
                 kk.clear();
                 let _ = kk.flush();
-                println!("\nIf keys lit up in sequence, the USB Light Guide WORKS. If not,\n\
-                          check the reported PID vs. docs/protocol.md and the init sequence.");
+                println!(
+                    "\nIf keys lit up in sequence, the USB Light Guide WORKS. If not,\n\
+                          check the reported PID vs. docs/protocol.md and the init sequence."
+                );
             }
         }
 

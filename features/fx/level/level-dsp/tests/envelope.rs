@@ -235,10 +235,7 @@ fn a_breath_ducks_and_the_phrases_do_not() {
     let a = analyze(&audio, SR, ClassifyConfig::default());
     let breath = breath_envelope(&a, 12.0, -30.0, -70.0, 0.25);
 
-    assert!(
-        breath.iter().any(|p| p.db < -6.0),
-        "something got ducked"
-    );
+    assert!(breath.iter().any(|p| p.db < -6.0), "something got ducked");
     assert!(
         breath.iter().any(|p| p.db.abs() < 1e-9),
         "and something did not"
@@ -256,7 +253,7 @@ fn a_breath_curve_ramps_rather_than_stepping() {
 
 // ── The composite (#205) ─────────────────────────────────────────────
 
-use level_dsp::envelope::{COMPOSITE_FLOOR_DB, Contributions, EnvPoint, GainSpan, composite};
+use level_dsp::envelope::{composite, Contributions, EnvPoint, GainSpan, COMPOSITE_FLOOR_DB};
 
 fn flat(db: f64) -> Vec<EnvPoint> {
     vec![EnvPoint::new(0.0, db), EnvPoint::new(1.0, db)]
@@ -286,7 +283,9 @@ fn the_composite_is_the_sum_in_db() {
         gate: flat(-3.0),
         breath: flat(-2.0),
         ride: flat(4.0),
-        sibilance: Vec::new(), ..Default::default() };
+        sibilance: Vec::new(),
+        ..Default::default()
+    };
     let env = composite(&parts);
     assert!((at(&env, 0.5) - (-1.0)).abs() < 1e-9, "-3 -2 +4 = -1");
 }
@@ -301,7 +300,9 @@ fn sibilance_only_applies_across_its_span() {
             from_s: 0.4,
             to_s: 0.6,
             db: -5.0,
-        }], ..Default::default() };
+        }],
+        ..Default::default()
+    };
     let env = composite(&parts);
     assert!((at(&env, 0.2) - 0.0).abs() < 1e-9, "before the ess");
     assert!((at(&env, 0.5) - (-5.0)).abs() < 1e-9, "during it");
@@ -314,7 +315,9 @@ fn a_closed_gate_is_silent_but_finite() {
         gate: flat(-400.0),
         breath: Vec::new(),
         ride: Vec::new(),
-        sibilance: Vec::new(), ..Default::default() };
+        sibilance: Vec::new(),
+        ..Default::default()
+    };
     let env = composite(&parts);
     assert!(env.iter().all(|p| p.db.is_finite()), "no infinities escape");
     assert!(env.iter().all(|p| p.db >= COMPOSITE_FLOOR_DB - 1e-9));
@@ -329,7 +332,9 @@ fn a_hand_dragged_zero_does_not_produce_an_infinity_downstream() {
         gate: Vec::new(),
         breath: flat(f64::NEG_INFINITY),
         ride: Vec::new(),
-        sibilance: Vec::new(), ..Default::default() };
+        sibilance: Vec::new(),
+        ..Default::default()
+    };
     let env = composite(&parts);
     assert!(env.iter().all(|p| p.db.is_finite()));
 }
@@ -340,7 +345,9 @@ fn editing_one_contribution_recomputes_the_composite() {
         gate: flat(0.0),
         breath: Vec::new(),
         ride: flat(0.0),
-        sibilance: Vec::new(), ..Default::default() };
+        sibilance: Vec::new(),
+        ..Default::default()
+    };
     let before = at(&composite(&parts), 0.5);
     parts.ride = flat(6.0);
     let after = at(&composite(&parts), 0.5);
@@ -353,7 +360,9 @@ fn bypassing_a_stage_is_leaving_it_out() {
         gate: flat(-10.0),
         breath: Vec::new(),
         ride: flat(3.0),
-        sibilance: Vec::new(), ..Default::default() };
+        sibilance: Vec::new(),
+        ..Default::default()
+    };
     let without = Contributions {
         gate: Vec::new(),
         ..with.clone()
@@ -403,7 +412,9 @@ fn every_contributions_breakpoints_reach_the_result() {
             from_s: 0.2,
             to_s: 0.4,
             db: -2.0,
-        }], ..Default::default() };
+        }],
+        ..Default::default()
+    };
     let env = composite(&parts);
     for t in [0.0, 0.1, 0.2, 0.3, 0.4, 0.7] {
         assert!(
@@ -420,7 +431,7 @@ fn nothing_at_all_composites_to_nothing() {
 
 // ── Bypass (#206) ────────────────────────────────────────────────────
 
-use level_dsp::envelope::{Bypass, Cached, GenerationConfig, config_for, generate};
+use level_dsp::envelope::{config_for, generate, Bypass, Cached, GenerationConfig};
 
 #[test]
 fn bypassing_removes_a_contribution_and_leaves_the_rest() {
@@ -544,20 +555,57 @@ fn every_setting_is_actually_in_the_digest() {
     // reproduce, so check each one moves it.
     let base = GenerationConfig::default();
     let mutations: Vec<GenerationConfig> = vec![
-        GenerationConfig { gate_threshold_db: -1.0, ..base },
-        GenerationConfig { gate_floor_db: -1.0, ..base },
-        GenerationConfig { breath_reduction_db: 1.0, ..base },
-        GenerationConfig { breath_max_level_db: -1.0, ..base },
-        GenerationConfig { breath_min_level_db: -1.0, ..base },
-        GenerationConfig { sibilance_reduction_db: 1.0, ..base },
-        GenerationConfig { ride_target_db: -1.0, ..base },
-        GenerationConfig { ride_amount: 0.5, ..base },
-        GenerationConfig { ride_max_gain_db: 1.0, ..base },
-        GenerationConfig { ride_max_cut_db: 1.0, ..base },
-        GenerationConfig { tolerance_db: 1.0, ..base },
+        GenerationConfig {
+            gate_threshold_db: -1.0,
+            ..base
+        },
+        GenerationConfig {
+            gate_floor_db: -1.0,
+            ..base
+        },
+        GenerationConfig {
+            breath_reduction_db: 1.0,
+            ..base
+        },
+        GenerationConfig {
+            breath_max_level_db: -1.0,
+            ..base
+        },
+        GenerationConfig {
+            breath_min_level_db: -1.0,
+            ..base
+        },
+        GenerationConfig {
+            sibilance_reduction_db: 1.0,
+            ..base
+        },
+        GenerationConfig {
+            ride_target_db: -1.0,
+            ..base
+        },
+        GenerationConfig {
+            ride_amount: 0.5,
+            ..base
+        },
+        GenerationConfig {
+            ride_max_gain_db: 1.0,
+            ..base
+        },
+        GenerationConfig {
+            ride_max_cut_db: 1.0,
+            ..base
+        },
+        GenerationConfig {
+            tolerance_db: 1.0,
+            ..base
+        },
     ];
     for m in mutations {
-        assert_ne!(base.digest(), m.digest(), "a setting is missing from the digest");
+        assert_ne!(
+            base.digest(),
+            m.digest(),
+            "a setting is missing from the digest"
+        );
     }
 }
 
@@ -575,7 +623,10 @@ fn an_item_inherits_its_tracks_config_and_can_override_it() {
         breath_reduction_db: 3.0,
         ..Default::default()
     };
-    assert_eq!(config_for(Some(tuned), Some(track)).breath_reduction_db, 3.0);
+    assert_eq!(
+        config_for(Some(tuned), Some(track)).breath_reduction_db,
+        3.0
+    );
 
     // And with neither, the defaults.
     assert_eq!(
@@ -686,7 +737,10 @@ fn only_the_ride_moves() {
         .collect();
     absorb_into_ride(&mut parts, &edited);
 
-    assert_eq!(parts.gate, gate_before, "gain would be wrong when it is shut");
+    assert_eq!(
+        parts.gate, gate_before,
+        "gain would be wrong when it is shut"
+    );
     assert_eq!(parts.breath, breath_before);
     assert_eq!(
         parts.sibilance, sib_before,

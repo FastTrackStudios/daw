@@ -1,7 +1,7 @@
 //! Layout history — undo/redo based on compact layout diffs.
 
-use crate::LayoutDiff;
 use crate::layout::DockLayout;
+use crate::LayoutDiff;
 
 // region: --- LayoutHistory
 

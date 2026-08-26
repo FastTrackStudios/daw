@@ -127,7 +127,11 @@ fn detect_strip(img: &RgbaImage) -> Option<(u32, u32, u32)> {
                     .collect();
                 let score = (1..n as usize)
                     .map(|c| {
-                        segs[0].iter().zip(&segs[c]).map(|(a, b)| a * b).sum::<f32>()
+                        segs[0]
+                            .iter()
+                            .zip(&segs[c])
+                            .map(|(a, b)| a * b)
+                            .sum::<f32>()
                             / period as f32
                     })
                     .fold(f32::INFINITY, f32::min);

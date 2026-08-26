@@ -19,16 +19,16 @@ pub mod correct;
 pub mod detect;
 pub mod dna;
 pub mod model;
+pub mod note;
 #[cfg(feature = "world")]
 pub mod render;
-pub mod note;
 pub mod tracker;
 
 pub use correct::{correct_notes, CorrectConfig, NoteCorrection, Scale};
-pub use dna::{DnaConfig, DnaEngine, NoteSpan, SeparatedNote};
-pub use tracker::{spans_from_frames, track_notes, TrackConfig, TrackedNote};
 pub use detect::{hz_to_midi, midi_to_hz, PitchFrame, YinConfig, YinDetector};
+pub use dna::{DnaConfig, DnaEngine, NoteSpan, SeparatedNote};
 pub use note::{segment_notes, Note, NoteConfig};
+pub use tracker::{spans_from_frames, track_notes, TrackConfig, TrackedNote};
 
 /// Re-export the shared pitch-shift core the correction stage drives.
 pub use pitch_dsp as shifter;

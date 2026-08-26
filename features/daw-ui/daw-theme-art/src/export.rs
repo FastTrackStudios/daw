@@ -66,7 +66,11 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
     // the same control they are the same drawing: `tcp_solodefeat_on` and
     // `track_solodefeat_on` are byte-identical.
     let track = name.starts_with("track_") || name.starts_with("tcp_");
-    let axis = if track { v::Axis::Horizontal } else { v::Axis::Vertical };
+    let axis = if track {
+        v::Axis::Horizontal
+    } else {
+        v::Axis::Vertical
+    };
     // The FX control's two halves are named for their *layout*, not their
     // panel: `track_fx*_h` is the track panel's and `track_fx*_v` the
     // mixer's, despite both carrying the `track_` prefix.
@@ -88,7 +92,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 state,
                 art: art(),
                 housing: !track,
-width: n.0,
+                width: n.0,
                 height: n.1,
                 at,
             },
@@ -108,7 +112,12 @@ width: n.0,
     let mute = |on| {
         render_svg(
             v::MuteButton,
-            v::ToggleProps { width: n.0, height: n.1, at, ..crate::dress::mute(art(), on) },
+            v::ToggleProps {
+                width: n.0,
+                height: n.1,
+                at,
+                ..crate::dress::mute(art(), on)
+            },
         )
     };
     let solo = |state| {
@@ -126,7 +135,7 @@ width: n.0,
                 sinks: !track,
                 // Solo's red is pinned; only its green falls, by 11%.
                 depth: 0.11,
-width: n.0,
+                width: n.0,
                 height: n.1,
                 at,
             },
@@ -138,7 +147,7 @@ width: n.0,
             v::FxProps {
                 state,
                 family,
-width: n.0,
+                width: n.0,
                 height: n.1,
                 at,
             },
@@ -151,7 +160,7 @@ width: n.0,
                 state,
                 art: art(),
                 axis,
-width: n.0,
+                width: n.0,
                 height: n.1,
                 at,
             },
@@ -166,7 +175,7 @@ width: n.0,
                 disabled,
                 art: art(),
                 axis,
-width: n.0,
+                width: n.0,
                 height: n.1,
                 at,
             },
@@ -181,7 +190,7 @@ width: n.0,
             v::FxBypassProps {
                 state,
                 family,
-width: n.0,
+                width: n.0,
                 height: n.1,
                 at,
             },
@@ -199,7 +208,7 @@ width: n.0,
                 scrim: true,
                 mode,
                 cell: (20.0, 20.0),
-width: n.0,
+                width: n.0,
                 height: n.1,
                 at,
             },
@@ -211,7 +220,7 @@ width: n.0,
             v::PhaseProps {
                 inverted,
                 art: art(),
-width: n.0,
+                width: n.0,
                 height: n.1,
                 at,
             },
@@ -224,7 +233,7 @@ width: n.0,
             v::RecordModeProps {
                 mode,
                 cell: (20.0, 20.0),
-width: n.0,
+                width: n.0,
                 height: n.1,
                 at,
             },
@@ -236,7 +245,7 @@ width: n.0,
             v::FolderCompactProps {
                 state,
                 cell: (17.0, 13.0),
-width: n.0,
+                width: n.0,
                 height: n.1,
                 at,
             },
@@ -248,7 +257,7 @@ width: n.0,
             v::FxInProps {
                 loaded,
                 cell: (29.0, 20.0),
-width: n.0,
+                width: n.0,
                 height: n.1,
                 at,
             },
@@ -260,7 +269,7 @@ width: n.0,
             v::FolderProps {
                 state,
                 cell: (54.0, 14.0),
-width: n.0,
+                width: n.0,
                 height: n.1,
                 at,
             },
@@ -281,7 +290,7 @@ width: n.0,
                 } else {
                     (36.0, 26.0)
                 },
-width: n.0,
+                width: n.0,
                 height: n.1,
                 at,
             },
@@ -322,8 +331,8 @@ width: n.0,
         // The strip-body grey is the token, not a re-derivation: the
         // panels paint STRIP_BODY, and the exported art must move with it
         // (#240). `hardware.shade(-0.40)` happens to equal it today.
-        let strip_body = Color::hex(daw_theme::defaults::STRIP_BODY)
-            .expect("token is valid hex (tested)");
+        let strip_body =
+            Color::hex(daw_theme::defaults::STRIP_BODY).expect("token is valid hex (tested)");
         let flat = |c: daw_theme::Color, a: f32| (c, c, a);
         let strip = |pills: Vec<v::ListPill>, rows, pill, edge, inset| {
             render_svg(
@@ -335,7 +344,7 @@ width: n.0,
                     pill,
                     edge,
                     inset,
-    width: n.0,
+                    width: n.0,
                     height: n.1,
                     at,
                 },
@@ -438,8 +447,8 @@ width: n.0,
     {
         let g = |v: f32| theme.chrome.hardware.shade(v);
         // The same token the panels paint — see the note in the list block.
-        let strip_body = Color::hex(daw_theme::defaults::STRIP_BODY)
-            .expect("token is valid hex (tested)");
+        let strip_body =
+            Color::hex(daw_theme::defaults::STRIP_BODY).expect("token is valid hex (tested)");
         let full = |bands: Vec<v::Band>, stripes: Vec<v::Stripe>, inset| {
             render_svg(
                 v::PanelPlate,
@@ -448,7 +457,7 @@ width: n.0,
                     stripes,
                     art: art(),
                     inset,
-    width: n.0,
+                    width: n.0,
                     height: n.1,
                     at,
                 },
@@ -473,12 +482,8 @@ width: n.0,
             "mcp_bg" => Some(plate(vec![(1.0, 2.0, sunk, 1.0)], 1.0)),
             "mcp_bgsel" => Some(plate(vec![(1.0, 1.0, sunk, 1.0)], 1.0)),
             "mcp_extmixbg" => Some(plate(vec![(0.0, 3.0, sunk, 1.0)], 0.0)),
-            "mcp_extmixbgsel" => {
-                Some(plate(vec![(1.0, 1.0, sunk, 0.88)], 1.0))
-            }
-            "mcp_mainextmixbg" => {
-                Some(plate(vec![(1.0, 6.0, sunk, 1.0)], 1.0))
-            }
+            "mcp_extmixbgsel" => Some(plate(vec![(1.0, 1.0, sunk, 0.88)], 1.0)),
+            "mcp_mainextmixbg" => Some(plate(vec![(1.0, 6.0, sunk, 1.0)], 1.0)),
             "mcp_mainextmixbgsel" => Some(plate(
                 vec![(1.0, 1.0, sunk, 1.0), (2.0, 5.0, g(0.005), 1.0)],
                 1.0,
@@ -559,8 +564,8 @@ width: n.0,
             // the body rows only.
             "envcp_bgsel" => Some(marked(
                 vec![
-                    (0.0, 10.0, g(0.005), 1.0),  // #404040
-                    (10.0, 1.0, g(-0.43), 1.0),  // #242424
+                    (0.0, 10.0, g(0.005), 1.0), // #404040
+                    (10.0, 1.0, g(-0.43), 1.0), // #242424
                     (11.0, 1.0, g(0.005), 1.0),
                 ],
                 vec![
@@ -568,9 +573,7 @@ width: n.0,
                     (45.0, 2.0, 0.0, 10.0, theme.chrome.accent),
                 ],
             )),
-            "envcp_namebg" => {
-                Some(plate(vec![(1.0, 22.0, g(-0.56), 1.0)], 1.0))
-            }
+            "envcp_namebg" => Some(plate(vec![(1.0, 22.0, g(-0.56), 1.0)], 1.0)),
             // The track panel's index strip: a `#313131` rule down
             // column 1 and a mark on the right that says whether the
             // track is selected — a 1px black tick, or a white block
@@ -594,8 +597,9 @@ width: n.0,
             )),
             // Drawn by REAPER, not by the theme: every pixel is
             // transparent, so an empty band list is the whole truth.
-            "mcp_namebg" | "mcp_idxbg" | "mcp_idxbg_sel" | "tcp_namebg"
-            | "tcp_main_namebg_sel" => Some(plate(vec![], 0.0)),
+            "mcp_namebg" | "mcp_idxbg" | "mcp_idxbg_sel" | "tcp_namebg" | "tcp_main_namebg_sel" => {
+                Some(plate(vec![], 0.0))
+            }
             _ => None,
         };
         if let Some(markup) = hit {
@@ -615,7 +619,7 @@ width: n.0,
                     glyph,
                     lit,
                     cell: (30.0, 20.0),
-    width: n.0,
+                    width: n.0,
                     height: n.1,
                     at,
                 },
@@ -624,7 +628,13 @@ width: n.0,
         let furniture = |part, cell| {
             render_svg(
                 v::EnvcpPanel,
-                v::EnvcpPanelProps { part, cell, width: n.0, height: n.1, at },
+                v::EnvcpPanelProps {
+                    part,
+                    cell,
+                    width: n.0,
+                    height: n.1,
+                    at,
+                },
             )
         };
         let hit = match name {
@@ -634,14 +644,19 @@ width: n.0,
             "envcp_parammod_on" => Some(plate(G::ParamMod, true)),
             "envcp_hide" => Some(render_svg(
                 v::EnvcpOptionsButton,
-                v::EnvcpOptionsProps { cell: (36.0, 20.0), width: n.0, height: n.1, at },
+                v::EnvcpOptionsProps {
+                    cell: (36.0, 20.0),
+                    width: n.0,
+                    height: n.1,
+                    at,
+                },
             )),
             "envcp_arm_off" | "envcp_arm_on" => Some(render_svg(
                 v::EnvcpArmButton,
                 v::EnvcpArmProps {
                     armed: name.ends_with("_on"),
                     cell: (20.0, 20.0),
-    width: n.0,
+                    width: n.0,
                     height: n.1,
                     at,
                 },
@@ -655,7 +670,7 @@ width: n.0,
                 v::EnvcpBypassProps {
                     bypassed: name.ends_with("_on"),
                     cell: (15.0, 20.0),
-    width: n.0,
+                    width: n.0,
                     height: n.1,
                     at,
                 },
@@ -671,7 +686,14 @@ width: n.0,
         let slider = |part| {
             render_svg(
                 v::PanelSlider,
-                v::SliderProps { part, art: art(), drop: 0.0, width: n.0, height: n.1, at },
+                v::SliderProps {
+                    part,
+                    art: art(),
+                    drop: 0.0,
+                    width: n.0,
+                    height: n.1,
+                    at,
+                },
             )
         };
         let thumb = |drop| {
@@ -681,7 +703,7 @@ width: n.0,
                     part: v::SliderPart::PanThumb,
                     art: art(),
                     drop,
-    width: n.0,
+                    width: n.0,
                     height: n.1,
                     at,
                 },
@@ -702,9 +724,7 @@ width: n.0,
             "tcp_volthumb" => Some(slider(S::VolumeThumb)),
             // One drawing at two widths — 43 in the track panel, 69 in the
             // mixer. Two arms until the width came from the table.
-            "tcp_panbg" | "tcp_widthbg" | "mcp_panbg" | "mcp_widthbg" => {
-                Some(slider(S::PanTrough))
-            }
+            "tcp_panbg" | "tcp_widthbg" | "mcp_panbg" | "mcp_widthbg" => Some(slider(S::PanTrough)),
             "tcp_panthumb" | "mcp_panthumb" | "mcp_widththumb" => Some(thumb(0.0)),
             "tcp_widththumb" => Some(thumb(1.0)),
             _ => None,
@@ -718,7 +738,13 @@ width: n.0,
         let part = |part, cell| {
             render_svg(
                 v::TransportPanel,
-                v::TransportPartProps { part, cell, width: n.0, height: n.1, at },
+                v::TransportPartProps {
+                    part,
+                    cell,
+                    width: n.0,
+                    height: n.1,
+                    at,
+                },
             )
         };
         let hit = match name {
@@ -789,10 +815,7 @@ width: n.0,
         // glyph — and type that small is hinted by hand, not described.
         // It stays traced for the same reason the large knob's blurred
         // edge does: a vector version would have to draw the artefact.
-        "env" | "env_read" | "env_write" | "env_touch" | "env_latch"
-        | "env_preview"
-            if !track =>
-        {
+        "env" | "env_read" | "env_write" | "env_touch" | "env_latch" | "env_preview" if !track => {
             return None;
         }
 
@@ -835,7 +858,7 @@ width: n.0,
                 indicator: false,
                 position: 0.0,
                 large: false,
-width: n.0,
+                width: n.0,
                 height: n.1,
             },
         ),
@@ -845,7 +868,7 @@ width: n.0,
                 indicator: false,
                 position: 0.0,
                 large: true,
-width: n.0,
+                width: n.0,
                 height: n.1,
             },
         ),
@@ -1010,23 +1033,28 @@ fn states(name: &str) -> usize {
         // Three marks side by side in one image, not three pointer states.
         "folder_off" | "folder_on" | "folder_last" => 1,
         // Three states stacked vertically: one drawing, not three cells.
-        "fxlist_norm" | "fxlist_byp" | "fxlist_off" | "fxlist_empty"
-        | "sendlist_norm" | "sendlist_mute" | "sendlist_empty"
-        | "sendlist_midihw" => 1,
+        "fxlist_norm" | "fxlist_byp" | "fxlist_off" | "fxlist_empty" | "sendlist_norm"
+        | "sendlist_mute" | "sendlist_empty" | "sendlist_midihw" => 1,
         // Named for the panel it customises, not with the panel's prefix,
         // so the `envcp_` shortcut above never sees it.
         "custom_envcp_arm_bg" => 1,
-        "mainbg" | "mainbgsel" | "bg" | "bgsel" | "extmixbg" | "extmixbgsel"
-        | "mainextmixbg" | "mainextmixbgsel" | "namebg" | "main_namebg"
-        | "main_namebg_sel" | "iconbg" | "iconbgsel" | "idxbg" | "idxbg_sel" => 1,
+        "mainbg" | "mainbgsel" | "bg" | "bgsel" | "extmixbg" | "extmixbgsel" | "mainextmixbg"
+        | "mainextmixbgsel" | "namebg" | "main_namebg" | "main_namebg_sel" | "iconbg"
+        | "iconbgsel" | "idxbg" | "idxbg_sel" => 1,
         // The transport's furniture is drawn once and stretched. Left at
         // the default of three, each panel was rendered into a third of
         // its own width and repeated across it — which reads, in the
         // audit, as the drawing being twenty columns too far left.
-        "transport_bg" | "transport_bpm" | "transport_bpm_bg"
-        | "transport_edit_bg" | "transport_group_bg" | "transport_status_bg"
-        | "transport_status_bg_err" | "transport_playspeedbg"
-        | "transport_playspeedthumb" | "transport_knob_bg_large" => 1,
+        "transport_bg"
+        | "transport_bpm"
+        | "transport_bpm_bg"
+        | "transport_edit_bg"
+        | "transport_group_bg"
+        | "transport_status_bg"
+        | "transport_status_bg_err"
+        | "transport_playspeedbg"
+        | "transport_playspeedthumb"
+        | "transport_knob_bg_large" => 1,
         _ => 3,
     }
 }
@@ -1058,7 +1086,11 @@ pub fn slice_mismatches(source_art: &std::path::Path) -> Vec<String> {
     for a in crate::slice::MCP_ART {
         let path = source_art.join(format!("{}.png", a.name));
         let Ok(src) = image::open(&path) else {
-            out.push(format!("{}: declared, but no source art at {}", a.name, path.display()));
+            out.push(format!(
+                "{}: declared, but no source art at {}",
+                a.name,
+                path.display()
+            ));
             continue;
         };
         let src = src.to_rgba8();
@@ -1072,9 +1104,7 @@ pub fn slice_mismatches(source_art: &std::path::Path) -> Vec<String> {
             ));
         }
         let want = crate::derive::guides(&src).slice(&cells, spec.width, spec.height);
-        for (axis, declared, measured) in
-            [("x", a.slice.x, want.x), ("y", a.slice.y, want.y)]
-        {
+        for (axis, declared, measured) in [("x", a.slice.x, want.x), ("y", a.slice.y, want.y)] {
             if declared.guided() != measured.guided() {
                 out.push(format!(
                     "{}: declared {axis} {declared:?}, but the art's guides say {measured:?}",

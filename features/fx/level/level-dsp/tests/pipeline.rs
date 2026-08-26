@@ -28,8 +28,7 @@ fn rms_db(x: &[f64]) -> f64 {
 fn build_signal() -> Vec<f64> {
     let mut out = Vec::new();
     let tone = |n: usize, amp: f64, start: usize| {
-        (0..n)
-            .map(move |i| amp * (core::f64::consts::TAU * 220.0 * (start + i) as f64 / SR).sin())
+        (0..n).map(move |i| amp * (core::f64::consts::TAU * 220.0 * (start + i) as f64 / SR).sin())
     };
     out.extend(tone((SR * 0.5) as usize, 0.5, 0));
     out.extend(tone((SR * 0.5) as usize, 0.05, 0));
@@ -42,7 +41,12 @@ fn build_signal() -> Vec<f64> {
 #[test]
 fn classifies_voiced_noise_and_silence() {
     let sig = build_signal();
-    let a = analyze(&sig, SR, ClassifyConfig::default(), SegmentConfig::default());
+    let a = analyze(
+        &sig,
+        SR,
+        ClassifyConfig::default(),
+        SegmentConfig::default(),
+    );
 
     // Sample a block in each region.
     let block_dur = a.block_samples as f64 / SR;
@@ -68,7 +72,12 @@ fn classifies_voiced_noise_and_silence() {
 #[test]
 fn envelope_boosts_the_quiet_tonal_region() {
     let sig = build_signal();
-    let a = analyze(&sig, SR, ClassifyConfig::default(), SegmentConfig::default());
+    let a = analyze(
+        &sig,
+        SR,
+        ClassifyConfig::default(),
+        SegmentConfig::default(),
+    );
 
     // Target the loud region's level so the quiet tone gets boosted.
     let cfg = RenderConfig {
@@ -107,7 +116,12 @@ fn envelope_boosts_the_quiet_tonal_region() {
 fn realtime_rider_reduces_level_spread() {
     let sig = build_signal();
     // Seed the rider's silence floor from an offline pass (as the plugin would).
-    let a = analyze(&sig, SR, ClassifyConfig::default(), SegmentConfig::default());
+    let a = analyze(
+        &sig,
+        SR,
+        ClassifyConfig::default(),
+        SegmentConfig::default(),
+    );
     let mut rider = VocalRider::new(
         SR,
         ClassifyConfig::default(),

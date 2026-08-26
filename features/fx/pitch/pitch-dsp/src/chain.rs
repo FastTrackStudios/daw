@@ -620,7 +620,8 @@ mod tests {
         // on dry path; dry-wet correctness tested in pog::tests::dry_wet_mix.
         for algo in all_algorithms()
             .into_iter()
-            .filter(|a| *a != Algorithm::PolyOctave) {
+            .filter(|a| *a != Algorithm::PolyOctave)
+        {
             let mut chain = PitchChain::new();
             chain.algorithm = algo;
             chain.semitones = -12.0;
@@ -641,8 +642,6 @@ mod tests {
             }
         }
     }
-
-
 
     #[test]
     fn latency_standard_mode() {

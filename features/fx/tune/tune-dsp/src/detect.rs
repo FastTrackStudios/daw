@@ -73,7 +73,9 @@ impl YinDetector {
         let sr = sample_rate.max(1.0);
         let half = cfg.window / 2;
         let min_lag = ((sr / cfg.max_hz) as usize).max(2);
-        let max_lag = ((sr / cfg.min_hz) as usize).min(half.saturating_sub(1)).max(min_lag + 1);
+        let max_lag = ((sr / cfg.min_hz) as usize)
+            .min(half.saturating_sub(1))
+            .max(min_lag + 1);
         let fft_len = (cfg.window + half).next_power_of_two();
         let mut planner = realfft::RealFftPlanner::<f64>::new();
         let fft_fwd = planner.plan_fft_forward(fft_len);

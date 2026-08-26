@@ -66,8 +66,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     daw.send(&sysex(PAGE_NAME, 0, 0, "AMP"))?;
     daw.send(&[0xBF, SELECTED_PARAM_PAGE, 0])?;
     let params = [
-        ("TUNE", "+0.0"), ("DECAY", "1.2s"), ("ATTACK", "0ms"), ("VOLUME", "-3dB"),
-        ("PAN", "C"), ("PITCH", "0"), ("SEND", "20%"), ("COMP", "ON"),
+        ("TUNE", "+0.0"),
+        ("DECAY", "1.2s"),
+        ("ATTACK", "0ms"),
+        ("VOLUME", "-3dB"),
+        ("PAN", "C"),
+        ("PITCH", "0"),
+        ("SEND", "20%"),
+        ("COMP", "ON"),
     ];
     for (i, (name, val)) in params.iter().enumerate() {
         daw.send(&sysex(PARAM_NAME, 0, i as u8, name))?;

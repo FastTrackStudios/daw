@@ -256,8 +256,8 @@ impl Classifier {
             }
             flux /= sum_mag;
         }
-        self.flux_smooth = self.cfg.flux_alpha * self.flux_smooth
-            + (1.0 - self.cfg.flux_alpha) * flux;
+        self.flux_smooth =
+            self.cfg.flux_alpha * self.flux_smooth + (1.0 - self.cfg.flux_alpha) * flux;
         self.prev_mags.copy_from_slice(&self.mags);
         self.have_prev = true;
 

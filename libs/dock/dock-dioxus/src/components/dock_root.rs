@@ -3,9 +3,9 @@
 //! Reads the global `DOCK_WORKSPACE` signal and renders one window's
 //! split/tile tree. Handles maximized panels and global drag state.
 
-use crate::components::PanelContextMenuOverlay;
 use crate::components::split_pane::SplitPane;
 use crate::components::tile_pane::TilePane;
+use crate::components::PanelContextMenuOverlay;
 use crate::context::use_dock_context;
 use crate::prelude::*;
 use crate::signals::*;

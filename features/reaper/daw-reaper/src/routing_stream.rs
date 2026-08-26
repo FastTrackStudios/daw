@@ -270,12 +270,15 @@ fn diff_and_emit(
     // Deleted: in prev but not in curr.
     for p in prev {
         if !p.dest_key.is_empty() && !curr_by_dest.contains_key(p.dest_key.as_str()) {
-            emit(tx, RoutingEvent::RouteDeleted {
-                project_guid: project_guid.to_string(),
-                source_track_guid: source_track_guid.to_string(),
-                route_type,
-                route_index: p.index,
-            });
+            emit(
+                tx,
+                RoutingEvent::RouteDeleted {
+                    project_guid: project_guid.to_string(),
+                    source_track_guid: source_track_guid.to_string(),
+                    route_type,
+                    route_index: p.index,
+                },
+            );
         }
     }
 
@@ -287,40 +290,52 @@ fn diff_and_emit(
         match prev_by_dest.get(c.dest_key.as_str()) {
             None => {
                 if let Some(route) = curr_full.get(i) {
-                    emit(tx, RoutingEvent::RouteCreated {
-                        project_guid: project_guid.to_string(),
-                        source_track_guid: source_track_guid.to_string(),
-                        route: route.clone(),
-                    });
+                    emit(
+                        tx,
+                        RoutingEvent::RouteCreated {
+                            project_guid: project_guid.to_string(),
+                            source_track_guid: source_track_guid.to_string(),
+                            route: route.clone(),
+                        },
+                    );
                 }
             }
             Some(prev) => {
                 if (prev.volume - c.volume).abs() > VOLUME_THRESHOLD {
-                    emit(tx, RoutingEvent::VolumeChanged {
-                        project_guid: project_guid.to_string(),
-                        source_track_guid: source_track_guid.to_string(),
-                        route_type,
-                        route_index: c.index,
-                        volume: c.volume,
-                    });
+                    emit(
+                        tx,
+                        RoutingEvent::VolumeChanged {
+                            project_guid: project_guid.to_string(),
+                            source_track_guid: source_track_guid.to_string(),
+                            route_type,
+                            route_index: c.index,
+                            volume: c.volume,
+                        },
+                    );
                 }
                 if (prev.pan - c.pan).abs() > PAN_THRESHOLD {
-                    emit(tx, RoutingEvent::PanChanged {
-                        project_guid: project_guid.to_string(),
-                        source_track_guid: source_track_guid.to_string(),
-                        route_type,
-                        route_index: c.index,
-                        pan: c.pan,
-                    });
+                    emit(
+                        tx,
+                        RoutingEvent::PanChanged {
+                            project_guid: project_guid.to_string(),
+                            source_track_guid: source_track_guid.to_string(),
+                            route_type,
+                            route_index: c.index,
+                            pan: c.pan,
+                        },
+                    );
                 }
                 if prev.muted != c.muted {
-                    emit(tx, RoutingEvent::MuteChanged {
-                        project_guid: project_guid.to_string(),
-                        source_track_guid: source_track_guid.to_string(),
-                        route_type,
-                        route_index: c.index,
-                        muted: c.muted,
-                    });
+                    emit(
+                        tx,
+                        RoutingEvent::MuteChanged {
+                            project_guid: project_guid.to_string(),
+                            source_track_guid: source_track_guid.to_string(),
+                            route_type,
+                            route_index: c.index,
+                            muted: c.muted,
+                        },
+                    );
                 }
             }
         }

@@ -146,7 +146,8 @@ fn main() {
                             ),
                             render_svg(
                                 vector::MuteButton,
-                                vector::ToggleProps { unlit: None,
+                                vector::ToggleProps {
+                                    unlit: None,
                                     hover: 0.35,
                                     sinks: true,
                                     depth: 0.15,
@@ -195,7 +196,8 @@ fn main() {
                             ),
                             render_svg(
                                 vector::SoloButton,
-                                vector::SoloProps { unlit: None,
+                                vector::SoloProps {
+                                    unlit: None,
                                     hover: 0.35,
                                     sinks: true,
                                     depth: 0.11,
@@ -434,7 +436,7 @@ fn main() {
                     vector::FaderCapProps {
                         accent: None,
                         pane: None,
-                                                width: None,
+                        width: None,
                         height: None,
                     },
                 ),
@@ -453,7 +455,7 @@ fn main() {
                     vector::FaderCapProps {
                         accent: None,
                         pane: None,
-                                                width: None,
+                        width: None,
                         height: None,
                     },
                 ),

@@ -13,7 +13,7 @@
 
 use audiocore_dsp::db::db_to_linear;
 
-use crate::classify::{BlockClass, ClassifyConfig, Classifier};
+use crate::classify::{BlockClass, Classifier, ClassifyConfig};
 
 /// De-breath tuning.
 #[derive(Clone, Copy, Debug)]
@@ -86,8 +86,7 @@ impl DeBreather {
     /// recompute the slew coefficient.
     pub fn set_config(&mut self, cfg: DeBreathConfig, sample_rate: f64) {
         self.cfg = cfg;
-        self.slew_coeff =
-            (-1.0 / ((cfg.slew_ms / 1000.0).max(1e-4) * sample_rate.max(1.0))).exp();
+        self.slew_coeff = (-1.0 / ((cfg.slew_ms / 1000.0).max(1e-4) * sample_rate.max(1.0))).exp();
     }
 
     /// Clear runtime state.

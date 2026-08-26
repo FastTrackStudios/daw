@@ -25,9 +25,9 @@
 //! Known-good anchor (a test): to sound **B** using **G** shapes, capo = **4**
 //! (`G + 4 = B`).
 
-use crate::chord::{Chord, ChordQuality, SuspendedType};
 use crate::chart::types::{KeyChange, RhythmElement};
 use crate::chart::{Chart, ChordInstance};
+use crate::chord::{Chord, ChordQuality, SuspendedType};
 use crate::key::{Key, KeySpelling, ScaleMode, SpellingMode};
 use crate::primitives::{Accidental, MusicalNote, RomanCase, RootNotation};
 use crate::sections::SectionType;
@@ -264,10 +264,7 @@ fn renotate_chord(parsed_in: &Chord, ctx: &Ctx) -> Option<(Chord, String)> {
             // their `°` / `+`.
             let (deg, _acc) = degree_of(ctx.song_key, &root_note);
             let is_diatonic_triad = is_plain_triad(parsed_in)
-                && matches!(
-                    parsed_in.quality,
-                    ChordQuality::Major | ChordQuality::Minor
-                )
+                && matches!(parsed_in.quality, ChordQuality::Major | ChordQuality::Minor)
                 && ctx.song_key.diatonic_quality(deg) == Some(parsed_in.quality);
             if is_diatonic_triad {
                 parsed.quality = ChordQuality::Major;
@@ -403,7 +400,12 @@ pub fn transpose_source(source: &str, view: &ChartView) -> String {
             Some(rest) => (rest, "\n"),
             None => (piece, ""),
         };
-        out.push_str(&transform_source_line(content, &song_key, &display_key, view));
+        out.push_str(&transform_source_line(
+            content,
+            &song_key,
+            &display_key,
+            view,
+        ));
         out.push_str(newline);
     }
     out
@@ -789,7 +791,9 @@ mod tests {
         // keep it; a non-diatonic minor triad keeps it; slash bass unaffected.
         let c = chart_in(
             key("A"),
-            &["A", "D", "E", "F#m", "Bm", "C#m", "Bm7", "F#m7", "Asus4", "Amaj7", "A/C#", "Bm7/A"],
+            &[
+                "A", "D", "E", "F#m", "Bm", "C#m", "Bm7", "F#m7", "Asus4", "Amaj7", "A/C#", "Bm7/A",
+            ],
         );
         let view = ChartView {
             target_key: None,

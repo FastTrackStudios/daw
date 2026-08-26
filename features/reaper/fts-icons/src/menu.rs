@@ -13,8 +13,7 @@ use std::path::Path;
 /// Returns number of buttons updated.
 pub fn apply_assignments(resource: &Path, assigns: &[(String, String)]) -> Result<usize> {
     let path = resource.join("reaper-menu.ini");
-    let text = fs::read_to_string(&path)
-        .with_context(|| format!("read {}", path.display()))?;
+    let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     let mut lines: Vec<String> = text.lines().map(String::from).collect();
     let mut changed = 0;
 
@@ -42,8 +41,7 @@ pub fn apply_assignments(resource: &Path, assigns: &[(String, String)]) -> Resul
 
     if changed > 0 {
         let backup = path.with_extension("ini.fts-icons.bak");
-        fs::copy(&path, &backup)
-            .with_context(|| format!("backup {}", backup.display()))?;
+        fs::copy(&path, &backup).with_context(|| format!("backup {}", backup.display()))?;
         fs::write(&path, lines.join("\n") + "\n")
             .with_context(|| format!("write {}", path.display()))?;
     }
@@ -52,7 +50,13 @@ pub fn apply_assignments(resource: &Path, assigns: &[(String, String)]) -> Resul
 
 /// Replace `icon_N=` within the section, or insert it after the item line.
 /// Returns false if the icon was already set to this file.
-fn set_icon(lines: &mut Vec<String>, section_start: usize, item_idx: usize, n: &str, png: &str) -> bool {
+fn set_icon(
+    lines: &mut Vec<String>,
+    section_start: usize,
+    item_idx: usize,
+    n: &str,
+    png: &str,
+) -> bool {
     let key = format!("icon_{n}=");
     let new_line = format!("{key}{png}");
     let mut j = section_start + 1;

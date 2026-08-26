@@ -489,9 +489,7 @@ mod tests {
 
         let mut theme = Theme::default();
         let want = Color::rgb(0x42, 0x42, 0x42);
-        theme
-            .overrides
-            .insert("col_arrangebg".into(), want);
+        theme.overrides.insert("col_arrangebg".into(), want);
 
         let got = theme
             .reaper_palette()

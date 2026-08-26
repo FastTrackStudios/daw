@@ -4,9 +4,8 @@ use dawfile_dawproject::{
     Application, Arrangement, AudioContent, AutomationPoint, AutomationPoints, AutomationTarget,
     BuiltinDeviceContent, Channel, ChannelRole, Clip, ClipContent, CompressorParams, ContentType,
     DawProject, Device, DeviceFormat, EqBand, EqBandType, ExpressionType, FileReference,
-    Interpolation, Lane, LaneContent, Marker, NoiseGateParams, Note,
-    ProjectMetadata, Scene, Send, TempoPoint, TimeSignaturePoint, TimeUnit, Track, Transport,
-    Warps, feature_support,
+    Interpolation, Lane, LaneContent, Marker, NoiseGateParams, Note, ProjectMetadata, Scene, Send,
+    TempoPoint, TimeSignaturePoint, TimeUnit, Track, Transport, Warps, feature_support,
 };
 
 fn minimal_project() -> DawProject {

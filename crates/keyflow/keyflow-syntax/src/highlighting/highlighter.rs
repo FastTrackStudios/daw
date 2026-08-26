@@ -1202,7 +1202,11 @@ impl Highlighter {
                         && matches!(tokens[idx + 2].token_type, TokenType::Number(_)) =>
                 {
                     let acc = &tokens[idx + 1];
-                    spans.push(HighlightSpan::from_range(acc.pos, 1, HighlightKind::Extension));
+                    spans.push(HighlightSpan::from_range(
+                        acc.pos,
+                        1,
+                        HighlightKind::Extension,
+                    ));
                     if let TokenType::Number(num) = &tokens[idx + 2].token_type {
                         spans.push(HighlightSpan::from_range(
                             tokens[idx + 2].pos,
@@ -1427,9 +1431,15 @@ mod tests {
         // `F#m7b5`: F# is one root (# takes Root color); the b5
         // alteration is one extension (both b and 5 take Extension).
         let spans = Highlighter::highlight_chord("F#m7b5");
-        let root = spans.iter().filter(|s| s.kind == HighlightKind::Root).count();
+        let root = spans
+            .iter()
+            .filter(|s| s.kind == HighlightKind::Root)
+            .count();
         assert_eq!(root, 2, "F and # are both root-colored");
-        let ext = spans.iter().filter(|s| s.kind == HighlightKind::Extension).count();
+        let ext = spans
+            .iter()
+            .filter(|s| s.kind == HighlightKind::Extension)
+            .count();
         assert_eq!(ext, 3, "7, b and 5 are all extension-colored");
         // Nothing falls through to the gray MeasureCount kind mid-chord.
         assert!(

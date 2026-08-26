@@ -27,9 +27,9 @@ use architect_launcher_core::{FilterState, QueryEngine};
 use architect_launcher_providers::{CalcProvider, ExtensionProvider, WorkflowProvider};
 
 // Re-export everything consumers need
-pub use dioxus_native;
 pub use architect_launcher_core;
 pub use architect_launcher_ui;
+pub use dioxus_native;
 
 /// Re-export the UI components under a convenient path.
 pub mod ui {

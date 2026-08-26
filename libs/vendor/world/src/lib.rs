@@ -82,8 +82,7 @@ impl WorldAnalysis {
     pub fn analyze(x: &[f64], sample_rate: u32, frame_period_ms: f64) -> Self {
         let fs = sample_rate as c_int;
         let n = x.len() as c_int;
-        let frames =
-            unsafe { fts_world_num_frames(n, fs, frame_period_ms) }.max(0) as usize;
+        let frames = unsafe { fts_world_num_frames(n, fs, frame_period_ms) }.max(0) as usize;
         let mut f0 = vec![0.0; frames];
         let mut tp = vec![0.0; frames];
         unsafe {
@@ -138,7 +137,11 @@ impl WorldAnalysis {
     /// Formants (sp) and breath (ap) are untouched — pitch moves,
     /// the voice's character stays.
     pub fn synthesize_with_f0(&self, f0: &[f64]) -> Vec<f64> {
-        assert_eq!(f0.len(), self.frames(), "f0 contour must match analysis frames");
+        assert_eq!(
+            f0.len(),
+            self.frames(),
+            "f0 contour must match analysis frames"
+        );
         let y_len = ((self.frames() as f64 - 1.0) * self.frame_period_ms / 1000.0
             * self.sample_rate as f64) as usize
             + 1;

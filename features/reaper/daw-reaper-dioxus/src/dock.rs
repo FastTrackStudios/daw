@@ -1040,8 +1040,7 @@ pub fn update_panels() {
 
             // Deliver the coalesced pointer move for this tick — one
             // dispatch per frame instead of one per X11 motion event.
-            let pending =
-                PENDING_MOVES.with(|m| m.borrow_mut().remove(&(panel.hwnd as usize)));
+            let pending = PENDING_MOVES.with(|m| m.borrow_mut().remove(&(panel.hwnd as usize)));
             if let Some((x, y)) = pending
                 && let Some(view) = &mut panel.view
             {

@@ -1,7 +1,10 @@
 //! Does dangerous_inner_html reach the blitz DOM? The editor's widget
 //! decorations (block-ref chips, math, painted caret) depend on it.
 use dioxus::prelude::*;
-use dioxus_test::{matchers::{contains_substring, inner_html}, render};
+use dioxus_test::{
+    matchers::{contains_substring, inner_html},
+    render,
+};
 
 #[component]
 fn Danger() -> Element {

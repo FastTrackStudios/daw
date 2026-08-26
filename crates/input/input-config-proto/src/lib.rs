@@ -10,7 +10,5 @@ pub mod service;
 pub mod types;
 
 pub use context::{KeybindContext, MouseModifierContext};
-pub use service::{
-    InputConfigService, OverlayInfo, ProfileInfo, WorkflowInfo, WriteResult,
-};
+pub use service::{InputConfigService, OverlayInfo, ProfileInfo, WorkflowInfo, WriteResult};
 pub use types::*;

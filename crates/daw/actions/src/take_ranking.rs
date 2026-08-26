@@ -22,7 +22,7 @@
 use daw::service::take_ranking::{TakeRankingActions, register_take_ranking_actions};
 use daw::service::transport::service::Transport as _;
 use daw::service::{
-    Items as _, ItemRef, PlayState, Projects as _, ProjectContext, TakeMarkerCreate,
+    ItemRef, Items as _, PlayState, ProjectContext, Projects as _, TakeMarkerCreate,
     TakeMarkerUpdate, TakeRating, TakeRef, Takes as _,
 };
 use daw_reaper::safe_wrappers::mouse::MouseSnapshot;
@@ -156,7 +156,13 @@ fn write_rank_marker(
                     color: None,
                 },
             );
-            debug!(action = "update", index = m.index, source_pos, new = name, "[take-rank] Wrote marker");
+            debug!(
+                action = "update",
+                index = m.index,
+                source_pos,
+                new = name,
+                "[take-rank] Wrote marker"
+            );
         }
         None => {
             let _ = daw.add_take_marker(
@@ -185,7 +191,11 @@ fn targets_play_pos_minus_2s(daw: &daw_reaper::Reaper) -> Vec<Target> {
         PlayState::Playing | PlayState::Recording
     );
     let cursor = daw.get_position(ProjectContext::Current);
-    let target_pos = if playing { (cursor - 2.0).max(0.0) } else { cursor };
+    let target_pos = if playing {
+        (cursor - 2.0).max(0.0)
+    } else {
+        cursor
+    };
 
     let mut out = Vec::new();
     for it in daw.get_selected_items(ProjectContext::Current) {
@@ -228,9 +238,11 @@ fn targets_item_wide(daw: &daw_reaper::Reaper) -> Vec<Target> {
 /// `MouseSnapshot` safe wrapper rather than a domain trait.
 fn targets_mouse_cursor() -> Option<Target> {
     let snap = MouseSnapshot::capture();
-    let (Some(item_guid), Some(take_guid), Some(source_pos)) =
-        (snap.item_guid(), snap.take_guid(), snap.take_source_position())
-    else {
+    let (Some(item_guid), Some(take_guid), Some(source_pos)) = (
+        snap.item_guid(),
+        snap.take_guid(),
+        snap.take_source_position(),
+    ) else {
         debug!(
             item = snap.item.is_some(),
             take = snap.take.is_some(),

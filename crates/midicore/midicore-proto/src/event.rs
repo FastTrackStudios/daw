@@ -20,17 +20,39 @@ use crate::number::{
 #[repr(u8)]
 pub enum MidiEvent {
     /// Note released. (A `NoteOn` with velocity 0 decodes to this.)
-    NoteOff { channel: Channel, key: KeyNumber, velocity: Velocity },
+    NoteOff {
+        channel: Channel,
+        key: KeyNumber,
+        velocity: Velocity,
+    },
     /// Note struck.
-    NoteOn { channel: Channel, key: KeyNumber, velocity: Velocity },
+    NoteOn {
+        channel: Channel,
+        key: KeyNumber,
+        velocity: Velocity,
+    },
     /// Per-note (polyphonic) aftertouch.
-    PolyAftertouch { channel: Channel, key: KeyNumber, pressure: Pressure },
+    PolyAftertouch {
+        channel: Channel,
+        key: KeyNumber,
+        pressure: Pressure,
+    },
     /// Control change (CC).
-    ControlChange { channel: Channel, controller: ControllerNumber, value: ControllerValue },
+    ControlChange {
+        channel: Channel,
+        controller: ControllerNumber,
+        value: ControllerValue,
+    },
     /// Program (patch) change.
-    ProgramChange { channel: Channel, program: ProgramNumber },
+    ProgramChange {
+        channel: Channel,
+        program: ProgramNumber,
+    },
     /// Channel-wide aftertouch.
-    ChannelPressure { channel: Channel, pressure: Pressure },
+    ChannelPressure {
+        channel: Channel,
+        pressure: Pressure,
+    },
     /// Pitch bend.
     PitchBend { channel: Channel, bend: PitchBend },
     /// System-realtime: timing clock (24 per quarter note).
@@ -95,8 +117,10 @@ impl MidiEvent {
                 0xFF => Ok((MidiEvent::Reset, 1)),
                 0xF0 => {
                     // SysEx runs until the 0xF7 terminator.
-                    let end =
-                        bytes.iter().position(|&b| b == 0xF7).ok_or(DecodeError::Truncated)?;
+                    let end = bytes
+                        .iter()
+                        .position(|&b| b == 0xF7)
+                        .ok_or(DecodeError::Truncated)?;
                     Ok((MidiEvent::SysEx(bytes[1..end].to_vec()), end + 1))
                 }
                 other => Err(DecodeError::Unsupported(other)),
@@ -122,9 +146,17 @@ impl MidiEvent {
                 let (key, vel) = (KeyNumber::new(d1()?), Velocity::new(d2()?));
                 // Note-on with velocity 0 is the canonical "note off".
                 let ev = if vel.get() == 0 {
-                    MidiEvent::NoteOff { channel, key, velocity: vel }
+                    MidiEvent::NoteOff {
+                        channel,
+                        key,
+                        velocity: vel,
+                    }
                 } else {
-                    MidiEvent::NoteOn { channel, key, velocity: vel }
+                    MidiEvent::NoteOn {
+                        channel,
+                        key,
+                        velocity: vel,
+                    }
                 };
                 Ok((ev, 3))
             }
@@ -144,8 +176,20 @@ impl MidiEvent {
                 },
                 3,
             )),
-            0xC0 => Ok((MidiEvent::ProgramChange { channel, program: ProgramNumber::new(d1()?) }, 2)),
-            0xD0 => Ok((MidiEvent::ChannelPressure { channel, pressure: Pressure::new(d1()?) }, 2)),
+            0xC0 => Ok((
+                MidiEvent::ProgramChange {
+                    channel,
+                    program: ProgramNumber::new(d1()?),
+                },
+                2,
+            )),
+            0xD0 => Ok((
+                MidiEvent::ChannelPressure {
+                    channel,
+                    pressure: Pressure::new(d1()?),
+                },
+                2,
+            )),
             0xE0 => Ok((
                 MidiEvent::PitchBend {
                     channel,
@@ -169,18 +213,26 @@ impl MidiEvent {
         }
         let ch = |c: &Channel| c.index();
         match self {
-            MidiEvent::NoteOff { channel, key, velocity } => {
-                put(out, &[0x80 | ch(channel), key.get(), velocity.get()])
-            }
-            MidiEvent::NoteOn { channel, key, velocity } => {
-                put(out, &[0x90 | ch(channel), key.get(), velocity.get()])
-            }
-            MidiEvent::PolyAftertouch { channel, key, pressure } => {
-                put(out, &[0xA0 | ch(channel), key.get(), pressure.get()])
-            }
-            MidiEvent::ControlChange { channel, controller, value } => {
-                put(out, &[0xB0 | ch(channel), controller.get(), value.get()])
-            }
+            MidiEvent::NoteOff {
+                channel,
+                key,
+                velocity,
+            } => put(out, &[0x80 | ch(channel), key.get(), velocity.get()]),
+            MidiEvent::NoteOn {
+                channel,
+                key,
+                velocity,
+            } => put(out, &[0x90 | ch(channel), key.get(), velocity.get()]),
+            MidiEvent::PolyAftertouch {
+                channel,
+                key,
+                pressure,
+            } => put(out, &[0xA0 | ch(channel), key.get(), pressure.get()]),
+            MidiEvent::ControlChange {
+                channel,
+                controller,
+                value,
+            } => put(out, &[0xB0 | ch(channel), controller.get(), value.get()]),
             MidiEvent::ProgramChange { channel, program } => {
                 put(out, &[0xC0 | ch(channel), program.get()])
             }
@@ -217,7 +269,11 @@ impl MidiEvent {
 impl core::fmt::Display for MidiEvent {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            MidiEvent::NoteOn { channel, key, velocity } => write!(
+            MidiEvent::NoteOn {
+                channel,
+                key,
+                velocity,
+            } => write!(
                 f,
                 "ch{:<2} note-on  {:>3} vel {}",
                 channel.number(),
@@ -227,7 +283,11 @@ impl core::fmt::Display for MidiEvent {
             MidiEvent::NoteOff { channel, key, .. } => {
                 write!(f, "ch{:<2} note-off {:>3}", channel.number(), key.get())
             }
-            MidiEvent::ControlChange { channel, controller, value } => write!(
+            MidiEvent::ControlChange {
+                channel,
+                controller,
+                value,
+            } => write!(
                 f,
                 "ch{:<2} cc {:>3} = {}",
                 channel.number(),
@@ -240,7 +300,11 @@ impl core::fmt::Display for MidiEvent {
             MidiEvent::ChannelPressure { channel, pressure } => {
                 write!(f, "ch{:<2} aftertouch {}", channel.number(), pressure.get())
             }
-            MidiEvent::PolyAftertouch { channel, key, pressure } => write!(
+            MidiEvent::PolyAftertouch {
+                channel,
+                key,
+                pressure,
+            } => write!(
                 f,
                 "ch{:<2} poly-at {} = {}",
                 channel.number(),

@@ -25,11 +25,11 @@
 //!   core already models, so bends are attributed to the note sounding
 //!   on that channel and flagged ambiguous when two are.
 
+pub mod fixture;
 pub mod midi_tools_sink;
+pub mod session;
 pub mod shapes;
 pub mod state;
-pub mod fixture;
-pub mod session;
 
 pub use session::Session;
 
@@ -43,11 +43,11 @@ pub use session::Session;
 pub const DEFAULT_BEND_RANGE: f64 = 48.0;
 
 use daw::service::midi::{
-    MidiChannelPressureCreate,
-    MidiCCCreate, MidiNoteCreate, MidiPitchBendCreate, MidiTakeContent, MidiTakeSnapshot,
+    MidiCCCreate, MidiChannelPressureCreate, MidiNoteCreate, MidiPitchBendCreate, MidiTakeContent,
+    MidiTakeSnapshot,
 };
 use expression_editor_core::cc::CcLane;
-use expression_editor_core::doc::{ExpressionDoc, Dimension, Note, NoteId, TimeBase};
+use expression_editor_core::doc::{Dimension, ExpressionDoc, Note, NoteId, TimeBase};
 use expression_editor_core::tuning;
 
 /// Convert a take snapshot into an editable document.
@@ -92,18 +92,31 @@ pub fn to_doc(snapshot: &MidiTakeSnapshot, bend_range: f64) -> ExpressionDoc {
         // More than one owner is the ambiguity the core already models;
         // writing to both would be a guess, so leave it to be flagged.
         if owners.len() == 1
-            && let Some(n) = doc.note_mut(owners[0]) {
-                n.pitch.set(pb.position_ppq, semitones);
-            }
+            && let Some(n) = doc.note_mut(owners[0])
+        {
+            n.pitch.set(pb.position_ppq, semitones);
+        }
     }
 
     // Channel pressure and CC74 are the MPE expression dimensions.
     for cp in &snapshot.channel_pressures {
-        set_lane(&mut doc, cp.channel + 1, cp.position_ppq, Dimension::Pressure, cp.pressure);
+        set_lane(
+            &mut doc,
+            cp.channel + 1,
+            cp.position_ppq,
+            Dimension::Pressure,
+            cp.pressure,
+        );
     }
     for cc in &snapshot.ccs {
         if cc.controller == 74 {
-            set_lane(&mut doc, cc.channel + 1, cc.position_ppq, Dimension::Timbre, cc.value);
+            set_lane(
+                &mut doc,
+                cc.channel + 1,
+                cc.position_ppq,
+                Dimension::Timbre,
+                cc.value,
+            );
         }
     }
 

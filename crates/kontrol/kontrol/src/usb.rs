@@ -84,8 +84,15 @@ impl KontrolUsb {
         let device = api
             .open_path(&path)
             .map_err(|e| eyre!("open MK3 HID device: {e} (permission? udev rule for 0x17cc)"))?;
-        tracing::info!(pid = format!("{pid:#06x}"), "kontrol: opened MK3 Light Guide (HID)");
-        Ok(Self { device, keys: [0; NUM_KEYS], pid })
+        tracing::info!(
+            pid = format!("{pid:#06x}"),
+            "kontrol: opened MK3 Light Guide (HID)"
+        );
+        Ok(Self {
+            device,
+            keys: [0; NUM_KEYS],
+            pid,
+        })
     }
 
     /// Set one key's color in the local map (0 = lowest key = MIDI 21). Call

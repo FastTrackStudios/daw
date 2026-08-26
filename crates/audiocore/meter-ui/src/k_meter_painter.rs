@@ -8,10 +8,10 @@
 use std::sync::Arc;
 
 use meter_dsp::k_meter::KMeterState;
-use nice_plug_dioxus::prelude::SceneOverlay;
-use nice_plug_dioxus::prelude::vello::Scene;
 use nice_plug_dioxus::prelude::vello::kurbo::{Affine, Line, Rect, Stroke};
 use nice_plug_dioxus::prelude::vello::peniko::{Color, Fill};
+use nice_plug_dioxus::prelude::vello::Scene;
+use nice_plug_dioxus::prelude::SceneOverlay;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 

@@ -41,7 +41,6 @@ impl ApplyReport {
     }
 }
 
-
 /// Write `theme`'s palette into the REAPER theme at `dir`.
 ///
 /// `dry_run` computes the diff without touching the file — worth having,

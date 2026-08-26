@@ -134,7 +134,6 @@ fn session_summary_smoke() {
 #[test]
 fn aufl_audio_filenames() {
     use dawfile_logic::parse::aufl::parse_aufl;
-    
 
     let session = dawfile_logic::read_session(FIXTURE).expect("parse failed");
 
@@ -843,7 +842,6 @@ fn fire_envi_name_hex() {
 
 #[test]
 fn fire_envi_seq_range() {
-    
     let session = dawfile_logic::read_session(FIRE_FIXTURE).expect("parse failed");
     let chunks = &session.chunks;
     const TAG_ENVI: [u8; 4] = *b"ivnE";

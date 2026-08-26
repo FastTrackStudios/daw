@@ -23,7 +23,7 @@
 //! of what the gate decided. One pass rather than four also matters
 //! across a whole song.
 
-use crate::classify::{BlockClass, ClassifyConfig, Classifier, adaptive_silence_db};
+use crate::classify::{adaptive_silence_db, BlockClass, Classifier, ClassifyConfig};
 
 /// One breakpoint on a generated envelope.
 ///
@@ -184,7 +184,12 @@ fn transitions(open: &[bool]) -> Vec<usize> {
 /// The stage's own smoothing is reproduced here rather than re-running
 /// the sample-rate gate, because an envelope is read at block rate and
 /// the difference is inaudible against the tolerance.
-pub fn gate_envelope(analysis: &Analysis, threshold_db: f64, floor_db: f64, tolerance_db: f64) -> Vec<EnvPoint> {
+pub fn gate_envelope(
+    analysis: &Analysis,
+    threshold_db: f64,
+    floor_db: f64,
+    tolerance_db: f64,
+) -> Vec<EnvPoint> {
     if analysis.blocks() == 0 {
         return Vec::new();
     }
@@ -245,9 +250,7 @@ pub fn breath_envelope(
         .rms_db
         .iter()
         .zip(&analysis.classes)
-        .map(|(&db, &class)| {
-            class != BlockClass::Tonal && db < max_level_db && db > min_level_db
-        })
+        .map(|(&db, &class)| class != BlockClass::Tonal && db < max_level_db && db > min_level_db)
         .collect();
 
     let dense: Vec<EnvPoint> = ducked
@@ -401,13 +404,25 @@ pub struct Contributions {
 
 impl Contributions {
     fn gate_pts(&self) -> &[EnvPoint] {
-        if self.bypass.gate { &[] } else { &self.gate }
+        if self.bypass.gate {
+            &[]
+        } else {
+            &self.gate
+        }
     }
     fn breath_pts(&self) -> &[EnvPoint] {
-        if self.bypass.breath { &[] } else { &self.breath }
+        if self.bypass.breath {
+            &[]
+        } else {
+            &self.breath
+        }
     }
     fn ride_pts(&self) -> &[EnvPoint] {
-        if self.bypass.ride { &[] } else { &self.ride }
+        if self.bypass.ride {
+            &[]
+        } else {
+            &self.ride
+        }
     }
     fn sibilance_spans(&self) -> &[GainSpan] {
         if self.bypass.sibilance {
