@@ -1653,7 +1653,8 @@ mod tests {
     /// silence, which reads as a broken audio device.
     #[test]
     fn a_trailing_flag_is_not_part_of_the_path() {
-        let block = "<SOURCE MP3\n  FILE \"Media/_NSYNC - Bye Bye Bye (Official Audio) 0.mp3\" 1\n>";
+        let block =
+            "<SOURCE MP3\n  FILE \"Media/_NSYNC - Bye Bye Bye (Official Audio) 0.mp3\" 1\n>";
         let source = Item::parse_source_block(block).expect("parses");
         assert_eq!(
             source.file_path,

@@ -150,8 +150,11 @@ pub fn parse(text: &str) -> Lrc {
         }
     }
 
-    lrc.lines
-        .sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
+    lrc.lines.sort_by(|a, b| {
+        a.start
+            .partial_cmp(&b.start)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     lrc
 }
 
@@ -168,7 +171,10 @@ fn parse_words(body: &str) -> Vec<LrcWord> {
         let end = tail.find('<').unwrap_or(tail.len());
         let text = tail[..end].trim();
         if !text.is_empty() {
-            words.push(LrcWord { start, text: text.to_string() });
+            words.push(LrcWord {
+                start,
+                text: text.to_string(),
+            });
         }
         rest = &tail[end..];
     }
