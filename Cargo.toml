@@ -80,6 +80,7 @@ members = [
     "features/reaper/reaper-embed",
     "features/reaper/reaper-hwnd",
     "features/reaper/reaper-input",
+    "features/reaper/reaper-input-config",
     "features/reaper/reaper-kbd",
     "features/reaper/reaper-launcher",
     "features/standalone/daw-standalone",

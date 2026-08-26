@@ -10801,6 +10801,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "reaper-input-config"
+version = "0.1.0"
+
+[[package]]
 name = "reaper-kbd"
 version = "0.1.0"
 dependencies = [
