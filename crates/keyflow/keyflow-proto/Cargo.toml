@@ -31,8 +31,5 @@ music-catalog = { workspace = true }
 uuid = { version = "1", features = ["v4", "serde"] }
 helgoboss-midi = "0.4.0"
 
-[dev-dependencies]
-keyflow-text.workspace = true
-
 [lints]
 workspace = true

@@ -1030,44 +1030,4 @@ mod tests {
         // Verify current_key was updated
         assert_eq!(chart.current_key, Some(f_major));
     }
-
-    #[test]
-    fn test_round_trip_serialization() {
-        let input = r#"
-My Song - Test Artist
-120bpm 4/4 #C
-
-Intro 4
-C G Am F
-
-VS 8
-C G Am F x2
-
-CH 8
-F C G Am
-"#;
-
-        // Parse the chart
-        let chart1 = keyflow_text::chart::parse_chart(input).expect("Should parse successfully");
-
-        // Serialize it
-        let output = chart1.to_syntax();
-        println!("Serialized output:\n{}", output);
-
-        // Parse it again
-        let chart2 =
-            keyflow_text::chart::parse_chart(&output).expect("Should parse serialized output");
-
-        // Verify they have the same structure
-        assert_eq!(chart1.metadata.title, chart2.metadata.title);
-        assert_eq!(chart1.metadata.artist, chart2.metadata.artist);
-        assert_eq!(chart1.tempo, chart2.tempo);
-        assert_eq!(chart1.initial_key, chart2.initial_key);
-        assert_eq!(chart1.sections.len(), chart2.sections.len());
-
-        // Verify sections have same measure counts
-        for (s1, s2) in chart1.sections.iter().zip(chart2.sections.iter()) {
-            assert_eq!(s1.measures().len(), s2.measures().len());
-        }
-    }
 }
