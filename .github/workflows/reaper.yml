@@ -15,11 +15,13 @@
 #     the full REAPER pass before anything ships.
 #
 # The job resolves the same REAPER 7.75 store path the dev machine's
-# rig uses (pinned via gcroot; nixpkgs fallback) and runs both
-# harnesses fully isolated: daw-reaper builds its own rig under
-# <checkout>/target/fts-reaper-test, fts-extensions gets a CI-owned
-# resources dir. Nothing touches ~/.config/signal or port 4040
-# (different user, Dummy audio, unix sockets only).
+# rig uses (pinned via gcroot; nixpkgs fallback) and runs the daw-reaper
+# harness fully isolated: it builds its own rig under
+# <checkout>/target/fts-reaper-test. Nothing touches ~/.config/signal or
+# port 4040 (different user, Dummy audio, unix sockets only).
+#
+# The fts-extensions suite is the sibling of this one and runs from the
+# fts-extensions repo, which owns that harness.
 
 name: reaper-integration
 
@@ -76,18 +78,3 @@ jobs:
         run: |
           FTS_REAPER_EXECUTABLE="$FTS_CI/reaper/bin/reaper" \
             nix develop .#reaper-test -c cargo run -p daw-reaper-xtask
-
-      # Extension suite (13 tests): CI-owned REAPER resources dir
-      # (persistent — keeps the [nag] prewarm token between runs),
-      # seeded with the same Dummy-audio ini the daw harness uses.
-      - name: extension suite (fts-extensions)
-        run: |
-          RIG="$FTS_CI/reaper-rig"
-          mkdir -p "$RIG/UserPlugins"
-          if [ ! -f "$RIG/reaper.ini" ]; then
-            printf '[REAPER]\naudiodriver=2\nlinux_audio_mode=2\nautosaveint=0\n[reaper_explorer]\nlastdir=/tmp\n' \
-              > "$RIG/reaper.ini"
-          fi
-          FTS_REAPER_EXECUTABLE="$FTS_CI/reaper/bin/reaper" \
-          FTS_REAPER_RESOURCES="$RIG" \
-            nix develop .#reaper-test -c cargo run -p fts-extensions-xtask
