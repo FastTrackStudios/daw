@@ -59,6 +59,13 @@ pub struct EngineStats {
     pub render_ns: AtomicU64,
     /// Peak render time since the last [`reset_peak`](Self::reset_peak), ns.
     pub peak_render_ns: AtomicU64,
+    /// Sum of every block's render time, ns — with `calls`, the MEAN.
+    ///
+    /// Peak is the right measure for "did we drop audio" and the wrong one
+    /// for "is this faster than it was": one preempted block on a shared
+    /// machine moves the peak by milliseconds and says nothing about the
+    /// code. The mean is stable enough to optimise against.
+    pub total_render_ns: AtomicU64,
     /// Blocks where the graph reported an xrun.
     ///
     /// NOTE: on a FOLLOWER node this reads the driver's clock and can stay at
@@ -87,6 +94,16 @@ impl EngineStats {
     pub fn record_render(&self, ns: u64) {
         self.render_ns.store(ns, Ordering::Relaxed);
         self.peak_render_ns.fetch_max(ns, Ordering::Relaxed);
+        self.total_render_ns.fetch_add(ns, Ordering::Relaxed);
+    }
+
+    /// Mean render time per block, milliseconds.
+    pub fn mean_render_ms(&self) -> f64 {
+        let calls = self.calls.load(Ordering::Relaxed);
+        if calls == 0 {
+            return 0.0;
+        }
+        self.total_render_ns.load(Ordering::Relaxed) as f64 / calls as f64 / 1e6
     }
 
     /// Record a block's render time and flag it if it overran the deadline.
