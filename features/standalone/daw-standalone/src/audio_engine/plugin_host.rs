@@ -628,6 +628,25 @@ impl LoadedClapPlugin {
 
     /// Plugin's reported latency (in samples). 0 if `clap_plugin_latency`
     /// isn't implemented.
+    /// The port counts this plugin was *prepared* with, or `None` if it is
+    /// not activated.
+    ///
+    /// Exposed so the invariant behind the side-chain fix is testable without
+    /// a plugin that crashes when it is violated: on Linux the old
+    /// single-port buffer list produced silence rather than a fault, so a
+    /// render-and-check test passes there whether or not the bug is present.
+    /// Comparing this against [`Self::audio_port_count`] is platform
+    /// independent and fails loudly the moment the two disagree.
+    pub fn prepared_port_counts(&self) -> Option<(usize, usize)> {
+        self.activation.as_ref().map(|a| (a.input_ports, a.output_ports))
+    }
+
+    /// How many auxiliary channel buffers are held for the ports beyond the
+    /// main bus — two per auxiliary port, inputs and outputs counted apart.
+    pub fn aux_buffer_counts(&self) -> Option<(usize, usize)> {
+        self.activation.as_ref().map(|a| (a.aux_in.len(), a.aux_out.len()))
+    }
+
     /// Number of audio I/O ports the plugin advertises.
     /// `(input_count, output_count)`. Defaults to `(1, 1)` (single
     /// stereo bus each side) if the plugin doesn't implement the
