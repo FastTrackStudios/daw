@@ -41,8 +41,37 @@ const CLIENT: &str = "midicore-midir";
 // r[impl primitives.midi.client-identity]
 static CLIENT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Whether connections share one OS client name (and so merge into ONE
+/// pipewire-jack graph node) or each get a unique one.
+///
+/// Unique names were the default because several rigs each opened their own
+/// input, and a shared name made pipewire-jack merge the same-named clients
+/// so that two connections **to the same port** shared one link and only one
+/// callback fired. That is a real hazard, but only when the same port is
+/// opened twice.
+///
+/// A caller that opens each port exactly once — signal's shared MIDI hub is
+/// the reason this exists — has no such collision, and paying a graph node
+/// per port is expensive: 23 ports across the rigs produced ~46 nodes, enough
+/// that port enumeration itself became unreliable.
+///
+/// Off by default, so nothing changes for existing callers.
+static SHARED_CLIENT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Opt into one shared OS client name for every subsequent connection.
+///
+/// Only safe when the caller guarantees it never opens the same port twice —
+/// see [`SHARED_CLIENT`]. Affects connections opened after this call.
+pub fn use_shared_client_name(shared: bool) {
+    SHARED_CLIENT.store(shared, std::sync::atomic::Ordering::Relaxed);
+}
+
 // r[impl primitives.midi.client-identity]
 fn client_name() -> String {
+    if SHARED_CLIENT.load(std::sync::atomic::Ordering::Relaxed) {
+        return CLIENT.to_string();
+    }
     format!(
         "{CLIENT}-{}",
         CLIENT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)

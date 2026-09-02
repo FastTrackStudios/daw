@@ -8257,6 +8257,7 @@ version = "0.1.0"
 dependencies = [
  "eyre",
  "midicore-midir",
+ "midicore-pipewire",
  "midicore-proto",
  "tracing",
 ]
@@ -8270,6 +8271,19 @@ dependencies = [
  "midicore-proto",
  "midir",
  "tracing",
+]
+
+[[package]]
+name = "midicore-pipewire"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "libspa",
+ "libspa-sys",
+ "midicore-proto",
+ "pipewire",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

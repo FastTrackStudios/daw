@@ -33,6 +33,18 @@ pub fn selector_for(name: Option<&str>) -> PortSelector {
 #[cfg(feature = "midir")]
 pub mod attach;
 
+/// The **native PipeWire** MIDI backend (`MidiInput`, `input_ports`, …).
+///
+/// Enabled by the `pipewire` feature; Linux only. Prefer this over
+/// [`midir`] on a PipeWire host: it is one graph node rather than one per
+/// port, it discovers hot-plug from the registry instead of polling (which
+/// on the midir/JACK path meant creating and destroying a client several
+/// times a second), and it needs no `pw-jack` wrapper.
+#[cfg(feature = "pipewire")]
+pub mod pipewire {
+    pub use midicore_pipewire::*;
+}
+
 /// The midir-backed OS MIDI backend (`MidiInput`, `MidiStream`, `input_ports`,
 /// …). Enabled by the `midir` feature; native platforms only.
 #[cfg(feature = "midir")]
