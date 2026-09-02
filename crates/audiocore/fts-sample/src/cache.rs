@@ -533,6 +533,108 @@ impl SampleData {
 
     /// Read one stereo frame (or duplicate mono → stereo). Returns (L, R).
     #[inline]
+    /// Read `out_l.len()` consecutive frames from `start` into separate L/R
+    /// buffers, resolving a streamed chunk once per chunk crossed.
+    ///
+    /// This is what any BULK read of sample data should use. Reading frame by
+    /// frame through [`SampleData::frame`] costs an arc-swap guard per
+    /// channel per frame when the sample is streamed; priming a pitch
+    /// shifter reads ~4-8k frames, so doing it the obvious way cost ~16,000
+    /// guarded reads PER VOICE at note-on — measured at ~27% of the audio
+    /// thread, and the reason a chord stalled the callback for hundreds of
+    /// milliseconds.
+    pub fn read_frames(
+        &self,
+        start: usize,
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        cursor: &mut crate::stream::StreamCursor,
+    ) {
+        let n = out_l.len().min(out_r.len());
+        let Pcm::Streamed(stream) = &self.pcm else {
+            for i in 0..n {
+                let (l, r) = self.frame(start + i);
+                out_l[i] = l;
+                out_r[i] = r;
+            }
+            return;
+        };
+        let ch = self.channels as usize;
+        let mono = self.channels == 1;
+        for i in 0..n {
+            let base = (start + i) * ch;
+            // The cursor holds the chunk; it only re-seeks when the read
+            // leaves it, i.e. about once per 12,000 frames.
+            let l = match cursor.get(base) {
+                Some(v) => Some(v),
+                None => cursor.seek(stream, base).then(|| cursor.get(base)).flatten(),
+            };
+            match l {
+                Some(l) => {
+                    let r = if mono {
+                        l
+                    } else {
+                        cursor.get(base + 1).unwrap_or(l)
+                    };
+                    out_l[i] = l;
+                    out_r[i] = r;
+                }
+                // Head, or a chunk that has not arrived: the ordinary path
+                // answers both correctly (the head is always resident).
+                None => {
+                    let (l, r) = self.frame(start + i);
+                    out_l[i] = l;
+                    out_r[i] = r;
+                }
+            }
+        }
+    }
+
+    /// The interpolator's two frames, read through a voice's own
+    /// [`StreamCursor`].
+    ///
+    /// This is the hot read: one call per output frame per voice. When the
+    /// cursor already holds the right chunk — which it does for thousands of
+    /// consecutive samples — the whole thing is four range-checked slice
+    /// indexes and no atomics at all. It re-seeks only when the playhead
+    /// leaves the chunk, i.e. roughly once every 12,000 frames instead of
+    /// four times per frame.
+    pub fn frame_pair_cursored(
+        &self,
+        frame_idx: usize,
+        last: usize,
+        cursor: &mut crate::stream::StreamCursor,
+    ) -> ((f32, f32), (f32, f32)) {
+        let Pcm::Streamed(stream) = &self.pcm else {
+            return self.frame_pair(frame_idx, last);
+        };
+        let ch = self.channels as usize;
+        let next = (frame_idx + 1).min(last);
+        let (a, b) = (frame_idx * ch, next * ch);
+        // The head is always resident and read directly; the cursor covers
+        // the streamed body.
+        let want_hi = b + ch.saturating_sub(1);
+        if cursor.get(a).is_none() || cursor.get(want_hi).is_none() {
+            // A pair straddling a chunk boundary is rare (once per chunk) and
+            // handled by the per-sample fallback below rather than by holding
+            // two chunks.
+            if !cursor.seek(stream, a) {
+                return self.frame_pair(frame_idx, last);
+            }
+        }
+        let read = |i: usize| cursor.get(i);
+        match self.channels {
+            1 => match (read(a), read(b)) {
+                (Some(x), Some(y)) => ((x, x), (y, y)),
+                _ => self.frame_pair(frame_idx, last),
+            },
+            _ => match (read(a), read(a + 1), read(b), read(b + 1)) {
+                (Some(l0), Some(r0), Some(l1), Some(r1)) => ((l0, r0), (l1, r1)),
+                _ => self.frame_pair(frame_idx, last),
+            },
+        }
+    }
+
     /// The two consecutive stereo frames a linear interpolator needs, read
     /// with ONE chunk resolution when the samples are streamed.
     ///
