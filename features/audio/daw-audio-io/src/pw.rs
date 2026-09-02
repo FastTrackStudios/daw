@@ -230,6 +230,31 @@ pub fn device_node_name(name_match: &str, capture: bool) -> Option<String> {
     None
 }
 
+/// The session manager's current default sink (or source) node name.
+///
+/// `AudioIoPrefs` documents an empty device name as "system default", and the
+/// cpal backend honoured that by asking cpal for the default device. The
+/// native backend links ports by name, so it needs the name — without this it
+/// links NOTHING and the node sits at `paused`, which presents as a rig that
+/// runs, meters dead, in perfect silence.
+pub fn default_device_node_name(capture: bool) -> Option<String> {
+    let key = if capture {
+        "default.audio.source"
+    } else {
+        "default.audio.sink"
+    };
+    let out = Command::new("pw-metadata")
+        .args(["-n", "default"])
+        .output()
+        .ok()?;
+    let listing = String::from_utf8_lossy(&out.stdout);
+    // `update: id:0 key:'default.audio.sink' value:'{"name":"alsa_output.…"}' …`
+    let line = listing.lines().find(|l| l.contains(key))?;
+    let value = line.split("value:'").nth(1)?;
+    let name = value.split("\"name\":\"").nth(1)?.split('"').next()?;
+    (!name.is_empty()).then(|| name.to_string())
+}
+
 /// Link one PipeWire port to another (`"node:port"` endpoints), best-effort.
 /// Returns whether the link command reported success.
 pub fn link(src: &str, dst: &str) -> bool {

@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 #[cfg(feature = "engine-native")]
 use std::sync::{Condvar, OnceLock, Weak};
 
-use arc_swap::ArcSwap;
+use arc_swap::{ArcSwap, ArcSwapOption};
 
 use crate::cache::PackBytes;
 use crate::flac_index::FlacIndex;
@@ -38,12 +38,18 @@ pub const CHUNK_FRAMES: u32 = 12_000;
 pub const HEAD_FRAMES: u32 = 12_000;
 
 /// One decoded chunk: interleaved 16-bit PCM.
-type Chunk = Arc<[i16]>;
+///
+/// `Vec` rather than a boxed slice because the chunk table stores these in
+/// `ArcSwapOption`, and arc-swap only holds `Sized` payloads.
+type Chunk = Arc<Vec<i16>>;
 
 /// 64-bit words in the wanted-chunk bitmask — 512 chunks, over two minutes of
 /// audio. Beyond that a sample plays from its head and whatever the linear
 /// prefetch reaches.
 const WANTED_WORDS: usize = 8;
+
+/// Chunk slots, matching the reach of the `wanted` bitmask.
+const MAX_CHUNKS: usize = WANTED_WORDS * 64;
 
 /// A sample that lives compressed in a pack and is decoded a chunk at a time.
 pub struct StreamedSample {
@@ -57,8 +63,17 @@ pub struct StreamedSample {
     pub channels: u16,
     pub sample_rate: u32,
     pub num_frames: usize,
-    /// Decoded chunks by index, published for lock-free audio-thread reads.
-    chunks: ArcSwap<HashMap<u32, Chunk>>,
+    /// Decoded chunks, one slot per chunk index, published for lock-free
+    /// audio-thread reads.
+    ///
+    /// A slot table rather than a map, because `sample()` runs once per
+    /// sample per voice: a `HashMap` made every one of those reads hash a
+    /// key (16% of the audio thread's time, measured), and every chunk the
+    /// streamer decoded cloned the WHOLE map to publish it — O(n) work that
+    /// churned the readers' arc-swap debt exactly when a chord was starting
+    /// voices. Indexing costs neither: a read is a bounds check, and a fill
+    /// swaps one slot.
+    chunks: Box<[ArcSwapOption<Vec<i16>>]>,
     /// Chunks the audio thread has asked for and the streamer hasn't filled,
     /// as a bitmask so the request path never takes a lock. A request that
     /// has to contend with the decoder is a request that gets dropped, and a
@@ -112,7 +127,7 @@ impl std::fmt::Debug for StreamedSample {
         f.debug_struct("StreamedSample")
             .field("num_frames", &self.num_frames)
             .field("channels", &self.channels)
-            .field("resident_chunks", &self.chunks.load().len())
+            .field("resident_chunks", &self.resident_chunk_count())
             .finish()
     }
 }
@@ -150,7 +165,10 @@ impl StreamedSample {
             channels,
             sample_rate,
             num_frames,
-            chunks: ArcSwap::from_pointee(HashMap::new()),
+            chunks: (0..MAX_CHUNKS)
+                .map(|_| ArcSwapOption::empty())
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
             wanted: [const { AtomicU64::new(0) }; WANTED_WORDS],
             queued: AtomicBool::new(false),
             tick: AtomicU64::new(0),
@@ -207,25 +225,24 @@ impl StreamedSample {
     /// Called by the sweep when no voice has touched this sample recently.
     #[cfg(feature = "engine-native")]
     fn shed_chunks(&self) {
-        if self.chunks.load().is_empty() {
+        if self.resident_chunk_count() == 0 {
             return;
         }
         let pinned = self.pins.lock().map(|p| p.clone()).unwrap_or_default();
         if pinned.is_empty() {
-            self.chunks.store(Arc::new(HashMap::new()));
+            for slot in self.chunks.iter() {
+                slot.store(None);
+            }
             if let Ok(mut used) = self.last_used.lock() {
                 used.clear();
             }
             return;
         }
-        let kept: HashMap<u32, Chunk> = self
-            .chunks
-            .load()
-            .iter()
-            .filter(|(k, _)| pinned.contains_key(k))
-            .map(|(k, v)| (*k, Arc::clone(v)))
-            .collect();
-        self.chunks.store(Arc::new(kept));
+        for (i, slot) in self.chunks.iter().enumerate() {
+            if !pinned.contains_key(&(i as u32)) {
+                slot.store(None);
+            }
+        }
     }
 
     /// Decode the WHOLE sample, here and now, as interleaved floats.
@@ -272,10 +289,20 @@ impl StreamedSample {
         out
     }
 
+    /// How many chunk slots are filled.
+    fn resident_chunk_count(&self) -> usize {
+        self.chunks.iter().filter(|s| s.load().is_some()).count()
+    }
+
     /// Anonymous bytes this sample holds right now: its head plus whatever
     /// chunks are resident.
     pub fn resident_bytes(&self) -> usize {
-        let chunks: usize = self.chunks.load().values().map(|c| c.len() * 2).sum();
+        let chunks: usize = self
+            .chunks
+            .iter()
+            .filter_map(|slot| slot.load_full())
+            .map(|c| c.len() * 2)
+            .sum();
         self.head.len() * 2 + chunks
     }
 
@@ -298,8 +325,12 @@ impl StreamedSample {
         let frame = index / ch;
         let chunk_no = frame as u32 / CHUNK_FRAMES;
         let within = (frame as u32 % CHUNK_FRAMES) as usize * ch + index % ch;
-        let chunks = self.chunks.load();
-        match chunks.get(&chunk_no) {
+        // `load()` (a guard), never `load_full()`: this runs once per sample
+        // per voice — tens of thousands of times a block — and `load_full`
+        // would clone an `Arc` every one of them, i.e. an atomic
+        // increment/decrement pair per audio sample.
+        let slot = self.chunks.get(chunk_no as usize).map(|s| s.load());
+        match slot.as_ref().and_then(|g| g.as_deref()) {
             Some(chunk) => {
                 // Ask for the next one while there is still a chunk of audio
                 // left to play — that lead time is what keeps the read path
@@ -409,10 +440,12 @@ impl StreamedSample {
             );
             return;
         };
-        let mut next = HashMap::clone(&self.chunks.load());
         let tick = self.tick.fetch_add(1, Ordering::Relaxed);
         for chunk_no in wanted {
-            if next.contains_key(&chunk_no) {
+            let Some(slot) = self.chunks.get(chunk_no as usize) else {
+                continue;
+            };
+            if slot.load().is_some() {
                 continue;
             }
             let from = chunk_no * CHUNK_FRAMES;
@@ -421,7 +454,9 @@ impl StreamedSample {
                 tracing::warn!(chunk_no, from, "stream: chunk decode failed");
                 continue;
             };
-            next.insert(chunk_no, Arc::from(pcm));
+            // Publishing is a single slot swap, so a voice reading a
+            // DIFFERENT chunk of this sample is never disturbed by the fill.
+            slot.store(Some(Arc::new(pcm)));
             if let Ok(mut used) = self.last_used.lock() {
                 used.insert(chunk_no, tick);
             }
@@ -431,20 +466,24 @@ impl StreamedSample {
         // frees memory promptly without ever cutting audio short.
         let pinned = self.pins.lock().map(|p| p.clone()).unwrap_or_default();
         let budget = MAX_RESIDENT_CHUNKS + pinned.len();
-        if next.len() > budget {
+        let resident = self.resident_chunk_count();
+        if resident > budget {
             if let Ok(used) = self.last_used.lock() {
-                let mut by_age: Vec<(u32, u64)> = next
-                    .keys()
-                    .filter(|k| !pinned.contains_key(*k))
-                    .map(|k| (*k, used.get(k).copied().unwrap_or(0)))
+                let mut by_age: Vec<(u32, u64)> = self
+                    .chunks
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, slot)| {
+                        slot.load().is_some() && !pinned.contains_key(&(*i as u32))
+                    })
+                    .map(|(i, _)| (i as u32, used.get(&(i as u32)).copied().unwrap_or(0)))
                     .collect();
                 by_age.sort_by_key(|(_, t)| *t);
-                for (chunk_no, _) in by_age.iter().take(next.len() - budget) {
-                    next.remove(chunk_no);
+                for (chunk_no, _) in by_age.iter().take(resident - budget) {
+                    self.chunks[*chunk_no as usize].store(None);
                 }
             }
         }
-        self.chunks.store(Arc::new(next));
         // Requests that arrived while this fill was running must not be
         // stranded: clear the flag first, then re-queue if anything is
         // outstanding. The other order loses whatever landed in between.
@@ -667,7 +706,7 @@ mod tests {
 
         // Nothing beyond the head has been fetched, which is exactly the
         // state that used to yield silence.
-        assert!(s.chunks.load().is_empty(), "expected a cold sample");
+        assert_eq!(s.resident_chunk_count(), 0, "expected a cold sample");
         let all = s.decode_all();
         assert_eq!(
             all.len(),
@@ -744,7 +783,7 @@ mod tests {
         let far = (HEAD_FRAMES as usize + CHUNK_FRAMES as usize + 500) * ch as usize;
         let _ = s.sample(far);
         for _ in 0..200 {
-            if !s.chunks.load().is_empty() {
+            if s.resident_chunk_count() > 0 {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
