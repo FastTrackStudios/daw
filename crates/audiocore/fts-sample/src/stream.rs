@@ -37,6 +37,89 @@ pub const CHUNK_FRAMES: u32 = 12_000;
 /// on everything else.
 pub const HEAD_FRAMES: u32 = 12_000;
 
+/// A single voice's private read cursor into a streamed sample.
+///
+/// Every production sampler streams this way: the audio thread reads from a
+/// buffer the VOICE owns, never from a shared index. HISE keeps two streaming
+/// buffers per voice and swaps them; JUCE's `streaming_sampler` preloads each
+/// sample's head and fills per-voice buffers on a background thread. The
+/// shared-index alternative — ask a table which chunk holds this sample, for
+/// every sample — is what made a chord cost hundreds of milliseconds here:
+/// an arc-swap guard and contended atomics per sample per voice, with every
+/// voice hammering the same cache lines as the streamer thread.
+///
+/// The cursor holds the chunk it is reading, so a whole block of audio costs
+/// ONE resolution. It is deliberately dumb: a range check and a slice index.
+#[derive(Default, Clone)]
+pub struct StreamCursor {
+    chunk: Option<Chunk>,
+    /// Held when the cursor is parked on the sample's resident head, which is
+    /// where every note starts and therefore where most reads land. Without
+    /// this the head fell through to the per-sample path and kept the slow
+    /// read alive for exactly the part of the note the player hears first.
+    head: Option<Arc<StreamedSample>>,
+    /// Absolute sample-index range the cursor covers.
+    lo: usize,
+    hi: usize,
+}
+
+impl StreamCursor {
+    /// Read `index` from the held chunk, or `None` when it falls outside it.
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<f32> {
+        const SCALE: f32 = 1.0 / 32768.0;
+        if index < self.lo || index >= self.hi {
+            return None;
+        }
+        if let Some(stream) = self.head.as_ref() {
+            return stream.head.get(index).map(|s| *s as f32 * SCALE);
+        }
+        self.chunk
+            .as_ref()?
+            .get(index - self.lo)
+            .map(|s| *s as f32 * SCALE)
+    }
+
+    /// Point the cursor at whichever chunk covers `index`. Returns whether it
+    /// now holds one.
+    #[inline]
+    pub fn seek(&mut self, stream: &Arc<StreamedSample>, index: usize) -> bool {
+        // The head is always resident: park on it rather than asking the
+        // chunk table a question it will answer `None` to.
+        if index < stream.head.len() {
+            self.chunk = None;
+            self.head = Some(Arc::clone(stream));
+            self.lo = 0;
+            self.hi = stream.head.len();
+            // Ask for the chunk that follows the head while there is still
+            // head left to play — the same lead time `sample()` buys.
+            if index >= stream.head.len() - stream.head.len() / 4 {
+                let ch = stream.channels.max(1) as usize;
+                stream.request((stream.head.len() / ch) as u32 / CHUNK_FRAMES);
+            }
+            return true;
+        }
+        self.head = None;
+        match stream.chunk_at(index) {
+            Some((chunk, lo, hi)) => {
+                self.chunk = Some(chunk);
+                self.lo = lo;
+                self.hi = hi;
+                true
+            }
+            None => {
+                // Drop the old chunk: holding it would pin memory the sweep
+                // wants back, and it cannot serve this read anyway.
+                self.chunk = None;
+                self.head = None;
+                self.lo = 0;
+                self.hi = 0;
+                false
+            }
+        }
+    }
+}
+
 /// One decoded chunk: interleaved 16-bit PCM.
 ///
 /// `Vec` rather than a boxed slice because the chunk table stores these in
@@ -395,6 +478,40 @@ impl StreamedSample {
             self.request(chunk_no + 1);
         }
         n
+    }
+
+    /// The decoded chunk covering `index`, with the absolute sample-index
+    /// range it spans.
+    ///
+    /// This is the door a [`StreamCursor`] uses, and the reason it exists:
+    /// resolving a chunk costs an arc-swap load and an `Arc` clone, which is
+    /// fine ONCE per chunk and ruinous once per sample. Returns `None` for
+    /// the head (read directly, it is always resident) and for a chunk that
+    /// has not arrived, requesting it on the way out.
+    ///
+    /// Also issues the read-ahead for the following chunk here — once per
+    /// resolution rather than once per sample.
+    pub fn chunk_at(self: &Arc<Self>, index: usize) -> Option<(Chunk, usize, usize)> {
+        if index < self.head.len() {
+            return None;
+        }
+        let ch = self.channels.max(1) as usize;
+        let frame = index / ch;
+        let chunk_no = frame as u32 / CHUNK_FRAMES;
+        let Some(chunk) = self
+            .chunks
+            .get(chunk_no as usize)
+            .and_then(|slot| slot.load_full())
+        else {
+            self.request(chunk_no);
+            return None;
+        };
+        let lo = chunk_no as usize * CHUNK_FRAMES as usize * ch;
+        let hi = lo + chunk.len();
+        if index + ch * 4_800 >= hi {
+            self.request(chunk_no + 1);
+        }
+        Some((chunk, lo, hi))
     }
 
     /// Note the chunk as wanted and make sure the streamer knows about us.
