@@ -533,6 +533,33 @@ impl SampleData {
 
     /// Read one stereo frame (or duplicate mono → stereo). Returns (L, R).
     #[inline]
+    /// The two consecutive stereo frames a linear interpolator needs, read
+    /// with ONE chunk resolution when the samples are streamed.
+    ///
+    /// The obvious spelling — four `Pcm::sample` calls — costs four arc-swap
+    /// guard loads per output frame per voice, which at a chord's worth of
+    /// voices dominated the audio callback. `last` clamps the second frame
+    /// the way the caller would.
+    pub fn frame_pair(&self, frame_idx: usize, last: usize) -> ((f32, f32), (f32, f32)) {
+        let ch = self.channels as usize;
+        if let Pcm::Streamed(stream) = &self.pcm {
+            let next = (frame_idx + 1).min(last);
+            // Contiguous only when the second frame really does follow the
+            // first; at the clamp they are the same frame.
+            if next == frame_idx + 1 {
+                let mut buf = [0.0f32; 4];
+                let want = (ch * 2).min(4);
+                if stream.run(frame_idx * ch, &mut buf[..want]) == want {
+                    return match self.channels {
+                        1 => ((buf[0], buf[0]), (buf[1], buf[1])),
+                        _ => ((buf[0], buf[1]), (buf[2], buf[3])),
+                    };
+                }
+            }
+        }
+        (self.frame(frame_idx), self.frame((frame_idx + 1).min(last)))
+    }
+
     pub fn frame(&self, frame_idx: usize) -> (f32, f32) {
         let n = self.pcm.len();
         let base = frame_idx * self.channels as usize;

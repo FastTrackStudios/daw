@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 #[cfg(feature = "engine-native")]
 use std::sync::{Condvar, OnceLock, Weak};
 
-use arc_swap::{ArcSwap, ArcSwapOption};
+use arc_swap::ArcSwapOption;
 
 use crate::cache::PackBytes;
 use crate::flac_index::FlacIndex;
@@ -347,6 +347,56 @@ impl StreamedSample {
         }
     }
 
+    /// Read up to `out.len()` consecutive samples starting at `index`,
+    /// resolving the chunk ONCE for the whole run.
+    ///
+    /// The per-sample [`sample`](Self::sample) path costs an arc-swap guard
+    /// load every call, and the voice interpolator asks for four of them per
+    /// output frame (two frames x two channels). At a chord's worth of voices
+    /// that was ~200k guard loads per block, contending with the streamer
+    /// publishing chunks. A run shares one lookup, so the same read costs one.
+    ///
+    /// Returns how many it filled; the caller falls back to `sample()` for a
+    /// remainder that crosses a chunk boundary (rare, and never in the hot
+    /// middle of a chunk).
+    pub fn run(self: &Arc<Self>, index: usize, out: &mut [f32]) -> usize {
+        const SCALE: f32 = 1.0 / 32768.0;
+        if out.is_empty() {
+            return 0;
+        }
+        if index < self.head.len() {
+            let n = out.len().min(self.head.len() - index);
+            for (o, s) in out[..n].iter_mut().zip(&self.head[index..index + n]) {
+                *o = *s as f32 * SCALE;
+            }
+            if index + n >= self.head.len() - self.head.len() / 4 {
+                let ch = self.channels.max(1) as usize;
+                self.request((self.head.len() / ch) as u32 / CHUNK_FRAMES);
+            }
+            return n;
+        }
+        let ch = self.channels.max(1) as usize;
+        let frame = index / ch;
+        let chunk_no = frame as u32 / CHUNK_FRAMES;
+        let within = (frame as u32 % CHUNK_FRAMES) as usize * ch + index % ch;
+        let slot = self.chunks.get(chunk_no as usize).map(|s| s.load());
+        let Some(chunk) = slot.as_ref().and_then(|g| g.as_deref()) else {
+            self.request(chunk_no);
+            return 0;
+        };
+        if within >= chunk.len() {
+            return 0;
+        }
+        let n = out.len().min(chunk.len() - within);
+        for (o, s) in out[..n].iter_mut().zip(&chunk[within..within + n]) {
+            *o = *s as f32 * SCALE;
+        }
+        if within + n + ch * 4_800 >= chunk.len() {
+            self.request(chunk_no + 1);
+        }
+        n
+    }
+
     /// Note the chunk as wanted and make sure the streamer knows about us.
     /// Lock-free: safe to call from the audio thread, and never dropped.
     fn request(self: &Arc<Self>, chunk_no: u32) {
@@ -357,8 +407,37 @@ impl StreamedSample {
         if word >= WANTED_WORDS {
             return;
         }
+        // FAST PATH — and it is the overwhelmingly common one. `sample()`
+        // calls this once per audio sample for the last stretch of every
+        // chunk, so with a chord's worth of voices it runs tens of thousands
+        // of times a block. Doing the three read-modify-writes below every
+        // time put three contended atomics per sample on lines the streamer
+        // thread is also touching, and the resulting cache-line ping-pong
+        // cost 200-600 ms of callback time per chord against a 5.33 ms
+        // budget — the keys rig's glitch, measured.
+        //
+        // Once a chunk is wanted and the streamer knows about us, asking
+        // again changes nothing, and that question can be answered with
+        // plain loads: shared reads leave every core's copy valid.
+        let mask = 1u64 << bit;
+        let already_wanted = self.wanted[word].load(Ordering::Acquire) & mask != 0;
+        #[cfg(feature = "engine-native")]
+        let known = already_wanted && self.queued.load(Ordering::Acquire);
+        #[cfg(not(feature = "engine-native"))]
+        let known = already_wanted;
+        if known {
+            // Keep the sample off the eviction sweep, but only WRITE when the
+            // tick actually moved — an unconditional store would invalidate
+            // the line on every sample and undo the point of this path.
+            let tick = sweep_tick();
+            if self.last_touch.load(Ordering::Relaxed) != tick {
+                self.last_touch.store(tick, Ordering::Relaxed);
+            }
+            return;
+        }
+
         self.last_touch.store(sweep_tick(), Ordering::Relaxed);
-        self.wanted[word].fetch_or(1 << bit, Ordering::Release);
+        self.wanted[word].fetch_or(mask, Ordering::Release);
         #[cfg(feature = "engine-native")]
         if !self.queued.swap(true, Ordering::AcqRel) {
             streamer().enqueue(Arc::downgrade(self));
