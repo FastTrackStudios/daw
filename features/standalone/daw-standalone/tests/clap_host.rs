@@ -426,6 +426,21 @@ fn a_plugin_declaring_a_side_chain_renders_without_reading_past_its_ports() {
     const BLOCK: usize = 512;
     plugin.prepare(48_000.0, BLOCK as u32).expect("prepare");
 
+    // The invariant, asserted directly. A render-and-check test is not enough
+    // on its own: the old single-port list produced *silence* on Linux rather
+    // than a fault, so 64 clean blocks prove nothing there. These two do,
+    // on every platform.
+    assert_eq!(
+        plugin.prepared_port_counts(),
+        Some((inputs as usize, outputs as usize)),
+        "the host must prepare a buffer list matching what the plugin declares"
+    );
+    assert_eq!(
+        plugin.aux_buffer_counts(),
+        Some(((inputs as usize - 1) * 2, (outputs as usize - 1) * 2)),
+        "two channels must be held for every port beyond the main bus"
+    );
+
     // A quarter-scale tone, loud enough to drive a compressor's detector so
     // the side-chain path is actually walked rather than skipped on silence.
     let in_l: Vec<f32> = (0..BLOCK)
