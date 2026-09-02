@@ -37,6 +37,8 @@ struct DuplexState {
     /// Last seen `spa_io_clock.xrun` (accumulated xrun duration) — a rise
     /// means the graph reported an xrun since the previous block.
     last_xrun: u64,
+    /// Graph rate, for turning a block's frame count into its deadline.
+    rate: u32,
 }
 
 unsafe extern "C" fn on_process(data: *mut c_void, position: *mut spa::spa_io_position) {
@@ -104,7 +106,8 @@ unsafe extern "C" fn on_process(data: *mut c_void, position: *mut spa::spa_io_po
         st.in_slices.clear();
         st.out_slices.clear();
 
-        st.stats.record_render(t0.elapsed().as_nanos() as u64);
+        st.stats
+            .record_render_at(t0.elapsed().as_nanos() as u64, st.rate);
     } // unsafe
 }
 
@@ -185,6 +188,7 @@ impl DuplexBackend for PipewireBackend {
             process,
             stats: stats.clone(),
             last_xrun: 0,
+            rate: sample_rate,
         });
 
         unsafe {

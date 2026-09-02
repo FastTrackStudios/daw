@@ -60,7 +60,21 @@ pub struct EngineStats {
     /// Peak render time since the last [`reset_peak`](Self::reset_peak), ns.
     pub peak_render_ns: AtomicU64,
     /// Blocks where the graph reported an xrun.
+    ///
+    /// NOTE: on a FOLLOWER node this reads the driver's clock and can stay at
+    /// zero while the graph is dropping audio — measured against `pw-top`, it
+    /// reported 0 while PipeWire counted 112 xruns on the same node in the
+    /// same window. Trust [`over_budget`](Self::over_budget) for "did we
+    /// cause a dropout"; this stays because a driver-side xrun is still worth
+    /// seeing when it is reported.
     pub xruns: AtomicU64,
+    /// Blocks whose render took longer than the block's own realtime budget.
+    ///
+    /// This is the one WE are responsible for: a callback that overruns its
+    /// deadline is a dropout the player hears, whether or not the graph gets
+    /// around to calling it an xrun. Counted from our own render timing, so
+    /// it cannot be silent about our own overruns.
+    pub over_budget: AtomicU64,
     /// Last backend stream/filter state code (backend-specific; on the
     /// PipeWire backend this is `pw_filter_state`, where `-1` = error,
     /// `3` = streaming). Written by the backend's state listener; owners
@@ -73,6 +87,23 @@ impl EngineStats {
     pub fn record_render(&self, ns: u64) {
         self.render_ns.store(ns, Ordering::Relaxed);
         self.peak_render_ns.fetch_max(ns, Ordering::Relaxed);
+    }
+
+    /// Record a block's render time and flag it if it overran the deadline.
+    ///
+    /// `rate` is needed because the budget is `block_frames / rate`; the
+    /// caller knows both. A block that takes longer than its own duration has
+    /// already made the next one late, which is what a listener hears as a
+    /// click.
+    pub fn record_render_at(&self, ns: u64, rate: u32) {
+        self.record_render(ns);
+        let frames = self.block_frames.load(Ordering::Relaxed) as u64;
+        if frames > 0 && rate > 0 {
+            let budget_ns = frames * 1_000_000_000 / rate as u64;
+            if ns > budget_ns {
+                self.over_budget.fetch_add(1, Ordering::Relaxed);
+            }
+        }
     }
     /// DSP load 0..1 = render time / block budget at `rate`.
     pub fn load(&self, rate: u32) -> f64 {
