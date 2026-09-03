@@ -17,4 +17,5 @@ pub mod main_window;
 pub mod media_browser;
 pub mod mixer;
 pub mod tcp;
+pub mod toolbars;
 pub mod track_control_panel;

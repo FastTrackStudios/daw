@@ -38,7 +38,7 @@ where
     Ok(())
 }
 
-/// Wait for a DAW connection, then hand back its current project.
+/// Wait for a DAW connection AND a current project, then hand it back.
 ///
 /// The two long-lived subscriptions — the track stream and the meter feed —
 /// both start this way, and both used to carry their own copy of the loop.
@@ -47,19 +47,22 @@ where
 /// panel's futures run on dioxus's own scheduler with no tokio runtime
 /// behind them, so a tokio timer aborts the host process the moment the
 /// panel opens — a non-unwinding panic, taking REAPER with it.
+///
+/// Never gives up early: a host can be connected with nothing open yet (a
+/// standalone player before its first setlist loads), so "no current
+/// project" is retried on the same cadence as "no DAW at all" rather than
+/// resolving to `None` — a caller that gave up here used to get stuck
+/// showing "no connection" forever even after a project *did* open, since
+/// nothing re-polled it.
 pub async fn connected_project() -> Option<daw_control::Project> {
     loop {
-        if daw_control::Daw::try_get().is_some() {
-            break;
+        if let Some(daw) = daw_control::Daw::try_get() {
+            match daw.current_project().await {
+                Ok(p) => return Some(p),
+                Err(e) => tracing::debug!("no current project yet: {e:?}"),
+            }
         }
         futures_timer::Delay::new(std::time::Duration::from_millis(500)).await;
-    }
-    match daw_control::Daw::get().current_project().await {
-        Ok(p) => Some(p),
-        Err(e) => {
-            tracing::warn!("no project: {e:?}");
-            None
-        }
     }
 }
 

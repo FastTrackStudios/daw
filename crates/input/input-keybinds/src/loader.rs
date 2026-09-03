@@ -51,6 +51,32 @@ fn load_profile(dir: &Path) -> Option<ProfileConfig> {
     facet_styx::from_str::<ProfileConfig>(&contents).ok()
 }
 
+/// List every profile under `root` — one subdirectory per profile, each
+/// containing its own `profile.styx` (the same layout `load_profile_keymap`
+/// reads one of). The slug (subdirectory name — `"fasttrackstudio"`,
+/// `"logic"`, …) is what a caller would pass back into
+/// `load_profile_keymap(root.join(slug))` to actually load it; `name`/
+/// `description` on the returned [`ProfileConfig`] are what a picker UI
+/// shows. Unreadable directories and non-profile subdirectories (no
+/// `profile.styx`) are skipped rather than erroring — `root` also holds
+/// shared, non-profile folders (`workflows/`, `overlays/`).
+pub fn list_profiles(root: &Path) -> Vec<(String, ProfileConfig)> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut profiles: Vec<(String, ProfileConfig)> = entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|entry| {
+            let slug = entry.file_name().to_string_lossy().into_owned();
+            let profile = load_profile(&entry.path())?;
+            Some((slug, profile))
+        })
+        .collect();
+    profiles.sort_by(|a, b| a.1.name.to_lowercase().cmp(&b.1.name.to_lowercase()));
+    profiles
+}
+
 fn load_section(path: &Path) -> Option<SectionConfig> {
     let contents = std::fs::read_to_string(path).ok()?;
     facet_styx::from_str::<SectionConfig>(&contents).ok()

@@ -702,10 +702,23 @@ fn build_take(item_guid: &str, index: u32, rt: &RppTake, _summary: &mut LoadedPr
     let (source_type, source_file_path) = match &rt.source {
         Some(src) => {
             let st = match src.source_type {
-                RppSourceType::Wave => SourceType::Audio,
+                // Every compressed/PCM audio source REAPER's `<SOURCE ...>`
+                // tag can name — not just `WAVE`. Previously only `Wave`
+                // mapped to `Audio`; `Vorbis` (ogg — what session's
+                // generated projects use), `Mp3`, `Flac`, and
+                // `OfflineWave` all fell into `Unknown`, which silently
+                // skips waveform-preview fetching (anything gated on
+                // `SourceType::Audio` treated these takes as non-audio).
+                RppSourceType::Wave
+                | RppSourceType::OfflineWave
+                | RppSourceType::Mp3
+                | RppSourceType::Flac
+                | RppSourceType::Vorbis => SourceType::Audio,
                 RppSourceType::Midi => SourceType::Midi,
                 RppSourceType::Empty => SourceType::Empty,
-                _ => SourceType::Unknown,
+                RppSourceType::Video | RppSourceType::Section | RppSourceType::Unknown(_) => {
+                    SourceType::Unknown
+                }
             };
             let file = if src.file_path.is_empty() {
                 None

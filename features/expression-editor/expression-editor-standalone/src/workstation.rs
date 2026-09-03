@@ -727,6 +727,9 @@ fn TimelineItems(
     pixels_per_second: f32,
     bpm: f64,
 ) -> Element {
+    // Static preview — no live transport, so the cursors never move.
+    let play_position = use_signal(|| 0.0f32);
+    let edit_position = use_signal(|| 0.0f32);
     rsx! {
         ArrangePreview {
             tracks,
@@ -736,6 +739,8 @@ fn TimelineItems(
             height,
             pixels_per_second,
             bpm,
+            play_position,
+            edit_position,
         }
     }
 }

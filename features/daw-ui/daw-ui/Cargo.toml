@@ -36,6 +36,12 @@ dioxus-native = { workspace = true, optional = true }
 # zoom/scroll/playhead (both wasm-clean). Enabled by the `web` feature.
 input = { workspace = true, optional = true }
 input-dioxus = { workspace = true, optional = true }
+# The app-agnostic styx keybind-profile format (name/description/version
+# + section files) — read-only here, just to list/name the profiles a
+# user can pick between (FastTrackStudio/Logic/Ableton/Pro Tools/REAPER);
+# no REAPER coupling, same profile data `reaper-input` loads.
+input-config-proto = { workspace = true, optional = true }
+input-keybinds = { workspace = true, optional = true }
 
 # Logging
 tracing = { workspace = true, optional = true }
@@ -78,7 +84,15 @@ dioxus-ssr = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a5
 
 [features]
 default = ["web"]
-web = ["dep:dioxus", "dep:tracing", "dock-dioxus/web", "dep:input", "dep:input-dioxus"]
+web = [
+    "dep:dioxus",
+    "dep:tracing",
+    "dock-dioxus/web",
+    "dep:input",
+    "dep:input-dioxus",
+    "dep:input-config-proto",
+    "dep:input-keybinds",
+]
 native = ["dep:dioxus-native"]
 # Folder-hierarchy mixer (`widgets::mixer::Mixer`, driven by
 # `daw_proto::track::FolderDepthChange`). daw-proto is already a hard dep.

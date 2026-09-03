@@ -87,6 +87,12 @@ pub fn MainWindowPreview(
     let rule = t.chrome.surface_sunken.shade(-0.25).css();
 
     let playing = use_signal(|| false);
+    // Static — this is a pure preview/screenshot composition, not a live
+    // transport. `ArrangePreview` takes a signal (not a plain `f32`) so
+    // the live caller (`ArrangementView`) can update position without
+    // re-rendering its whole tree on every tick; a preview just never
+    // writes to it.
+    let cursor_position = use_signal(|| 0.0f32);
 
     let fx_band = if fx.values().any(|c| !c.is_empty()) {
         FX_BAND_H
@@ -142,6 +148,7 @@ pub fn MainWindowPreview(
                                             key: "{tracks[i].guid}",
                                             track: tracks[i].clone(),
                                             index: i as u32,
+                                            depth: crate::components::arrangement_view::folder_depths(&tracks)[i],
                                         }
                                     },
                                     ArrangeRowKind::EnvelopeLane { track, lane } => {
@@ -169,6 +176,8 @@ pub fn MainWindowPreview(
                             width: arrange_w,
                             height: middle_h,
                             bpm,
+                            play_position: cursor_position,
+                            edit_position: cursor_position,
                         }
                     }
 

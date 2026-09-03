@@ -62,12 +62,27 @@ pub fn TrackRow(
     /// them at all.
     #[props(default = ROW_H)]
     height: f32,
+    /// REAPER-style folder nesting depth (0 = top level) — see
+    /// `arrangement_view::folder_depths`. Shifts the pin/folder-glyph/
+    /// name-field cluster right and narrows the name field by the same
+    /// amount, so deeper tracks read as nested without moving the knobs/
+    /// meter/mute/solo, which stay at their measured absolute positions.
+    #[props(default)]
+    depth: u32,
+    /// Local j/k selection cursor (`arrangement_view`'s own — not a
+    /// REAPER-style DAW-level selection). Draws an accent outline.
+    #[props(default)]
+    selected: bool,
 ) -> Element {
     // The store first, the prop as the seed — see `use_live_track`.
     let row_h = height;
     let live = use_live_track(&track);
     let live = live.read();
     let track = live.as_ref().unwrap_or(&track);
+    // Per REAPER level. Modest — the name field is the thing that
+    // shrinks to make room, and it isn't wide to begin with.
+    const INDENT_PX: f32 = 10.0;
+    let indent = depth as f32 * INDENT_PX;
 
     let theme = daw_theme::Theme::default();
     let tint = track
@@ -106,11 +121,17 @@ pub fn TrackRow(
         SOLO_TOP + 20.0 + 2.0
     };
 
+    let selection_ring = if selected {
+        format!("box-shadow: inset 0 0 0 2px {};", theme.chrome.accent.css())
+    } else {
+        String::new()
+    };
+
     rsx! {
         div {
             class: "relative shrink-0",
             style: "position:relative; width:{ROW_W}px; height:{row_h + 1.0}px; \
-                    border-bottom:1px solid {rule};",
+                    border-bottom:1px solid {rule}; {selection_ring}",
 
             // The track colour is the row: REAPER tints the whole panel,
             // not a stripe on it. It stops at the gutter.
@@ -131,21 +152,25 @@ pub fn TrackRow(
             // darkening the input combo gets — so they read as pressed
             // into the panel rather than printed on it.
             div {
-                style: "position:absolute; left:0; top:0; width:3px; height:{row_h}px; \
+                style: "position:absolute; left:0; top:0; width:{3.0 + indent}px; height:{row_h}px; \
                         background:#323232;",
             }
             div {
-                style: "position:absolute; left:{COLUMN_RULE_X}px; top:0; \
+                style: "position:absolute; left:{COLUMN_RULE_X + indent}px; top:0; \
                         width:1px; height:{row_h}px; background:{combo};",
             }
             // At (7,5): the pushpin's 11x11 box carries the needle's
             // corner, so it sits a pixel up and left of where the old
             // 9x9 star did to keep the head on the same spot.
-            div { style: "position:absolute; left:7px; top:5px;",
+            div { style: "position:absolute; left:{7.0 + indent}px; top:5px;",
                 art::TrackPin { colour: combo.clone() }
             }
-            div { style: "position:absolute; left:7px; top:{row_h - 10.0}px;",
-                art::TrackFolder { colour: combo.clone() }
+            // Only an actual folder-start track gets the folder glyph —
+            // it used to draw on every row regardless of `is_folder`.
+            if track.is_folder {
+                div { style: "position:absolute; left:{7.0 + indent}px; top:{row_h - 10.0}px;",
+                    art::TrackFolder { colour: combo.clone() }
+                }
             }
 
             // The row's right edge, which REAPER closes with a dark column
@@ -159,7 +184,7 @@ pub fn TrackRow(
             // The track number, between them.
             div {
                 class: "absolute font-mono",
-                style: "position:absolute; left:9px; top:{row_h / 2.0 - 8.0}px; \
+                style: "position:absolute; left:{9.0 + indent}px; top:{row_h / 2.0 - 8.0}px; \
                         font-size:11px; line-height:16px; color:{index_ink};",
                 "{index + 1}"
             }
@@ -178,17 +203,17 @@ pub fn TrackRow(
             // line instead, the arm and the knob had grey gutters either
             // side of them that REAPER does not have.
             div {
-                style: "position:absolute; left:{NAME_FIELD_X}px; top:{ROW_ONE}px; \
-                        width:{NAME_FIELD_W}px; height:{NAME_FIELD_H}px; \
+                style: "position:absolute; left:{NAME_FIELD_X + indent}px; top:{ROW_ONE}px; \
+                        width:{(NAME_FIELD_W - indent).max(0.0)}px; height:{NAME_FIELD_H}px; \
                         background:{field}; \
                         border-radius:{NAME_FIELD_H / 2.0}px 0 0 {NAME_FIELD_H / 2.0}px;",
             }
-            div { style: "position:absolute; left:{NAME_FIELD_X + 2.0}px; top:7px;",
+            div { style: "position:absolute; left:{NAME_FIELD_X + indent + 2.0}px; top:7px;",
                 RecordArmButton { track: track.guid.clone(), panel: Panel::Track }
             }
             div {
-                style: "position:absolute; left:58px; top:{ROW_ONE}px; \
-                        width:{NAME_FIELD_X + NAME_FIELD_W - 58.0}px; \
+                style: "position:absolute; left:{58.0 + indent}px; top:{ROW_ONE}px; \
+                        width:{(NAME_FIELD_X + NAME_FIELD_W - 58.0 - indent).max(0.0)}px; \
                         height:{NAME_FIELD_H}px; \
                         line-height:{NAME_FIELD_H}px; font-size:11.5px; \
                         color:{name_ink}; white-space:nowrap; overflow:hidden; \
