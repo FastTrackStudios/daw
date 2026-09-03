@@ -22,6 +22,7 @@ use crate::audio_engine::render::ProjectRenderer;
 use crate::transport_engine::TransportShared;
 
 /// The duplex node name (how it appears in the PipeWire graph / patchbays).
+/// Default graph node name, when `AudioIoPrefs::node_name` is empty.
 const NODE_NAME: &str = "FTS-Signal";
 
 /// A live audio engine driven by a native PipeWire duplex `pw_filter`.
@@ -137,8 +138,16 @@ impl DuplexAudioEngine {
         } else {
             in_channels
         };
+        // One process can run several engines (guitar rig + keys rig), and the
+        // linker matches ports by name — so the name must be per-engine, not a
+        // constant. Empty prefs keep the historical name.
+        let node_name = if prefs.node_name.is_empty() {
+            NODE_NAME.to_string()
+        } else {
+            prefs.node_name.clone()
+        };
         let cfg = DuplexConfig {
-            name: NODE_NAME.into(),
+            name: node_name.clone(),
             inputs: in_ports,
             outputs: out_ports,
             latency: Some((buffer, sample_rate)),
@@ -247,7 +256,12 @@ struct LinkPass {
 /// Idempotently (re-)establish every expected link for this engine's device
 /// prefs. `Exists` = healthy, `Created` = it was missing and came back (device
 /// re-enumerated / first appearance), `Failed` = the port is gone.
-fn link_pass(input: Option<&str>, output: Option<&str>, in_channels: usize) -> LinkPass {
+fn link_pass(
+    input: Option<&str>,
+    output: Option<&str>,
+    in_channels: usize,
+    node_name: &str,
+) -> LinkPass {
     use daw_audio_io::pw::LinkStatus;
     fn run(pass: &mut LinkPass, src: &str, dst: &str) {
         pass.total += 1;
@@ -261,34 +275,45 @@ fn link_pass(input: Option<&str>, output: Option<&str>, in_channels: usize) -> L
         }
     }
     let mut pass = LinkPass::default();
-    if let Some(name) = input {
-        if let Some(dev) = pw::device_node_name(name, true) {
+    // An absent name means "system default" (see `AudioIoPrefs`), not "do not
+    // link" — resolve it rather than silently wiring nothing. That distinction
+    // is the difference between a rig that plays and one that runs perfectly
+    // into a disconnected graph, meters dead, in total silence.
+    let in_dev = match input {
+        Some(n) => pw::device_node_name(n, true),
+        None => pw::default_device_node_name(true),
+    };
+    let out_dev = match output {
+        Some(n) => pw::device_node_name(n, false),
+        None => pw::default_device_node_name(false),
+    };
+    match in_dev {
+        Some(dev) => {
             for c in 0..in_channels {
                 run(
                     &mut pass,
                     &format!("{dev}:capture_{}", c + 1),
-                    &format!("{NODE_NAME}:input_{c}"),
+                    &format!("{node_name}:input_{c}"),
                 );
             }
-        } else {
-            pass.total += in_channels; // device node absent — all its links count as down
         }
+        // Device node absent — all its links count as down.
+        None => pass.total += in_channels,
     }
-    if let Some(name) = output {
-        if let Some(dev) = pw::device_node_name(name, false) {
+    match out_dev {
+        Some(dev) => {
             run(
                 &mut pass,
-                &format!("{NODE_NAME}:output_0"),
+                &format!("{node_name}:output_0"),
                 &format!("{dev}:playback_1"),
             );
             run(
                 &mut pass,
-                &format!("{NODE_NAME}:output_1"),
+                &format!("{node_name}:output_1"),
                 &format!("{dev}:playback_2"),
             );
-        } else {
-            pass.total += 2;
         }
+        None => pass.total += 2,
     }
     pass
 }
@@ -306,6 +331,13 @@ fn spawn_linker(
     stop: Arc<AtomicBool>,
     stats: Arc<EngineStats>,
 ) {
+    // Must match the name the backend registered, or the linker hunts for
+    // ports that do not exist and the node plays to nothing.
+    let node_name = if prefs.node_name.is_empty() {
+        NODE_NAME.to_string()
+    } else {
+        prefs.node_name.clone()
+    };
     const WATCH_INTERVAL: Duration = Duration::from_millis(1500);
     /// Startup cadence, until the duplex node's own ports appear in the graph.
     const STARTUP_INTERVAL: Duration = Duration::from_millis(100);
@@ -325,9 +357,13 @@ fn spawn_linker(
         .output_name()
         .or(prefs.input_name())
         .map(str::to_string);
-    if input.is_none() && output.is_none() {
-        return; // nothing to link or watch
-    }
+    // NOTE: no early return when both names are empty. Empty means "system
+    // default" (see `AudioIoPrefs`), which is the NORMAL case for an
+    // instrument that just wants to be heard — the keys rig passes exactly
+    // that. Returning here left its node in the graph with ports and no
+    // links: audio running perfectly into nothing, meters dead, and nothing
+    // logged to say so. `link_pass` resolves the defaults per pass, so the
+    // watchdog also follows the default device when the user changes it.
     std::thread::spawn(move || {
         let mut was_linked = false;
         let mut ever_linked = false;
@@ -369,7 +405,7 @@ fn spawn_linker(
                 dead_passes = 0;
             }
 
-            let pass = link_pass(input.as_deref(), output.as_deref(), in_channels);
+            let pass = link_pass(input.as_deref(), output.as_deref(), in_channels, &node_name);
             let now_linked = pass.live == pass.total;
             if now_linked && !was_linked {
                 if ever_linked {

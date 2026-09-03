@@ -32,6 +32,16 @@ pub struct AudioIoPrefs {
     /// DAW playback); `true` = duplex (live monitoring needs the input).
     #[facet(default)]
     pub want_input: bool,
+    /// Graph node name for the native (PipeWire) backend. Empty = the engine's
+    /// default.
+    ///
+    /// This has to be settable because a process can run more than one engine
+    /// — the guitar rig and the keys rig both open one — and the linker finds
+    /// its ports BY NAME. Two engines sharing a name means the second node
+    /// never gets linked to the device and plays to nothing: audible as "the
+    /// UI is fine, the meters are dead".
+    #[facet(default)]
+    pub node_name: String,
     /// Output routing (0-based channel indices). `main_out` is where the
     /// stereo master lands (default 0/1). When `phones_out` differs from
     /// `main_out`, a second stereo bus is written there: master (scaled by

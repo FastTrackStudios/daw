@@ -1,0 +1,18 @@
+[package]
+name = "midicore-pipewire"
+version.workspace = true
+edition = "2021"          # matches the rest of midicore
+authors.workspace = true
+license.workspace = true
+description = "Native PipeWire MIDI input backend for midicore — ONE graph node with ONE merged MIDI port, no JACK shim."
+
+[dependencies]
+midicore-proto.workspace = true
+pipewire = "0.10"
+libspa = "0.10"
+libspa-sys = "0.10"
+eyre = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

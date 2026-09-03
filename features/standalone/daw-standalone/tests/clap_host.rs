@@ -387,3 +387,84 @@ fn loads_real_plugin_and_inspects_params() {
         );
     }
 }
+
+/// A plugin that declares a side chain must be given a buffer for it.
+///
+/// This is the regression test for the fault that made FabFilter's Pro-C
+/// unusable through this host. `process_block` built a single-port input list
+/// while Pro-C declares two input ports, so the plugin indexed past the end of
+/// the array it was handed and dereferenced whatever followed — the observed
+/// crash address decoded to the ASCII of its own `"Side Chain"` port name.
+///
+/// It is undefined behaviour, so the symptom was platform-dependent and
+/// intermittent: a `SIGSEGV` roughly two runs in three on native macOS, and
+/// silence, reliably, through yabridge on Linux. That is why the test renders
+/// repeatedly rather than once — a single clean block proved nothing, and this
+/// failed about as often as it passed before the fix.
+///
+/// Set `DAW_TEST_CLAP_MULTIPORT_BUNDLE` to a plugin declaring more than one
+/// input port (any Pro-C, Pro-MB, Pro-DS, or any compressor with an external
+/// side chain). Skipped otherwise, since it needs a plugin CI does not have.
+#[test]
+fn a_plugin_declaring_a_side_chain_renders_without_reading_past_its_ports() {
+    let Some(path) = std::env::var_os("DAW_TEST_CLAP_MULTIPORT_BUNDLE") else {
+        eprintln!(
+            "(skip) set DAW_TEST_CLAP_MULTIPORT_BUNDLE to a .clap bundle \
+             declaring >1 input port to exercise this test"
+        );
+        return;
+    };
+    let host = ClapHost::default();
+    let mut plugin = host.load(&PathBuf::from(path), 0).expect("plugin should load");
+
+    let (inputs, outputs) = plugin.audio_port_count();
+    assert!(
+        inputs > 1,
+        "this test needs a plugin with more than one input port; got {inputs} in / {outputs} out"
+    );
+
+    const BLOCK: usize = 512;
+    plugin.prepare(48_000.0, BLOCK as u32).expect("prepare");
+
+    // The invariant, asserted directly. A render-and-check test is not enough
+    // on its own: the old single-port list produced *silence* on Linux rather
+    // than a fault, so 64 clean blocks prove nothing there. These two do,
+    // on every platform.
+    assert_eq!(
+        plugin.prepared_port_counts(),
+        Some((inputs as usize, outputs as usize)),
+        "the host must prepare a buffer list matching what the plugin declares"
+    );
+    assert_eq!(
+        plugin.aux_buffer_counts(),
+        Some(((inputs as usize - 1) * 2, (outputs as usize - 1) * 2)),
+        "two channels must be held for every port beyond the main bus"
+    );
+
+    // A quarter-scale tone, loud enough to drive a compressor's detector so
+    // the side-chain path is actually walked rather than skipped on silence.
+    let in_l: Vec<f32> = (0..BLOCK)
+        .map(|i| 0.25 * (i as f32 * 0.05).sin())
+        .collect();
+    let in_r = in_l.clone();
+    let mut out_l = vec![0.0f32; BLOCK];
+    let mut out_r = vec![0.0f32; BLOCK];
+
+    let events = daw_standalone::plugin::PluginEvents {
+        params: &[],
+        midi: &[],
+        note_expressions: &[],
+    };
+
+    for block in 0..64 {
+        plugin
+            .process_block(&in_l, &in_r, &mut out_l, &mut out_r, &events)
+            .unwrap_or_else(|e| panic!("block {block} failed: {e:?}"));
+        assert!(
+            out_l.iter().chain(out_r.iter()).all(|v| v.is_finite()),
+            "block {block} produced a non-finite sample"
+        );
+    }
+    plugin.deactivate();
+    eprintln!("rendered 64 blocks through a plugin with {inputs} input / {outputs} output ports");
+}

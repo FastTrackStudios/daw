@@ -554,6 +554,17 @@ struct ActivationGuard {
     /// allocate on the hot path. Length = block_size.
     scratch_l: Vec<f32>,
     scratch_r: Vec<f32>,
+    /// How many audio ports the plugin declared, captured at activation.
+    /// Never zero — see `prepare`.
+    input_ports: usize,
+    output_ports: usize,
+    /// Two channels per *auxiliary* port, so every port the plugin
+    /// declared is handed a real buffer. Inputs stay silent (nothing is
+    /// routed to a side chain here); outputs are written and discarded.
+    /// Both are allocated at activation, so `process_block` still does not
+    /// allocate on the hot path.
+    aux_in: Vec<Vec<f32>>,
+    aux_out: Vec<Vec<f32>>,
 }
 
 impl LoadedClapPlugin {
@@ -617,6 +628,25 @@ impl LoadedClapPlugin {
 
     /// Plugin's reported latency (in samples). 0 if `clap_plugin_latency`
     /// isn't implemented.
+    /// The port counts this plugin was *prepared* with, or `None` if it is
+    /// not activated.
+    ///
+    /// Exposed so the invariant behind the side-chain fix is testable without
+    /// a plugin that crashes when it is violated: on Linux the old
+    /// single-port buffer list produced silence rather than a fault, so a
+    /// render-and-check test passes there whether or not the bug is present.
+    /// Comparing this against [`Self::audio_port_count`] is platform
+    /// independent and fails loudly the moment the two disagree.
+    pub fn prepared_port_counts(&self) -> Option<(usize, usize)> {
+        self.activation.as_ref().map(|a| (a.input_ports, a.output_ports))
+    }
+
+    /// How many auxiliary channel buffers are held for the ports beyond the
+    /// main bus — two per auxiliary port, inputs and outputs counted apart.
+    pub fn aux_buffer_counts(&self) -> Option<(usize, usize)> {
+        self.activation.as_ref().map(|a| (a.aux_in.len(), a.aux_out.len()))
+    }
+
     /// Number of audio I/O ports the plugin advertises.
     /// `(input_count, output_count)`. Defaults to `(1, 1)` (single
     /// stereo bus each side) if the plugin doesn't implement the
@@ -933,6 +963,25 @@ impl LoadedClapPlugin {
             // (drop + redo so sample rate / block size can change).
             self.deactivate();
         }
+        // How many audio ports does this plugin actually declare? Asked
+        // before activation, because activating borrows the instance.
+        //
+        // This matters far more than it looks. A host that passes fewer port
+        // buffers than the plugin declares is not merely withholding audio:
+        // the plugin indexes the array it was promised and reads past the end
+        // of the one it got. FabFilter's Pro-C declares a side-chain input
+        // beside its main bus, and against a single-port list it dereferenced
+        // whatever followed in memory — the observed crash address decoded to
+        // the ASCII of its own "Side Chain" port name. It is undefined
+        // behaviour, so it presented as a segfault on macOS and as silence
+        // through yabridge on Linux, which is why it read for a long time as
+        // two unrelated faults.
+        let (input_ports, output_ports) = self.audio_port_count();
+        // Never zero: a plugin reporting no ports still gets the main bus,
+        // which is what the pre-`audio-ports` default has always been.
+        let input_ports = (input_ports as usize).max(1);
+        let output_ports = (output_ports as usize).max(1);
+
         let config = PluginAudioConfiguration {
             sample_rate,
             min_frames_count: 1,
@@ -951,6 +1000,10 @@ impl LoadedClapPlugin {
             block_size,
             scratch_l: vec![0.0; block_size as usize],
             scratch_r: vec![0.0; block_size as usize],
+            input_ports,
+            output_ports,
+            aux_in: vec![vec![0.0; block_size as usize]; (input_ports - 1) * 2],
+            aux_out: vec![vec![0.0; block_size as usize]; (output_ports - 1) * 2],
         });
         Ok(())
     }
@@ -974,6 +1027,8 @@ impl LoadedClapPlugin {
         if frames > act.block_size as usize {
             return Err(ClapHostError::BlockTooLarge);
         }
+
+        let (n_in, n_out) = (act.input_ports, act.output_ports);
 
         // Copy inputs into scratch (clack wants mutable input slices
         // even for read-only channels).
@@ -1007,12 +1062,16 @@ impl LoadedClapPlugin {
         }
         let mut output_events = EventBuffer::new();
 
-        let mut input_ports = AudioPorts::with_capacity(2, 1);
-        let mut output_ports = AudioPorts::with_capacity(2, 1);
+        let mut input_ports = AudioPorts::with_capacity(2, n_in);
+        let mut output_ports = AudioPorts::with_capacity(2, n_out);
 
-        let inputs = input_ports.with_input_buffers([AudioPortBuffer {
+        // The main bus, then one buffer for every auxiliary port the plugin
+        // declared. Handing over fewer than it declared is what corrupted
+        // memory before — see `prepare`.
+        let mut in_bufs = Vec::with_capacity(n_in);
+        in_bufs.push(AudioPortBuffer {
             latency: 0,
-            channels: AudioPortBufferType::f32_input_only([
+            channels: AudioPortBufferType::f32_input_only(vec![
                 InputChannel {
                     buffer: scratch_l_full,
                     is_constant: false,
@@ -1022,14 +1081,62 @@ impl LoadedClapPlugin {
                     is_constant: false,
                 },
             ]),
-        }]);
-        let mut outputs = output_ports.with_output_buffers([AudioPortBuffer {
+        });
+        // Auxiliary inputs are fed silence and flagged constant, which is
+        // exactly what a host reports when nothing is routed to a side chain.
+        // The flag is not cosmetic: a compressor reading a constant-zero side
+        // chain can take its "no external input" path instead of detecting on
+        // digital black.
+        let mut aux = act.aux_in.iter_mut();
+        for _ in 1..n_in {
+            let (Some(l), Some(r)) = (aux.next(), aux.next()) else {
+                break;
+            };
+            let (l, r) = (&mut l[..frames], &mut r[..frames]);
+            // Re-silence: a plugin is free to scribble on its input buffers.
+            l.fill(0.0);
+            r.fill(0.0);
+            in_bufs.push(AudioPortBuffer {
+                latency: 0,
+                channels: AudioPortBufferType::f32_input_only(vec![
+                    InputChannel {
+                        buffer: l,
+                        is_constant: true,
+                    },
+                    InputChannel {
+                        buffer: r,
+                        is_constant: true,
+                    },
+                ]),
+            });
+        }
+        let inputs = input_ports.with_input_buffers(in_bufs);
+
+        let mut out_bufs = Vec::with_capacity(n_out);
+        out_bufs.push(AudioPortBuffer {
             latency: 0,
-            channels: AudioPortBufferType::f32_output_only([
+            channels: AudioPortBufferType::f32_output_only(vec![
                 &mut out_l[..frames],
                 &mut out_r[..frames],
             ]),
-        }]);
+        });
+        // Auxiliary outputs still need somewhere to land. Nothing reads them
+        // back — this host returns the main bus — but the plugin will write
+        // to them, and it must be into a buffer we own.
+        let mut aux = act.aux_out.iter_mut();
+        for _ in 1..n_out {
+            let (Some(l), Some(r)) = (aux.next(), aux.next()) else {
+                break;
+            };
+            out_bufs.push(AudioPortBuffer {
+                latency: 0,
+                channels: AudioPortBufferType::f32_output_only(vec![
+                    &mut l[..frames],
+                    &mut r[..frames],
+                ]),
+            });
+        }
+        let mut outputs = output_ports.with_output_buffers(out_bufs);
 
         let in_evs = input_events.as_input();
         let mut out_evs = output_events.as_output();

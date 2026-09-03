@@ -30,6 +30,7 @@ members = [
     "crates/kontrol/kontrol",
     "crates/midicore/midicore",
     "crates/midicore/midicore-midir",
+    "crates/midicore/midicore-pipewire",
     "crates/midicore/midicore-proto",
     "crates/midicore/midicore-ui",
     "features/align/align-dsp",
@@ -153,6 +154,7 @@ meter-ui = { path = "crates/audiocore/meter-ui" }
 midicore = { path = "crates/midicore/midicore", default-features = false }
 midicore-proto = { path = "crates/midicore/midicore-proto" }
 midicore-midir = { path = "crates/midicore/midicore-midir" }
+midicore-pipewire = { path = "crates/midicore/midicore-pipewire" }
 midicore-ui = { path = "crates/midicore/midicore-ui" }
 # NI Komplete Kontrol keyboard driver (Light Guide / per-key RGB LEDs).
 kontrol = { path = "crates/kontrol/kontrol" }
