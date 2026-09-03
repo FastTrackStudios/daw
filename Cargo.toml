@@ -339,15 +339,15 @@ inferno-net = { git = "https://codeberg.org/FastTrackStudios/inferno-control", r
 # (FastTrackStudios/architect: the entity/RPC framework, the auth/crdt/
 # permissions stack, architect-ui + architect-story, architect-telemetry).
 # One tag pin shared by every entry so the whole framework moves together.
-architect = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
-architect-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
-architect-rpc-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
-architect-action-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
-architect-atom = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
-architect-form = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
-architect-permissions = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
-architect-permissions-proto = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
-architect-auth = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
+architect = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
+architect-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
+architect-rpc-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
+architect-action-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
+architect-atom = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
+architect-form = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
+architect-permissions = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
+architect-permissions-proto = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
+architect-auth = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
 auth = { git = "https://github.com/FastTrackStudios/architect", rev = "5e4bb829674fe8b2d3527c3b65b9ab3a2b6baa86" }
 auth-proto = { git = "https://github.com/FastTrackStudios/architect", rev = "5e4bb829674fe8b2d3527c3b65b9ab3a2b6baa86" }
 auth-db = { git = "https://github.com/FastTrackStudios/architect", rev = "5e4bb829674fe8b2d3527c3b65b9ab3a2b6baa86" }
@@ -356,23 +356,23 @@ crdt = { git = "https://github.com/FastTrackStudios/architect", rev = "5e4bb8296
 crdt-derive = { git = "https://github.com/FastTrackStudios/architect", rev = "5e4bb829674fe8b2d3527c3b65b9ab3a2b6baa86" }
 crdt-seaorm = { git = "https://github.com/FastTrackStudios/architect", rev = "5e4bb829674fe8b2d3527c3b65b9ab3a2b6baa86" }
 # The Dioxus primitive library (was libs/ui/fts-ui, renamed on the split).
-architect-ui = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
+architect-ui = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
 # The launcher engine, vendored into architect in v0.2.0 (was
 # launcher-core / launcher-ui / providers on dioxus-launcher.git).
-architect-launcher-core = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
+architect-launcher-core = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
 # default-features = false lives here, not on the consumer: cargo refuses
 # `default-features = false` on a workspace-inherited dep.
-architect-launcher-ui = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
-architect-launcher-providers = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
+architect-launcher-ui = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
+architect-launcher-providers = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
 # Wide-events telemetry (was crates/task/telemetry).
-architect-telemetry = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
+architect-telemetry = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
 # Story/snapshot tooling (was libs/fts-story/*).
-architect-story-core = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
-architect-story-macros = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
-architect-story-runtime = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
-architect-story-shell = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
-architect-story-snapshots = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
-architect-story-parity = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.0.2" }
+architect-story-core = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
+architect-story-macros = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
+architect-story-runtime = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
+architect-story-shell = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
+architect-story-snapshots = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
+architect-story-parity = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.1" }
 
 # Architect's externals, merged from its dissolved workspace table
 # (root pins win — both were already on the rc.5 fleet).
@@ -464,8 +464,8 @@ swell-ui = { git = "https://codeberg.org/FastTrackStudios/reaper-lib.git", branc
 
 # ── Plugin frameworks / hosting (daw) ─────────────────────────────────
 nih_plug = { git = "https://codeberg.org/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
-clack-host = { git = "https://github.com/prokopyl/clack" }
-clack-extensions = { git = "https://github.com/prokopyl/clack", features = [
+clack-host = { git = "https://github.com/prokopyl/clack", rev = "f874e858ad576c601367b3038af5088a4e671744" }
+clack-extensions = { git = "https://github.com/prokopyl/clack", rev = "f874e858ad576c601367b3038af5088a4e671744", features = [
     "clack-host",
     # Bridge host windows (winit 0.30) into CLAP embedded GUIs (fts-clap-host).
     "raw-window-handle_06",
@@ -684,6 +684,14 @@ vox-codegen = "0.10.0-rc.5"
 # architect-ui. Nothing resolves a crate named `fts-ui` any more.
 
 [patch.crates-io]
+# Vendored one-line fix: parse_schema_bytes rejected every real schema
+# exchange with "schema decode consumed N of M bytes" — it compared
+# phon_schema::schema_from_bytes's owned-allocation byte count (added in
+# 0.2.0-rc.6) against the encoded slice length, two unrelated numbers.
+# schema_from_bytes already guarantees full-slice consumption internally.
+# Surfaced by the architect v0.7.1 bump (which pulls vox). Drop the
+# vendor once upstream removes/fixes the check. See vendor's README.
+vox-phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.3.0" }
 # baseview from the FTS fork (upstream v0.3 + one fix): the macOS frame timer
 # is registered in kCFRunLoopCommonModes rather than kCFRunLoopDefaultMode.
 # AppKit runs the run loop modally for the whole of a live window resize, so a
@@ -740,22 +748,18 @@ blitz-html = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd23
 # them, so serialized keybind configs (`keys "<C-s>"`) could not be
 # re-parsed. Drop the vendor once upstream fixes can_be_bare.
 styx-format = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.1.0" }
-# Vendored phon rc.5 + derive support for parse/display opaque scalars
-# (Uuid, chrono DateTime/NaiveDate, url, …). Upstream rc.5 PANICS (and the
-# reply path aborts the process) the first time a vox RPC reply contains
-# such a field — every task-server list/stats call died. Drop the vendor
-# once upstream phon derives these scalars.
-phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.1.0" }
-# Vendored phon-jit rc.5 with a one-line build.rs fix: force the stable,
-# call-based stencils. Upstream's nightly detection can be true while no real
-# nightly is present (the pinned nix toolchain), so it compiled the `become`
-# (explicit tail calls) stencils on stable rustc 1.94 → E0658, breaking the
-# macOS-aarch64 build. Drop the vendor once phon-jit builds on stable.
-phon-jit = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.1.0" }
-# Editor's vendored mermaid-rs-renderer fork (web_time::Instant so the
-# layouter works on wasm32). It moved out with the Editor stack — it is a
-# member of the task repo's workspace at libs/editor/vendor/.
-mermaid-rs-renderer = { git = "https://github.com/FastTrackStudios/task", branch = "main" }
+# phon/phon-jit vendor patches (both rc.5) are gone — architect v0.7.1
+# needs phon rc.7, and pinning the vendor fork behind that split the
+# graph into two incompatible phon copies (a real wire-format break, not
+# just a version number: schema-exchange decode failed cross-copy).
+# Testing whether rc.7 already carries the two upstream fixes the vendor
+# existed for (opaque-scalar derive panic; phon-jit's nightly-detection
+# false positive compiling `become` stencils on stable, breaking
+# macOS-aarch64) — if not, this needs a new vendor tag off rc.7 instead.
+# mermaid-rs-renderer's patch died 2026-09: task moved it out again, into
+# its own `editor` repo (consumed there as `editor-mermaid`, tag v0.0.3) —
+# it now arrives as an ordinary transitive dep of `editor`/`editor-keyflow`,
+# same as task's own [patch] table no longer needs to redirect it either.
 
 # ── Lints — merged union of the dissolved workspaces' policies ─────────
 [workspace.lints.rust]
