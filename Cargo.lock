@@ -5015,7 +5015,7 @@ dependencies = [
  "facet-core",
  "facet-path",
  "hashbrown 0.17.1",
- "smallvec 2.0.0-alpha.12",
+ "smallvec 2.0.0-alpha.13",
 ]
 
 [[package]]
@@ -11745,9 +11745,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "2.0.0-alpha.12"
+version = "2.0.0-alpha.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef784004ca8777809dcdad6ac37629f0a97caee4c685fcea805278d81dd8b857"
+checksum = "ce56585dbefaf71c9723e9a269fa65227bdcdbb6fd2f3ef50d264c65e067c648"
 
 [[package]]
 name = "smithay-client-toolkit"
@@ -14004,8 +14004,7 @@ dependencies = [
 [[package]]
 name = "vox-phon"
 version = "0.10.0-rc.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f8e7bba8590e42c1faea2b137edfcb4b11376c69104f50aafc7b00d0b2b64c0"
+source = "git+https://github.com/FastTrackStudios/vendor?tag=v0.3.0#2db28e4e760b195e23d5c3b2eda7d05e16b65e26"
 dependencies = [
  "facet",
  "phon",
@@ -15966,13 +15965,3 @@ checksum = "29ce2c8a9384ad323cf564b67da86e21d3cfdff87908bc1223ed5c99bc792713"
 dependencies = [
  "zune-core",
 ]
-
-[[patch.unused]]
-name = "phon"
-version = "0.2.0-rc.5"
-source = "git+https://github.com/FastTrackStudios/vendor?tag=v0.1.0#85c1a4b85a316b39a61c156127d61c05bf25fd9f"
-
-[[patch.unused]]
-name = "phon-jit"
-version = "0.2.0-rc.5"
-source = "git+https://github.com/FastTrackStudios/vendor?tag=v0.1.0#85c1a4b85a316b39a61c156127d61c05bf25fd9f"
