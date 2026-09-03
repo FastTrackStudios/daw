@@ -56,8 +56,7 @@ static CLIENT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::
 /// that port enumeration itself became unreliable.
 ///
 /// Off by default, so nothing changes for existing callers.
-static SHARED_CLIENT: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static SHARED_CLIENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Opt into one shared OS client name for every subsequent connection.
 ///

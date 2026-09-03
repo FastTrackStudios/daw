@@ -130,6 +130,17 @@ pub fn MixerPanel(
                 // The same measurement arrange_view takes: the strips are
                 // drawn — and collapsed — at the row's real height, not at
                 // a number chosen before the dock existed.
+                // `onmounted` gives the initial height; `onresize` (a real
+                // ResizeObserver) keeps it current as the window/dock
+                // resizes afterwards — matching the arrangement view's fix
+                // for the same staleness.
+                onresize: move |evt| {
+                    if let Ok(size_box) = evt.get_content_box_size() {
+                        if size_box.height > 0.0 {
+                            measured_h.set(Some(size_box.height as f32));
+                        }
+                    }
+                },
                 onmounted: move |evt| {
                     spawn(async move {
                         if let Ok(rect) = evt.get_client_rect().await {

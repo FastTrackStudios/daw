@@ -473,9 +473,7 @@ impl StreamedSample {
                     .chunks
                     .iter()
                     .enumerate()
-                    .filter(|(i, slot)| {
-                        slot.load().is_some() && !pinned.contains_key(&(*i as u32))
-                    })
+                    .filter(|(i, slot)| slot.load().is_some() && !pinned.contains_key(&(*i as u32)))
                     .map(|(i, _)| (i as u32, used.get(&(i as u32)).copied().unwrap_or(0)))
                     .collect();
                 by_age.sort_by_key(|(_, t)| *t);
