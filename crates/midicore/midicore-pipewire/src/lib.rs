@@ -498,7 +498,8 @@ where
     // after `connect`, so a purely event-driven reconcile can settle one pass
     // too early.
     let _timer = {
-        let (state, dirty, core, linked) = (state.clone(), dirty.clone(), core.clone(), linked.clone());
+        let (state, dirty, core, linked) =
+            (state.clone(), dirty.clone(), core.clone(), linked.clone());
         let stream = stream.clone();
         let timer = mainloop.loop_().add_timer(move |_| {
             if dirty.replace(false) {
@@ -766,7 +767,10 @@ mod tests {
     /// the old backend selects the same device on this one.
     #[test]
     fn a_named_selector_matches_a_substring_case_insensitively() {
-        assert!(wants(&PortSelector::NameContains("kontrol s88".into()), S88));
+        assert!(wants(
+            &PortSelector::NameContains("kontrol s88".into()),
+            S88
+        ));
         assert!(!wants(&PortSelector::NameContains("mioXM".into()), S88));
     }
 

@@ -415,7 +415,9 @@ fn a_plugin_declaring_a_side_chain_renders_without_reading_past_its_ports() {
         return;
     };
     let host = ClapHost::default();
-    let mut plugin = host.load(&PathBuf::from(path), 0).expect("plugin should load");
+    let mut plugin = host
+        .load(&PathBuf::from(path), 0)
+        .expect("plugin should load");
 
     let (inputs, outputs) = plugin.audio_port_count();
     assert!(
@@ -443,9 +445,7 @@ fn a_plugin_declaring_a_side_chain_renders_without_reading_past_its_ports() {
 
     // A quarter-scale tone, loud enough to drive a compressor's detector so
     // the side-chain path is actually walked rather than skipped on silence.
-    let in_l: Vec<f32> = (0..BLOCK)
-        .map(|i| 0.25 * (i as f32 * 0.05).sin())
-        .collect();
+    let in_l: Vec<f32> = (0..BLOCK).map(|i| 0.25 * (i as f32 * 0.05).sin()).collect();
     let in_r = in_l.clone();
     let mut out_l = vec![0.0f32; BLOCK];
     let mut out_r = vec![0.0f32; BLOCK];

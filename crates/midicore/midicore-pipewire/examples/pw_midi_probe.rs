@@ -34,7 +34,11 @@ fn main() -> eyre::Result<()> {
     println!("linked: {:#?}", input.ports());
     for _ in 0..24 {
         std::thread::sleep(std::time::Duration::from_secs(5));
-        println!("events={} linked={}", count.load(Ordering::Relaxed), input.ports().len());
+        println!(
+            "events={} linked={}",
+            count.load(Ordering::Relaxed),
+            input.ports().len()
+        );
     }
     Ok(())
 }

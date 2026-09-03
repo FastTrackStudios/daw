@@ -638,13 +638,17 @@ impl LoadedClapPlugin {
     /// Comparing this against [`Self::audio_port_count`] is platform
     /// independent and fails loudly the moment the two disagree.
     pub fn prepared_port_counts(&self) -> Option<(usize, usize)> {
-        self.activation.as_ref().map(|a| (a.input_ports, a.output_ports))
+        self.activation
+            .as_ref()
+            .map(|a| (a.input_ports, a.output_ports))
     }
 
     /// How many auxiliary channel buffers are held for the ports beyond the
     /// main bus — two per auxiliary port, inputs and outputs counted apart.
     pub fn aux_buffer_counts(&self) -> Option<(usize, usize)> {
-        self.activation.as_ref().map(|a| (a.aux_in.len(), a.aux_out.len()))
+        self.activation
+            .as_ref()
+            .map(|a| (a.aux_in.len(), a.aux_out.len()))
     }
 
     /// Number of audio I/O ports the plugin advertises.

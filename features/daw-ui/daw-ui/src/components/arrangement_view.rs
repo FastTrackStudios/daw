@@ -19,8 +19,8 @@ use std::collections::HashMap;
 
 use crate::components::tcp::{EnvcpRow, TrackRow};
 use crate::components::toolbars::{
-    KeybindProfile, ModeDropdown, ModeOption, ProfilePicker, RightToolbar,
-    ToolbarAction, TopToolbar,
+    KeybindProfile, ModeDropdown, ModeOption, ProfilePicker, RightToolbar, ToolbarAction,
+    TopToolbar,
 };
 use crate::controls::{use_daw_tracks, use_track_store};
 use crate::prelude::*;
@@ -466,16 +466,13 @@ fn ArrangeCanvas(
     /// worked out how much timeline/track space there is to draw.
     width: f32,
     height: f32,
-    #[props(default = PX_PER_SECOND)]
-    pixels_per_second: f32,
-    #[props(default = daw_theme_art::geometry::tcp::ROW_H)]
-    row_h: f32,
+    #[props(default = PX_PER_SECOND)] pixels_per_second: f32,
+    #[props(default = daw_theme_art::geometry::tcp::ROW_H)] row_h: f32,
     bar_px: f32,
     beat_px: f32,
     draw_beats: bool,
     bars: usize,
-    #[props(default)]
-    on_lane_resize: Option<EventHandler<(String, usize, f32)>>,
+    #[props(default)] on_lane_resize: Option<EventHandler<(String, usize, f32)>>,
     play_position: ReadSignal<f32>,
     edit_position: ReadSignal<f32>,
     /// Fired with an item's guid on plain click (select), or with `None`
@@ -741,7 +738,11 @@ fn ArrangeItem(
     let mark = body.shade(-0.38);
 
     let guid = item.guid.clone();
-    let cursor = if on_click.is_some() { "pointer" } else { "default" };
+    let cursor = if on_click.is_some() {
+        "pointer"
+    } else {
+        "default"
+    };
     rsx! {
         div {
             style: "position:absolute; left:{left}px; top:{top + 1.0}px; \
