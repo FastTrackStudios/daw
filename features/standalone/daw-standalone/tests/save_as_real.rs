@@ -1,8 +1,11 @@
 //! The save-as experiment against the real kit session.
 //!
-//! Skips when the project is not mounted. The written file lands in a
-//! temp dir copy of nothing — it goes beside the original, so this test
-//! deletes what it writes.
+//! Skips when the project is not mounted, or mounted but not writable by
+//! whatever account is running the test (the self-hosted CI runner's
+//! service account is not `cody`, so a personal drive at 0755 is a skip,
+//! not a failure — this test writes beside the original file). The
+//! written file lands in a temp dir copy of nothing — it goes beside the
+//! original, so this test deletes what it writes.
 
 #![cfg(feature = "rpp-save")]
 
@@ -25,10 +28,17 @@ impl Drop for Written {
 // r[verify drums.save.reopens]
 #[test]
 fn the_real_session_saves_byte_identical_and_reopens() {
-    if !std::path::Path::new(RPP).exists() {
+    let dir = std::path::Path::new(RPP).parent().expect("RPP has a parent dir");
+    if !dir.exists() {
         eprintln!("skipping: {RPP} not mounted");
         return;
     }
+    let probe = dir.join(".save_as_real-write-probe");
+    if let Err(e) = std::fs::write(&probe, b"") {
+        eprintln!("skipping: {dir:?} not writable here: {e}");
+        return;
+    }
+    let _ = std::fs::remove_file(&probe);
     let daw = Standalone::new();
     let info = Projects::open(&daw, RPP).expect("open");
 
