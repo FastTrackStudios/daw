@@ -28,7 +28,9 @@ impl Drop for Written {
 // r[verify drums.save.reopens]
 #[test]
 fn the_real_session_saves_byte_identical_and_reopens() {
-    let dir = std::path::Path::new(RPP).parent().expect("RPP has a parent dir");
+    let dir = std::path::Path::new(RPP)
+        .parent()
+        .expect("RPP has a parent dir");
     if !dir.exists() {
         eprintln!("skipping: {RPP} not mounted");
         return;
