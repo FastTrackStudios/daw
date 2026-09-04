@@ -43,7 +43,7 @@ env:
 
 jobs:
   reaper-integration:
-    runs-on: [self-hosted, nix-host]
+    runs-on: [self-hosted, daw]
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
