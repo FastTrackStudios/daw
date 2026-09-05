@@ -464,8 +464,13 @@ swell-ui = { git = "https://codeberg.org/FastTrackStudios/reaper-lib.git", branc
 
 # ── Plugin frameworks / hosting (daw) ─────────────────────────────────
 nih_plug = { git = "https://codeberg.org/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
-clack-host = { git = "https://github.com/prokopyl/clack" }
-clack-extensions = { git = "https://github.com/prokopyl/clack", features = [
+# Pinned by rev. This floated (no rev), so a routine lockfile regeneration
+# downstream pulled clack 0.1.0 -> 0.2.0, which moved the timer callbacks
+# from &mut self to &self and broke this crate's own plugin host. Cargo
+# unifies same-URL git deps to ONE source, so a consumer cannot pin around
+# an unpinned dep here — it has to be pinned at the source.
+clack-host = { git = "https://github.com/prokopyl/clack", rev = "f874e858ad576c601367b3038af5088a4e671744" }
+clack-extensions = { git = "https://github.com/prokopyl/clack", rev = "f874e858ad576c601367b3038af5088a4e671744", features = [
     "clack-host",
     # Bridge host windows (winit 0.30) into CLAP embedded GUIs (fts-clap-host).
     "raw-window-handle_06",
