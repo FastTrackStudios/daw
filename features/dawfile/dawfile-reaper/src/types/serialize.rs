@@ -1058,6 +1058,25 @@ impl RppSerialize for ReaperProject {
             tempo_env.write_rpp(out, &inner);
         }
 
+        // Ruler lanes (v7.62+) — parsed on read (see the RULERLANE/RULERHEIGHT
+        // arms in `decode_property`) but previously dropped on write, so a
+        // lane's display name/color never survived a round trip even though
+        // the markers/regions placed on it (via `MarkerRegion::lane`) did.
+        for lane in &self.ruler_lanes {
+            out.push_str(&format!(
+                "{}RULERLANE {} {} \"{}\" {} {} 0\n",
+                inner,
+                lane.index,
+                lane.flags,
+                rpp_escape(&lane.name),
+                lane.color,
+                lane.extra
+            ));
+        }
+        if let Some((total, secondary)) = self.ruler_height {
+            out.push_str(&format!("{}RULERHEIGHT {} {}\n", inner, total, secondary));
+        }
+
         // Markers and regions
         for marker in &self.markers_regions.all {
             marker.write_marker_line(out, &inner);

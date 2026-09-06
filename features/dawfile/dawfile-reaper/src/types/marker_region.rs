@@ -386,18 +386,32 @@ impl MarkerRegionCollection {
 
                 // Look for pairs where the second marker has an empty name.
                 // When found, the empty-name entry provides the real region end.
-                let mut consumed_end_positions = std::collections::HashSet::new();
+                //
+                // `consumed_positions` tracks BOTH ends of every pair already
+                // formed, and gates the START candidate too, not just the END
+                // search: REAPER supports unnamed regions (an empty `name` on
+                // the *start* line is legitimate, not just something an end
+                // line does), so skipping a start merely for having no name
+                // left every unnamed region unpaired — it never became a
+                // `Region`, just two orphan point markers, each round-tripping
+                // back out as a full malformed entry (missing guid/color on
+                // what should have been the terse end-marker line). What
+                // actually distinguishes "a real start candidate" from "an end
+                // line already spent" is whether it's already been consumed.
+                let mut consumed_positions = std::collections::HashSet::new();
 
                 for i in 0..markers.len() - 1 {
                     let start = &markers[i];
-                    if start.name.is_empty() || (start.flags & 1) == 0 {
+                    if (start.flags & 1) == 0
+                        || consumed_positions.contains(&start.position.to_bits())
+                    {
                         continue;
                     }
 
                     let Some(end) = markers.iter().skip(i + 1).find(|candidate| {
                         candidate.name.is_empty()
                             && candidate.position > start.position
-                            && !consumed_end_positions.contains(&candidate.position.to_bits())
+                            && !consumed_positions.contains(&candidate.position.to_bits())
                     }) else {
                         continue;
                     };
@@ -436,7 +450,8 @@ impl MarkerRegionCollection {
                         // Add the region
                         self.all.push(region.clone());
                         self.regions.push(region);
-                        consumed_end_positions.insert(end.position.to_bits());
+                        consumed_positions.insert(start.position.to_bits());
+                        consumed_positions.insert(end.position.to_bits());
                     }
                 }
             }
@@ -804,6 +819,47 @@ mod tests {
         let markers = collection.markers_sorted();
         assert_eq!(markers.len(), 1);
         assert_eq!(markers[0].name, "COUNT-IN");
+    }
+
+    /// REAPER supports unnamed regions — this is a real, unedited pair from
+    /// a professionally produced session. Pairing used to require the
+    /// *start* line to have a non-empty name (to keep an end line from
+    /// being misread as trying to start its own region), which silently
+    /// broke every unnamed region: it never became a `Region` at all, just
+    /// two orphan point markers — and re-serializing an orphaned "end" line
+    /// as an independent marker produces a line REAPER's own project loader
+    /// doesn't recognize (it carries no natural guid/color, but gets a full
+    /// one written anyway), so a full pass through `dawfile-reaper` visibly
+    /// corrupted the very regions the original DAW had understood fine.
+    #[test]
+    fn test_process_regions_pairs_unnamed_regions() {
+        let mut collection = MarkerRegionCollection::new();
+
+        collection.add(
+            MarkerRegion::from_marker_line(
+                r#"MARKER 0 0 "" 1 0 1 B {E0AACDF0-DA7E-E14C-B531-1707BC2BA4D0} 0 1"#,
+            )
+            .unwrap(),
+        );
+        collection
+            .add(MarkerRegion::from_marker_line(r#"MARKER 0 1.26315789473684 "" 1"#).unwrap());
+
+        collection.process_regions();
+
+        let regions = collection.regions_sorted();
+        assert_eq!(regions.len(), 1, "the unnamed pair should become one region");
+        assert_eq!(regions[0].name, "");
+        assert_eq!(regions[0].position, 0.0);
+        assert_eq!(regions[0].end_position, Some(1.26315789473684));
+        assert_eq!(
+            regions[0].guid,
+            "{E0AACDF0-DA7E-E14C-B531-1707BC2BA4D0}",
+            "the start line's real guid must survive, not fall back to empty"
+        );
+        assert!(
+            collection.markers_sorted().is_empty(),
+            "both lines should be consumed into the region, leaving no orphan markers"
+        );
     }
 
     #[test]

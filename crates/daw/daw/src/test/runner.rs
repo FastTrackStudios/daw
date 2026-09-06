@@ -280,7 +280,34 @@ impl TestRunner {
         let mut reaper = self.spawn_reaper()?;
         reaper.wait_for_socket(self)?;
 
+        // A real-world project opened by a test can pop a native modal
+        // REAPER has no headless-safe way to suppress (see
+        // `VirtualDisplay::close_stray_dialogs` — "Project Load Warning"
+        // is the one that bit the Rockstars album test: a REAPER-version
+        // format mismatch, not a test bug). It blocks REAPER's main
+        // thread until dismissed, which starves every RPC and looks
+        // exactly like a hung connection. With a display attached
+        // (`--gui`/`--virtual`), poll for and dismiss known stray dialogs
+        // for as long as tests are running so `open_project` on a real
+        // session doesn't need a human standing by.
+        let dismisser_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let dismisser_handle = self.display.clone().map(|display| {
+            let stop = dismisser_stop.clone();
+            std::thread::spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    display.close_stray_dialogs();
+                    display.accept_project_load_warning();
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+            })
+        });
+
         let tests_passed = self.run_tests(&mut reaper, packages, filter)?;
+
+        dismisser_stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(handle) = dismisser_handle {
+            let _ = handle.join();
+        }
 
         if !tests_passed {
             reaper.report_failure(self);
@@ -424,6 +451,20 @@ impl TestRunner {
             println!(
                 "  linux_audio_mode: {mode} (2 = Dummy audio; override with FTS_LINUX_AUDIO_MODE)"
             );
+        }
+
+        // Clear the VST/CLAP scan paths too — same reasoning as the
+        // LV2_PATH env override above (real dev-machine plugin
+        // directories are pure startup cost no test needs), but these DO
+        // round-trip correctly through reaper.ini, so patching here is
+        // sufficient without a matching env var. Override with
+        // FTS_VST_PATH if a test actually needs real VST/VST3 plugins.
+        {
+            let ini = reaper_launcher::ReaperIni::new(&reaper_ini);
+            let vst_path = std::env::var("FTS_VST_PATH").unwrap_or_default();
+            let _ = ini.set("vstpath", &vst_path);
+            let _ = ini.set("vstpath64", &vst_path);
+            println!("  vstpath/vstpath64: {vst_path:?} (override with FTS_VST_PATH)");
         }
 
         // Patch lastt in [verchk] to suppress version-check dialog
@@ -572,6 +613,7 @@ impl TestRunner {
         let headless = self.headless;
         let virtual_display = self.display.as_ref().map(|d| d.display().to_string());
         let reaper_log_for_nih = reaper_log.clone();
+        let isolated_home = self.resources_dir.to_string_lossy().into_owned();
         let apply_env = |cmd: &mut Command| {
             if let Some(d) = &virtual_display {
                 cmd.env("DISPLAY", d);
@@ -582,6 +624,25 @@ impl TestRunner {
             // can open plugin windows and actually render frames.
             cmd.env("FTS_SYNC_NO_MDNS", "1");
             cmd.env("FTS_SYNC_NO_LINK", "1");
+            // REAPER hardcodes `$HOME/.lv2` (and `$HOME/.vst`, `$HOME/.vst3`,
+            // …) as a scan location regardless of `reaper.ini`'s
+            // `lv2path_linux`/`vstpath` (those only ADD paths, they don't
+            // override the defaults) and regardless of the `LV2_PATH`
+            // env var too (tried — REAPER doesn't honor it). On a real dev
+            // machine with a populated `~/.lv2` (hundreds of plugins),
+            // every test REAPER rescans them on startup, which can run
+            // long enough on its own to blow past a test's timeout. The
+            // only thing that actually works is not being the real
+            // `$HOME` at all: point it at this test's own isolated
+            // resources dir (which has no `.lv2`/`.vst`/`.vst3` of its
+            // own), the same way `session-extension-xtask`'s isolated rig
+            // keeps REAPER's install itself from touching the dev rig's
+            // real extensions. Override with FTS_TEST_HOME if a test
+            // actually needs the real home directory.
+            cmd.env(
+                "HOME",
+                std::env::var("FTS_TEST_HOME").unwrap_or_else(|_| isolated_home.clone()),
+            );
             // Route nih_plug log output (nih_log!/nih_warn!/nih_error!) to the REAPER log
             // so GPU/surface messages show up in the same file as other test output.
             cmd.env("NIH_LOG", &reaper_log_for_nih);

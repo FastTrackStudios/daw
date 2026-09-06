@@ -460,6 +460,32 @@ impl VirtualDisplay {
         .sum()
     }
 
+    /// Accept REAPER's "Project Load Warning" modal (pops when a real
+    /// project was saved by a different REAPER build/version than the one
+    /// running the test — observed opening a real production session with
+    /// "11163 elements ... not understood", likely newer fixed-lane/
+    /// comping state) by pressing Return, not `windowclose`.
+    ///
+    /// This dialog only has an "OK" button, so accepting it is safe: the
+    /// test never saves the project back to disk, so nothing about
+    /// dismissal touches the real file. `windowclose` (WM_DELETE) was
+    /// tried first and crashed REAPER's GDK backend outright ("GdkWindow
+    /// unexpectedly destroyed" / X BadDrawable) — a WM-level destroy
+    /// request racing GDK's own surface teardown, apparently unlike a
+    /// plain keypress the dialog's own event loop handles itself. Without
+    /// a display to dismiss it from at all (pure headless), the dialog
+    /// blocks REAPER's main thread until an operator clicks it, which
+    /// starves every RPC and looks exactly like a hung connection — hence
+    /// `--virtual`/`--gui` plus the background poll loop in
+    /// `TestRunner::run_reaper_tests` that calls this.
+    pub fn accept_project_load_warning(&self) -> bool {
+        if !self.focus_window_named("Project Load Warning") {
+            return false;
+        }
+        self.key("Return");
+        true
+    }
+
     /// Raise and focus a window by title.
     pub fn focus_window_named(&self, pattern: &str) -> bool {
         let Some(id) = self.find_windows(pattern).into_iter().next() else {
