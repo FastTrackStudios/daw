@@ -711,20 +711,47 @@ mod global {
     use super::*;
     use std::sync::OnceLock;
 
-    static GLOBAL_DAW: OnceLock<Daw> = OnceLock::new();
+    /// The one native `Daw`, replaceable.
+    ///
+    /// This was a `OnceLock` on the assumption that a process attaches to one
+    /// DAW for its life. That holds inside a REAPER extension, where the DAW
+    /// *is* the host — but not for an external client like session-desktop's
+    /// Recording Mode, which dials a REAPER over a socket and has to survive
+    /// that REAPER being quit and reopened under a new pid. A `OnceLock` left
+    /// every `daw::get()` consumer (the Mixer panel, "Open in REAPER", the
+    /// armed-track poll) holding a dead connection with no way to re-point it.
+    ///
+    /// Each `Daw` is leaked rather than dropped so `get`/`try_get` keep
+    /// returning `&'static Daw` and their call sites are unchanged. What leaks
+    /// is one handle per reconnect within a single run — bounded by how often
+    /// the host bounces. The wasm side has always leaked for the same reason.
+    static GLOBAL_DAW: std::sync::RwLock<Option<&'static Daw>> = std::sync::RwLock::new(None);
 
     impl Daw {
         /// Initialize the global DAW connection (for single-host usage)
         ///
-        /// This must be called once at startup before using the global static methods.
+        /// This must be called at startup before using the global static
+        /// methods. Calling it again *replaces* the instance, which is what a
+        /// reconnect to a restarted host is.
         ///
         /// # Errors
         ///
-        /// Returns an error if already initialized.
+        /// Returns an error only if the lock is poisoned.
         pub fn init(handle: Caller) -> crate::Result<()> {
-            GLOBAL_DAW
-                .set(Daw::new(handle))
-                .map_err(|_| Error::InvalidOperation("DAW already initialized".to_string()))
+            let daw: &'static Daw = Box::leak(Box::new(Daw::new(handle)));
+            *GLOBAL_DAW
+                .write()
+                .map_err(|_| Error::InvalidOperation("the global DAW lock is poisoned".into()))? =
+                Some(daw);
+            Ok(())
+        }
+
+        /// Forget the current instance, so `try_get` reports uninitialized
+        /// again — for a client whose host has gone away.
+        pub fn clear() {
+            if let Ok(mut slot) = GLOBAL_DAW.write() {
+                *slot = None;
+            }
         }
 
         /// Get the global DAW instance
@@ -733,9 +760,7 @@ mod global {
         ///
         /// Panics if `init()` has not been called.
         pub fn get() -> &'static Daw {
-            GLOBAL_DAW
-                .get()
-                .expect("DAW not initialized. Call Daw::init() first.")
+            Self::try_get().expect("DAW not initialized. Call Daw::init() first.")
         }
 
         /// Try to get the global DAW instance without panicking.
@@ -743,12 +768,12 @@ mod global {
         /// Returns `None` if `init()` has not been called yet.
         /// Useful for gracefully handling the case where DAW is not yet initialized.
         pub fn try_get() -> Option<&'static Daw> {
-            GLOBAL_DAW.get()
+            *GLOBAL_DAW.read().ok()?
         }
 
         /// Check if the DAW has been initialized.
         pub fn is_initialized() -> bool {
-            GLOBAL_DAW.get().is_some()
+            Self::try_get().is_some()
         }
     }
 }
