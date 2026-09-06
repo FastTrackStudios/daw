@@ -318,6 +318,8 @@ fn forward_button(
         buttons,
         mods,
         details: Default::default(),
+        element: blitz_traits::events::Point { x, y },
+        active_pointers: Default::default(),
     };
     let ui_event = if down {
         blitz_traits::events::UiEvent::PointerDown(ev)
@@ -416,6 +418,8 @@ extern "C" fn mouse_dragged(this: &Object, _sel: Sel, event: id) {
         buttons: blitz_traits::events::MouseEventButtons::Primary,
         mods,
         details: Default::default(),
+        element: blitz_traits::events::Point { x, y },
+        active_pointers: Default::default(),
     };
     crate::dock::forward_keyboard_event(hwnd, blitz_traits::events::UiEvent::PointerMove(ev));
 }
@@ -443,6 +447,7 @@ extern "C" fn scroll_wheel(this: &Object, _sel: Sel, event: id) {
             coords: pointer_coords(x, y),
             buttons: blitz_traits::events::MouseEventButtons::empty(),
             mods,
+            element: blitz_traits::events::Point { x, y },
         };
         crate::dock::forward_keyboard_event(hwnd, blitz_traits::events::UiEvent::Wheel(ev));
     }
