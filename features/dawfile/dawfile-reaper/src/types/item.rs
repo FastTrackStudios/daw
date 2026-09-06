@@ -423,6 +423,12 @@ pub struct Take {
     /// take; the first take's markers are also mirrored on
     /// `Item::stretch_markers` for callers that predate this field.
     pub stretch_markers: Vec<StretchMarker>,
+    /// Nested blocks under this take that are not `<SOURCE>` — chiefly
+    /// `<EXT>` (REAPER's per-take extension store, e.g.
+    /// `ORIGINAL_FILENAME`). Kept verbatim so a round trip does not drop
+    /// them; the serializer re-indents and writes them back after the
+    /// source block.
+    pub extra_blocks: Vec<String>,
 }
 
 impl Default for Take {
@@ -439,6 +445,7 @@ impl Default for Take {
             rec_pass: None,
             source: None,
             stretch_markers: Vec::new(),
+            extra_blocks: Vec::new(),
         }
     }
 }
@@ -714,6 +721,7 @@ impl Item {
             rec_pass: None,
             source: None,
             stretch_markers: Vec::new(),
+            extra_blocks: Vec::new(),
         }
     }
 
@@ -1072,6 +1080,11 @@ impl Item {
                         if let Some(ref mut take) = current_take {
                             take.source = Some(source_block);
                         }
+                    } else if let Some(ref mut take) = current_take {
+                        // Anything else under a take (`<EXT>` above all) is
+                        // real project content: keep it verbatim rather than
+                        // dropping it on the floor.
+                        take.extra_blocks.push(nested_block.to_string());
                     }
                 }
             }
@@ -1170,16 +1183,22 @@ impl Item {
                 continue;
             }
 
-            // Handle SOURCE blocks first (before token parsing)
-            if line.starts_with("<SOURCE") {
-                let mut source_lines = Vec::new();
-                source_lines.push(line);
+            // The `<ITEM` header is structure, not content.
+            if line.starts_with("<ITEM") {
+                i += 1;
+                continue;
+            }
+
+            // Nested blocks: `<SOURCE ...>` and everything else (`<EXT>`).
+            if line.starts_with('<') {
+                let mut block_lines = Vec::new();
+                block_lines.push(line);
                 i += 1;
                 let mut depth = 1i32;
 
                 while i < lines.len() {
                     let current_line = lines[i].trim();
-                    source_lines.push(current_line);
+                    block_lines.push(current_line);
 
                     if current_line.starts_with('<') {
                         depth += 1;
@@ -1193,22 +1212,25 @@ impl Item {
                 }
 
                 if i >= lines.len() {
-                    return Err("SOURCE block not properly closed with '>'".to_string());
+                    return Err(format!("nested block {line} not properly closed with '>'"));
                 }
 
-                let source_block_content = source_lines.join("\n");
-                let source_block = Self::parse_source_block(&source_block_content)?;
-
-                if let Some(ref mut take) = current_take {
-                    take.source = Some(source_block);
+                let block_content = block_lines.join("\n");
+                if line.starts_with("<SOURCE") {
+                    let source_block = Self::parse_source_block(&block_content)?;
+                    if let Some(ref mut take) = current_take {
+                        take.source = Some(source_block);
+                    }
+                } else if let Some(ref mut take) = current_take {
+                    take.extra_blocks.push(block_content);
                 }
 
                 // Skip the increment at the end since we already incremented in the loop
                 continue;
             }
 
-            // Skip block start/end markers
-            if line.starts_with('<') || line == ">" {
+            // Skip block end markers
+            if line == ">" {
                 i += 1;
                 continue;
             }

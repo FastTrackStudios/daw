@@ -90,6 +90,28 @@ pub struct FxPlugin {
     pub param_envelopes: Vec<FxParamEnvelope>,
     /// Parameter indices visible on TCP (from PARM_TCP lines)
     pub params_on_tcp: Vec<FxParamRef>,
+    /// The header fields surrounding the custom-name slot (VST/VST3/AU only),
+    /// captured verbatim so that a header re-emitted without a `raw_block`
+    /// keeps its flags, vendor id and plugin state token. `None` for headers
+    /// that were built programmatically rather than parsed.
+    #[serde(default)]
+    pub header_extra: Option<FxHeaderExtra>,
+}
+
+/// The parts of a VST/VST3/AU plugin block header that surround the
+/// user-assigned custom name, preserved verbatim for round-tripping.
+///
+/// The header shape is
+/// `<VST "<display name>" <file> <flags> "<custom name>" <tail>`, e.g.
+/// `<VST "VST3i: Kontakt 8 (Native Instruments)" "Kontakt 8.vst3" 0 "" 952745140{5653…} ""`
+/// where `flags` is `0` and `tail` is `952745140{5653…} ""`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct FxHeaderExtra {
+    /// Text between the filename and the custom-name slot (typically `0`).
+    pub flags: String,
+    /// Text after the custom-name slot: the vendor id, the plugin state
+    /// token, and any trailing empty string.
+    pub tail: String,
 }
 
 /// Reference to an FX parameter by index and optional name.
@@ -444,7 +466,7 @@ fn parse_plugin_block(
     };
 
     // Parse header: <TYPE "Display Name" "file.dll" extra_params...
-    let (plugin_type, name, file, custom_name) = parse_plugin_header(header);
+    let parsed_header = parse_plugin_header(header);
 
     // State data = all lines between header and closing >
     let state_data: Vec<String> = if block_lines.len() > 2 {
@@ -458,10 +480,11 @@ fn parse_plugin_block(
     };
 
     FxPlugin {
-        name,
-        custom_name,
-        plugin_type,
-        file,
+        name: parsed_header.name,
+        custom_name: parsed_header.custom_name,
+        plugin_type: parsed_header.plugin_type,
+        file: parsed_header.file,
+        header_extra: parsed_header.header_extra,
         bypassed,
         offline,
         fxid: None,
@@ -485,9 +508,10 @@ fn parse_plugin_block(
 /// - `<CLAP "org.surge-synthesizer.surge-xt" ...>`
 /// - `<VIDEO_EFFECT "Video processor" ...>`
 ///
-/// VST headers have an unquoted filename token after the quoted name:
-/// `<VST "display name" filename.dylib vendor_code "state" ...`
-fn parse_plugin_header(header: &str) -> (PluginType, String, String, Option<String>) {
+/// The filename token after the quoted display name may be bare (VST2:
+/// `reaeq.vst.dylib`) or quoted (VST3, whose filenames routinely contain
+/// spaces: `"Kontakt 8.vst3"`).
+fn parse_plugin_header(header: &str) -> ParsedPluginHeader {
     let header = header.trim();
 
     // Remove leading '<'
@@ -500,8 +524,10 @@ fn parse_plugin_header(header: &str) -> (PluginType, String, String, Option<Stri
 
     let plugin_type = match type_keyword {
         "VST" => {
-            // Distinguish VST2 vs VST3 by name prefix
-            if rest.contains("VST3:") || rest.contains("VSTi3:") {
+            // Distinguish VST2 vs VST3 by name prefix. REAPER writes `VST3:`
+            // for effects and `VST3i:` for instruments (`VSTi3:` in older
+            // files).
+            if rest.contains("VST3:") || rest.contains("VST3i:") || rest.contains("VSTi3:") {
                 PluginType::Vst3
             } else {
                 PluginType::Vst
@@ -515,31 +541,38 @@ fn parse_plugin_header(header: &str) -> (PluginType, String, String, Option<Stri
     };
 
     // Parse tokens from the rest of the header.
-    // The structure is: "display name" <unquoted_file_or_second_quoted> ...
+    // The structure is: "display name" <file token> ...
     // VST: "name" filename.dylib 0 "custom_name" vendorcode<hex> ""
+    // VST3: "name" "file name.vst3" 0 "custom_name" vendorcode{hex} ""
     // JS:  "script/path" "custom_name"
     // CLAP: "plugin.id" ...
-    let (name, file, custom_name) = parse_header_name_file(rest, &plugin_type);
-
-    (plugin_type, name, file, custom_name)
+    parse_header_name_file(rest, plugin_type)
 }
 
-/// Extract the display name, file, and custom name from the header tokens.
+/// The fields `parse_plugin_header` recovers from a plugin block header line.
+struct ParsedPluginHeader {
+    plugin_type: PluginType,
+    name: String,
+    file: String,
+    custom_name: Option<String>,
+    header_extra: Option<FxHeaderExtra>,
+}
+
+/// Extract the display name, file, custom name and surrounding header fields.
 ///
-/// VST headers: `"VST: Name" filename.dylib 0 "Custom Name" 12345<hex> ""`
+/// VST/AU headers: `"VST: Name" <file> 0 "Custom Name" 12345<hex> ""`
 ///   - First quoted string = default display name
-///   - Next unquoted token = file
-///   - Second quoted string = user-assigned custom name (empty = no custom name)
+///   - Next token = file, either bare (`reaeq.vst.dylib`) or quoted
+///     (`"Kontakt 8.vst3"` — VST3 filenames commonly contain spaces)
+///   - The next quoted string = user-assigned custom name (empty = no custom name)
+///   - Everything either side of that slot is kept verbatim in `header_extra`
 ///
 /// JS headers: `"script/path" "Custom Name"`
 ///   - First quoted string = both name and file (script path)
 ///   - Second quoted string = user-assigned custom name
 ///
 /// Other types: first two quoted strings = name, file (no custom name support)
-fn parse_header_name_file(
-    rest: &str,
-    plugin_type: &PluginType,
-) -> (String, String, Option<String>) {
+fn parse_header_name_file(rest: &str, plugin_type: PluginType) -> ParsedPluginHeader {
     let rest = rest.trim();
 
     // Extract the first quoted string (display name)
@@ -547,40 +580,49 @@ fn parse_header_name_file(
 
     match plugin_type {
         PluginType::Vst | PluginType::Vst3 | PluginType::Au => {
-            // After the quoted name, the next token (unquoted) is the filename
-            let after_name = after_name.trim();
-            let file = after_name
-                .split_whitespace()
-                .next()
-                .unwrap_or("")
-                .to_string();
-            // Custom name is the second quoted string in the remaining text
-            // Format: filename flags "custom_name" vendorcode "..."
-            let (custom_raw, _) = extract_first_quoted(after_name);
-            let custom_name = if custom_raw.is_empty() {
-                None
-            } else {
-                Some(custom_raw)
+            // After the quoted name comes the filename, bare or quoted.
+            let (file, after_file) = extract_first_token(after_name);
+            // Then: <flags> "<custom name>" <vendor id><state token> ""
+            let (custom_name, header_extra) = match split_around_first_quoted(after_file) {
+                Some((flags, custom_raw, tail)) => (
+                    (!custom_raw.is_empty()).then_some(custom_raw),
+                    Some(FxHeaderExtra {
+                        flags: flags.trim().to_string(),
+                        tail: tail.trim().to_string(),
+                    }),
+                ),
+                None => (None, None),
             };
-            (name, file, custom_name)
+            ParsedPluginHeader {
+                plugin_type,
+                name,
+                file,
+                custom_name,
+                header_extra,
+            }
         }
         PluginType::Js => {
             // For JS, the name IS the script path (acts as both name and file)
             // Custom name is the second quoted string
             let (custom_raw, _) = extract_first_quoted(after_name);
-            let custom_name = if custom_raw.is_empty() {
-                None
-            } else {
-                Some(custom_raw)
-            };
-            (name.clone(), name, custom_name)
+            ParsedPluginHeader {
+                plugin_type,
+                name: name.clone(),
+                file: name,
+                custom_name: (!custom_raw.is_empty()).then_some(custom_raw),
+                header_extra: None,
+            }
         }
         _ => {
             // For CLAP, Video, Other: try to extract second quoted string as file
             let quoted = extract_quoted_strings(rest);
-            let name = quoted.first().cloned().unwrap_or_default();
-            let file = quoted.get(1).cloned().unwrap_or_default();
-            (name, file, None)
+            ParsedPluginHeader {
+                plugin_type,
+                name: quoted.first().cloned().unwrap_or_default(),
+                file: quoted.get(1).cloned().unwrap_or_default(),
+                custom_name: None,
+                header_extra: None,
+            }
         }
     }
 }
@@ -596,6 +638,39 @@ fn extract_first_quoted(s: &str) -> (String, &str) {
         }
     }
     (String::new(), s)
+}
+
+/// Extract the leading header token and the text after it.
+///
+/// A token is either a double-quoted string (returned without its quotes, so
+/// that `"Kontakt 8.vst3"` survives the spaces inside it) or a bare
+/// whitespace-delimited run.
+fn extract_first_token(s: &str) -> (String, &str) {
+    let s = s.trim_start();
+    if s.starts_with('"') {
+        let after_open = &s[1..];
+        if let Some(end) = after_open.find('"') {
+            return (after_open[..end].to_string(), &after_open[end + 1..]);
+        }
+    }
+    match s.find(char::is_whitespace) {
+        Some(end) => (s[..end].to_string(), &s[end..]),
+        None => (s.to_string(), ""),
+    }
+}
+
+/// Split `s` around its first double-quoted string, yielding the text before
+/// it, its contents, and the text after it. `None` when `s` holds no quoted
+/// string at all.
+fn split_around_first_quoted(s: &str) -> Option<(&str, String, &str)> {
+    let start = s.find('"')?;
+    let after_open = &s[start + 1..];
+    let end = after_open.find('"')?;
+    Some((
+        &s[..start],
+        after_open[..end].to_string(),
+        &after_open[end + 1..],
+    ))
 }
 
 /// Parse a `<CONTAINER ...>...</>` block into an `FxContainer`.
@@ -1176,7 +1251,7 @@ impl FxChainNode {
 // RPP Serialization (via RppSerialize trait)
 // ---------------------------------------------------------------------------
 
-use super::serialize::RppSerialize;
+use super::serialize::{RppSerialize, rpp_token};
 
 // r[impl rpp.write.fx-chain]
 impl RppSerialize for FxChain {
@@ -1216,6 +1291,41 @@ impl RppSerialize for FxChainNode {
     }
 }
 
+impl FxPlugin {
+    /// Rebuild a `<VST …` / `<AU …` block header from the parsed fields.
+    ///
+    /// The filename is re-quoted when it is not a bare RPP token, so a VST3
+    /// path such as `Kontakt 8.vst3` round-trips as one token instead of
+    /// splitting across the flags and custom-name slots. `fallback` supplies
+    /// the flags and tail for plugins built programmatically, which carry no
+    /// `header_extra` from a parsed header.
+    fn plugin_header_line(
+        &self,
+        tag: &str,
+        default_file: &str,
+        custom: &str,
+        fallback: &FxHeaderExtra,
+    ) -> String {
+        let extra = self.header_extra.as_ref().unwrap_or(fallback);
+        let file = if self.file.is_empty() {
+            default_file
+        } else {
+            &self.file
+        };
+        let mut header = format!("<{} \"{}\" {}", tag, self.name, rpp_token(file));
+        if !extra.flags.is_empty() {
+            header.push(' ');
+            header.push_str(&extra.flags);
+        }
+        header.push_str(&format!(" \"{}\"", custom));
+        if !extra.tail.is_empty() {
+            header.push(' ');
+            header.push_str(&extra.tail);
+        }
+        header
+    }
+}
+
 impl RppSerialize for FxPlugin {
     /// Emits the BYPASS preamble, the raw plugin block (preserving binary state),
     /// and post-plugin metadata (PRESETNAME, FLOATPOS, FXID, WAK).
@@ -1252,47 +1362,38 @@ impl RppSerialize for FxPlugin {
             // Synthetic block for programmatic FX nodes that don't carry a raw block.
             let custom = self.custom_name.as_deref().unwrap_or("");
             let header = match &self.plugin_type {
-                PluginType::Vst | PluginType::Vst3 => format!(
-                    "<VST \"{}\" {} 0 \"{}\" 0<00> \"\"",
-                    self.name,
-                    if self.file.is_empty() {
-                        "plugin.vst"
-                    } else {
-                        &self.file
-                    },
+                PluginType::Vst | PluginType::Vst3 => self.plugin_header_line(
+                    "VST",
+                    "plugin.vst",
                     custom,
+                    &FxHeaderExtra {
+                        flags: "0".to_string(),
+                        tail: "0<00> \"\"".to_string(),
+                    },
                 ),
-                PluginType::Au => format!(
-                    "<AU \"{}\" {} 0 \"{}\"",
-                    self.name,
-                    if self.file.is_empty() {
-                        "plugin.component"
-                    } else {
-                        &self.file
-                    },
+                PluginType::Au => self.plugin_header_line(
+                    "AU",
+                    "plugin.component",
                     custom,
+                    &FxHeaderExtra {
+                        flags: "0".to_string(),
+                        tail: String::new(),
+                    },
                 ),
                 PluginType::Js => format!("<JS \"{}\" \"{}\"", self.name, custom),
                 PluginType::Clap => format!(
                     "<CLAP \"{}\" {} \"\"",
                     self.name,
-                    if self.file.is_empty() {
+                    rpp_token(if self.file.is_empty() {
                         "plugin.clap"
                     } else {
                         &self.file
-                    }
+                    })
                 ),
                 PluginType::Video => format!("<VIDEO_EFFECT \"{}\" \"\"", self.name),
-                PluginType::Other(tag) => format!(
-                    "<{} \"{}\" {}",
-                    tag,
-                    self.name,
-                    if self.file.is_empty() {
-                        "\"\""
-                    } else {
-                        &self.file
-                    }
-                ),
+                PluginType::Other(tag) => {
+                    format!("<{} \"{}\" {}", tag, self.name, rpp_token(&self.file))
+                }
             };
             out.push_str(&format!("{}{}\n", indent, header));
             for line in &self.state_data {

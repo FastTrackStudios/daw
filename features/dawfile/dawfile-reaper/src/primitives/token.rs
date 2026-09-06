@@ -229,6 +229,39 @@ fn identifier(input: &str) -> IResult<&str, Token> {
     .parse(input)
 }
 
+/// Parse a plugin state token: a vendor id with an angle-bracketed hex blob
+/// glued straight onto it, as in `1919247985<5653547265657172656571…>`.
+///
+/// `<` normally opens a block and `>` closes one, so without this the token
+/// splits mid-line and the rest of a `<VST …` header is swallowed into a
+/// phantom nested block. REAPER's own `LineParser` splits only on whitespace
+/// and quotes, so an angle bracket inside a word is just part of the word.
+///
+/// The bracket group must be glued to a non-empty, quote-free, single-line
+/// prefix, which is what keeps a genuine block opener (`<TRACK`, where the
+/// prefix is empty) from matching here.
+fn state_token(input: &str) -> IResult<&str, Token> {
+    fn reject(input: &str) -> nom::Err<nom::error::Error<&str>> {
+        nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag))
+    }
+
+    let line = input.split('\n').next().unwrap_or(input);
+    // `open > 0` keeps a real block opener (`<TRACK`, empty prefix) out.
+    let open = line.find('<').filter(|open| *open > 0).ok_or(reject(input))?;
+    let (prefix, bracketed) = line.split_at(open);
+    if prefix.contains(['"', '\'', '`', '#', ';', '>']) || prefix.contains(char::is_whitespace) {
+        return Err(reject(input));
+    }
+    let close = bracketed.find('>').ok_or(reject(input))?;
+    let hex = bracketed.get(1..close).ok_or(reject(input))?;
+    if hex.contains(char::is_whitespace) {
+        return Err(reject(input));
+    }
+    let end = open + close + 1;
+    let (token, rest) = input.split_at(end);
+    Ok((rest, Token::Identifier(token.to_string())))
+}
+
 /// Parse a single token from input (matching WDL's token parsing order)
 pub fn parse_token(input: &str) -> IResult<&str, Token> {
     alt((
@@ -236,6 +269,9 @@ pub fn parse_token(input: &str) -> IResult<&str, Token> {
         midi_event,
         // Quoted strings
         map(quoted_string, |(s, qt)| Token::String(s, qt)),
+        // `vendorid<hex>` before the number parsers, which would otherwise
+        // stop at the '<' and leave the bracket group to open a phantom block
+        state_token,
         // Numbers - try hex first, then general number parser
         hex_integer,
         number,

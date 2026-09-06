@@ -4,7 +4,9 @@
 //! back to valid RPP chunk text.
 
 use super::envelope::Envelope;
-use super::item::{FadeCurveType, Item, PitchMode, SoloState, SourceBlock, SourceType, Take};
+use super::item::{
+    ChannelMode, FadeCurveType, Item, PitchMode, SoloState, SourceBlock, SourceType, Take,
+};
 use super::marker_region::{MarkerRegion, MarkerRegionCollection};
 use super::project::ReaperProject;
 use super::time_tempo::{TempoTimeEnvelope, TempoTimePoint};
@@ -55,7 +57,7 @@ fn rpp_escape(s: &str) -> String {
 /// otherwise wrap in double quotes with `rpp_escape`. The official PT
 /// Reaper Converter uses the same rule (`NAME ClickPrint_03` vs
 /// `NAME "10 REASON WHY demo"`).
-fn rpp_token(s: &str) -> String {
+pub(crate) fn rpp_token(s: &str) -> String {
     let needs_quotes = s.is_empty()
         || s.chars()
             .any(|c| !(c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.'));
@@ -180,6 +182,28 @@ fn envelope_shape_to_i32(s: &super::envelope::EnvelopePointShape) -> i32 {
         EnvelopePointShape::FastEnd => 4,
         EnvelopePointShape::Bezier => 5,
         EnvelopePointShape::Default => -1,
+    }
+}
+
+/// Inverse of `ChannelMode::from(i32)` — the `CHANMODE` field value.
+fn channel_mode_to_i32(m: &ChannelMode) -> i32 {
+    match m {
+        ChannelMode::Normal => 0,
+        ChannelMode::ReverseStereo => 1,
+        ChannelMode::MonoDownmix => 2,
+        ChannelMode::MonoLeft => 3,
+        ChannelMode::MonoRight => 4,
+        // Mono channels 3..=64 encode as ch+2, 65..=128 as ch+66.
+        ChannelMode::MonoChannel(ch) => {
+            let ch = i32::from(*ch);
+            if ch <= 64 { ch + 2 } else { ch + 66 }
+        }
+        // Stereo pairs 1..=64 encode as ch+66, 67..=128 as ch+128.
+        ChannelMode::StereChannel(ch) => {
+            let ch = i32::from(*ch);
+            if ch <= 64 { ch + 66 } else { ch + 128 }
+        }
+        ChannelMode::Unknown(v) => *v,
     }
 }
 
@@ -381,6 +405,11 @@ impl Take {
                 pr.unknown_field_6
             ));
         }
+        out.push_str(&format!(
+            "{}CHANMODE {}\n",
+            indent,
+            channel_mode_to_i32(&self.channel_mode)
+        ));
         if let Some(color) = self.take_color {
             out.push_str(&format!("{}TAKECOLOR {}\n", indent, color));
         }
@@ -390,22 +419,24 @@ impl Take {
         if let Some(rp) = self.rec_pass {
             out.push_str(&format!("{}RECPASS {}\n", indent, rp));
         }
+        // REAPER writes a take's stretch markers between its scalar fields
+        // and its `<SOURCE>` block.
+        for sm in &self.stretch_markers {
+            out.push_str(&format!(
+                "{}SM {} {}",
+                indent, sm.position, sm.source_position
+            ));
+            if let Some(rate) = sm.rate {
+                out.push_str(&format!(" {}", rate));
+            }
+            out.push('\n');
+        }
         if let Some(source) = &self.source {
             source.write_rpp(out, indent);
         }
-        // Stretch markers of a non-first take. The first take's markers are
-        // written from `Item::stretch_markers` by the item serializer.
-        if emit_marker {
-            for sm in &self.stretch_markers {
-                out.push_str(&format!(
-                    "{}SM {} {}",
-                    indent, sm.position, sm.source_position
-                ));
-                if let Some(rate) = sm.rate {
-                    out.push_str(&format!(" {}", rate));
-                }
-                out.push('\n');
-            }
+        // `<EXT>` and any other nested block read under this take.
+        for block in &self.extra_blocks {
+            write_raw_block(out, block, indent);
         }
     }
 }
@@ -413,6 +444,50 @@ impl Take {
 // ---------------------------------------------------------------------------
 // Item
 // ---------------------------------------------------------------------------
+
+/// The item's first take, as ONE value ready to be written inline.
+///
+/// An RPP item stores take #0's fields at item level — that is the
+/// format, not a quirk — so the parser fills both `Item::{name, volpan,
+/// slip_offset, playrate, channel_mode, take_guid, rec_pass,
+/// stretch_markers}` and `Item::takes[0]`. The serializer must therefore
+/// pick ONE of the two to write. Item-level values win where present
+/// (the builder sets `Item::name` while `takes[0].name` holds the source
+/// path); the take supplies everything the item has no slot for
+/// (`take_color`, `source`, `extra_blocks`).
+fn first_take_of(item: &Item) -> Take {
+    let base = item.takes.first().cloned().unwrap_or_default();
+    Take {
+        is_selected: base.is_selected,
+        name: if item.name.is_empty() {
+            base.name
+        } else {
+            item.name.clone()
+        },
+        volpan: item.volpan.clone().or(base.volpan),
+        slip_offset: if item.slip_offset == 0.0 {
+            base.slip_offset
+        } else {
+            item.slip_offset
+        },
+        playrate: item.playrate.clone().or(base.playrate),
+        channel_mode: if matches!(item.channel_mode, ChannelMode::Normal) {
+            base.channel_mode
+        } else {
+            item.channel_mode
+        },
+        take_color: base.take_color,
+        take_guid: item.take_guid.clone().or(base.take_guid),
+        rec_pass: item.rec_pass.or(base.rec_pass),
+        source: base.source,
+        stretch_markers: if item.stretch_markers.is_empty() {
+            base.stretch_markers
+        } else {
+            item.stretch_markers.clone()
+        },
+        extra_blocks: base.extra_blocks,
+    }
+}
 
 impl RppSerialize for Item {
     fn write_rpp(&self, out: &mut String, indent: &str) {
@@ -472,64 +547,33 @@ impl RppSerialize for Item {
                 solo_state_to_i32(&m.solo_state)
             ));
         }
+        // Vertical geometry. REAPER has NO `LANE` token in an ITEM at any
+        // version — the per-item lane lives in `YPOS <y> <height> [mode]`,
+        // which is also what `Item::lane` is derived from at parse time.
+        // Emitting `LANE` made REAPER reject the whole project with
+        // "Project tokens not recognized: LANE".
+        if let Some(yp) = self.y_pos {
+            out.push_str(&format!(
+                "{}YPOS {} {} {}\n",
+                inner, yp.y, yp.height, yp.mode
+            ));
+        }
         if let Some(iguid) = &self.item_guid {
             out.push_str(&format!("{}IGUID {}\n", inner, iguid));
         }
         if let Some(iid) = self.item_id {
             out.push_str(&format!("{}IID {}\n", inner, iid));
         }
-        if !self.name.is_empty() {
-            out.push_str(&format!("{}NAME {}\n", inner, rpp_token(&self.name)));
-        }
-        if let Some(vp) = &self.volpan {
-            out.push_str(&format!(
-                "{}VOLPAN {} {} {} {}\n",
-                inner, vp.item_trim, vp.take_pan, vp.take_volume, vp.take_pan_law
-            ));
-        }
-        if self.slip_offset != 0.0 {
-            out.push_str(&format!("{}SOFFS {}\n", inner, self.slip_offset));
-        }
-        if let Some(pr) = &self.playrate {
-            out.push_str(&format!(
-                "{}PLAYRATE {} {} {} {} {} {}\n",
-                inner,
-                pr.rate,
-                b(pr.preserve_pitch),
-                pr.pitch_adjust,
-                pitch_mode_to_i32(&pr.pitch_mode),
-                pr.unknown_field_5,
-                pr.unknown_field_6
-            ));
-        }
-        if let Some(guid) = &self.take_guid {
-            out.push_str(&format!("{}GUID {}\n", inner, guid));
-        }
-        if let Some(rp) = self.rec_pass {
-            out.push_str(&format!("{}RECPASS {}\n", inner, rp));
-        }
-        // Fixed item lane index (REAPER 7+ comping). `None` for ordinary items.
-        if let Some(lane) = self.lane {
-            out.push_str(&format!("{}LANE {}\n", inner, lane));
-        }
-
-        // Stretch markers
-        for sm in &self.stretch_markers {
-            out.push_str(&format!(
-                "{}SM {} {}",
-                inner, sm.position, sm.source_position
-            ));
-            if let Some(rate) = sm.rate {
-                out.push_str(&format!(" {}", rate));
-            }
-            out.push('\n');
-        }
 
         // Takes — REAPER reads the FIRST take's properties directly off the
-        // ITEM block, so we omit the `TAKE`/`TAKE SEL` marker for take #0.
-        // Subsequent takes get the marker (`TAKE SEL` for the active one).
-        for (i, take) in self.takes.iter().enumerate() {
-            take.write_take(out, &inner, i > 0);
+        // ITEM block, with no `TAKE` marker; subsequent takes get one
+        // (`TAKE SEL` for the active one). The item-level NAME / VOLPAN /
+        // SOFFS / PLAYRATE / CHANMODE / GUID / RECPASS / SM fields ARE
+        // take #0's — writing them here *and* letting the loop write
+        // `takes[0]` is what emitted every take twice.
+        first_take_of(self).write_take(out, &inner, false);
+        for take in self.takes.iter().skip(1) {
+            take.write_take(out, &inner, true);
         }
 
         out.push_str(&format!("{}>\n", indent));
@@ -1166,6 +1210,7 @@ mod tests {
                 raw_block: String::new(),
                 param_envelopes: vec![],
                 params_on_tcp: vec![],
+                header_extra: None,
             })],
             raw_content: String::new(),
         });

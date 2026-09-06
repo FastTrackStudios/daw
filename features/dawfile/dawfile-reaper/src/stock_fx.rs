@@ -27,7 +27,7 @@
 //!     .build();
 //! ```
 
-use crate::types::fx_chain::{FxChainNode, FxPlugin, PluginType};
+use crate::types::fx_chain::{FxChainNode, FxHeaderExtra, FxPlugin, PluginType};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 
@@ -156,6 +156,10 @@ fn build_fx_plugin_with_state(
         raw_block,
         param_envelopes: vec![],
         params_on_tcp: vec![],
+        header_extra: Some(FxHeaderExtra {
+            flags: "0".to_string(),
+            tail: format!("{} \"\"", id.vst_id),
+        }),
     }
 }
 
@@ -187,6 +191,7 @@ fn build_fx_plugin_no_state(
         raw_block,
         param_envelopes: vec![],
         params_on_tcp: vec![],
+        header_extra: None,
     }
 }
 

@@ -188,6 +188,7 @@ fn convert_tree_node(node: &FxNode, index: usize, routing: FxRoutingMode) -> FxC
             raw_block: String::new(),
             param_envelopes: Vec::new(),
             params_on_tcp: Vec::new(),
+            header_extra: None,
         }),
         FxNodeKind::Container {
             name,

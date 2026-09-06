@@ -152,6 +152,7 @@ impl FxBuilder {
             raw_block: self.raw_block,
             param_envelopes: vec![],
             params_on_tcp: vec![],
+            header_extra: None,
         }
     }
 }

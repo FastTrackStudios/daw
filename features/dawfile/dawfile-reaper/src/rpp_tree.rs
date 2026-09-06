@@ -778,7 +778,12 @@ where
                 )));
             }
             stack.push(RChunk {
-                header: RNode::from_tokens(tokens),
+                // Keep the header's original text alongside its tokens, so an
+                // untouched chunk renders back byte-for-byte. See `render_line`.
+                header: RNode {
+                    line: Some(after_lt.to_string()),
+                    tokens: Some(tokens),
+                },
                 children: Vec::new(),
             });
             continue;
@@ -821,25 +826,40 @@ fn stringify_root(root: &RChunk) -> String {
     s
 }
 
+/// Render one line, preferring the text it was parsed from.
+///
+/// A parsed node carries both its original `line` and the `tokens` that line
+/// tokenizes to. Rendering from the tokens re-quotes them, which is
+/// semantically identical but not byte-identical: REAPER writes
+/// `FILE "Media/x.wav"`, and a token round-trip drops the now-unnecessary
+/// quotes to `FILE Media/x.wav`. Harmless on its own — but it means a tool
+/// that edits three lines of a project rewrites thousands, and no diff of its
+/// output can be read.
+///
+/// So the original text wins whenever it still agrees with the tokens. Once
+/// anything mutates the tokens they no longer tokenize back to `line`, and
+/// rendering falls through to the tokens — which is what an edit means.
+fn render_line(node: &RNode) -> String {
+    match (&node.line, &node.tokens) {
+        (Some(line), Some(tokens)) if tokenize(line) == *tokens => line.clone(),
+        (_, Some(_)) => {
+            let mut clone = node.clone();
+            clone.get_tokens_as_line()
+        }
+        (Some(line), None) => line.clone(),
+        (None, None) => String::new(),
+    }
+}
+
 fn stringify_node(node: &RNodeTree, indent: usize) -> String {
     let pad = "  ".repeat(indent);
     match node {
         RNodeTree::Node(n) => {
-            let mut clone = n.clone();
-            let line = if clone.tokens.is_some() {
-                clone.get_tokens_as_line()
-            } else {
-                clone.line.unwrap_or_default()
-            };
+            let line = render_line(n);
             format!("{pad}{line}")
         }
         RNodeTree::Chunk(c) => {
-            let mut h = c.header.clone();
-            let header_line = if h.tokens.is_some() {
-                format!("<{}", h.get_tokens_as_line())
-            } else {
-                format!("<{}", h.line.unwrap_or_default())
-            };
+            let header_line = format!("<{}", render_line(&c.header));
             let mut out = format!("{pad}{header_line}");
             for child in &c.children {
                 out.push('\n');
