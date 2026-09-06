@@ -321,7 +321,7 @@ pub fn get_tcp_wnd(medium_reaper: &MediumReaper) -> (Option<HWND>, bool) {
 
     // Try to find by class name "REAPERTCPDisplay"
     let tcp_class = CString::new(REAPER_TCP_DISPLAY).ok();
-    let tcp_hwnd = if let Some(class) = &tcp_class {
+    let mut tcp_hwnd = if let Some(class) = &tcp_class {
         unsafe {
             swell.FindWindowEx(
                 main_hwnd.as_ptr(),
@@ -616,7 +616,7 @@ pub fn get_mcp_wnd(medium_reaper: &MediumReaper) -> (Option<HWND>, bool) {
 
     // Try to find by class name "REAPERMCPDisplay"
     let mcp_class = CString::new(REAPER_MCP_DISPLAY).ok();
-    let mcp_hwnd = if let Some(class) = &mcp_class {
+    let mut mcp_hwnd = if let Some(class) = &mcp_class {
         unsafe {
             swell.FindWindowEx(
                 mixer_hwnd,

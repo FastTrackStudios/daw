@@ -19,7 +19,7 @@ use reaper_low::{Reaper, Swell};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::os::raw::c_int;
+use std::os::raw::{c_int, c_void};
 use std::ptr;
 
 use crate::embedded::EmbeddedView;
@@ -354,7 +354,7 @@ impl HasDisplayHandle for RenderSurface {
 /// Fires on WM_CONTEXTMENU — on Linux SWELL this is any right-click in the
 /// panel HWND (tab + content). Minimal options: Dock/Undock + Close.
 fn show_dock_context_menu(hwnd: raw::HWND, screen_x: i32, screen_y: i32) {
-    use std::os::raw::c_int;
+    use std::os::raw::{c_int, c_void};
     const TPM_RETURNCMD: c_int = 0x0100;
     const TPM_NONOTIFY: c_int = 0x0080;
     const CMD_CLOSE: u32 = 1;

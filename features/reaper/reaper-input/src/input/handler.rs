@@ -143,7 +143,8 @@ impl InputHandler {
     ) -> String {
         const SWELL_FLWIN: u8 = 0x20;
         let key_code = key.get();
-        let _rawctrl = (raw_flags & SWELL_FLWIN) != 0;
+        #[cfg(target_os = "macos")]
+        let rawctrl = (raw_flags & SWELL_FLWIN) != 0;
 
         // Check modifiers
         let ctrl = behavior.contains(AcceleratorBehavior::Control);
