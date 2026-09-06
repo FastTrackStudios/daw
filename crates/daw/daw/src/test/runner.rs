@@ -314,8 +314,16 @@ impl TestRunner {
         }
         if !self.keep_open {
             reaper.stop(self);
+            // Only when REAPER is actually gone — `--keep-open` leaves it
+            // running specifically so something else can still reach it
+            // (a manual client, another test), and this unconditionally
+            // unlinked its still-live socket file out from under it,
+            // silently breaking every subsequent connection attempt with
+            // no error anywhere (the extension's own listener stays valid
+            // in-process; only new clients dialing the now-missing path
+            // fail).
+            self.clean_stale_sockets();
         }
-        self.clean_stale_sockets();
 
         Ok(tests_passed)
     }
