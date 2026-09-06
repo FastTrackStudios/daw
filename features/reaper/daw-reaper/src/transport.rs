@@ -171,12 +171,23 @@ fn time_to_musical_position(
     daw_proto::primitives::MusicalPosition::new(measure, beat, subdivision.clamp(0, 999))
 }
 
-fn run_command(cmd: u32) {
+/// Fire a transport action against a *specific* project, not whichever tab
+/// REAPER's UI currently has focused.
+///
+/// `Main_OnCommandEx` takes a project argument for exactly this reason, but
+/// every caller here used to pass `CurrentProject` unconditionally and
+/// discard the real `ProjectContext` — harmless for a single-project setup,
+/// but Recording Mode's whole point is driving several open songs' projects
+/// by GUID, and REAPER's UI focus has no reason to already be on whichever
+/// one a `SetlistService` call means to target. `resolve_reaper_project_context`
+/// is the same GUID→project resolution every other REAPER-targeted RPC in
+/// this backend already goes through.
+fn run_command_on(cmd: u32, project: &ProjectContext) {
     let reaper = ReaperHigh::get();
     reaper.medium_reaper().main_on_command_ex(
         CommandId::new(cmd),
         0,
-        ReaperProjectContext::CurrentProject,
+        resolve_reaper_project_context(project),
     );
 }
 
@@ -206,51 +217,51 @@ impl Transport for crate::Reaper {
             .unwrap_or(false)
     }
 
-    fn play(&self, _project: ProjectContext) -> DawResult<()> {
+    fn play(&self, project: ProjectContext) -> DawResult<()> {
         // 1007: Transport: Play
-        run_command(1007);
+        run_command_on(1007, &project);
         Ok(())
     }
 
-    fn pause(&self, _project: ProjectContext) -> DawResult<()> {
+    fn pause(&self, project: ProjectContext) -> DawResult<()> {
         // 1008: Transport: Pause
-        run_command(1008);
+        run_command_on(1008, &project);
         Ok(())
     }
 
-    fn stop(&self, _project: ProjectContext) -> DawResult<()> {
+    fn stop(&self, project: ProjectContext) -> DawResult<()> {
         // 1016: Transport: Stop
-        run_command(1016);
+        run_command_on(1016, &project);
         Ok(())
     }
 
-    fn play_pause(&self, _project: ProjectContext) -> DawResult<()> {
+    fn play_pause(&self, project: ProjectContext) -> DawResult<()> {
         // 40073: Transport: Play/pause
-        run_command(40073);
+        run_command_on(40073, &project);
         Ok(())
     }
 
-    fn play_stop(&self, _project: ProjectContext) -> DawResult<()> {
+    fn play_stop(&self, project: ProjectContext) -> DawResult<()> {
         // 40044: Transport: Play/stop
-        run_command(40044);
+        run_command_on(40044, &project);
         Ok(())
     }
 
-    fn record(&self, _project: ProjectContext) -> DawResult<()> {
+    fn record(&self, project: ProjectContext) -> DawResult<()> {
         // 1013: Transport: Record
-        run_command(1013);
+        run_command_on(1013, &project);
         Ok(())
     }
 
-    fn stop_recording(&self, _project: ProjectContext) -> DawResult<()> {
+    fn stop_recording(&self, project: ProjectContext) -> DawResult<()> {
         // 1016: Transport: Stop (also stops recording)
-        run_command(1016);
+        run_command_on(1016, &project);
         Ok(())
     }
 
-    fn toggle_recording(&self, _project: ProjectContext) -> DawResult<()> {
+    fn toggle_recording(&self, project: ProjectContext) -> DawResult<()> {
         // 1013 toggles record state
-        run_command(1013);
+        run_command_on(1013, &project);
         Ok(())
     }
 
@@ -277,15 +288,15 @@ impl Transport for crate::Reaper {
             .unwrap_or(0.0)
     }
 
-    fn goto_start(&self, _project: ProjectContext) -> DawResult<()> {
+    fn goto_start(&self, project: ProjectContext) -> DawResult<()> {
         // 40042: Transport: Go to start of project
-        run_command(40042);
+        run_command_on(40042, &project);
         Ok(())
     }
 
-    fn goto_end(&self, _project: ProjectContext) -> DawResult<()> {
+    fn goto_end(&self, project: ProjectContext) -> DawResult<()> {
         // 40043: Transport: Go to end of project
-        run_command(40043);
+        run_command_on(40043, &project);
         Ok(())
     }
 
@@ -344,9 +355,9 @@ impl Transport for crate::Reaper {
         Ok(())
     }
 
-    fn toggle_loop(&self, _project: ProjectContext) -> DawResult<()> {
+    fn toggle_loop(&self, project: ProjectContext) -> DawResult<()> {
         // 1068: Transport: Toggle repeat
-        run_command(1068);
+        run_command_on(1068, &project);
         Ok(())
     }
 
