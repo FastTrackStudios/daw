@@ -823,6 +823,24 @@ fn populate_markers_regions(
     summary: &mut LoadedProject,
 ) {
     let _ = daw.with_project_mut(project_guid, |p| {
+        // REAPER 7.62+ ruler lanes. A marker carries a lane index and
+        // the project names the lanes (`RULERLANE 1 8 SONG 0 -1`), so
+        // without the names a lane index is a bare number and the
+        // grouping cannot be labelled. Stored where the `Project`
+        // service's ruler-lane accessors already read from, so a loaded
+        // project answers them the same way a hand-set one does.
+        for lane in &project.ruler_lanes {
+            if lane.index < 0 || lane.name.is_empty() {
+                continue;
+            }
+            p.project_ext_state.insert(
+                (
+                    "daw-standalone:ruler_lanes".into(),
+                    format!("{}", lane.index),
+                ),
+                lane.name.clone(),
+            );
+        }
         for mr in &project.markers_regions.markers {
             let id = next_id(&mut p.next_marker_id);
             let m = Marker {
