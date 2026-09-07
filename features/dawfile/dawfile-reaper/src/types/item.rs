@@ -627,6 +627,14 @@ pub struct StretchMarker {
     pub rate: Option<f64>,
 }
 
+/// Whether an accumulated take holds anything — a source, a name or a GUID.
+///
+/// Distinguishes "the item began with an inline take" from "the parser had an
+/// empty accumulator when the first `TAKE` marker arrived".
+fn take_has_content(take: &Take) -> bool {
+    take.source.is_some() || !take.name.is_empty() || take.take_guid.is_some()
+}
+
 impl Item {
     fn should_parse_item_raw_line(raw: &str) -> bool {
         let trimmed = raw.trim_start();
@@ -953,10 +961,23 @@ impl Item {
                 }
             }
             "TAKE" => {
+                // `TAKE NULL` is an empty comp-lane slot. It is still a take
+                // as far as REAPER is concerned — it occupies an index — so
+                // it is kept, not skipped: dropping it would silently
+                // re-number every take on a comped item.
                 let is_selected =
                     matches!(tokens.get(1), Some(Token::Identifier(flag)) if flag == "SEL");
                 if let Some(take) = current_take.take() {
-                    item.takes.push(take);
+                    // An item whose FIRST take is written inline has content
+                    // before any `TAKE` marker, and that content is take 0.
+                    // A comped item has none — it opens straight with
+                    // `TAKE NULL` — and pushing the empty accumulator there
+                    // invented a take 0 that REAPER does not count, shifting
+                    // every later index by one. Only real inline content
+                    // becomes take 0.
+                    if *in_take_context || take_has_content(&take) {
+                        item.takes.push(take);
+                    }
                 }
                 *current_take = Some(Take {
                     is_selected,

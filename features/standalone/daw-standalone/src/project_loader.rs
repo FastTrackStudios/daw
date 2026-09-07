@@ -467,10 +467,38 @@ fn populate_tracks(
                     }
                     takes_out.push(take);
                 }
+                // Which take plays.
+                //
+                // `TAKE SEL` is REAPER's own marker for the active take and
+                // is authoritative when present. The GUID match below is the
+                // older path and only works for an item whose FIRST take is
+                // written inline (so the item carries that take's `GUID`).
+                //
+                // A comped item is not written that way. It opens with
+                // `TAKE NULL` — an empty comp-lane slot, which occupies a
+                // take index exactly as REAPER counts it — so there is no
+                // item-level `GUID` to match, `position` finds nothing, and
+                // the old `unwrap_or(0)` landed on a null slot. The item
+                // then reported an `Empty` active take and every consumer
+                // that keeps only audio dropped it: on a real session
+                // (`set in stone`) the tom trigger tracks composed to 1.3%
+                // non-zero at -66 dBFS while their source files were full
+                // 317s recordings. It presented as "the trigger tracks hold
+                // no audio".
+                //
+                // Falling back to the first take that has a source keeps a
+                // pathological item (nulls only, no SEL) playing something
+                // real rather than silence.
                 let active_idx = ri
                     .takes
                     .iter()
-                    .position(|t| t.take_guid == ri.take_guid)
+                    .position(|t| t.is_selected)
+                    .or_else(|| {
+                        ri.take_guid
+                            .as_ref()
+                            .and_then(|g| ri.takes.iter().position(|t| t.take_guid.as_ref() == Some(g)))
+                    })
+                    .or_else(|| ri.takes.iter().position(|t| t.source.is_some()))
                     .unwrap_or(0) as u32;
                 if !takes_out.is_empty() {
                     p.takes.insert(
