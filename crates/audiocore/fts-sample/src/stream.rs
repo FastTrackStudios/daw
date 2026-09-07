@@ -37,6 +37,14 @@ pub const CHUNK_FRAMES: u32 = 12_000;
 /// on everything else.
 pub const HEAD_FRAMES: u32 = 12_000;
 
+/// How far ahead of the end of a chunk to ask for the next one, in frames.
+///
+/// 4,800 frames is 100ms at 48kHz — two orders of magnitude more than a
+/// chunk decode costs (~0.4ms measured), so the streamer has room even when
+/// a chord asks for a hundred chunks at once. The same figure `sample()` and
+/// `run()` use.
+pub const READ_AHEAD_FRAMES: u32 = 4_800;
+
 /// A single voice's private read cursor into a streamed sample.
 ///
 /// Every production sampler streams this way: the audio thread reads from a
@@ -61,12 +69,51 @@ pub struct StreamCursor {
     /// Absolute sample-index range the cursor covers.
     lo: usize,
     hi: usize,
+    /// Index range of a chunk we asked for and did NOT get, and how many more
+    /// reads to answer from that knowledge before asking again.
+    ///
+    /// A failed `seek` used to leave the cursor holding nothing at all, so
+    /// the very next sample re-entered `seek` -> `chunk_at` -> miss, for
+    /// every sample until the chunk landed. One absent chunk therefore cost
+    /// thousands of chunk-table lookups (measured: 1.1M lookups in 8s of
+    /// playing, against 5.7k successful ones) — an atomic load and an
+    /// `ArcSwap` guard each, on the audio thread, at exactly the moment the
+    /// streamer is trying to publish into that table.
+    ///
+    /// Remembering the hole makes the wait nearly free, and re-asking every
+    /// `MISS_RETRY` reads keeps the recovery inside one audio block.
+    miss_lo: usize,
+    miss_hi: usize,
+    miss_skip: u32,
+    /// The sample this cursor is parked on, so it can ask for the NEXT chunk
+    /// as it advances. Without it the cursor could only read ahead at `seek`
+    /// time — which is the moment it ENTERS a chunk, when the end is still a
+    /// whole chunk away and the read-ahead condition is false. The result was
+    /// that the cursor path never prefetched at all: every chunk boundary
+    /// raced the streamer from a standing start, and about half of them lost.
+    src: Option<Arc<StreamedSample>>,
+    /// Whether the read-ahead for the chunk AFTER the held one has been
+    /// issued. Once per chunk, not once per sample: `request` is cheap only
+    /// while the chunk is already wanted AND queued, and the streamer clears
+    /// `queued` as soon as it drains — after which every further call takes
+    /// two read-modify-writes and the streamer's queue MUTEX, on the audio
+    /// thread. `frame_pair_cursored` reads four samples per frame, so an
+    /// unguarded prefetch did that four times a frame per voice and cost
+    /// more render time than the gaps it prevented (measured: mean 1.17ms ->
+    /// 1.93ms, and the deadline overruns came back).
+    prefetched: bool,
 }
+
+/// Reads to answer from a known-absent chunk before consulting the chunk
+/// table again. 256 is one audio block at the sizes this engine runs, so a
+/// chunk that lands is picked up within a block — inaudible — while the
+/// lookups drop by that factor.
+const MISS_RETRY: u32 = 256;
 
 impl StreamCursor {
     /// Read `index` from the held chunk, or `None` when it falls outside it.
     #[inline]
-    pub fn get(&self, index: usize) -> Option<f32> {
+    pub fn get(&mut self, index: usize) -> Option<f32> {
         const SCALE: f32 = 1.0 / 32768.0;
         if index < self.lo || index >= self.hi {
             return None;
@@ -74,37 +121,70 @@ impl StreamCursor {
         if let Some(stream) = self.head.as_ref() {
             return stream.head.get(index).map(|s| *s as f32 * SCALE);
         }
-        self.chunk
+        let v = self
+            .chunk
             .as_ref()?
             .get(index - self.lo)
-            .map(|s| *s as f32 * SCALE)
+            .map(|s| *s as f32 * SCALE);
+        // Approaching the end of this chunk: ask for the next one now, so it
+        // is resident before the read gets there. `request` is two atomic
+        // loads once the chunk is already wanted, so this costs nothing on
+        // the samples that follow the first.
+        if !self.prefetched {
+            if let Some(stream) = self.src.as_ref() {
+                let ch = stream.channels.max(1) as usize;
+                if index + ch * READ_AHEAD_FRAMES as usize >= self.hi {
+                    let chunk_no = (self.lo / ch) as u32 / CHUNK_FRAMES;
+                    stream.request(chunk_no + 1);
+                    self.prefetched = true;
+                }
+            }
+        }
+        v
     }
 
     /// Point the cursor at whichever chunk covers `index`. Returns whether it
     /// now holds one.
     #[inline]
     pub fn seek(&mut self, stream: &Arc<StreamedSample>, index: usize) -> bool {
+        // Still inside a hole we already know about: say so without touching
+        // the chunk table.
+        if index >= self.miss_lo && index < self.miss_hi && self.miss_skip > 0 {
+            self.miss_skip -= 1;
+            return false;
+        }
         // The head is always resident: park on it rather than asking the
         // chunk table a question it will answer `None` to.
         if index < stream.head.len() {
             self.chunk = None;
+            self.src = Some(Arc::clone(stream));
             self.head = Some(Arc::clone(stream));
+            self.prefetched = false;
             self.lo = 0;
             self.hi = stream.head.len();
-            // Ask for the chunk that follows the head while there is still
-            // head left to play — the same lead time `sample()` buys.
-            if index >= stream.head.len() - stream.head.len() / 4 {
-                let ch = stream.channels.max(1) as usize;
-                stream.request((stream.head.len() / ch) as u32 / CHUNK_FRAMES);
-            }
+            // Ask for the chunk after the head the MOMENT a cursor parks on
+            // the head, not three quarters of the way through it.
+            //
+            // The head is the one place a voice has no predecessor to have
+            // prefetched for it: it starts here. Waiting until 3/4 left only
+            // 62ms of lead, and that transition was the last one still
+            // missing after the read-ahead fix — every later boundary gets a
+            // full chunk of warning. Requesting on arrival costs nothing (the
+            // request is idempotent and the streamer is idle) and buys the
+            // whole head, 0.25s, as lead.
+            let ch = stream.channels.max(1) as usize;
+            stream.request((stream.head.len() / ch) as u32 / CHUNK_FRAMES);
             return true;
         }
         self.head = None;
         match stream.chunk_at(index) {
             Some((chunk, lo, hi)) => {
                 self.chunk = Some(chunk);
+                self.src = Some(Arc::clone(stream));
                 self.lo = lo;
                 self.hi = hi;
+                self.miss_skip = 0;
+                self.prefetched = false;
                 true
             }
             None => {
@@ -114,11 +194,62 @@ impl StreamCursor {
                 self.head = None;
                 self.lo = 0;
                 self.hi = 0;
+                // Remember which chunk is missing, so the reads that follow
+                // cost nothing until it is worth asking again.
+                let ch = stream.channels.max(1) as usize;
+                let chunk_no = (index / ch) as u32 / CHUNK_FRAMES;
+                self.miss_lo = chunk_no as usize * CHUNK_FRAMES as usize * ch;
+                self.miss_hi = self.miss_lo + CHUNK_FRAMES as usize * ch;
+                self.miss_skip = MISS_RETRY;
                 false
             }
         }
     }
 }
+
+/// Reads that found their chunk absent and returned silence, process wide.
+///
+/// The audio thread never blocks on the streamer: a read whose chunk has not
+/// arrived asks for it and returns 0.0. That is the right trade, but it is
+/// also silent damage — no xrun, no missed deadline, just a hole in the
+/// output — so it has to be countable.
+pub static STREAM_MISSES: AtomicU64 = AtomicU64::new(0);
+
+/// Reads served from a resident chunk, process wide — the denominator.
+pub static STREAM_HITS: AtomicU64 = AtomicU64::new(0);
+
+/// Fill passes run by the streamer workers.
+pub static FILLS: AtomicU64 = AtomicU64::new(0);
+/// Chunks actually decoded.
+pub static CHUNKS_DECODED: AtomicU64 = AtomicU64::new(0);
+/// Total time inside `decode_chunk`, nanoseconds — the streamer's real cost.
+pub static DECODE_NS: AtomicU64 = AtomicU64::new(0);
+/// Chunks decoded that this sample had ALREADY decoded once before —
+/// eviction thrash. A voice playing forward should never need the same
+/// chunk twice; if it does, something threw the chunk away while it was
+/// still being read, and the streamer is doing the same work repeatedly
+/// while voices gap waiting for it.
+pub static REDECODES: AtomicU64 = AtomicU64::new(0);
+
+/// Misses where NOBODY had asked for the chunk yet — the read is the first
+/// to want it, so it had zero lead time by construction. This is a prefetch
+/// failure: something is reading where no read-ahead predicted.
+pub static MISS_UNREQUESTED: AtomicU64 = AtomicU64::new(0);
+
+/// Misses where the chunk was already wanted and simply had not arrived —
+/// the streamer being late rather than uninformed.
+pub static MISS_PENDING: AtomicU64 = AtomicU64::new(0);
+
+/// Chunks dropped by the idle SWEEP (a sample nobody has asked for lately).
+pub static SHED_BY_SWEEP: AtomicU64 = AtomicU64::new(0);
+
+/// Chunks dropped by the per-sample residency BUDGET during a fill.
+pub static SHED_BY_BUDGET: AtomicU64 = AtomicU64::new(0);
+
+/// Longest single fill pass, nanoseconds. A voice has ~62ms of lead time
+/// (it asks for the next chunk 3/4 of the way through its head/chunk), so a
+/// fill that takes longer than that is a gap somebody hears.
+pub static FILL_PEAK_NS: AtomicU64 = AtomicU64::new(0);
 
 /// One decoded chunk: interleaved 16-bit PCM.
 ///
@@ -162,6 +293,8 @@ pub struct StreamedSample {
     /// has to contend with the decoder is a request that gets dropped, and a
     /// dropped request is a hole in the audio at the next chunk boundary.
     wanted: [AtomicU64; WANTED_WORDS],
+    /// Chunks this sample has decoded at least once, ever — for [`REDECODES`].
+    ever: [AtomicU64; WANTED_WORDS],
     /// Set while this sample is queued with the streamer.
     queued: AtomicBool,
     /// Rolling counter used to evict the chunks nobody is reading.
@@ -253,6 +386,7 @@ impl StreamedSample {
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
             wanted: [const { AtomicU64::new(0) }; WANTED_WORDS],
+            ever: [const { AtomicU64::new(0) }; WANTED_WORDS],
             queued: AtomicBool::new(false),
             tick: AtomicU64::new(0),
             last_used: Mutex::new(HashMap::new()),
@@ -313,6 +447,7 @@ impl StreamedSample {
         }
         let pinned = self.pins.lock().map(|p| p.clone()).unwrap_or_default();
         if pinned.is_empty() {
+            SHED_BY_SWEEP.fetch_add(self.resident_chunk_count() as u64, Ordering::Relaxed);
             for slot in self.chunks.iter() {
                 slot.store(None);
             }
@@ -323,6 +458,9 @@ impl StreamedSample {
         }
         for (i, slot) in self.chunks.iter().enumerate() {
             if !pinned.contains_key(&(i as u32)) {
+                if slot.load().is_some() {
+                    SHED_BY_SWEEP.fetch_add(1, Ordering::Relaxed);
+                }
                 slot.store(None);
             }
         }
@@ -424,6 +562,7 @@ impl StreamedSample {
                 chunk.get(within).map(|s| *s as f32 * SCALE).unwrap_or(0.0)
             }
             None => {
+                STREAM_MISSES.fetch_add(1, Ordering::Relaxed);
                 self.request(chunk_no);
                 0.0
             }
@@ -503,6 +642,19 @@ impl StreamedSample {
             .get(chunk_no as usize)
             .and_then(|slot| slot.load_full())
         else {
+            STREAM_MISSES.fetch_add(1, Ordering::Relaxed);
+            // Was this chunk already on order? If not, no read-ahead ever
+            // predicted this read and the voice was always going to gap.
+            let (w, b) = (chunk_no as usize / 64, chunk_no as usize % 64);
+            let already = self
+                .wanted
+                .get(w)
+                .is_some_and(|word| word.load(Ordering::Acquire) & (1u64 << b) != 0);
+            if already {
+                MISS_PENDING.fetch_add(1, Ordering::Relaxed);
+            } else {
+                MISS_UNREQUESTED.fetch_add(1, Ordering::Relaxed);
+            }
             self.request(chunk_no);
             return None;
         };
@@ -511,6 +663,7 @@ impl StreamedSample {
         if index + ch * 4_800 >= hi {
             self.request(chunk_no + 1);
         }
+        STREAM_HITS.fetch_add(1, Ordering::Relaxed);
         Some((chunk, lo, hi))
     }
 
@@ -623,6 +776,8 @@ impl StreamedSample {
     /// Decode everything the audio thread has asked for. Runs on the streamer
     /// thread.
     fn fill(self: &Arc<Self>) {
+        let fill_started = std::time::Instant::now();
+        FILLS.fetch_add(1, Ordering::Relaxed);
         let wanted = self.take_wanted();
         if wanted.is_empty() {
             self.queued.store(false, Ordering::Release);
@@ -637,6 +792,7 @@ impl StreamedSample {
             return;
         };
         let tick = self.tick.fetch_add(1, Ordering::Relaxed);
+        let mut decoded_here = 0u64;
         for chunk_no in wanted {
             let Some(slot) = self.chunks.get(chunk_no as usize) else {
                 continue;
@@ -645,11 +801,27 @@ impl StreamedSample {
                 continue;
             }
             let from = chunk_no * CHUNK_FRAMES;
+            let decode_started = std::time::Instant::now();
             let Some(pcm) = decode_chunk(stream, &self.index, from, CHUNK_FRAMES, self.channels)
             else {
                 tracing::warn!(chunk_no, from, "stream: chunk decode failed");
                 continue;
             };
+            DECODE_NS.fetch_add(
+                decode_started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64,
+                Ordering::Relaxed,
+            );
+            CHUNKS_DECODED.fetch_add(1, Ordering::Relaxed);
+            decoded_here += 1;
+            {
+                let (w, b) = (chunk_no as usize / 64, chunk_no as usize % 64);
+                if let Some(word) = self.ever.get(w) {
+                    let mask = 1u64 << b;
+                    if word.fetch_or(mask, Ordering::Relaxed) & mask != 0 {
+                        REDECODES.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            }
             // Publishing is a single slot swap, so a voice reading a
             // DIFFERENT chunk of this sample is never disturbed by the fill.
             slot.store(Some(Arc::new(pcm)));
@@ -677,12 +849,25 @@ impl StreamedSample {
                 by_age.sort_by_key(|(_, t)| *t);
                 for (chunk_no, _) in by_age.iter().take(resident - budget) {
                     self.chunks[*chunk_no as usize].store(None);
+                    SHED_BY_BUDGET.fetch_add(1, Ordering::Relaxed);
                 }
             }
         }
         // Requests that arrived while this fill was running must not be
         // stranded: clear the flag first, then re-queue if anything is
         // outstanding. The other order loses whatever landed in between.
+        let fill_ns = fill_started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+        FILL_PEAK_NS.fetch_max(fill_ns, Ordering::Relaxed);
+        // One event per fill, with the numbers that decide whether a voice
+        // gaps: how many chunks this pass owed, and how long the caller had
+        // to wait for them. A voice asks for its next chunk ~62ms before it
+        // needs it, so `fill_ms` above that is a hole in somebody's output.
+        tracing::debug!(
+            target: "fts_sample::stream",
+            chunks = decoded_here,
+            fill_ms = fill_ns as f64 / 1.0e6,
+            "stream fill"
+        );
         self.queued.store(false, Ordering::Release);
         #[cfg(feature = "engine-native")]
         if self.has_wanted() && !self.queued.swap(true, Ordering::AcqRel) {
@@ -695,7 +880,7 @@ impl StreamedSample {
 /// slack for re-triggers and loop jumps. At 48 KB a chunk that caps a
 /// sounding sample at ~290 KB; a sample that is merely loaded holds only its
 /// head.
-const MAX_RESIDENT_CHUNKS: usize = 6;
+const MAX_RESIDENT_CHUNKS: usize = 24;
 
 /// Decode `frames` starting at `from_frame` out of a FLAC stream, as
 /// interleaved i16.
@@ -1033,3 +1218,4 @@ mod tests {
     // signal-sampler's `engine::voice` tests — it needs the `Voice` types,
     // which stayed behind when this module moved into fts-sample.
 }
+

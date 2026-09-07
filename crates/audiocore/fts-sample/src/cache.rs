@@ -433,9 +433,26 @@ impl SampleData {
     }
 
     /// A sample that stays compressed in its pack and streams as it plays.
+    ///
+    /// `FTS_NO_STREAM=1` decodes the whole entry up front instead, giving a
+    /// fully resident sample with no streamer involvement at all. It is a
+    /// DIAGNOSTIC, not a mode to ship: it trades every byte of the library
+    /// for certainty, and a real library will not fit. The point is to settle
+    /// whether an artefact is the streamer's fault by removing the streamer —
+    /// if the crackle survives this, it was never streaming.
     pub fn streamed(sample: Arc<super::stream::StreamedSample>) -> Self {
         let (channels, sample_rate, num_frames) =
             (sample.channels, sample.sample_rate, sample.num_frames);
+        if no_stream() {
+            let pcm = sample.decode_all();
+            tracing::debug!(
+                target: "fts_sample::stream",
+                frames = num_frames,
+                mib = (pcm.len() * 4) as f64 / (1024.0 * 1024.0),
+                "FTS_NO_STREAM: decoded entry fully resident"
+            );
+            return Self::from_f32(pcm, channels, sample_rate, num_frames);
+        }
         Self {
             pcm: Pcm::Streamed(sample),
             channels,
@@ -622,7 +639,7 @@ impl SampleData {
                 return self.frame_pair(frame_idx, last);
             }
         }
-        let read = |i: usize| cursor.get(i);
+        let mut read = |i: usize| cursor.get(i);
         match self.channels {
             1 => match (read(a), read(b)) {
                 (Some(x), Some(y)) => ((x, x), (y, y)),
@@ -683,6 +700,13 @@ impl SampleData {
 }
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
+
+/// Whether to bypass streaming entirely and decode every entry up front.
+/// Read once — this is consulted per sample load, and `env::var` is not free.
+fn no_stream() -> bool {
+    static NO_STREAM: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *NO_STREAM.get_or_init(|| std::env::var_os("FTS_NO_STREAM").is_some())
+}
 
 /// Shared sample cache, safe to use across the audio thread and a
 /// background preloader simultaneously.
