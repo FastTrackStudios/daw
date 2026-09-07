@@ -38,7 +38,6 @@ dawfile-reaper = { workspace = true, optional = true }
 # The reusable, vector-themeable UI component library (widgets / theming /
 # panels: DawWorkspace, TrackControlPanel, …). Exposed as `daw::ui` behind the
 # `ui` feature so apps consume the components through the facade.
-daw-ui = { workspace = true, optional = true }
 
 # Control Surface Integration (Mackie Control / X-Touch). Depends only on
 # daw-proto + daw-control, so it folds into the facade — no cycle.
@@ -106,10 +105,7 @@ standalone-audio = ["standalone", "daw-standalone/audio"]
 pipewire = ["standalone-audio"]
 # Reusable UI components (`daw::ui` — widgets / theming / panels). `web` brings
 # in dioxus (the components render under any dioxus renderer, incl. native Blitz).
-ui = ["dep:daw-ui", "daw-ui/web"]
 # REAPER theme import: `daw::ui::theming::theme_from_reaper` (+ the
-# daw-theme-reaper parser via daw-ui).
-ui-reaper-theme = ["ui", "daw-ui/reaper-theme"]
 standalone-rpp = ["standalone-audio", "daw-standalone/rpp-loader"]
 # Save an opened project to a NEW .rpp beside its original
 # (`daw::standalone::save`) — the write-back experiment; never in place.

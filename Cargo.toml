@@ -39,10 +39,6 @@ members = [
     "features/audio/daw-audio-graph",
     "features/audio/daw-audio-io",
     "features/audio/fts-audio-proto",
-    "features/daw-ui/daw-theme",
-    "features/daw-ui/daw-theme-art",
-    "features/daw-ui/daw-theme-reaper",
-    "features/daw-ui/daw-ui",
     "features/dawfile/dawfile-aaf",
     "features/dawfile/dawfile-ableton",
     "features/dawfile/dawfile-dawproject",
@@ -50,16 +46,6 @@ members = [
     "features/dawfile/dawfile-protools",
     "features/dawfile/dawfile-reaper",
     "features/dawfile/dawfile-standalone",
-    "features/expression-editor/expression-editor-audio",
-    "features/expression-editor/expression-editor-core",
-    "features/expression-editor/expression-editor-corpus",
-    "features/expression-editor/expression-editor-daw",
-    "features/expression-editor/expression-editor-demo",
-    "features/expression-editor/expression-editor-guitarpro",
-    "features/expression-editor/expression-editor-reaper",
-    "features/expression-editor/expression-editor-standalone",
-    "features/expression-editor/expression-editor-tools",
-    "features/expression-editor/expression-editor-ui",
     "features/fx/level/level-dsp",
     "features/fx/pitch/pitch-dsp",
     "features/fx/tune/tune-dsp",
@@ -69,13 +55,9 @@ members = [
     "features/reaper/daw-perf-test",
     "features/reaper/daw-reaper",
     "features/reaper/daw-reaper-dioxus",
-    "features/reaper/daw-reaper-dioxus-ext",
-    "features/reaper/daw-reaper-dioxus-ext-test",
     "features/reaper/daw-reaper-embed",
     "features/reaper/daw-reaper/xtask",
     "features/reaper/fts-icons",
-    "features/reaper/fts-themer",
-    "features/reaper/fts-themer-ui",
     "features/reaper/reaper-config",
     "features/reaper/reaper-dioxus",
     "features/reaper/reaper-embed",
@@ -203,12 +185,9 @@ daw-bridge = { path = "features/reaper/daw-bridge" }
 # Extension runtime — integrated REAPER extension helpers
 daw-extension-runtime = { path = "features/reaper/daw-extension-runtime" }
 daw-reaper-dioxus = { path = "features/reaper/daw-reaper-dioxus" }
-daw-reaper-dioxus-ext = { path = "features/reaper/daw-reaper-dioxus-ext" }
 daw-reaper-embed = { path = "features/reaper/daw-reaper-embed" }
 reaper-launcher = { path = "features/reaper/reaper-launcher" }
 fts-icons = { path = "features/reaper/fts-icons" }
-fts-themer = { path = "features/reaper/fts-themer", default-features = false }
-fts-themer-ui = { path = "features/reaper/fts-themer-ui" }
 reaper-config = { path = "features/reaper/reaper-config" }
 reaper-kbd = { path = "features/reaper/reaper-kbd" }
 reaper-hwnd = { path = "features/reaper/reaper-hwnd" }
@@ -221,11 +200,6 @@ reaper-input = { path = "features/reaper/reaper-input", default-features = false
 fts-launcher = { path = "features/launcher/fts-launcher" }
 daw-standalone = { path = "features/standalone/daw-standalone" }
 daw-csi = { path = "features/surfaces/daw-csi" }
-daw-ui = { path = "features/daw-ui/daw-ui", default-features = false }
-daw-theme = { path = "features/daw-ui/daw-theme" }
-daw-theme-art = { path = "features/daw-ui/daw-theme-art", default-features = false }
-daw-theme-reaper = { path = "features/daw-ui/daw-theme-reaper" }
-
 # ── session domain (wave 3) ───────────────────────────────────────────
 # `session` is the facade — the only public API surface for the session
 # domain. session-proto is INTERNAL (session-ui and session-guide are the
@@ -267,16 +241,6 @@ pitch-dsp = { path = "features/fx/pitch/pitch-dsp" }
 world-sys = { path = "libs/vendor/world" }
 tune-dsp = { path = "features/fx/tune/tune-dsp" }
 align-dsp = { path = "features/align/align-dsp" }
-expression-editor-audio = { path = "features/expression-editor/expression-editor-audio" }
-expression-editor-core = { path = "features/expression-editor/expression-editor-core" }
-expression-editor-corpus = { path = "features/expression-editor/expression-editor-corpus" }
-expression-editor-daw = { path = "features/expression-editor/expression-editor-daw" }
-expression-editor-demo = { path = "features/expression-editor/expression-editor-demo" }
-expression-editor-guitarpro = { path = "features/expression-editor/expression-editor-guitarpro" }
-expression-editor-reaper = { path = "features/expression-editor/expression-editor-reaper" }
-expression-editor-standalone = { path = "features/expression-editor/expression-editor-standalone" }
-expression-editor-tools = { path = "features/expression-editor/expression-editor-tools" }
-expression-editor-ui = { path = "features/expression-editor/expression-editor-ui" }
 level-dsp = { path = "features/fx/level/level-dsp" }
 # Internal DSP cores (behind the facades).
 
