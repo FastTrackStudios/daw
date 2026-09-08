@@ -21,6 +21,8 @@
 // see safe `&mut self` methods.
 #![allow(unsafe_code)]
 
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Arc;
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
@@ -158,13 +160,18 @@ impl Vst3Host {
             })
         };
 
+        let handler = HostComponentHandler::new();
         Ok(LoadedVst3Plugin {
             descriptor,
             activation: None,
             controller,
             processor,
             component,
-            _component_handler: ComWrapper::new(HostComponentHandler),
+            pending_restart: Arc::clone(&handler.pending_restart),
+            last_params: std::collections::HashMap::new(),
+            resend_params: false,
+            cached_latency: None,
+            _component_handler: ComWrapper::new(handler),
             _host_app: ComWrapper::new(HostApplication),
             _module: module,
         })
@@ -301,6 +308,22 @@ pub struct LoadedVst3Plugin {
     controller: Option<ControllerHandle>,
     processor: ComPtr<IAudioProcessor>,
     component: ComPtr<IComponent>,
+    /// Restart flags the plugin has requested, shared with the handler above.
+    /// Honoured at the top of the next `process_block`.
+    pending_restart: Arc<AtomicI32>,
+    /// The last plain value the host set for each parameter.
+    ///
+    /// Re-activating a component resets its processor to defaults, so a
+    /// restart silently discards everything set before it. Decapitator made
+    /// this visible: honouring its restart got it processing again, but at
+    /// its default Drive, so a style change quietly reverted the drive that
+    /// had been set alongside it. The host has to put the state back.
+    last_params: std::collections::HashMap<ParamID, ParamValue>,
+    /// Set after a restart: re-send `last_params` on the next block.
+    resend_params: bool,
+    /// Cleared when the plugin reports `kLatencyChanged`, so the next
+    /// `latency()` asks the plugin again rather than returning a stale value.
+    cached_latency: Option<u32>,
     /// Host-side IComponentHandler installed on the controller after
     /// initialize(). Lives for the plugin's lifetime so the COM ref
     /// the controller holds stays valid.
@@ -611,7 +634,27 @@ impl IParameterChangesTrait for HostParameterChanges {
 // integration with the renderer's automation system lands when we
 // wire the controller's edits back into envelope writes.
 
-struct HostComponentHandler;
+struct HostComponentHandler {
+    /// Restart flags the plugin has asked for and the host has not yet
+    /// acted on. OR-ed together; cleared once honoured.
+    ///
+    /// Acknowledging `restartComponent` and doing nothing is not a
+    /// simplification, it is a way to hang a plugin. Soundtoys' Decapitator
+    /// asks for a restart whenever its `Style` changes — the styles differ
+    /// in internal latency — and if the host never restarts it, the plugin
+    /// stops processing and passes the dry signal through *permanently*.
+    /// Setting Style back to its original value does not recover it: the
+    /// plugin is waiting for the host, not for another parameter write.
+    /// From the outside that looks exactly like a plugin that ignores the
+    /// parameter, which is how it was diagnosed for a long time.
+    pending_restart: Arc<AtomicI32>,
+}
+
+impl HostComponentHandler {
+    fn new() -> Self {
+        Self { pending_restart: Arc::new(AtomicI32::new(0)) }
+    }
+}
 
 impl Class for HostComponentHandler {
     type Interfaces = (IComponentHandler,);
@@ -627,7 +670,11 @@ impl IComponentHandlerTrait for HostComponentHandler {
     unsafe fn endEdit(&self, _id: ParamID) -> tresult {
         kResultOk
     }
-    unsafe fn restartComponent(&self, _flags: int32) -> tresult {
+    unsafe fn restartComponent(&self, flags: int32) -> tresult {
+        // Called from the controller thread. Record and honour it on the
+        // next process call, which is the thread allowed to touch
+        // activation state.
+        self.pending_restart.fetch_or(flags, Ordering::AcqRel);
         kResultOk
     }
 }
@@ -1038,6 +1085,54 @@ impl LoadedVst3Plugin {
         out_r: &mut [f32],
         events: &PluginEvents<'_>,
     ) -> Result<(), Vst3HostError> {
+        // Honour any restart the plugin asked for since the last block.
+        //
+        // `restartComponent` is the plugin telling the host that something
+        // about its configuration has changed and it needs the activation
+        // cycle run again. Acknowledging it without acting is what left
+        // Decapitator passing dry audio for every style but its default: it
+        // asks for a restart on each style change, and until it gets one it
+        // does not process. This is the audio thread, which is where
+        // activation state may be touched.
+        // Honour the restart the plugin asked for, according to what it
+        // actually asked for. The flags are not interchangeable and
+        // responding to all of them with a re-activation is worse than
+        // ignoring them: Decapitator raises `kParamTitlesChanged` on every
+        // style change — its controls are relabelled per style — and
+        // re-activating on that reset the processor to defaults 330 times
+        // over two seconds of audio, so the plugin never settled and every
+        // style measured the same.
+        const K_RELOAD_COMPONENT: i32 = 1 << 0;
+        const K_IO_CHANGED: i32 = 1 << 1;
+        const K_LATENCY_CHANGED: i32 = 1 << 3;
+        const K_PARAM_TITLES_CHANGED: i32 = 1 << 4;
+
+        let flags = self.pending_restart.swap(0, Ordering::AcqRel);
+        if flags != 0 && self.activation.is_some() {
+            if flags & (K_RELOAD_COMPONENT | K_IO_CHANGED) != 0 {
+                // The plugin's configuration changed underneath us; the
+                // activation cycle has to run again, and the parameter state
+                // has to be put back because re-activation resets it.
+                self.restart_component();
+                self.resend_params = true;
+            }
+            if flags & K_LATENCY_CHANGED != 0 {
+                // Nothing to restart — the host just has to believe the new
+                // number. Callers read it through `latency()`.
+                self.cached_latency = None;
+            }
+            if flags & K_PARAM_TITLES_CHANGED != 0 {
+                // Titles and value displays are stale; re-read them. This is
+                // what the flag asks for, and it is all it asks for.
+                self.refresh_param_titles();
+            }
+        }
+        for &(id, plain) in events.params {
+            self.last_params.insert(id, plain);
+        }
+        let resend = std::mem::take(&mut self.resend_params);
+        let last_params = self.last_params.clone();
+
         let Some(act) = self.activation.as_mut() else {
             return Err(Vst3HostError::NotActivated);
         };
@@ -1113,6 +1208,14 @@ impl LoadedVst3Plugin {
         // — the canonical pattern is documented in the VST3 SDK.
         act.param_changes_owner.reset();
         if let Some(c) = self.controller.as_ref() {
+            // Everything the host set before a restart has to be put back
+            // after it, because re-activation resets the processor.
+            if resend {
+                for (&id, &plain) in &last_params {
+                    let normalized = unsafe { c.ptr.plainParamToNormalized(id, plain) };
+                    act.param_changes_owner.push_point(id, normalized);
+                }
+            }
             for &(id, plain) in events.params {
                 let normalized = unsafe { c.ptr.plainParamToNormalized(id, plain) };
                 act.param_changes_owner.push_point(id, normalized);
@@ -1331,6 +1434,49 @@ impl LoadedVst3Plugin {
             }
         }
         Ok(stream.buf.borrow().clone())
+    }
+
+    /// Re-read parameter titles and displays after the plugin reports
+    /// `kParamTitlesChanged`. Cheap, and it is the whole of the correct
+    /// response to that flag.
+    fn refresh_param_titles(&mut self) {
+        let Some(c) = self.controller.as_ref() else { return };
+        let count = unsafe { c.ptr.getParameterCount() };
+        for i in 0..count {
+            let mut info = ParameterInfo {
+                id: 0,
+                title: [0; 128],
+                shortTitle: [0; 128],
+                units: [0; 128],
+                stepCount: 0,
+                defaultNormalizedValue: 0.0,
+                unitId: 0,
+                flags: 0,
+            };
+            unsafe {
+                let _ = c.ptr.getParameterInfo(i, &mut info);
+            }
+        }
+    }
+
+    /// Run the activation cycle again in place, keeping the current
+    /// configuration: setProcessing(false) → setActive(false) →
+    /// setActive(true) → setProcessing(true).
+    ///
+    /// This is what a plugin is asking for when it calls
+    /// `restartComponent`. It is deliberately *not* a full `prepare`: the
+    /// scratch buffers, bus arrangement and sample rate are unchanged, and
+    /// re-preparing would discard parameter state the plugin has just
+    /// finished applying.
+    fn restart_component(&mut self) {
+        unsafe {
+            let _ = self.processor.setProcessing(0);
+            let _ = self.component.setActive(0);
+            if self.component.setActive(1) != kResultOk {
+                return;
+            }
+            let _ = self.processor.setProcessing(1);
+        }
     }
 
     /// Reverse of [`prepare`]: setProcessing(false) → setActive(false)
