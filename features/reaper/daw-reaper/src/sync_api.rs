@@ -577,6 +577,10 @@ fn build_track_info(track: &reaper_high::Track) -> daw_proto::Track {
         fx_count,
         input_fx_count,
         height,
+        // REAPER has no strip width, so there is nothing to read: the
+        // value lives in the project's ext state and reaches the model
+        // through the loader.
+        width: None,
         record_input,
         parent_send,
     }

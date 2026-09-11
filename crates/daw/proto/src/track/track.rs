@@ -154,7 +154,7 @@ pub struct Track {
     /// Number of FX in the input/recording FX chain
     pub input_fx_count: u32,
     /// How tall the track's panel is drawn, in pixels — REAPER's
-    /// `TRACKHEIGHT`.
+    /// `TRACKHEIGHT`. See also [`Track::width`], its mixer counterpart.
     ///
     /// A view concern living on the track on purpose. It is not what a
     /// track IS, and nothing about playback or routing reads it; but it
@@ -169,6 +169,23 @@ pub struct Track {
     /// pixels tall is a different claim from one that has never been
     /// resized, and the UI's minimum is the UI's business.
     pub height: Option<u32>,
+    /// How wide the track's mixer strip is drawn, in pixels.
+    ///
+    /// The counterpart of [`Track::height`], and modelled the same way —
+    /// but with no host field behind it, because REAPER has no such
+    /// thing: every strip there is one width. It is ours, and it
+    /// persists in the project's `<EXTSTATE>` block, which is where
+    /// REAPER keeps what it does not model itself.
+    ///
+    /// It exists because a mixer is read by scanning across it, and a
+    /// session has tracks that deserve very different amounts of that
+    /// scan: a trigger or a reverb return needs its name and its mute,
+    /// while the track being worked on wants room for an embedded FX
+    /// display. One width for all of them spends the same space on both.
+    ///
+    /// `None` = the default width, which is a user setting like the
+    /// default height.
+    pub width: Option<u32>,
 }
 
 impl Track {
@@ -201,6 +218,7 @@ impl Track {
             fx_count: 0,
             input_fx_count: 0,
             height: None,
+            width: None,
             record_input: RecordInput::None,
             // Sending, because that is what a new track does — a default of
             // "cut off from the master" would put a disabled badge on every
