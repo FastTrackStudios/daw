@@ -141,6 +141,7 @@ pub(crate) fn build_track_info(track: &reaper_high::Track) -> Track {
     let visible_in_tcp = track.is_shown(reaper_medium::TrackArea::Tcp);
     let visible_in_mixer = track.is_shown(reaper_medium::TrackArea::Mcp);
     let (record_input, parent_send) = record_input_and_parent_send(track);
+    let height = tcp_height(track);
 
     Track {
         guid,
@@ -191,6 +192,7 @@ pub(crate) fn build_track_info(track: &reaper_high::Track) -> Track {
         visible_in_mixer,
         fx_count,
         input_fx_count,
+        height,
         record_input,
         parent_send,
     }
@@ -401,6 +403,25 @@ fn reorder_behavior_to_reaper(behavior: ProtoReorderTracksBehavior) -> ReorderTr
             ReorderTracksBehavior::MakeChildOfPreviousTrack
         }
         ProtoReorderTracksBehavior::ExtendFolder => ReorderTracksBehavior::ExtendFolder,
+    }
+}
+
+/// The track's panel height, or `None` when REAPER is sizing it itself.
+///
+/// `I_HEIGHTOVERRIDE` is zero for automatic height — the same sentinel
+/// [`set_tcp_height_on_main_thread`] writes to hand a track back to
+/// REAPER — so zero becomes `None` rather than a track nought pixels
+/// tall. What the default then IS belongs to whoever draws the panel.
+pub(crate) fn tcp_height(track: &reaper_high::Track) -> Option<u32> {
+    let raw = track.raw().ok()?;
+    let medium = ReaperHigh::get().medium_reaper();
+    let pixels = unsafe { medium.get_media_track_info_value(raw, TrackAttributeKey::HeightOverride) };
+    if pixels >= 1.0 {
+        // Rounded rather than truncated: REAPER stores this as a double
+        // and hands back values a hair under the integer it was set to.
+        Some(pixels.round().max(0.0).min(f64::from(u32::MAX)) as u32)
+    } else {
+        None
     }
 }
 

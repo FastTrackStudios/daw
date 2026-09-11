@@ -153,6 +153,22 @@ pub struct Track {
     pub fx_count: u32,
     /// Number of FX in the input/recording FX chain
     pub input_fx_count: u32,
+    /// How tall the track's panel is drawn, in pixels — REAPER's
+    /// `TRACKHEIGHT`.
+    ///
+    /// A view concern living on the track on purpose. It is not what a
+    /// track IS, and nothing about playback or routing reads it; but it
+    /// is stored per track in the project file, it round-trips through
+    /// save and load, and every surface that draws a track list needs it
+    /// at the same moment it needs the name and the colour. Modelling it
+    /// anywhere else would mean a second lookup keyed by GUID on every
+    /// row of every panel, for a number the project already carries next
+    /// to the rest of the track.
+    ///
+    /// `None` = the host's default. Not zero: a track that is nought
+    /// pixels tall is a different claim from one that has never been
+    /// resized, and the UI's minimum is the UI's business.
+    pub height: Option<u32>,
 }
 
 impl Track {
@@ -184,6 +200,7 @@ impl Track {
             visible_in_mixer: true,
             fx_count: 0,
             input_fx_count: 0,
+            height: None,
             record_input: RecordInput::None,
             // Sending, because that is what a new track does — a default of
             // "cut off from the master" would put a disabled badge on every

@@ -526,6 +526,7 @@ fn build_track_info(track: &reaper_high::Track) -> daw_proto::Track {
     let visible_in_tcp = track.is_shown(reaper_medium::TrackArea::Tcp);
     let visible_in_mixer = track.is_shown(reaper_medium::TrackArea::Mcp);
     let (record_input, parent_send) = crate::track::record_input_and_parent_send(track);
+    let height = crate::track::tcp_height(track);
 
     daw_proto::Track {
         guid,
@@ -575,6 +576,7 @@ fn build_track_info(track: &reaper_high::Track) -> daw_proto::Track {
         visible_in_mixer,
         fx_count,
         input_fx_count,
+        height,
         record_input,
         parent_send,
     }
