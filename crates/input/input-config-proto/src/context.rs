@@ -64,4 +64,18 @@ pub enum MouseModifierContext {
     MidiNote,
     /// MIDI CC lane
     MidiCCLane,
+    /// The timeline ruler — where you set the edit cursor and drag a
+    /// time selection. REAPER models this as its own set of contexts
+    /// (ruler, region lane, marker lane, tempo lane) because what a
+    /// click does there depends on which lane it lands in.
+    Ruler,
+    /// A mixer strip's body.
+    MixerStrip,
+    /// App-defined context, so a surface can name one this enum does
+    /// not have without every consumer needing a new variant.
+    ///
+    /// The keybind side already works this way — `KeybindContext` has
+    /// had `Custom` since it was extracted — and a closed mouse-context
+    /// enum is what forces a fork every time a new surface appears.
+    Custom(&'static str),
 }
