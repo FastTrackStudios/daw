@@ -430,7 +430,7 @@ fn read_item(
                     if param(node, 1).as_deref() == Some("SEL") {
                         selected_take = takes.len() + 1;
                     }
-                    takes.push(pending.finish(&id));
+                    takes.push(pending.finish(&id, takes.len()));
                     pending = PendingTake::default();
                 }
                 "NAME" => pending.name = param(node, 1).unwrap_or_default(),
@@ -470,7 +470,7 @@ fn read_item(
             }
         }
     }
-    takes.push(pending.finish(&id));
+    takes.push(pending.finish(&id, takes.len()));
 
     for (position, take_node) in takes.iter_mut().enumerate() {
         take_node.take.is_active = position == selected_take;
@@ -504,12 +504,12 @@ struct PendingTake {
 }
 
 impl PendingTake {
-    fn finish(self, item_id: &EntityId) -> TakeNode {
+    fn finish(self, item_id: &EntityId, index: usize) -> TakeNode {
         let id = self
             .guid
             .clone()
             .map(EntityId::adopt)
-            .unwrap_or_else(|| EntityId::derived(item_id, "take"));
+            .unwrap_or_else(|| EntityId::derived(item_id, &format!("take/{index}")));
         let (source, source_type) = self.source.unwrap_or((SourceRef::Empty, SourceType::Empty));
 
         let take = Take {

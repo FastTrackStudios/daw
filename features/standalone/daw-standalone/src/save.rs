@@ -143,12 +143,13 @@ fn item_node(
         .map(|tl| {
             tl.takes
                 .iter()
-                .map(|t| {
+                .enumerate()
+                .map(|(index, t)| {
                     let prev_take = previous
                         .into_iter()
                         .flat_map(|n| n.takes.iter())
                         .find(|tn| tn.id.as_str() == t.guid);
-                    let take = match prev_take {
+                    let mut take = match prev_take {
                         Some(prev) => {
                             let mut merged = prev.take.clone();
                             merged.start_offset = t.start_offset;
@@ -158,6 +159,7 @@ fn item_node(
                         }
                         None => t.clone(),
                     };
+                    take.is_active = index == tl.active_idx as usize;
                     let source = prev_take
                         .map(|tn| tn.source.clone())
                         .or_else(|| source_for(t.source_file_path.as_deref()))

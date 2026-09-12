@@ -7,6 +7,8 @@
 //! proven rather than asserted, and it is why the corpus test can assert
 //! that exporting an unedited document is a no-op down to the byte.
 
+mod sources;
+
 use super::*;
 use crate::document::{DawDocument, EnvelopeNode, ItemNode, TakeNode, TrackNode};
 use crate::error::{DawError, DawResult};
@@ -61,6 +63,7 @@ pub fn to_rpp_patched(
 
     let mut report = ExportReport::default();
     patch_project(&mut root, document, &mut report);
+    sources::write_missing_sources(&mut root, document, store, &mut report)?;
 
     let mut rendered =
         dawfile_reaper::rpp_tree::stringify_rpp_node(&RNodeTree::Chunk(root.clone()));
@@ -233,10 +236,22 @@ fn patch_item(chunk: &mut RChunk, node: &ItemNode, report: &mut ExportReport) {
     reconcile_takes(chunk, node, &label, report);
     // Takes are matched by GUID, so the walk collects them in file order and
     // pairs each with the document's take of the same id.
-    let mut take_cursor = 0usize;
-    let mut current_take: Option<&TakeNode> = node.takes.first();
+    // Resolve the whole run before writing NAME/SOFFS: GUID appears after
+    // those fields, and empty/null take slots do not reliably match indices.
+    let runs = take_runs(chunk);
+    let mut current_take: Option<&TakeNode> = None;
 
-    for child in &mut chunk.children {
+    for (position, child) in chunk.children.iter_mut().enumerate() {
+        if let Some((index, (_, _, guid))) = runs
+            .iter()
+            .enumerate()
+            .find(|(_, (start, _, _))| *start == position)
+        {
+            current_take = match guid {
+                Some(guid) => node.takes.iter().find(|take| take.id.as_str() == guid),
+                None => node.takes.get(index),
+            };
+        }
         match child {
             RNodeTree::Node(line) => match key(line).as_str() {
                 "POSITION" => set_number(
@@ -303,23 +318,7 @@ fn patch_item(chunk: &mut RChunk, node: &ItemNode, report: &mut ExportReport) {
                 }
 
                 // ── take-scoped keys ────────────────────────────────
-                "TAKE" => {
-                    take_cursor += 1;
-                    current_take = node.takes.get(take_cursor);
-                }
-                "GUID" => {
-                    // Re-anchor on the take's own GUID rather than trusting
-                    // the running cursor: an item whose takes were reordered
-                    // in the editor must still patch the right one.
-                    if let Some(guid) = param(line, 1)
-                        && let Some(found) = node
-                            .takes
-                            .iter()
-                            .find(|candidate| candidate.id.as_str() == guid)
-                    {
-                        current_take = Some(found);
-                    }
-                }
+                "TAKE" | "GUID" => {}
                 "NAME" => {
                     if let Some(take) = current_take {
                         set_string(line, 1, &take.take.name, &label, "take NAME", report);
@@ -752,11 +751,11 @@ fn reconcile_takes(chunk: &mut RChunk, node: &ItemNode, label: &str, report: &mu
         report
             .changes
             .push(format!("{label} take {}: added", take.id));
-        chunk
-            .children
-            .push(RNodeTree::Node(RNode::from_tokens(vec![RToken::new(
-                "TAKE",
-            )])));
+        chunk.children.push(if take.take.is_active {
+            node_line(&["TAKE", "SEL"])
+        } else {
+            node_line(&["TAKE"])
+        });
         for line in take_lines(take) {
             chunk.children.push(RNodeTree::Node(line));
         }
@@ -915,7 +914,11 @@ fn build_item(node: &ItemNode) -> RChunk {
     }
     for (position, take) in node.takes.iter().enumerate() {
         if position > 0 {
-            chunk.children.push(node_line(&["TAKE"]));
+            chunk.children.push(if take.take.is_active {
+                node_line(&["TAKE", "SEL"])
+            } else {
+                node_line(&["TAKE"])
+            });
         }
         for line in take_lines(take) {
             chunk.children.push(RNodeTree::Node(line));
