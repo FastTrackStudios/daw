@@ -73,7 +73,9 @@ daw-proto = { workspace = true }
 base64 = "0.22.1"
 # Integration-test harness — now folded into the `daw` facade behind the
 # `test-harness` feature (replaces the former `reaper-test` crate).
-daw = { workspace = true, features = ["test-harness"] }
+# `standalone-audio` for the take-peaks parity test: the same fixture
+# through the standalone backend, compared against REAPER's answer.
+daw = { workspace = true, features = ["test-harness", "standalone-audio"] }
 eyre.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 vox.workspace = true
