@@ -805,6 +805,22 @@ impl RppSerialize for Track {
             }
             out.push('\n');
         }
+        if let Some(n) = self.item_lanes {
+            out.push_str(&format!("{}ITEMLANES {}\n", inner, n));
+        }
+        for a in &self.comp_areas {
+            out.push_str(&format!(
+                "{}LINKEDLANE {} {} {} {} {} {} {}\n",
+                inner,
+                a.start,
+                a.end,
+                a.source_lane,
+                a.comp_lane,
+                a.unknown_field_5,
+                a.fade_in,
+                a.fade_out
+            ));
+        }
         if let Some(rec) = &self.record {
             out.push_str(&format!(
                 "{}REC {} {} {} {} {} {} {}\n",
