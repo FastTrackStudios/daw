@@ -14,8 +14,10 @@ use crate::document::{DawDocument, EnvelopeNode, ItemNode, TakeNode, TrackNode};
 use crate::error::{DawError, DawResult};
 use crate::objects::ObjectStore;
 use daw_proto::automation::EnvelopeShape;
-use daw_proto::item::FadeShape;
+use daw_proto::item::{FadeShape, Item};
+use daw_proto::track::{LaneComping, LaneDisplay, Track};
 use dawfile_reaper::rpp_tree::RToken;
+use dawfile_reaper::types::track::FixedLaneFields;
 
 /// What an export changed.
 ///
@@ -218,6 +220,7 @@ fn patch_track(chunk: &mut RChunk, node: &TrackNode, report: &mut ExportReport) 
                             .find(|candidate| candidate.id.as_str() == iguid)
                     {
                         patch_item(inner, item_node, report);
+                        set_item_lane(inner, &item_node.item, track.lane_count, report);
                     }
                 } else if is_envelope_chunk(&inner_name)
                     && let Some(envelope_node) = find_envelope(&node.envelopes, inner, &inner_name)
@@ -225,6 +228,249 @@ fn patch_track(chunk: &mut RChunk, node: &TrackNode, report: &mut ExportReport) 
                     patch_envelope(inner, envelope_node, &label, report);
                 }
             }
+        }
+    }
+    patch_lanes(chunk, node, &label, report);
+}
+
+// ── fixed lanes ────────────────────────────────────────────────────────
+//
+// The lane lines REAPER writes under <TRACK>, in the order it writes
+// them: FREEMODE 2 (fixed lanes on), FIXEDLANES, LANESOLO, LANEREC,
+// LANENAME, then ITEMLANES and the LINKEDLANE comp areas. A track whose
+// lanes were switched off loses all of them and gets FREEMODE 0.
+
+/// The lane lines a track should carry, keyed for upsert. `settings` is
+/// the `FIXEDLANES` bitfield to preserve from the file (only the big-lanes
+/// bit is ours to change).
+fn lane_lines(node: &TrackNode, settings: i64) -> Vec<Vec<String>> {
+    let track = &node.track;
+    let big = track.lane_display == LaneDisplay::Big;
+    let one = track.lane_display == LaneDisplay::One;
+    let settings = if big { settings | 8 } else { settings & !8 };
+    let lane_index = |lane: Option<u32>| lane.map(|l| l as i64).unwrap_or(-1).to_string();
+    let mut lines = vec![
+        vec!["FREEMODE".into(), "2".into()],
+        vec![
+            "FIXEDLANES".into(),
+            settings.to_string(),
+            "0".into(),
+            if one { "1" } else { "0" }.into(),
+            "0".into(),
+            "0".into(),
+        ],
+        vec![
+            "LANESOLO".into(),
+            (track.lane_play_mask as u32).to_string(),
+            ((track.lane_play_mask >> 32) as u32).to_string(),
+            "0".into(),
+            "0".into(),
+            "0".into(),
+            "0".into(),
+            "0".into(),
+            "0".into(),
+        ],
+    ];
+    let comping = &node.comping;
+    if comping != &LaneComping::default() {
+        lines.push(vec![
+            "LANEREC".into(),
+            lane_index(comping.record_lane),
+            lane_index(comping.comp_lane),
+            lane_index(comping.last_comp_lane),
+        ]);
+    }
+    if !track.lane_names.is_empty() {
+        let mut line = vec!["LANENAME".to_string()];
+        line.extend(track.lane_names.iter().cloned());
+        lines.push(line);
+    }
+    lines.push(vec!["ITEMLANES".into(), track.lane_count.to_string()]);
+    for area in &comping.areas {
+        lines.push(vec![
+            "LINKEDLANE".into(),
+            format_f64(area.start.as_seconds()),
+            format_f64(area.end.as_seconds()),
+            area.source_lane.to_string(),
+            area.comp_lane.to_string(),
+            "-1".into(),
+            format_f64(area.fade_in.as_seconds()),
+            format_f64(area.fade_out.as_seconds()),
+        ]);
+    }
+    lines
+}
+
+const LANE_KEYS: [&str; 7] = [
+    "FIXEDLANES",
+    "LANESOLO",
+    "LANEREC",
+    "LANENAME",
+    "ITEMLANES",
+    "LINKEDLANE",
+    "FREEMODE",
+];
+
+fn is_lane_line(child: &RNodeTree) -> bool {
+    matches!(child, RNodeTree::Node(line) if LANE_KEYS.contains(&key(line).as_str()))
+}
+
+/// Bring a track chunk's lane lines in line with the document.
+///
+/// A no-op when the lines already say what the document says, so an
+/// unedited export stays byte-identical. Otherwise the old lane lines are
+/// dropped and the new set inserted where the first of them was (or before
+/// the first item), which keeps the diff local.
+fn patch_lanes(chunk: &mut RChunk, node: &TrackNode, label: &str, report: &mut ExportReport) {
+    let existing: Vec<Vec<String>> = chunk
+        .children
+        .iter()
+        .filter(|child| is_lane_line(child))
+        .filter_map(|child| match child {
+            RNodeTree::Node(line) => Some(tokens(line)),
+            RNodeTree::Chunk(_) => None,
+        })
+        .collect();
+    let free_mode = existing
+        .iter()
+        .find(|t| t[0] == "FREEMODE")
+        .and_then(|t| t.get(1))
+        .and_then(|v| v.parse::<i64>().ok());
+    let settings = existing
+        .iter()
+        .find(|t| t[0] == "FIXEDLANES")
+        .and_then(|t| t.get(1))
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(1);
+
+    // Compare by meaning, not by text: a REAPER-written lanes track has
+    // no LANESOLO when lane 0 plays and no LANEREC until it comps, and
+    // rewriting those lines on an unedited export would be churn.
+    if decoded_lanes(&existing, node) == (node.track.clone(), node.comping.clone()) {
+        return;
+    }
+    let wanted: Vec<Vec<String>> = if node.track.lane_count > 0 {
+        lane_lines(node, settings)
+    } else if free_mode == Some(2) {
+        // Lanes switched off: the geometry mode goes back to normal and
+        // every lane line goes with it.
+        vec![vec!["FREEMODE".into(), "0".into()]]
+    } else {
+        // Never had lanes: leave a free-item-positioning track's FREEMODE
+        // (and anything else) exactly as it was.
+        return;
+    };
+    report.changes.push(format!(
+        "{label} lanes: {} lines → {} lines",
+        existing.len(),
+        wanted.len()
+    ));
+    let insert_at = chunk
+        .children
+        .iter()
+        .position(is_lane_line)
+        .or_else(|| {
+            chunk
+                .children
+                .iter()
+                .position(|child| matches!(child, RNodeTree::Chunk(_)))
+        })
+        .unwrap_or(chunk.children.len());
+    chunk.children.retain(|child| !is_lane_line(child));
+    for (offset, line) in wanted.iter().enumerate() {
+        let refs: Vec<&str> = line.iter().map(String::as_str).collect();
+        chunk.children.insert(insert_at + offset, node_line(&refs));
+    }
+}
+
+/// What the importer would read from these lane lines, laid over the
+/// document's track so only the lane fields differ.
+fn decoded_lanes(lines: &[Vec<String>], node: &TrackNode) -> (Track, LaneComping) {
+    let find = |k: &str| lines.iter().find(|t| t[0] == k);
+    let int = |t: &[String], i: usize| t.get(i).and_then(|v| v.parse::<f64>().ok()).map(|v| v as i64);
+    let fields = FixedLaneFields {
+        has_fixed_lanes: find("FIXEDLANES").is_some(),
+        settings: find("FIXEDLANES").and_then(|t| int(t, 1)).unwrap_or(0) as i32,
+        show_play_only_lane: find("FIXEDLANES").and_then(|t| int(t, 3)).unwrap_or(0) != 0,
+        lane_solo: find("LANESOLO")
+            .map(|t| (int(t, 1).unwrap_or(0) as u32, int(t, 2).unwrap_or(0) as u32)),
+        lane_names: find("LANENAME")
+            .map(|t| t[1..].to_vec())
+            .unwrap_or_default(),
+        max_item_lane: node.items.iter().filter_map(|i| i.item.fixed_lane).max(),
+    };
+    let state = fields.decode();
+    let mut track = node.track.clone();
+    track.lane_count = state.lane_count;
+    track.lane_play_mask = state.lane_play_mask;
+    track.lane_names = state.lane_names;
+    track.lane_display = state.lane_display;
+    let lane = |t: &[String], i: usize| int(t, i).filter(|&l| l >= 0).map(|l| l as u32);
+    let comping = LaneComping {
+        record_lane: find("LANEREC").and_then(|t| lane(t, 1)),
+        comp_lane: find("LANEREC").and_then(|t| lane(t, 2)),
+        last_comp_lane: find("LANEREC").and_then(|t| lane(t, 3)),
+        areas: lines
+            .iter()
+            .filter(|t| t[0] == "LINKEDLANE")
+            .filter_map(|t| {
+                Some(daw_proto::track::CompArea {
+                    start: daw_proto::PositionInSeconds::from_seconds(t.get(1)?.parse().ok()?),
+                    end: daw_proto::PositionInSeconds::from_seconds(t.get(2)?.parse().ok()?),
+                    source_lane: lane(t, 3)?,
+                    comp_lane: lane(t, 4)?,
+                    fade_in: daw_proto::Duration::from_seconds(
+                        t.get(6).and_then(|v| v.parse().ok()).unwrap_or(0.0),
+                    ),
+                    fade_out: daw_proto::Duration::from_seconds(
+                        t.get(7).and_then(|v| v.parse().ok()).unwrap_or(0.0),
+                    ),
+                })
+            })
+            .collect(),
+    };
+    (track, comping)
+}
+
+/// Put an item on its fixed lane: `YPOS <y> <height> 2`, each lane
+/// `1/lane_count` of the track tall. Left alone on a track without lanes,
+/// where `YPOS` is free-item-positioning geometry the document does not
+/// model.
+fn set_item_lane(chunk: &mut RChunk, item: &Item, lane_count: u32, report: &mut ExportReport) {
+    if lane_count == 0 {
+        return;
+    }
+    let Some(lane) = item.fixed_lane else {
+        return;
+    };
+    let height = 1.0 / f64::from(lane_count);
+    let y = f64::from(lane) * height;
+    let current = child_node(chunk, "YPOS").and_then(|line| {
+        let (y, h) = (param_f64(line, 1)?, param_f64(line, 2)?);
+        (h > 1e-9).then(|| (y / h).round() as u32)
+    });
+    if current == Some(lane) {
+        return;
+    }
+    report.changes.push(format!(
+        "item {} YPOS: lane {} → {lane}",
+        item.guid,
+        current.map(|l| l.to_string()).unwrap_or_default()
+    ));
+    let line = node_line(&["YPOS", &format_f64(y), &format_f64(height), "2"]);
+    let at = chunk
+        .children
+        .iter()
+        .position(|child| matches!(child, RNodeTree::Node(l) if key(l) == "YPOS"));
+    match at {
+        Some(at) => chunk.children[at] = line,
+        None => {
+            let at = chunk
+                .children
+                .iter()
+                .position(|child| matches!(child, RNodeTree::Chunk(_)))
+                .unwrap_or(chunk.children.len());
+            chunk.children.insert(at, line);
         }
     }
 }
@@ -855,13 +1101,24 @@ fn build_track(node: &TrackNode) -> RChunk {
         .children
         .push(node_line(&["TRACKID", node.id.as_str()]));
 
+    if track.lane_count > 0 {
+        // A fresh lanes track: auto-remove empty lanes (&1), the way REAPER
+        // itself starts one.
+        for line in lane_lines(node, 1) {
+            let refs: Vec<&str> = line.iter().map(String::as_str).collect();
+            chunk.children.push(node_line(&refs));
+        }
+    }
+
     for envelope in &node.envelopes {
         chunk
             .children
             .push(RNodeTree::Chunk(build_envelope(envelope)));
     }
     for item in &node.items {
-        chunk.children.push(RNodeTree::Chunk(build_item(item)));
+        let mut built = build_item(item);
+        set_item_lane(&mut built, &item.item, track.lane_count, &mut ExportReport::default());
+        chunk.children.push(RNodeTree::Chunk(built));
     }
     chunk
 }
