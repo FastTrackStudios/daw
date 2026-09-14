@@ -57,6 +57,17 @@ pub fn save_project_as_reported(
             // with none) simply keeps its file-side items untouched.
             for track_node in doc.tracks.iter_mut() {
                 let track_guid = track_node.id.as_str().to_string();
+                if let Some(track) = p.tracks.iter().find(|t| t.guid == track_guid) {
+                    // The lane layout is the backend's; the exporter writes
+                    // it by meaning, so an untouched track is not rewritten.
+                    track_node.track.lane_count = track.lane_count;
+                    track_node.track.lane_play_mask = track.lane_play_mask;
+                    track_node.track.lane_names = track.lane_names.clone();
+                    track_node.track.lane_display = track.lane_display;
+                }
+                if let Some(ext) = p.track_ext.get(&track_guid) {
+                    track_node.comping = ext.comping.clone();
+                }
                 let Some(order) = p.items_by_track.get(&track_guid) else {
                     continue;
                 };
@@ -118,6 +129,7 @@ fn item_node(
             merged.locked = item.locked;
             merged.loop_source = item.loop_source;
             merged.volume = item.volume;
+            merged.fixed_lane = item.fixed_lane;
             // Fades only when the backend moved them — its *shape*
             // codes are stand-ins for curves the facade cannot name,
             // and writing a stand-in over an untouched Bezier would be

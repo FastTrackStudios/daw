@@ -245,53 +245,14 @@ fn populate_tracks(
                 })
                 .unwrap_or((0, false));
 
-            // Fixed item lanes (REAPER 7 comping). Lane count comes
-            // from LANENAME (one token per lane); fall back to the
-            // largest item lane index + 1 when names are absent. The
-            // play mask comes from LANESOLO's first 64 bits; a track
-            // with lanes but no LANESOLO plays lane 0.
-            let lane_count: u32 = rt
-                .lane_names
-                .as_ref()
-                .map(|ln| ln.lane_count.max(0) as u32)
-                .filter(|&c| c > 0)
-                .unwrap_or_else(|| {
-                    if rt.fixed_lanes.is_some() {
-                        rt.items
-                            .iter()
-                            .filter_map(|i| i.lane)
-                            .max()
-                            .map(|l| (l.max(0) as u32) + 1)
-                            .unwrap_or(0)
-                    } else {
-                        0
-                    }
-                });
-            let lane_play_mask: u64 = if lane_count == 0 {
-                0
-            } else {
-                rt.lane_solo
-                    .as_ref()
-                    .map(|ls| {
-                        (ls.playing_lanes as u32 as u64)
-                            | ((ls.unknown_field_2 as u32 as u64) << 32)
-                    })
-                    .filter(|&m| m != 0)
-                    .unwrap_or(1) // lanes on, no LANESOLO → lane 0 plays
-            };
-            let lane_names: Vec<String> = rt
-                .lane_names
-                .as_ref()
-                .map(|ln| ln.lane_names.clone())
-                .unwrap_or_default();
-            // Display mode from FIXEDLANES (empirical, verified across
-            // the session corpus): field 3 = "show only the playing
-            // lane"; bitfield &8 = big lanes (vs small).
-            let lane_display = match rt.fixed_lanes.as_ref() {
-                Some(fl) if fl.show_play_only_lane => daw_proto::track::LaneDisplay::One,
-                Some(fl) if fl.bitfield & 8 != 0 => daw_proto::track::LaneDisplay::Big,
-                _ => daw_proto::track::LaneDisplay::Small,
-            };
+            // Fixed item lanes (REAPER 7 comping), decoded by the one
+            // decoder every loader shares (`FixedLaneFields::decode`).
+            let dawfile_reaper::types::track::FixedLaneState {
+                lane_count,
+                lane_play_mask,
+                lane_names,
+                lane_display,
+            } = rt.fixed_lane_state();
 
             let grouping = decode_grouping(
                 rt.group_flags.as_deref().unwrap_or(&[]),
@@ -392,6 +353,7 @@ fn populate_tracks(
                         }),
                     parent_send_enabled,
                     tcp_height_pixels: 0,
+                    comping: rt.lane_comping(),
                 },
             );
 

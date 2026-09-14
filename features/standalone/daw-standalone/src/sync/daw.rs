@@ -70,6 +70,9 @@ pub struct TrackExt {
     pub parent_send_enabled: bool,
     /// TCP height override in pixels. `0` means host/default height.
     pub tcp_height_pixels: u32,
+    /// Fixed-lane comping: record / comping lanes and comp areas. Beside
+    /// the `Track` because the facade serves it from a getter of its own.
+    pub comping: daw_proto::track::LaneComping,
 }
 
 /// Stable hashable identity for an envelope on a track. Lifts
@@ -255,6 +258,7 @@ impl Default for TrackExt {
             record_input: RecordInput::None,
             parent_send_enabled: true,
             tcp_height_pixels: 0,
+            comping: daw_proto::track::LaneComping::default(),
         }
     }
 }

@@ -138,4 +138,8 @@ pub trait Items {
         item: ItemRef,
         group_id: Option<u32>,
     ) -> DawResult<()>;
+
+    /// Move the item onto fixed lane `lane` of its track (REAPER
+    /// `I_FIXEDLANE`). The track must have that many lanes.
+    fn set_fixed_lane(&self, project: ProjectContext, item: ItemRef, lane: u32) -> DawResult<()>;
 }
