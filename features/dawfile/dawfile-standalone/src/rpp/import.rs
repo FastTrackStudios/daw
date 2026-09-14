@@ -14,7 +14,8 @@ use daw_proto::marker::Marker;
 use daw_proto::primitives::{AutomationMode, Duration, Position, PositionInSeconds, TimeSignature};
 use daw_proto::stretch_marker::StretchMarker;
 use daw_proto::tempo_map::TempoPoint;
-use daw_proto::track::Track;
+use daw_proto::track::{CompArea, LaneComping, Track};
+use dawfile_reaper::types::track::FixedLaneFields;
 use std::collections::BTreeMap;
 
 /// What an import saw that it did not model.
@@ -262,6 +263,8 @@ fn read_track(
     let id = EntityId::adopt(guid.clone());
 
     let mut track = Track::new(guid, 0, String::new());
+    let mut lanes = FixedLaneFields::default();
+    let mut comping = LaneComping::default();
     let mut envelopes = Vec::new();
     let mut items = Vec::new();
     let mut fx_chain = None;
@@ -301,13 +304,34 @@ fn read_track(
                     // saying the track is not in the TCP.
                     track.visible_in_tcp = param_i64(node, 2).unwrap_or(0) & 2 == 0;
                 }
+                // Fixed lanes: the raw fields are collected here and decoded
+                // once the chunk is read, by the decoder `dawfile-reaper`
+                // shares — so the two loaders cannot read `FIXEDLANES`
+                // differently again (field 1 is `C_LANESETTINGS`, not a
+                // lane count; the play mask is `LANESOLO`, not field 2).
                 "FIXEDLANES" => {
-                    track.lane_count = param_i64(node, 1).unwrap_or(0).max(0) as u32;
-                    track.lane_play_mask = param_i64(node, 2).unwrap_or(0) as u64;
+                    lanes.has_fixed_lanes = true;
+                    lanes.settings = param_i64(node, 1).unwrap_or(0) as i32;
+                    lanes.show_play_only_lane = param_bool(node, 3).unwrap_or(false);
                 }
-                "LANENAME" => {
-                    let names = tokens(node);
-                    track.lane_names = names.into_iter().skip(2).collect();
+                "LANESOLO" => {
+                    lanes.lane_solo = Some((
+                        param_i64(node, 1).unwrap_or(0) as u32,
+                        param_i64(node, 2).unwrap_or(0) as u32,
+                    ));
+                }
+                "LANENAME" => lanes.lane_names = tokens(node).into_iter().skip(1).collect(),
+                "LANEREC" => {
+                    let lane = |i| param_i64(node, i).filter(|&l| l >= 0).map(|l| l as u32);
+                    comping.record_lane = lane(1);
+                    comping.comp_lane = lane(2);
+                    comping.last_comp_lane = lane(3);
+                }
+                "ITEMLANES" => {}
+                "LINKEDLANE" => {
+                    if let Some(area) = read_comp_area(node) {
+                        comping.areas.push(area);
+                    }
                 }
                 "NCHAN" | "TRACKID" | "BEAT" | "PERF" => {}
                 other => report.note("track", other),
@@ -335,6 +359,20 @@ fn read_track(
         }
     }
 
+    lanes.max_item_lane = items.iter().filter_map(|i| i.item.fixed_lane).max();
+    let lane_state = lanes.decode();
+    track.lane_count = lane_state.lane_count;
+    track.lane_play_mask = lane_state.lane_play_mask;
+    track.lane_names = lane_state.lane_names;
+    track.lane_display = lane_state.lane_display;
+    if track.lane_count == 0 {
+        // `YPOS` also carries free-item-positioning geometry; a lane only
+        // means something on a lane-enabled track.
+        for item in &mut items {
+            item.item.fixed_lane = None;
+        }
+    }
+
     // `ISBUS <state> <depth-change>`: state 1 opens a folder, and the depth
     // change closes as many as it is negative.
     let parent = folder_stack.last().cloned();
@@ -356,6 +394,7 @@ fn read_track(
         items,
         fx_chain,
         input_fx_chain,
+        comping,
     }
 }
 
@@ -400,7 +439,17 @@ fn read_item(
                 "COLOR" => item.color = param_i64(node, 1).map(|raw| raw as u32),
                 "GROUP" => item.group_id = param_i64(node, 1).map(|raw| raw as u32),
                 "NOTES" => item.label = param(node, 1),
-                "LANE" => item.fixed_lane = param_i64(node, 1).map(|lane| lane as u32),
+                // `YPOS <y> <height> [mode]`: on a fixed-lanes track each lane
+                // is `1/lane_count` tall, so the lane is `round(y/height)`.
+                // Cleared again by the track reader when the track has no
+                // lanes. There is no `LANE` token in a REAPER-written item.
+                "YPOS" => {
+                    if let (Some(y), Some(height)) = (param_f64(node, 1), param_f64(node, 2))
+                        && height > 1e-9
+                    {
+                        item.fixed_lane = Some((y / height).round().max(0.0) as u32);
+                    }
+                }
                 "FADEIN" => {
                     item.fade_in_shape = fade_shape(param_i64(node, 1).unwrap_or(0));
                     item.fade_in_length = Duration::from_seconds(param_f64(node, 2).unwrap_or(0.0));
@@ -455,7 +504,7 @@ fn read_item(
                 // `IGUID` is read ahead of this loop (it is the item's id, so it
                 // has to be known before anything else is built); the rest are
                 // REAPER bookkeeping the editor has no use for.
-                "IGUID" | "IID" | "ALLTAKES" | "YPOS" | "RECPASS" => {}
+                "IGUID" | "IID" | "ALLTAKES" | "RECPASS" => {}
                 other => report.note("item", other),
             },
             RNodeTree::Chunk(inner) => {
@@ -670,6 +719,18 @@ fn read_envelope(chunk: &RChunk, owner: &EntityId, report: &mut ImportReport) ->
         },
         points,
     }
+}
+
+/// One `LINKEDLANE start end source_lane comp_lane -1 fade_in fade_out`.
+fn read_comp_area(node: &RNode) -> Option<CompArea> {
+    Some(CompArea {
+        start: PositionInSeconds::from_seconds(param_f64(node, 1)?),
+        end: PositionInSeconds::from_seconds(param_f64(node, 2)?),
+        source_lane: param_i64(node, 3)?.max(0) as u32,
+        comp_lane: param_i64(node, 4)?.max(0) as u32,
+        fade_in: Duration::from_seconds(param_f64(node, 6).unwrap_or(0.0).max(0.0)),
+        fade_out: Duration::from_seconds(param_f64(node, 7).unwrap_or(0.0).max(0.0)),
+    })
 }
 
 fn count_fx(chunk: &RChunk) -> u32 {

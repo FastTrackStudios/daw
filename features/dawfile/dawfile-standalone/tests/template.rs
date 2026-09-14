@@ -19,6 +19,7 @@ fn track(name: &str, fx: Option<ObjectId>) -> TrackNode {
         items: Vec::new(),
         fx_chain: fx,
         input_fx_chain: None,
+        comping: daw_proto::track::LaneComping::default(),
     }
 }
 

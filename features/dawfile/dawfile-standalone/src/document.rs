@@ -26,7 +26,7 @@ use daw_proto::item::Take;
 use daw_proto::marker::Marker;
 use daw_proto::stretch_marker::StretchMarker;
 use daw_proto::tempo_map::TempoPoint;
-use daw_proto::track::Track;
+use daw_proto::track::{LaneComping, Track};
 use facet::Facet;
 
 /// The `.daw` format version. Bumped when the schema changes in a way a
@@ -127,6 +127,12 @@ pub struct TrackNode {
     pub fx_chain: Option<ObjectId>,
     /// The track's input/record FX chain, carried opaquely.
     pub input_fx_chain: Option<ObjectId>,
+    /// Fixed-lane comping: the record / comping lanes and the comp areas
+    /// (REAPER's `LANEREC`, `ITEMLANES`, `LINKEDLANE`). Beside the
+    /// `Track` rather than on it because the facade keeps it behind a
+    /// getter of its own — see [`daw_proto::track::LaneComping`].
+    #[facet(default)]
+    pub comping: LaneComping,
 }
 
 /// A media item and its takes.

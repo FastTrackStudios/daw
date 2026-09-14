@@ -216,6 +216,7 @@ impl DocumentEdit for DawDocument {
             items: Vec::new(),
             fx_chain: None,
             input_fx_chain: None,
+            comping: daw_proto::track::LaneComping::default(),
         });
         self.reindex();
         id
