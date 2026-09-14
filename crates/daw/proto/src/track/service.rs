@@ -12,7 +12,7 @@
 //! needs them.
 
 use super::event::TrackStreamEvent;
-use super::{RecordInput, ReorderTracksBehavior, Track, TrackRef};
+use super::{Comp, CompArea, LaneComping, RecordInput, ReorderTracksBehavior, Track, TrackRef};
 use crate::batch::{ProjectArg, TrackArg};
 use crate::{DawResult, ProjectContext};
 use facet::Facet;
@@ -198,6 +198,70 @@ pub trait Tracks {
         project: ProjectContext,
         track: TrackRef,
         height_pixels: u32,
+    ) -> DawResult<()>;
+
+    // ── Fixed lanes ─────────────────────────────────────────────────
+    //
+    // The lanes themselves ride the bulk `Track` read (`lane_count`,
+    // `lane_play_mask`, `lane_names`, `lane_display`); these are their
+    // writers. REAPER: `I_NUMFIXEDLANES`, `C_LANEPLAYS:N`, `P_LANENAME:n`.
+
+    /// Set the number of fixed item lanes. `0` switches lanes off, which
+    /// drops the lane names, the play mask and the comping state with
+    /// them. Growing from `0` makes lane 0 the playing lane, as REAPER
+    /// does when lanes are first enabled.
+    fn set_lane_count(&self, project: ProjectContext, track: TrackRef, count: u32)
+    -> DawResult<()>;
+
+    /// Set which lanes play: bit n = lane n audible. Bits past
+    /// `lane_count` are ignored.
+    fn set_lane_play_mask(&self, project: ProjectContext, track: TrackRef, mask: u64)
+    -> DawResult<()>;
+
+    /// Name lane `lane`. This is also how a comp is renamed — a comp's
+    /// name is its lane's name (see [`Comp`]).
+    fn set_lane_name(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        lane: u32,
+        name: &str,
+    ) -> DawResult<()>;
+
+    // ── Comping ─────────────────────────────────────────────────────
+    //
+    // A getter of its own rather than `Track` fields: on REAPER this is
+    // a state-chunk read (`LANEREC`, `ITEMLANES`, `LINKEDLANE` have no
+    // SDK accessor), which a bulk track read must never pay.
+
+    /// The track's comping state: record / comping lanes and comp areas.
+    fn comping(&self, project: ProjectContext, track: TrackRef) -> DawResult<LaneComping>;
+
+    /// Replace the track's comp areas. Every lane an area names must
+    /// exist.
+    fn set_comp_areas(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        areas: Vec<CompArea>,
+    ) -> DawResult<()>;
+
+    /// The track's named comps, ascending by lane — see
+    /// [`LaneComping::comps`].
+    fn comps(&self, project: ProjectContext, track: TrackRef) -> DawResult<Vec<Comp>>;
+
+    /// Add a lane named `name`, make it the comping lane, and return its
+    /// index. The new comp starts with no areas.
+    fn create_comp(&self, project: ProjectContext, track: TrackRef, name: &str)
+    -> DawResult<u32>;
+
+    /// Make `lane` the comping lane (`None` = no comp active). The lane
+    /// that was active becomes the previous one.
+    fn set_active_comp(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        lane: Option<u32>,
     ) -> DawResult<()>;
 
     // ── Streaming ───────────────────────────────────────────────────

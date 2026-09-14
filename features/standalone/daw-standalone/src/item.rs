@@ -548,4 +548,28 @@ impl Items for Standalone {
     ) -> DawResult<()> {
         mutate_item(self, &project, &item, |i| i.group_id = group_id)
     }
+
+    fn set_fixed_lane(&self, project: ProjectContext, item: ItemRef, lane: u32) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(no_project)?;
+        self.with_project_mut(&guid, |p| {
+            let item_guid = item_guid_from_ref(p, &item)
+                .ok_or_else(|| DawError::not_found("Item", &format!("{item:?}")))?;
+            let track_guid = p
+                .items
+                .get(&item_guid)
+                .map(|e| e.item.track_guid.clone())
+                .ok_or_else(|| DawError::not_found("Item", &item_guid))?;
+            let lane_count = p
+                .tracks
+                .iter()
+                .find(|t| t.guid == track_guid)
+                .map(|t| t.lane_count)
+                .unwrap_or(0);
+            crate::track::check_lane(lane, lane_count)?;
+            if let Some(entry) = p.items.get_mut(&item_guid) {
+                entry.item.fixed_lane = Some(lane);
+            }
+            Ok::<(), DawError>(())
+        })?
+    }
 }
