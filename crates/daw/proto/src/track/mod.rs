@@ -14,6 +14,7 @@ mod event;
 mod ext;
 mod hierarchy;
 mod hierarchy_builder;
+mod lanes;
 mod service;
 mod test_utils;
 #[allow(clippy::module_inception)]
@@ -24,6 +25,7 @@ pub use event::{TrackEvent, TrackStreamEvent};
 pub use ext::{TrackShape, TrackTree, TracksExt};
 pub use hierarchy::{FolderDepthChange, TrackHierarchy, TrackNode};
 pub use hierarchy_builder::{AddChildren, TrackHierarchyBuilder};
+pub use lanes::{Comp, CompArea, LaneComping};
 pub use service::*;
 
 // vox-emitted names from the architect macro mirror. Aliased to short

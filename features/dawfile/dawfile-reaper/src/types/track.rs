@@ -353,6 +353,126 @@ pub struct LaneNameSettings {
     pub lane_names: Vec<String>, // every LANENAME token is a name
 }
 
+/// One comp area (REAPER 7+): a `LINKEDLANE` line under `<TRACK>`.
+///
+/// `LINKEDLANE <start> <end> <source_lane> <comp_lane> -1 <fade_in> <fade_out>`:
+/// the stretch `start..end` of `comp_lane` is taken from `source_lane`,
+/// crossfaded by the two fade lengths. Decoded from
+/// `resources/Template-with-takes-lanes.RPP`, where lane 4 (named `3`)
+/// feeds comp lanes 0 and 1 (`"Custom Lane Name"`, `C1`) and both areas
+/// span the one item on lane 4.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CompAreaSettings {
+    pub start: f64,           // field 1 - area start, project seconds
+    pub end: f64,             // field 2 - area end, project seconds
+    pub source_lane: i32,     // field 3 - 0-based lane the audio comes from
+    pub comp_lane: i32,       // field 4 - 0-based comp lane the audio lands on
+    pub unknown_field_5: i32, // field 5 - always -1 in REAPER-saved projects
+    pub fade_in: f64,         // field 6 - crossfade in, seconds
+    pub fade_out: f64,        // field 7 - crossfade out, seconds
+}
+
+/// A comp area in the facade's terms.
+pub fn comp_area_to_proto(a: &CompAreaSettings) -> daw_proto::track::CompArea {
+    use daw_proto::primitives::{Duration, PositionInSeconds};
+    daw_proto::track::CompArea {
+        start: PositionInSeconds::from_seconds(a.start),
+        end: PositionInSeconds::from_seconds(a.end),
+        source_lane: a.source_lane.max(0) as u32,
+        comp_lane: a.comp_lane.max(0) as u32,
+        fade_in: Duration::from_seconds(a.fade_in.max(0.0)),
+        fade_out: Duration::from_seconds(a.fade_out.max(0.0)),
+    }
+}
+
+/// A comp area as REAPER writes it, from the facade's terms.
+pub fn comp_area_from_proto(a: &daw_proto::track::CompArea) -> CompAreaSettings {
+    CompAreaSettings {
+        start: a.start.as_seconds(),
+        end: a.end.as_seconds(),
+        source_lane: a.source_lane as i32,
+        comp_lane: a.comp_lane as i32,
+        unknown_field_5: -1,
+        fade_in: a.fade_in.as_seconds(),
+        fade_out: a.fade_out.as_seconds(),
+    }
+}
+
+/// The decoded meaning of a track's fixed-lane lines, in the facade's
+/// terms.
+///
+/// This is THE decoding of `FIXEDLANES` / `LANESOLO` / `LANENAME`, shared
+/// by every loader so they cannot disagree: `FIXEDLANES` field 1 is the
+/// SDK's `C_LANESETTINGS` bitfield (&8 = big lanes), field 3 is "show
+/// only the playing lane"; the lane count is the number of `LANENAME`
+/// tokens; the play mask is `LANESOLO`'s first 64 bits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FixedLaneState {
+    pub lane_count: u32,
+    pub lane_play_mask: u64,
+    pub lane_names: Vec<String>,
+    pub lane_display: daw_proto::track::LaneDisplay,
+}
+
+/// The raw lane fields a loader has in hand, before decoding.
+///
+/// `dawfile-reaper`'s typed [`Track`] fills this from its parsed
+/// settings; `dawfile-standalone` fills it straight from the token tree.
+/// Both then call [`FixedLaneFields::decode`], which is the one place the
+/// meanings live.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FixedLaneFields {
+    /// Whether a `FIXEDLANES` line is present at all.
+    pub has_fixed_lanes: bool,
+    /// `FIXEDLANES` field 1 — `C_LANESETTINGS`.
+    pub settings: i32,
+    /// `FIXEDLANES` field 3 — show only the playing lane.
+    pub show_play_only_lane: bool,
+    /// `LANESOLO`'s first two 32-bit words, when the line is present.
+    pub lane_solo: Option<(u32, u32)>,
+    /// Every `LANENAME` token.
+    pub lane_names: Vec<String>,
+    /// The highest lane any item on the track sits on.
+    pub max_item_lane: Option<u32>,
+}
+
+impl FixedLaneFields {
+    pub fn decode(&self) -> FixedLaneState {
+        use daw_proto::track::LaneDisplay;
+        // Lane count comes from LANENAME (one token per lane); fall back
+        // to the largest item lane index + 1 when names are absent.
+        let lane_count = match self.lane_names.len() as u32 {
+            0 if self.has_fixed_lanes => self.max_item_lane.map(|l| l + 1).unwrap_or(0),
+            0 => 0,
+            n => n,
+        };
+        // Lanes on, no LANESOLO (or an all-zero one) → lane 0 plays.
+        let lane_play_mask = if lane_count == 0 {
+            0
+        } else {
+            self.lane_solo
+                .map(|(lo, hi)| (lo as u64) | ((hi as u64) << 32))
+                .filter(|&m| m != 0)
+                .unwrap_or(1)
+        };
+        let lane_display = if !self.has_fixed_lanes {
+            LaneDisplay::default()
+        } else if self.show_play_only_lane {
+            LaneDisplay::One
+        } else if self.settings & 8 != 0 {
+            LaneDisplay::Big
+        } else {
+            LaneDisplay::Small
+        };
+        FixedLaneState {
+            lane_count,
+            lane_play_mask,
+            lane_names: self.lane_names.clone(),
+            lane_display,
+        }
+    }
+}
+
 /// MIDI hardware output settings
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MidiOutputSettings {
@@ -424,6 +544,8 @@ pub struct Track {
     pub lane_solo: Option<LaneSoloSettings>,     // LANESOLO - Lane solo settings
     pub lane_record: Option<LaneRecordSettings>, // LANEREC - Lane record settings
     pub lane_names: Option<LaneNameSettings>,    // LANENAME - Lane names
+    pub item_lanes: Option<i32>, // ITEMLANES - lane count the comp areas were written against
+    pub comp_areas: Vec<CompAreaSettings>, // LINKEDLANE - comp areas, in file order
 
     // Record settings
     pub record: Option<RecordSettings>, // REC - Record settings
@@ -592,6 +714,8 @@ impl Default for Track {
             lane_solo: None,
             lane_record: None,
             lane_names: None,
+            item_lanes: None,
+            comp_areas: Vec::new(),
             record: None,
             track_height: None,
             input_quantize: None,
@@ -620,6 +744,51 @@ impl Default for Track {
 }
 
 impl Track {
+    /// The raw fixed-lane fields, ready for [`FixedLaneFields::decode`].
+    pub fn fixed_lane_fields(&self) -> FixedLaneFields {
+        FixedLaneFields {
+            has_fixed_lanes: self.fixed_lanes.is_some(),
+            settings: self.fixed_lanes.as_ref().map(|f| f.bitfield).unwrap_or(0),
+            show_play_only_lane: self
+                .fixed_lanes
+                .as_ref()
+                .is_some_and(|f| f.show_play_only_lane),
+            lane_solo: self
+                .lane_solo
+                .as_ref()
+                .map(|ls| (ls.playing_lanes as u32, ls.unknown_field_2 as u32)),
+            lane_names: self
+                .lane_names
+                .as_ref()
+                .map(|ln| ln.lane_names.clone())
+                .unwrap_or_default(),
+            max_item_lane: self
+                .items
+                .iter()
+                .filter_map(|i| i.lane)
+                .filter(|&l| l >= 0)
+                .max()
+                .map(|l| l as u32),
+        }
+    }
+
+    /// The track's fixed lanes in the facade's terms.
+    pub fn fixed_lane_state(&self) -> FixedLaneState {
+        self.fixed_lane_fields().decode()
+    }
+
+    /// The track's comping state in the facade's terms: `LANEREC` plus
+    /// every `LINKEDLANE`. A negative `LANEREC` index is "unset".
+    pub fn lane_comping(&self) -> daw_proto::track::LaneComping {
+        let lane = |i: i32| (i >= 0).then_some(i as u32);
+        daw_proto::track::LaneComping {
+            record_lane: self.lane_record.as_ref().and_then(|r| lane(r.record_enabled_lane)),
+            comp_lane: self.lane_record.as_ref().and_then(|r| lane(r.comping_enabled_lane)),
+            last_comp_lane: self.lane_record.as_ref().and_then(|r| lane(r.last_comping_lane)),
+            areas: self.comp_areas.iter().map(comp_area_to_proto).collect(),
+        }
+    }
+
     fn fast_classify_track_token(raw: &str) -> Token {
         if let Some(hex) = raw.strip_prefix("0x")
             && let Ok(v) = u64::from_str_radix(hex, 16)
@@ -691,6 +860,8 @@ impl Track {
                 | "LANEREC"
                 | "LANENAME"
                 | "LANESOLO"
+                | "ITEMLANES"
+                | "LINKEDLANE"
                 | "REC"
                 | "TRACKHEIGHT"
                 | "INQ"
@@ -873,6 +1044,20 @@ impl Track {
                     last_comping_lane: Self::parse_int(&tokens[3])?,
                 });
             }
+            "ITEMLANES" if tokens.len() >= 2 => {
+                track.item_lanes = Some(Self::parse_int(&tokens[1])?);
+            }
+            "LINKEDLANE" if tokens.len() >= 8 => {
+                track.comp_areas.push(CompAreaSettings {
+                    start: Self::parse_float(&tokens[1])?,
+                    end: Self::parse_float(&tokens[2])?,
+                    source_lane: Self::parse_int(&tokens[3])?,
+                    comp_lane: Self::parse_int(&tokens[4])?,
+                    unknown_field_5: Self::parse_int(&tokens[5])?,
+                    fade_in: Self::parse_float(&tokens[6])?,
+                    fade_out: Self::parse_float(&tokens[7])?,
+                });
+            }
             "LANENAME" if tokens.len() >= 2 => {
                 // EVERY token after the keyword is a lane name —
                 // `LANENAME 1 2 3` is a 3-lane track whose lanes are
@@ -1033,6 +1218,8 @@ impl Track {
             lane_solo: None,
             lane_record: None,
             lane_names: None,
+            item_lanes: None,
+            comp_areas: Vec::new(),
             record: None,
             track_height: None,
             input_quantize: None,
@@ -1148,6 +1335,8 @@ impl Track {
             lane_solo: None,
             lane_record: None,
             lane_names: None,
+            item_lanes: None,
+            comp_areas: Vec::new(),
             record: None,
             track_height: None,
             input_quantize: None,

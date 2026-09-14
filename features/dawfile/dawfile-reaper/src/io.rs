@@ -147,6 +147,8 @@ fn parse_track_block_lenient(block: &RppBlock) -> RppTrack {
         lane_solo: None,
         lane_record: None,
         lane_names: None,
+        item_lanes: None,
+        comp_areas: Vec::new(),
         record: None,
         track_height: None,
         input_quantize: None,
