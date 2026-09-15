@@ -457,6 +457,7 @@ impl ReaperItem {
 
         let track = item_sw::get_media_item_track(medium, item)?;
         let track_guid = item_sw::get_track_guid(low, track);
+        let fixed_lane = item_fixed_lane(medium, item, track);
 
         let position = item_sw::get_item_info_value(medium, item, ItemAttributeKey::Position);
         let length = item_sw::get_item_info_value(medium, item, ItemAttributeKey::Length);
@@ -558,12 +559,23 @@ impl ReaperItem {
             auto_stretch,
             color,
             group_id,
-            // I_FIXEDLANE via the live API — not yet wired.
-            fixed_lane: None,
+            fixed_lane,
             take_count,
             active_take_index,
         })
     }
+}
+
+/// The item's fixed lane (`I_FIXEDLANE`), only on a fixed-lanes track —
+/// the value is meaningless elsewhere.
+fn item_fixed_lane(
+    medium: &reaper_medium::Reaper,
+    item: MediaItem,
+    track: reaper_medium::MediaTrack,
+) -> Option<u32> {
+    crate::lanes::has_fixed_lanes(track).then(|| {
+        item_sw::get_item_info_value(medium, item, ItemAttributeKey::FixedLane).max(0.0) as u32
+    })
 }
 
 impl Default for ReaperItem {
@@ -992,6 +1004,35 @@ impl Items for crate::Reaper {
         let text = std::ffi::CString::new(label)
             .map_err(|_| daw_proto::DawError::OperationFailed("item notes contain a NUL".into()))?;
         item_sw::set_item_notes(Reaper::get().medium_reaper().low(), item_ptr, &text);
+        Ok(())
+    }
+
+    fn set_fixed_lane(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        lane: u32,
+    ) -> daw_proto::DawResult<()> {
+        let medium = Reaper::get().medium_reaper();
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        let track =
+            item_sw::get_media_item_track(medium, item_ptr).ok_or_else(|| item_not_found(&item))?;
+        let lane_count = crate::lanes::read_lanes(track).lane_count;
+        if lane >= lane_count {
+            return Err(daw_proto::DawError::out_of_range(
+                lane,
+                lane_count,
+                "fixed lane",
+            ));
+        }
+        item_sw::set_item_info_value(
+            medium,
+            item_ptr,
+            ItemAttributeKey::FixedLane,
+            f64::from(lane),
+        );
+        medium.update_timeline();
         Ok(())
     }
 

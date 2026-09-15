@@ -215,8 +215,12 @@ pub trait Tracks {
 
     /// Set which lanes play: bit n = lane n audible. Bits past
     /// `lane_count` are ignored.
-    fn set_lane_play_mask(&self, project: ProjectContext, track: TrackRef, mask: u64)
-    -> DawResult<()>;
+    fn set_lane_play_mask(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        mask: u64,
+    ) -> DawResult<()>;
 
     /// Name lane `lane`. This is also how a comp is renamed — a comp's
     /// name is its lane's name (see [`Comp`]).
@@ -252,8 +256,7 @@ pub trait Tracks {
 
     /// Add a lane named `name`, make it the comping lane, and return its
     /// index. The new comp starts with no areas.
-    fn create_comp(&self, project: ProjectContext, track: TrackRef, name: &str)
-    -> DawResult<u32>;
+    fn create_comp(&self, project: ProjectContext, track: TrackRef, name: &str) -> DawResult<u32>;
 
     /// Make `lane` the comping lane (`None` = no comp active). The lane
     /// that was active becomes the previous one.

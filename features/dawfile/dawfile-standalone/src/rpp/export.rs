@@ -387,7 +387,11 @@ fn patch_lanes(chunk: &mut RChunk, node: &TrackNode, label: &str, report: &mut E
 /// document's track so only the lane fields differ.
 fn decoded_lanes(lines: &[Vec<String>], node: &TrackNode) -> (Track, LaneComping) {
     let find = |k: &str| lines.iter().find(|t| t[0] == k);
-    let int = |t: &[String], i: usize| t.get(i).and_then(|v| v.parse::<f64>().ok()).map(|v| v as i64);
+    let int = |t: &[String], i: usize| {
+        t.get(i)
+            .and_then(|v| v.parse::<f64>().ok())
+            .map(|v| v as i64)
+    };
     let fields = FixedLaneFields {
         has_fixed_lanes: find("FIXEDLANES").is_some(),
         settings: find("FIXEDLANES").and_then(|t| int(t, 1)).unwrap_or(0) as i32,
@@ -1117,7 +1121,12 @@ fn build_track(node: &TrackNode) -> RChunk {
     }
     for item in &node.items {
         let mut built = build_item(item);
-        set_item_lane(&mut built, &item.item, track.lane_count, &mut ExportReport::default());
+        set_item_lane(
+            &mut built,
+            &item.item,
+            track.lane_count,
+            &mut ExportReport::default(),
+        );
         chunk.children.push(RNodeTree::Chunk(built));
     }
     chunk

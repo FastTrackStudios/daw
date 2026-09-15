@@ -528,6 +528,10 @@ fn build_track_info(track: &reaper_high::Track) -> daw_proto::Track {
     let (record_input, parent_send) = crate::track::record_input_and_parent_send(track);
     let height = crate::track::tcp_height(track);
 
+    let lanes = track
+        .raw()
+        .map(crate::lanes::read_lanes)
+        .unwrap_or_default();
     daw_proto::Track {
         guid,
         index,
@@ -566,11 +570,10 @@ fn build_track_info(track: &reaper_high::Track) -> daw_proto::Track {
         parent_guid: None,
         folder_depth,
         is_folder,
-        // Fixed lanes via the live API — not yet wired through reaper-rs.
-        lane_count: 0,
-        lane_play_mask: 0,
-        lane_names: Vec::new(),
-        lane_display: daw_proto::track::LaneDisplay::default(),
+        lane_count: lanes.lane_count,
+        lane_play_mask: lanes.lane_play_mask,
+        lane_names: lanes.lane_names,
+        lane_display: lanes.lane_display,
         grouping: daw_proto::track::TrackGrouping::default(),
         visible_in_tcp,
         visible_in_mixer,

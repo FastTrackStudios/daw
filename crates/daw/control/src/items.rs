@@ -414,6 +414,15 @@ impl ItemHandle {
         Ok(())
     }
 
+    /// Move the item onto fixed lane `lane` of its track.
+    pub async fn set_fixed_lane(&self, lane: u32) -> Result<()> {
+        self.clients
+            .item
+            .set_fixed_lane(self.context(), self.item_ref(), lane)
+            .await??;
+        Ok(())
+    }
+
     /// Select the item
     pub async fn select(&self) -> Result<()> {
         self.clients
