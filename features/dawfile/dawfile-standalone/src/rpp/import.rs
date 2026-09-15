@@ -243,6 +243,17 @@ fn read_tempo_map(chunk: &RChunk, default_signature: TimeSignature) -> Vec<Tempo
 }
 
 /// One `<TRACK>` chunk.
+/// The `GROUP_FLAGS` / `GROUP_FLAGS_HIGH` bitmask fields. REAPER writes
+/// values above `i32::MAX` textually (`4294967295`), so they are read
+/// wide and narrowed by bit pattern.
+fn group_flag_fields(node: &RNode) -> Vec<u32> {
+    tokens(node)
+        .iter()
+        .skip(1)
+        .map(|token| token.parse::<i64>().unwrap_or(0) as u32)
+        .collect()
+}
+
 fn read_track(
     chunk: &RChunk,
     folder_stack: &mut Vec<EntityId>,
@@ -268,6 +279,8 @@ fn read_track(
     let mut input_fx_chain = None;
     let mut folder_state = 0i64;
     let mut folder_depth_change = 0i64;
+    let mut group_flags_low: Vec<u32> = Vec::new();
+    let mut group_flags_high: Vec<u32> = Vec::new();
 
     for child in &chunk.children {
         match child {
@@ -283,6 +296,8 @@ fn read_track(
                     track.soloed = param_i64(node, 2).unwrap_or(0) != 0;
                 }
                 "IPHASE" => track.phase_inverted = param_bool(node, 1).unwrap_or(false),
+                "GROUP_FLAGS" => group_flags_low = group_flag_fields(node),
+                "GROUP_FLAGS_HIGH" => group_flags_high = group_flag_fields(node),
                 "AUTOMODE" => {
                     track.automation_mode = automation_mode(param_i64(node, 1).unwrap_or(0))
                 }
@@ -337,6 +352,9 @@ fn read_track(
 
     // `ISBUS <state> <depth-change>`: state 1 opens a folder, and the depth
     // change closes as many as it is negative.
+    track.grouping =
+        daw_proto::track::TrackGrouping::from_rpp_fields(&group_flags_low, &group_flags_high);
+
     let parent = folder_stack.last().cloned();
     track.is_folder = folder_state == 1;
     track.folder_depth = folder_depth_change as i32;

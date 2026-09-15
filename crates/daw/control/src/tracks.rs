@@ -218,6 +218,34 @@ impl Tracks {
     }
 
     // =========================================================================
+    // Track groups (project-level)
+    // =========================================================================
+
+    /// Name track-group `slot` (1-based, 1..=128). Reads back through
+    /// `Project::get_info_string("TRACK_GROUP_NAME:<slot>")`.
+    pub async fn set_group_name(&self, slot: u32, name: &str) -> Result<()> {
+        self.clients
+            .track
+            .set_group_name(self.context(), slot, name.to_string())
+            .await??;
+        Ok(())
+    }
+
+    /// First slot in `[band_start, band_end]` no track is a member of
+    /// through any family or modifier; `None` when the band is full.
+    pub async fn first_free_group_slot(
+        &self,
+        band_start: u32,
+        band_end: u32,
+    ) -> Result<Option<u32>> {
+        Ok(self
+            .clients
+            .track
+            .first_free_group_slot(self.context(), band_start, band_end)
+            .await?)
+    }
+
+    // =========================================================================
     // Streaming
     // =========================================================================
 
@@ -506,6 +534,69 @@ impl TrackHandle {
             .set_phase_inverted(self.context(), self.track_ref(), inverted)
             .await??;
         Ok(())
+    }
+
+    // =========================================================================
+    // Track groups
+    // =========================================================================
+
+    /// Add or remove the track from `slot` as a mutual member (every
+    /// family, lead and follow).
+    pub async fn set_group_membership(&self, slot: u32, member: bool) -> Result<()> {
+        self.clients
+            .track
+            .set_group_membership(self.context(), self.track_ref(), slot, member)
+            .await??;
+        Ok(())
+    }
+
+    /// Set the track's role in one family of one slot (1-based, 1..=128).
+    pub async fn set_group_flags(
+        &self,
+        slot: u32,
+        family: daw_proto::track::GroupFamily,
+        role: daw_proto::track::GroupRole,
+    ) -> Result<()> {
+        self.clients
+            .track
+            .set_group_flags(
+                self.context(),
+                self.track_ref(),
+                daw_proto::track::GroupFlagChange { slot, family, role },
+            )
+            .await??;
+        Ok(())
+    }
+
+    /// Switch one modifier of one slot on or off.
+    pub async fn set_group_modifier(
+        &self,
+        slot: u32,
+        modifier: daw_proto::track::GroupModifier,
+        enabled: bool,
+    ) -> Result<()> {
+        self.clients
+            .track
+            .set_group_modifier(
+                self.context(),
+                self.track_ref(),
+                daw_proto::track::GroupModifierChange {
+                    slot,
+                    modifier,
+                    enabled,
+                },
+            )
+            .await??;
+        Ok(())
+    }
+
+    /// The track's live group membership over all slots.
+    pub async fn group_flags(&self) -> Result<daw_proto::track::TrackGrouping> {
+        Ok(self
+            .clients
+            .track
+            .group_flags(self.context(), self.track_ref())
+            .await??)
     }
 
     /// Get track pan (-1.0 = left, 0.0 = center, 1.0 = right)

@@ -118,35 +118,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ],
             test_binary: None,
         },
-        // session's Key-track tests: proof that a key stored as an item label
-        // survives a real project.
-        TestPackage {
-            package: "session".into(),
-            features: vec![],
-            test_threads: 1,
-            default_skips: vec![],
-            test_binary: Some("reaper_key_track".into()),
-        },
-        // chord-tool's insert path. Everything about it up to the DAW seam is
-        // unit-tested; these are the only tests that prove the pitches keyflow
-        // computes are the pitches REAPER ends up holding.
-        TestPackage {
-            package: "chord-tool-daw".into(),
-            features: vec![],
-            test_threads: 1,
-            default_skips: vec![],
-            test_binary: None,
-        },
-        // midi-tools' velocity write path. The engines are unit-tested against
-        // `&[Note]`; these are the only tests that prove a resolved session
-        // lands on the right REAPER notes with the right values.
-        TestPackage {
-            package: "midi-tools-daw".into(),
-            features: vec![],
-            test_threads: 1,
-            default_skips: vec![],
-            test_binary: None,
-        },
+        // `session`, `chord-tool-daw` and `midi-tools-daw` moved to the
+        // session repo in the August 2026 split; their REAPER tests run
+        // from that repo's own runner. Listing them here made every run
+        // of this xtask die with "package ID specification `session` did
+        // not match any packages" before a single test started.
     ];
 
     runner.install_daw_bridge(&repo_root)?;

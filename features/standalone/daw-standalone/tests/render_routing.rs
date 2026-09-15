@@ -1033,8 +1033,8 @@ fn send_modes_tap_pre_or_post_fader() {
 
 /// VCA grouping at playback (user guide §5.16): the lead's fader
 /// dB-adds (linear-multiplies) onto followers, the lead's pan offsets
-/// follower pan, the lead's MUTE BUTTON does NOT affect followers, and
-/// a mute ENVELOPE on the lead gates them.
+/// follower pan, and the lead's mute — button or ENVELOPE — gates them
+/// without touching the follower's own mute button.
 #[test]
 fn vca_lead_scales_and_mutes_followers() {
     use daw_proto::automation::{EnvelopePoint, EnvelopeShape, EnvelopeType};
@@ -1067,15 +1067,23 @@ fn vca_lead_scales_and_mutes_followers() {
     let follower_vol = daw.read_project(&guid, |p| p.tracks[1].volume).unwrap();
     assert!((follower_vol - 1.0).abs() < 1e-9, "follower fader unmoved");
 
-    // The lead's mute BUTTON does not gate followers (mute is not a
-    // VCA parameter — only a mute envelope on the lead is).
+    // The lead's mute BUTTON gates followers (the facade behaviour the
+    // language switch relies on: one VCA per language, mute the lead).
+    // The follower's own button stays up.
     Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(lead.clone()), true).unwrap();
-    let still = rms_l(&r.render_block(0, 512));
+    let gated_by_button = rms_l(&r.render_block(0, 512));
     assert!(
-        (still - unity * 0.5).abs() < 0.02,
-        "lead mute button must NOT mute follower: {still}"
+        gated_by_button < 1e-6,
+        "lead mute button mutes follower: {gated_by_button}"
     );
+    let follower_muted = daw.read_project(&guid, |p| p.tracks[1].muted).unwrap();
+    assert!(!follower_muted, "follower mute button unmoved");
     Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(lead.clone()), false).unwrap();
+    let back = rms_l(&r.render_block(0, 512));
+    assert!(
+        (back - unity * 0.5).abs() < 0.02,
+        "unmuting the lead restores the follower: {back}"
+    );
 
     // A mute ENVELOPE on the lead gates the follower.
     daw.write_project(&guid, |p| {

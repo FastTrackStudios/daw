@@ -177,6 +177,14 @@ fn patch_track(chunk: &mut RChunk, node: &TrackNode, report: &mut ExportReport) 
     );
     reconcile_envelopes(chunk, &node.envelopes, &label, report);
 
+    // Track-group membership. The file's lines are patched in place
+    // when they exist, and appended when the track has joined a group
+    // since the file was written — without this the whole grouping was
+    // dropped on every save.
+    let (group_low, group_high) = track.grouping.to_rpp_fields();
+    let mut wrote_group_low = false;
+    let mut wrote_group_high = false;
+
     // Items and envelopes are patched by walking the children once and
     // dispatching, so a track with both keeps its original ordering.
     for child in &mut chunk.children {
@@ -205,6 +213,14 @@ fn patch_track(chunk: &mut RChunk, node: &TrackNode, report: &mut ExportReport) 
                     }
                 }
                 "REC" => set_bool(line, 1, track.armed, &label, "REC", report),
+                "GROUP_FLAGS" => {
+                    set_group_flag_fields(line, &group_low, &label, "GROUP_FLAGS", report);
+                    wrote_group_low = true;
+                }
+                "GROUP_FLAGS_HIGH" => {
+                    set_group_flag_fields(line, &group_high, &label, "GROUP_FLAGS_HIGH", report);
+                    wrote_group_high = true;
+                }
                 _ => {}
             },
             RNodeTree::Chunk(inner) => {
@@ -226,6 +242,19 @@ fn patch_track(chunk: &mut RChunk, node: &TrackNode, report: &mut ExportReport) 
                 }
             }
         }
+    }
+    for (key, fields, already) in [
+        ("GROUP_FLAGS", &group_low, wrote_group_low),
+        ("GROUP_FLAGS_HIGH", &group_high, wrote_group_high),
+    ] {
+        if already || fields.is_empty() {
+            continue;
+        }
+        report.changes.push(format!(
+            "{label} {key}: (absent) \u{2192} {}",
+            join_fields(fields)
+        ));
+        chunk.children.push(group_flag_line(key, fields));
     }
 }
 
@@ -809,6 +838,49 @@ fn take_runs(chunk: &RChunk) -> Vec<(usize, usize, Option<String>)> {
 // Minimal but well-formed: enough for REAPER to open the project and see the
 // entity, and nothing invented beyond what the document actually says.
 
+/// `GROUP_FLAGS 1 0 1 …` — the bitmask fields as one line.
+fn group_flag_line(key: &str, fields: &[u32]) -> RNodeTree {
+    let mut line = vec![RToken::new(key)];
+    line.extend(fields.iter().map(|f| RToken::new(f.to_string())));
+    RNodeTree::Node(RNode::from_tokens(line))
+}
+
+fn join_fields(fields: &[u32]) -> String {
+    fields
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Rewrite a whole bitmask line, because its length is meaningful:
+/// REAPER trims trailing zero fields, so a track that leaves its last
+/// group shortens the line rather than zeroing a token.
+fn set_group_flag_fields(
+    line: &mut RNode,
+    fields: &[u32],
+    label: &str,
+    key_name: &str,
+    report: &mut ExportReport,
+) {
+    let current: Vec<u32> = tokens(line)
+        .iter()
+        .skip(1)
+        .map(|token| token.parse::<i64>().unwrap_or(0) as u32)
+        .collect();
+    if current == fields {
+        return;
+    }
+    report.changes.push(format!(
+        "{label} {key_name}: {} \u{2192} {}",
+        join_fields(&current),
+        join_fields(fields)
+    ));
+    let mut line_tokens = vec![RToken::new(key_name)];
+    line_tokens.extend(fields.iter().map(|f| RToken::new(f.to_string())));
+    *line = RNode::from_tokens(line_tokens);
+}
+
 fn node_line(tokens: &[&str]) -> RNodeTree {
     RNodeTree::Node(RNode::from_tokens(
         tokens.iter().map(|token| RToken::new(*token)).collect(),
@@ -851,6 +923,15 @@ fn build_track(node: &TrackNode) -> RChunk {
         .children
         .push(node_line(&["SEL", if track.selected { "1" } else { "0" }]));
     chunk.children.push(node_line(&["NCHAN", "2"]));
+    let (group_low, group_high) = track.grouping.to_rpp_fields();
+    for (key, fields) in [
+        ("GROUP_FLAGS", &group_low),
+        ("GROUP_FLAGS_HIGH", &group_high),
+    ] {
+        if !fields.is_empty() {
+            chunk.children.push(group_flag_line(key, fields));
+        }
+    }
     chunk
         .children
         .push(node_line(&["TRACKID", node.id.as_str()]));
