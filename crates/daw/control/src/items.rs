@@ -727,11 +727,16 @@ impl TakeHandle {
     /// Waveform peak data for this take.
     ///
     /// `block_size` is samples per peak — 1024 to 4096 is typical; larger
-    /// is fewer peaks. Under REAPER this goes through
-    /// `PCM_source::GetPeaks`, which serves from the `.reapeaks` cache
-    /// when one exists — the same data REAPER's own arrange view draws,
-    /// with no decoding of the media file. The standalone backend has no
-    /// peak store yet and returns an empty frame.
+    /// is fewer peaks. Both backends answer in the same shape: one
+    /// `(min ≤ 0, max ≥ 0)` pair per channel per block, blocks of
+    /// `block_size` source samples of take playback time (start offset
+    /// and play rate applied), covering the item's length. Under REAPER
+    /// this goes through `PCM_source::GetPeaks`, served from the
+    /// `.reapeaks` cache — the same data REAPER's own arrange view draws,
+    /// with no decoding of the media file. Standalone reads the take's
+    /// materialized source, folding from its own REAPER-compatible
+    /// `.reapeaks` sidecar at coarse zooms, and caches the result per
+    /// `(take, block_size)` at the project revision.
     pub async fn peaks(&self, block_size: u32) -> Result<daw_proto::TakePeakData> {
         let peaks = self
             .clients
@@ -795,6 +800,20 @@ impl TakeHandle {
     /// Get take play rate
     pub async fn play_rate(&self) -> Result<f64> {
         Ok(self.info().await?.play_rate)
+    }
+
+    /// Set the take's start offset into its source (`D_STARTOFFS`).
+    pub async fn set_start_offset(&self, offset: Duration) -> Result<()> {
+        self.clients
+            .take
+            .set_start_offset(
+                self.context(),
+                self.item_ref(),
+                self.take_ref.clone(),
+                offset,
+            )
+            .await??;
+        Ok(())
     }
 
     /// Set take play rate
