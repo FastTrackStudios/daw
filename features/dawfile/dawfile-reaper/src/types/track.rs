@@ -782,9 +782,18 @@ impl Track {
     pub fn lane_comping(&self) -> daw_proto::track::LaneComping {
         let lane = |i: i32| (i >= 0).then_some(i as u32);
         daw_proto::track::LaneComping {
-            record_lane: self.lane_record.as_ref().and_then(|r| lane(r.record_enabled_lane)),
-            comp_lane: self.lane_record.as_ref().and_then(|r| lane(r.comping_enabled_lane)),
-            last_comp_lane: self.lane_record.as_ref().and_then(|r| lane(r.last_comping_lane)),
+            record_lane: self
+                .lane_record
+                .as_ref()
+                .and_then(|r| lane(r.record_enabled_lane)),
+            comp_lane: self
+                .lane_record
+                .as_ref()
+                .and_then(|r| lane(r.comping_enabled_lane)),
+            last_comp_lane: self
+                .lane_record
+                .as_ref()
+                .and_then(|r| lane(r.last_comping_lane)),
             areas: self.comp_areas.iter().map(comp_area_to_proto).collect(),
         }
     }

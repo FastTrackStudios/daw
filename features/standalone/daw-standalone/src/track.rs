@@ -812,7 +812,12 @@ impl Tracks for Standalone {
 
     // ── Fixed lanes ─────────────────────────────────────────────────
 
-    fn set_lane_count(&self, project: ProjectContext, track: TrackRef, count: u32) -> DawResult<()> {
+    fn set_lane_count(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        count: u32,
+    ) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
         self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
@@ -840,7 +845,12 @@ impl Tracks for Standalone {
             }
             // Items past the new end lose their lane; every item loses it
             // when lanes go off.
-            for item_guid in p.items_by_track.get(&track_guid).cloned().unwrap_or_default() {
+            for item_guid in p
+                .items_by_track
+                .get(&track_guid)
+                .cloned()
+                .unwrap_or_default()
+            {
                 if let Some(entry) = p.items.get_mut(&item_guid)
                     && entry.item.fixed_lane.is_some_and(|l| l >= count)
                 {
@@ -851,7 +861,12 @@ impl Tracks for Standalone {
         })?
     }
 
-    fn set_lane_play_mask(&self, project: ProjectContext, track: TrackRef, mask: u64) -> DawResult<()> {
+    fn set_lane_play_mask(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        mask: u64,
+    ) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
         self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
@@ -892,8 +907,7 @@ impl Tracks for Standalone {
                 .get(&p.tracks[i].guid)
                 .map(|e| e.comping.clone())
                 .unwrap_or_default())
-        })
-        ?
+        })?
     }
 
     fn set_comp_areas(
@@ -925,8 +939,7 @@ impl Tracks for Standalone {
                 .get(&t.guid)
                 .map(|e| e.comping.comps(&t.lane_names))
                 .unwrap_or_default())
-        })
-        ?
+        })?
     }
 
     fn create_comp(&self, project: ProjectContext, track: TrackRef, name: &str) -> DawResult<u32> {
@@ -935,8 +948,7 @@ impl Tracks for Standalone {
             find_track_index(&p.tracks, &track)
                 .map(|i| p.tracks[i].lane_count)
                 .ok_or_else(not_found_track)
-        })
-        ??;
+        })??;
         self.set_lane_count(project.clone(), track.clone(), lane + 1)?;
         self.set_lane_name(project.clone(), track.clone(), lane, name)?;
         self.set_active_comp(project, track, Some(lane))?;

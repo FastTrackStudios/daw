@@ -81,7 +81,8 @@ fn area(comp_lane: u32, source_lane: u32, start: f64, end: f64) -> CompArea {
 /// the item moved onto lane 2.
 fn write_layout(daw: &Standalone, ctx: &ProjectContext) -> (u32, LaneComping) {
     let track = TrackRef::Guid(TRACK.into());
-    daw.set_lane_count(ctx.clone(), track.clone(), 3).expect("lanes");
+    daw.set_lane_count(ctx.clone(), track.clone(), 3)
+        .expect("lanes");
     for (lane, name) in ["Take 1", "Take 2", "Take 3"].iter().enumerate() {
         daw.set_lane_name(ctx.clone(), track.clone(), lane as u32, name)
             .expect("name");
@@ -115,7 +116,11 @@ fn assert_layout(daw: &Standalone, ctx: &ProjectContext, comp: u32, comping: &La
     assert_eq!(track.lane_play_mask, 1 << comp);
     assert_eq!(track.lane_names, vec!["Take 1", "Take 2", "Take 3", "COMP"]);
     assert_eq!(track.lane_display, LaneDisplay::Small);
-    assert_eq!(&daw.comping(ctx.clone(), track_ref.clone()).expect("comping"), comping);
+    assert_eq!(
+        &daw.comping(ctx.clone(), track_ref.clone())
+            .expect("comping"),
+        comping
+    );
     assert_eq!(
         daw.comps(ctx.clone(), track_ref).expect("comps"),
         vec![Comp {
@@ -164,7 +169,9 @@ fn renaming_and_switching_the_active_comp() {
     let ctx = ProjectContext::Project(info.guid);
     let track = TrackRef::Guid(TRACK.into());
     let (first, _) = write_layout(&daw, &ctx);
-    let edit = daw.create_comp(ctx.clone(), track.clone(), "EDIT").expect("EDIT");
+    let edit = daw
+        .create_comp(ctx.clone(), track.clone(), "EDIT")
+        .expect("EDIT");
     daw.set_lane_name(ctx.clone(), track.clone(), first, "COMP v2")
         .expect("rename");
 
@@ -175,12 +182,18 @@ fn renaming_and_switching_the_active_comp() {
         .collect();
     assert_eq!(names, vec![("COMP v2", false), ("EDIT", true)]);
     let comping = daw.comping(ctx.clone(), track.clone()).expect("comping");
-    assert_eq!((comping.comp_lane, comping.last_comp_lane), (Some(edit), Some(first)));
+    assert_eq!(
+        (comping.comp_lane, comping.last_comp_lane),
+        (Some(edit), Some(first))
+    );
 
     daw.set_active_comp(ctx.clone(), track.clone(), Some(first))
         .expect("switch back");
     let comping = daw.comping(ctx.clone(), track.clone()).expect("comping");
-    assert_eq!((comping.comp_lane, comping.last_comp_lane), (Some(first), Some(edit)));
+    assert_eq!(
+        (comping.comp_lane, comping.last_comp_lane),
+        (Some(first), Some(edit))
+    );
 }
 
 #[test]
@@ -192,22 +205,44 @@ fn lanes_reject_what_the_track_does_not_have() {
     let track = TrackRef::Guid(TRACK.into());
     let item = ItemRef::Guid(ITEM.into());
 
-    assert!(daw.set_fixed_lane(ctx.clone(), item.clone(), 0).is_err(), "no lanes yet");
-    daw.set_lane_count(ctx.clone(), track.clone(), 2).expect("lanes");
-    assert!(daw.set_fixed_lane(ctx.clone(), item.clone(), 2).is_err(), "past the end");
-    assert!(daw.set_lane_name(ctx.clone(), track.clone(), 2, "x").is_err());
+    assert!(
+        daw.set_fixed_lane(ctx.clone(), item.clone(), 0).is_err(),
+        "no lanes yet"
+    );
+    daw.set_lane_count(ctx.clone(), track.clone(), 2)
+        .expect("lanes");
+    assert!(
+        daw.set_fixed_lane(ctx.clone(), item.clone(), 2).is_err(),
+        "past the end"
+    );
+    assert!(
+        daw.set_lane_name(ctx.clone(), track.clone(), 2, "x")
+            .is_err()
+    );
     assert!(
         daw.set_comp_areas(ctx.clone(), track.clone(), vec![area(0, 5, 0.0, 1.0)])
             .is_err()
     );
-    assert!(daw.set_active_comp(ctx.clone(), track.clone(), Some(2)).is_err());
+    assert!(
+        daw.set_active_comp(ctx.clone(), track.clone(), Some(2))
+            .is_err()
+    );
 
     // Switching lanes off clears everything lane-shaped.
-    daw.set_fixed_lane(ctx.clone(), item.clone(), 1).expect("lane 1");
-    daw.create_comp(ctx.clone(), track.clone(), "C").expect("comp");
-    daw.set_lane_count(ctx.clone(), track.clone(), 0).expect("off");
+    daw.set_fixed_lane(ctx.clone(), item.clone(), 1)
+        .expect("lane 1");
+    daw.create_comp(ctx.clone(), track.clone(), "C")
+        .expect("comp");
+    daw.set_lane_count(ctx.clone(), track.clone(), 0)
+        .expect("off");
     let t = Tracks::get(&daw, ctx.clone(), track.clone()).expect("track");
-    assert_eq!((t.lane_count, t.lane_play_mask, t.lane_names.len()), (0, 0, 0));
-    assert_eq!(daw.comping(ctx.clone(), track).expect("comping"), LaneComping::default());
+    assert_eq!(
+        (t.lane_count, t.lane_play_mask, t.lane_names.len()),
+        (0, 0, 0)
+    );
+    assert_eq!(
+        daw.comping(ctx.clone(), track).expect("comping"),
+        LaneComping::default()
+    );
     assert_eq!(daw.get_item(ctx, item).expect("item").fixed_lane, None);
 }

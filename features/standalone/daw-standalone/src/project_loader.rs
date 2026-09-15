@@ -489,9 +489,11 @@ fn populate_tracks(
                     .iter()
                     .position(|t| t.is_selected)
                     .or_else(|| {
-                        ri.take_guid
-                            .as_ref()
-                            .and_then(|g| ri.takes.iter().position(|t| t.take_guid.as_ref() == Some(g)))
+                        ri.take_guid.as_ref().and_then(|g| {
+                            ri.takes
+                                .iter()
+                                .position(|t| t.take_guid.as_ref() == Some(g))
+                        })
                     })
                     .or_else(|| ri.takes.iter().position(|t| t.source.is_some()))
                     .unwrap_or(0) as u32;

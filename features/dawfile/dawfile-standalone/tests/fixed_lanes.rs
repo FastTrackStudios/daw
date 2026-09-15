@@ -35,7 +35,11 @@ fn both_loaders_decode_the_fixture_lanes_the_same_way() {
         .iter()
         .find(|t| t.track.name == "In")
         .expect("In track");
-    let theirs = reaper.tracks.iter().find(|t| t.name == "In").expect("In track");
+    let theirs = reaper
+        .tracks
+        .iter()
+        .find(|t| t.name == "In")
+        .expect("In track");
     let state = theirs.fixed_lane_state();
 
     assert_eq!(ours.track.lane_count, state.lane_count);
@@ -72,7 +76,13 @@ fn a_lane_track_without_lanesolo_plays_lane_zero_in_both_loaders() {
         .document()
         .tracks
         .iter()
-        .map(|t| (t.track.lane_count, t.track.lane_play_mask, t.track.lane_display))
+        .map(|t| {
+            (
+                t.track.lane_count,
+                t.track.lane_play_mask,
+                t.track.lane_display,
+            )
+        })
         .collect();
     let theirs: Vec<(u32, u64, LaneDisplay)> = reaper
         .tracks
@@ -170,7 +180,14 @@ fn lanes_and_comps_survive_the_build_path() {
     assert_eq!(node.track.lane_names, vec!["1", "2", "COMP"]);
     assert_eq!(node.track.lane_display, LaneDisplay::Big);
     assert_eq!(node.comping, comping);
-    assert_eq!(back.document().item(&item_id).expect("item").item.fixed_lane, Some(2));
+    assert_eq!(
+        back.document()
+            .item(&item_id)
+            .expect("item")
+            .item
+            .fixed_lane,
+        Some(2)
+    );
     assert_eq!(node.comping.comps(&node.track.lane_names)[0].name, "COMP");
 }
 

@@ -59,6 +59,7 @@ pub mod fx_params;
 pub mod health;
 pub mod input;
 pub mod item;
+pub mod lanes;
 pub mod live_midi;
 pub mod main_thread;
 pub mod marker;

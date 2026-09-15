@@ -13,6 +13,7 @@
 use std::cell::RefCell;
 
 use daw_proto::Tracks;
+use daw_proto::track::{Comp, CompArea, LaneComping};
 use daw_proto::{
     DawError, DawResult, ProjectContext, RecordInput,
     ReorderTracksBehavior as ProtoReorderTracksBehavior, Track, TrackRef,
@@ -142,6 +143,10 @@ pub(crate) fn build_track_info(track: &reaper_high::Track) -> Track {
     let visible_in_mixer = track.is_shown(reaper_medium::TrackArea::Mcp);
     let (record_input, parent_send) = record_input_and_parent_send(track);
     let height = tcp_height(track);
+    let lanes = track
+        .raw()
+        .map(crate::lanes::read_lanes)
+        .unwrap_or_default();
 
     Track {
         guid,
@@ -181,12 +186,10 @@ pub(crate) fn build_track_info(track: &reaper_high::Track) -> Track {
         parent_guid: None,
         folder_depth,
         is_folder,
-        // Fixed lanes via the live API (I_NUMFIXEDLANES /
-        // C_LANEPLAYS) — not yet wired through reaper-rs.
-        lane_count: 0,
-        lane_play_mask: 0,
-        lane_names: Vec::new(),
-        lane_display: daw_proto::track::LaneDisplay::default(),
+        lane_count: lanes.lane_count,
+        lane_play_mask: lanes.lane_play_mask,
+        lane_names: lanes.lane_names,
+        lane_display: lanes.lane_display,
         grouping: daw_proto::track::TrackGrouping::default(),
         visible_in_tcp,
         visible_in_mixer,
@@ -419,7 +422,8 @@ fn reorder_behavior_to_reaper(behavior: ProtoReorderTracksBehavior) -> ReorderTr
 pub(crate) fn tcp_height(track: &reaper_high::Track) -> Option<u32> {
     let raw = track.raw().ok()?;
     let medium = ReaperHigh::get().medium_reaper();
-    let pixels = unsafe { medium.get_media_track_info_value(raw, TrackAttributeKey::HeightOverride) };
+    let pixels =
+        unsafe { medium.get_media_track_info_value(raw, TrackAttributeKey::HeightOverride) };
     if pixels >= 1.0 {
         // Rounded rather than truncated: REAPER stores this as a double
         // and hands back values a hair under the integer it was set to.
@@ -1034,6 +1038,134 @@ impl Tracks for crate::Reaper {
         medium.track_list_adjust_windows_minor();
         Ok(())
     }
+
+    // ── Fixed lanes ─────────────────────────────────────────────────
+
+    fn set_lane_count(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        count: u32,
+    ) -> DawResult<()> {
+        let raw = resolve_raw_track(&project, &track)?;
+        crate::lanes::write_lane_count(raw, count)
+    }
+
+    fn set_lane_play_mask(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        mask: u64,
+    ) -> DawResult<()> {
+        let raw = resolve_raw_track(&project, &track)?;
+        crate::lanes::write_lane_play_mask(raw, mask)
+    }
+
+    fn set_lane_name(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        lane: u32,
+        name: &str,
+    ) -> DawResult<()> {
+        let raw = resolve_raw_track(&project, &track)?;
+        crate::lanes::write_lane_name(raw, lane, name)
+    }
+
+    // ── Comping ─────────────────────────────────────────────────────
+    //
+    // No SDK accessor exists for LANEREC / ITEMLANES / LINKEDLANE; each
+    // of these goes through the track's state chunk.
+
+    fn comping(&self, project: ProjectContext, track: TrackRef) -> DawResult<LaneComping> {
+        let raw = resolve_raw_track(&project, &track)?;
+        Ok(crate::lanes::comping_from_chunk(
+            &crate::lanes::track_chunk(raw)?,
+        ))
+    }
+
+    fn set_comp_areas(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        areas: Vec<CompArea>,
+    ) -> DawResult<()> {
+        let raw = resolve_raw_track(&project, &track)?;
+        let lane_count = crate::lanes::read_lanes(raw).lane_count;
+        for a in &areas {
+            for lane in [a.comp_lane, a.source_lane] {
+                if lane >= lane_count {
+                    return Err(DawError::out_of_range(lane, lane_count, "fixed lane"));
+                }
+            }
+        }
+        write_comping(raw, lane_count, |c| c.areas = areas)
+    }
+
+    fn comps(&self, project: ProjectContext, track: TrackRef) -> DawResult<Vec<Comp>> {
+        let raw = resolve_raw_track(&project, &track)?;
+        let lanes = crate::lanes::read_lanes(raw);
+        let comping = crate::lanes::comping_from_chunk(&crate::lanes::track_chunk(raw)?);
+        Ok(comping.comps(&lanes.lane_names))
+    }
+
+    fn create_comp(&self, project: ProjectContext, track: TrackRef, name: &str) -> DawResult<u32> {
+        let raw = resolve_raw_track(&project, &track)?;
+        let lane = crate::lanes::read_lanes(raw).lane_count;
+        crate::lanes::write_lane_count(raw, lane + 1)?;
+        crate::lanes::write_lane_name(raw, lane, name)?;
+        write_comping(raw, lane + 1, |c| {
+            c.last_comp_lane = c.comp_lane;
+            c.comp_lane = Some(lane);
+        })?;
+        Ok(lane)
+    }
+
+    fn set_active_comp(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        lane: Option<u32>,
+    ) -> DawResult<()> {
+        let raw = resolve_raw_track(&project, &track)?;
+        let lane_count = crate::lanes::read_lanes(raw).lane_count;
+        if let Some(l) = lane
+            && l >= lane_count
+        {
+            return Err(DawError::out_of_range(l, lane_count, "fixed lane"));
+        }
+        write_comping(raw, lane_count, |c| {
+            if c.comp_lane != lane {
+                c.last_comp_lane = c.comp_lane;
+                c.comp_lane = lane;
+            }
+        })
+    }
+}
+
+/// A resolved track's raw pointer, for the lane accessors.
+fn resolve_raw_track(
+    project: &ProjectContext,
+    track: &TrackRef,
+) -> DawResult<reaper_medium::MediaTrack> {
+    let proj = resolve_project(project).ok_or_else(not_found_proj)?;
+    let t = resolve_track(&proj, track).ok_or_else(not_found_track)?;
+    t.raw().map_err(|_| not_found_track())
+}
+
+/// Read the track's comping out of its chunk, change it, write it back.
+fn write_comping(
+    raw: reaper_medium::MediaTrack,
+    lane_count: u32,
+    edit: impl FnOnce(&mut LaneComping),
+) -> DawResult<()> {
+    let chunk = crate::lanes::track_chunk(raw)?;
+    let mut comping = crate::lanes::comping_from_chunk(&chunk);
+    edit(&mut comping);
+    crate::lanes::set_track_chunk(
+        raw,
+        &crate::lanes::patch_chunk_comping(&chunk, &comping, lane_count),
+    )
 }
 
 impl daw_proto::track::TracksStreamSource for crate::Reaper {
