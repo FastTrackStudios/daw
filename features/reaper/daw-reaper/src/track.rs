@@ -419,7 +419,8 @@ fn reorder_behavior_to_reaper(behavior: ProtoReorderTracksBehavior) -> ReorderTr
 pub(crate) fn tcp_height(track: &reaper_high::Track) -> Option<u32> {
     let raw = track.raw().ok()?;
     let medium = ReaperHigh::get().medium_reaper();
-    let pixels = unsafe { medium.get_media_track_info_value(raw, TrackAttributeKey::HeightOverride) };
+    let pixels =
+        unsafe { medium.get_media_track_info_value(raw, TrackAttributeKey::HeightOverride) };
     if pixels >= 1.0 {
         // Rounded rather than truncated: REAPER stores this as a double
         // and hands back values a hair under the integer it was set to.

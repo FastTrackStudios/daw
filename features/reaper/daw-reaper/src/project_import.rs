@@ -2445,6 +2445,24 @@ mod folder_tests {
             .count()
     }
 
+    /// The fixed lane each item sits on, read out of the emitted RPP.
+    ///
+    /// There is no per-item `LANE` token in REAPER's format — a fixed-lanes
+    /// track divides its height evenly and each item states its slice as
+    /// `YPOS <y> <height> <mode>`, so the lane is `y / height`. This is the
+    /// same derivation `Item::from_block` performs on read.
+    fn item_lanes(rpp: &str) -> Vec<i32> {
+        rpp.lines()
+            .filter_map(|l| l.trim_start().strip_prefix("YPOS "))
+            .filter_map(|rest| {
+                let mut f = rest.split_whitespace();
+                let y: f64 = f.next()?.parse().ok()?;
+                let height: f64 = f.next()?.parse().ok()?;
+                (height > 1e-9).then(|| (y / height).round() as i32)
+            })
+            .collect()
+    }
+
     /// A MIDI track with an active playlist + 2 alternates becomes a fixed-lane
     /// REAPER track: FIXEDLANES/LANENAME present, items on lanes 0/1/2, and the
     /// item sources are MIDI (`<SOURCE MIDI`), not audio.
@@ -2456,10 +2474,14 @@ mod folder_tests {
         assert!(count_line(&rpp, "FIXEDLANES") > 0, "expected FIXEDLANES");
         assert!(count_line(&rpp, "LANENAME ") > 0, "expected LANENAME");
         // Per-item lane assignments: active on lane 0, alternates on 1 and 2.
-        let lane = |n: i32| rpp.lines().any(|l| l.trim_start() == format!("LANE {n}"));
-        assert!(lane(0), "expected active playlist on LANE 0:\n{rpp}");
-        assert!(lane(1), "expected first alternate on LANE 1:\n{rpp}");
-        assert!(lane(2), "expected second alternate on LANE 2:\n{rpp}");
+        let mut lanes = item_lanes(&rpp);
+        lanes.sort_unstable();
+        assert_eq!(
+            lanes,
+            vec![0, 1, 2],
+            "expected the active playlist on lane 0 and the alternates on 1 \
+             and 2:\n{rpp}"
+        );
         // Items must be MIDI, not audio.
         assert!(
             rpp.contains("<SOURCE MIDI"),
@@ -2528,18 +2550,25 @@ mod folder_tests {
         let mut lanes: Vec<i32> = rtrack
             .items
             .iter()
-            .map(|it| it.lane.expect("each item should carry a LANE index"))
+            .map(|it| it.lane.expect("each item should carry a lane index"))
             .collect();
         lanes.sort_unstable();
         assert_eq!(lanes, vec![0, 1, 2]);
 
-        // And it survives serialization (FIXEDLANES + per-item LANE tokens).
+        // And it survives serialization: FIXEDLANES on the track, and each
+        // item's lane as the `YPOS` slice REAPER reads it back from.
         let rpp = project.to_rpp_string();
         assert!(
             rpp.contains("FIXEDLANES"),
             "RPP must carry FIXEDLANES token"
         );
-        assert!(rpp.contains("LANE "), "RPP items must carry LANE token");
+        let mut emitted = item_lanes(&rpp);
+        emitted.sort_unstable();
+        assert_eq!(
+            emitted,
+            vec![0, 1, 2],
+            "every item's lane must reach the RPP as YPOS geometry:\n{rpp}"
+        );
     }
 
     /// Strongest verification short of a real PT fixture: serialize the
@@ -2599,17 +2628,16 @@ mod folder_tests {
             "expected exactly one LANEREC line, got {lanerec:?}"
         );
 
-        // One item per playlist per lane: exactly one `LANE 0`, `LANE 1`,
-        // `LANE 2` token (REAPER's per-item `LANE <n>` line, not LANENAME/REC).
-        let lane_token_count = |n: i32| {
-            rpp.lines()
-                .map(str::trim)
-                .filter(|l| *l == format!("LANE {n}"))
-                .count()
-        };
-        assert_eq!(lane_token_count(0), 1, "expected one item on LANE 0");
-        assert_eq!(lane_token_count(1), 1, "expected one item on LANE 1");
-        assert_eq!(lane_token_count(2), 1, "expected one item on LANE 2");
+        // One item per playlist per lane. The lane is not a token of its own:
+        // three lanes means each item states `YPOS <lane/3> 0.333… 2`, and
+        // REAPER divides that back out on read.
+        let mut lanes = item_lanes(&rpp);
+        lanes.sort_unstable();
+        assert_eq!(
+            lanes,
+            vec![0, 1, 2],
+            "expected exactly one item on each of lanes 0, 1 and 2:\n{rpp}"
+        );
 
         // ── Re-parse the emitted RPP back into REAPER domain types ──────────
         // This proves the .rpp we emit is structurally valid and round-trips.
@@ -2644,11 +2672,11 @@ mod folder_tests {
             "re-parsed track must carry lane-record settings"
         );
 
-        // Each re-parsed item carries its expected LANE index (0, 1, 2).
+        // Each re-parsed item carries its expected lane index (0, 1, 2).
         let mut lanes: Vec<i32> = rtrack
             .items
             .iter()
-            .map(|it| it.lane.expect("re-parsed item must carry a LANE index"))
+            .map(|it| it.lane.expect("re-parsed item must carry a lane index"))
             .collect();
         lanes.sort_unstable();
         assert_eq!(

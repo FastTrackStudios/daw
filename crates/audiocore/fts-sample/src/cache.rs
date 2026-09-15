@@ -567,7 +567,10 @@ impl SampleData {
             // leaves it, i.e. about once per 12,000 frames.
             let l = match cursor.get(base) {
                 Some(v) => Some(v),
-                None => cursor.seek(stream, base).then(|| cursor.get(base)).flatten(),
+                None => cursor
+                    .seek(stream, base)
+                    .then(|| cursor.get(base))
+                    .flatten(),
             };
             match l {
                 Some(l) => {

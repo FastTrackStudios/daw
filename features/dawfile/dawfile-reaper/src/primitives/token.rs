@@ -247,7 +247,10 @@ fn state_token(input: &str) -> IResult<&str, Token> {
 
     let line = input.split('\n').next().unwrap_or(input);
     // `open > 0` keeps a real block opener (`<TRACK`, empty prefix) out.
-    let open = line.find('<').filter(|open| *open > 0).ok_or(reject(input))?;
+    let open = line
+        .find('<')
+        .filter(|open| *open > 0)
+        .ok_or(reject(input))?;
     let (prefix, bracketed) = line.split_at(open);
     if prefix.contains(['"', '\'', '`', '#', ';', '>']) || prefix.contains(char::is_whitespace) {
         return Err(reject(input));

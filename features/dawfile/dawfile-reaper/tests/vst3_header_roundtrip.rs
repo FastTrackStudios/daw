@@ -22,8 +22,7 @@ const KONTAKT_HEADER: &str = concat!(
     "952745140{5653544E694B386B6F6E74616B742038} \"\"",
 );
 
-const REAEQ_HEADER: &str =
-    "<VST \"VST: ReaEQ (Cockos)\" reaeq.vst.dylib 0 \"\" 1919247985<5653547265657172656165710000000> \"\"";
+const REAEQ_HEADER: &str = "<VST \"VST: ReaEQ (Cockos)\" reaeq.vst.dylib 0 \"\" 1919247985<5653547265657172656165710000000> \"\"";
 
 fn project_with_header(header: &str) -> String {
     format!(
@@ -57,7 +56,10 @@ fn vst3_quoted_filename_survives_roundtrip() {
         "filename was split on its space:\n{out}"
     );
     // The base64 state block must still be inside the plugin block.
-    assert!(out.contains("ZGVhZGJlZWY="), "plugin state was dropped:\n{out}");
+    assert!(
+        out.contains("ZGVhZGJlZWY="),
+        "plugin state was dropped:\n{out}"
+    );
 }
 
 /// The bare-filename VST2 form must keep working, unquoted.
