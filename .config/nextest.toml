@@ -8,3 +8,15 @@ slow-timeout = { period = "30s", terminate-after = 1 }
 [[profile.default.overrides]]
 filter = 'test(=shoot_every_scene)'
 slow-timeout = { period = "60s", terminate-after = 10 }
+
+# Walks all 384,000 samples of a streamed FLAC one at a time, sleeping 2ms
+# whenever it outruns the background streamer — waiting for the fill the
+# way an audio thread cannot. Measured at 131s and passing; it has been
+# killed by the 30s timeout since the day it was written, so it has never
+# once reported on the streaming path it covers. The wait strategy is what
+# costs, not the code under test (`sample()` is arc-swap loads and a
+# relaxed atomic). Making it quick means giving the streamer a way to say
+# "this chunk is here now" — session#86.
+[[profile.default.overrides]]
+filter = 'test(=stream::tests::streams_a_flac_entry_chunk_by_chunk)'
+slow-timeout = { period = "60s", terminate-after = 10 }

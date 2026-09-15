@@ -56,6 +56,7 @@ pub mod error;
 pub mod io;
 pub mod parse;
 pub mod raw_block;
+pub mod round_trip;
 pub mod types;
 pub mod write;
 
@@ -64,6 +65,7 @@ pub use convert::{feature_support, session_summary};
 pub use error::{PtError, PtResult};
 pub use io::{read_session, read_session_from_bytes};
 pub use raw_block::{RawSession, parse_raw};
+pub use round_trip::check_round_trip;
 pub use types::*;
 pub use write::{
     get_track_color, set_track_color, set_track_mix_state, set_track_output, write_session,
