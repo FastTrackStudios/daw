@@ -13,6 +13,10 @@
 use std::cell::RefCell;
 
 use daw_proto::Tracks;
+use daw_proto::track::{
+    GROUP_SLOTS, GroupFamily, GroupFlagChange, GroupModifier, GroupModifierChange, GroupRole,
+    TrackGrouping, check_group_slot, group_slot_bit,
+};
 use daw_proto::{
     DawError, DawResult, ProjectContext, RecordInput,
     ReorderTracksBehavior as ProtoReorderTracksBehavior, Track, TrackRef,
@@ -503,26 +507,124 @@ fn not_found_track() -> DawError {
     DawError::not_found("Track", "")
 }
 
-/// REAPER track-group flag families. A "mutual" group member sets every
-/// family's `_LEAD` and `_FOLLOW` bit so the whole group moves together.
-const GROUP_FLAG_FAMILIES: &[&str] = &[
-    "MEDIA_EDIT",
-    "VOLUME",
-    "VOLUME_VCA",
-    "PAN",
-    "WIDTH",
-    "MUTE",
-    "SOLO",
-    "RECARM",
-    "POLARITY",
-    "AUTOMODE",
-];
+/// `GetSetTrackGroupMembershipEx` family name of a lead/follow pair.
+fn group_family_api_name(family: GroupFamily) -> &'static str {
+    match family {
+        GroupFamily::Volume => "VOLUME",
+        GroupFamily::Vca => "VOLUME_VCA",
+        GroupFamily::Pan => "PAN",
+        GroupFamily::Width => "WIDTH",
+        GroupFamily::Mute => "MUTE",
+        GroupFamily::Solo => "SOLO",
+        GroupFamily::RecArm => "RECARM",
+        GroupFamily::Polarity => "POLARITY",
+        GroupFamily::AutoMode => "AUTOMODE",
+        GroupFamily::MediaEdit => "MEDIA_EDIT",
+    }
+}
+
+/// `GetSetTrackGroupMembershipEx` name of a modifier.
+fn group_modifier_api_name(modifier: GroupModifier) -> &'static str {
+    match modifier {
+        GroupModifier::VolumeReverse => "VOLUME_REVERSE",
+        GroupModifier::PanReverse => "PAN_REVERSE",
+        GroupModifier::WidthReverse => "WIDTH_REVERSE",
+        GroupModifier::NoLeadWhenFollow => "NO_LEAD_WHEN_FOLLOW",
+        GroupModifier::VcaFollowPreFx => "VOLUME_VCA_FOLLOW_ISPREFX",
+    }
+}
 
 /// `GetSetTrackGroupMembershipEx` window offset + bit for a 1-based slot.
 /// REAPER addresses the 128 slots as four 32-bit windows.
 fn group_slot_window(slot: u32) -> (i32, u32) {
     let idx = slot - 1;
     (((idx / 32) * 32) as i32, 1u32 << (idx % 32))
+}
+
+/// The four window offsets that together cover slots 1–128.
+const GROUP_WINDOWS: [i32; 4] = [0, 32, 64, 96];
+
+/// One `GetSetTrackGroupMembershipEx` call: with `setmask == 0` a pure
+/// read of the 32-slot window at `offset`.
+fn group_membership(
+    low: &reaper_low::Reaper,
+    track: *mut reaper_low::raw::MediaTrack,
+    name: &std::ffi::CStr,
+    offset: i32,
+    setmask: u32,
+    setvalue: u32,
+) -> u32 {
+    unsafe { low.GetSetTrackGroupMembershipEx(track, name.as_ptr(), offset, setmask, setvalue) }
+}
+
+/// Read all 128 slots of one group name into a mask.
+fn group_mask_all_windows(
+    low: &reaper_low::Reaper,
+    track: *mut reaper_low::raw::MediaTrack,
+    name: &std::ffi::CStr,
+) -> u128 {
+    GROUP_WINDOWS.iter().fold(0u128, |acc, &offset| {
+        acc | (u128::from(group_membership(low, track, name, offset, 0, 0)) << offset)
+    })
+}
+
+fn group_name_cstr(name: &str) -> DawResult<std::ffi::CString> {
+    std::ffi::CString::new(name)
+        .map_err(|e| DawError::operation_failed(format!("bad group name: {e}")))
+}
+
+/// Set or clear one slot bit of one group name on one track.
+fn write_group_bit(
+    low: &reaper_low::Reaper,
+    track: *mut reaper_low::raw::MediaTrack,
+    name: &str,
+    slot: u32,
+    on: bool,
+) -> DawResult<()> {
+    let name = group_name_cstr(name)?;
+    let (offset, mask) = group_slot_window(slot);
+    group_membership(low, track, &name, offset, mask, if on { mask } else { 0 });
+    Ok(())
+}
+
+/// One track's whole grouping, read family by family through the live
+/// API. The masks are filled through the proto's own `set_role` /
+/// `set_modifier`, so REAPER's group names are the only thing this
+/// backend knows that `TrackGrouping` does not.
+fn read_track_grouping(
+    low: &reaper_low::Reaper,
+    track: *mut reaper_low::raw::MediaTrack,
+) -> DawResult<TrackGrouping> {
+    let mut g = TrackGrouping::default();
+    for family in GroupFamily::ALL {
+        let base = group_family_api_name(family);
+        let lead = group_mask_all_windows(low, track, &group_name_cstr(&format!("{base}_LEAD"))?);
+        let follow =
+            group_mask_all_windows(low, track, &group_name_cstr(&format!("{base}_FOLLOW"))?);
+        for slot in 1..=GROUP_SLOTS {
+            let bit = group_slot_bit(slot);
+            // REAPER permits both bits at once; `Lead` wins, the same
+            // way `TrackGrouping::role` reads it.
+            let role = if lead & bit != 0 {
+                GroupRole::Lead
+            } else if follow & bit != 0 {
+                GroupRole::Follow
+            } else {
+                continue;
+            };
+            g.set_role(family, slot, role);
+        }
+    }
+    for modifier in GroupModifier::ALL {
+        let name = group_name_cstr(group_modifier_api_name(modifier))?;
+        let mask = group_mask_all_windows(low, track, &name);
+        for slot in 1..=GROUP_SLOTS {
+            if mask & group_slot_bit(slot) != 0 {
+                g.set_modifier(modifier, slot, true);
+            }
+        }
+    }
+    Ok(g)
 }
 
 impl Tracks for crate::Reaper {
@@ -708,6 +810,7 @@ impl Tracks for crate::Reaper {
     }
 
     fn set_group_name(&self, project: ProjectContext, slot: u32, name: &str) -> DawResult<()> {
+        check_group_slot(slot)?;
         let proj = resolve_project(&project).ok_or_else(not_found_proj)?;
         let low = ReaperHigh::get().medium_reaper().low();
         let desc = std::ffi::CString::new(format!("TRACK_GROUP_NAME:{slot}"))
@@ -740,22 +843,32 @@ impl Tracks for crate::Reaper {
     ) -> Option<u32> {
         let proj = resolve_project(&project)?;
         let low = ReaperHigh::get().medium_reaper().low();
-        // A slot is "in use" if any track carries its VCA-lead bit.
-        let probe = std::ffi::CString::new("VOLUME_VCA_LEAD").ok()?;
-        let tracks: Vec<_> = proj.tracks().filter_map(|t| t.raw().ok()).collect();
-        'slots: for slot in band_start..=band_end {
-            let (offset, mask) = group_slot_window(slot);
-            for t in &tracks {
-                let state = unsafe {
-                    low.GetSetTrackGroupMembershipEx(t.as_ptr(), probe.as_ptr(), offset, 0, 0)
-                };
-                if state & mask != 0 {
-                    continue 'slots;
+        // A slot is "in use" if any track carries any of its bits —
+        // every family's lead and follow, and every modifier.
+        let mut names: Vec<std::ffi::CString> = Vec::with_capacity(25);
+        for family in GroupFamily::ALL {
+            let base = group_family_api_name(family);
+            names.push(std::ffi::CString::new(format!("{base}_LEAD")).ok()?);
+            names.push(std::ffi::CString::new(format!("{base}_FOLLOW")).ok()?);
+        }
+        for modifier in GroupModifier::ALL {
+            names.push(std::ffi::CString::new(group_modifier_api_name(modifier)).ok()?);
+        }
+        // 25 group names × 4 windows is 100 reads per track, so stop the
+        // moment the band is accounted for rather than walking a large
+        // project to the end. This is an allocation-time call.
+        let band_mask = (band_start..=band_end.min(GROUP_SLOTS))
+            .fold(0u128, |acc, slot| acc | group_slot_bit(slot));
+        let mut used = 0u128;
+        'tracks: for t in proj.tracks().filter_map(|t| t.raw().ok()) {
+            for name in &names {
+                used |= group_mask_all_windows(low, t.as_ptr(), name);
+                if used & band_mask == band_mask {
+                    break 'tracks;
                 }
             }
-            return Some(slot);
         }
-        None
+        (band_start..=band_end.min(GROUP_SLOTS)).find(|slot| used & group_slot_bit(*slot) == 0)
     }
 
     fn set_group_membership(
@@ -765,28 +878,76 @@ impl Tracks for crate::Reaper {
         slot: u32,
         member: bool,
     ) -> DawResult<()> {
+        check_group_slot(slot)?;
         let proj = resolve_project(&project).ok_or_else(not_found_proj)?;
         let t = resolve_track(&proj, &track).ok_or_else(not_found_track)?;
         let raw = t.raw().map_err(|_| not_found_track())?;
         let low = ReaperHigh::get().medium_reaper().low();
-        let (offset, mask) = group_slot_window(slot);
-        let value = if member { mask } else { 0 };
-        for fam in GROUP_FLAG_FAMILIES {
-            for suffix in ["_LEAD", "_FOLLOW"] {
-                if let Ok(name) = std::ffi::CString::new(format!("{fam}{suffix}")) {
-                    unsafe {
-                        low.GetSetTrackGroupMembershipEx(
-                            raw.as_ptr(),
-                            name.as_ptr(),
-                            offset,
-                            mask,
-                            value,
-                        );
-                    }
-                }
-            }
+        for family in GroupFamily::ALL {
+            let base = group_family_api_name(family);
+            write_group_bit(low, raw.as_ptr(), &format!("{base}_LEAD"), slot, member)?;
+            write_group_bit(low, raw.as_ptr(), &format!("{base}_FOLLOW"), slot, member)?;
         }
         Ok(())
+    }
+
+    fn set_group_flags(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        change: GroupFlagChange,
+    ) -> DawResult<()> {
+        check_group_slot(change.slot)?;
+        let proj = resolve_project(&project).ok_or_else(not_found_proj)?;
+        let t = resolve_track(&proj, &track).ok_or_else(not_found_track)?;
+        let raw = t.raw().map_err(|_| not_found_track())?;
+        let low = ReaperHigh::get().medium_reaper().low();
+        let base = group_family_api_name(change.family);
+        let lead = change.role == GroupRole::Lead;
+        let follow = change.role == GroupRole::Follow;
+        write_group_bit(
+            low,
+            raw.as_ptr(),
+            &format!("{base}_LEAD"),
+            change.slot,
+            lead,
+        )?;
+        write_group_bit(
+            low,
+            raw.as_ptr(),
+            &format!("{base}_FOLLOW"),
+            change.slot,
+            follow,
+        )?;
+        Ok(())
+    }
+
+    fn set_group_modifier(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        change: GroupModifierChange,
+    ) -> DawResult<()> {
+        check_group_slot(change.slot)?;
+        let proj = resolve_project(&project).ok_or_else(not_found_proj)?;
+        let t = resolve_track(&proj, &track).ok_or_else(not_found_track)?;
+        let raw = t.raw().map_err(|_| not_found_track())?;
+        let low = ReaperHigh::get().medium_reaper().low();
+        write_group_bit(
+            low,
+            raw.as_ptr(),
+            group_modifier_api_name(change.modifier),
+            change.slot,
+            change.enabled,
+        )
+    }
+
+    fn group_flags(&self, project: ProjectContext, track: TrackRef) -> DawResult<TrackGrouping> {
+        let proj = resolve_project(&project).ok_or_else(not_found_proj)?;
+        let t = resolve_track(&proj, &track).ok_or_else(not_found_track)?;
+        let raw = t.raw().map_err(|_| not_found_track())?;
+        let low = ReaperHigh::get().medium_reaper().low();
+        read_track_grouping(low, raw.as_ptr())
     }
 
     fn set_selected(

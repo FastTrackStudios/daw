@@ -33,6 +33,7 @@ pub use test_utils::{
     TrackGroup, TrackStructureBuilder, assert_tracks_equal, display_tracklist, format_tracklist,
 };
 pub use track::{
+    GROUP_SLOTS, GroupFamily, GroupFlagChange, GroupModifier, GroupModifierChange, GroupRole,
     InputMonitoringMode, LaneDisplay, RecordInput, ReorderTracksBehavior, Track, TrackGrouping,
-    TrackRef,
+    TrackRef, check_group_slot, group_slot_bit,
 };

@@ -7,7 +7,10 @@
 //! canonical state — fewer places for state to drift.
 
 use daw_proto::Tracks;
-use daw_proto::track::{ReorderTracksBehavior, TrackEvent, TrackStreamEvent};
+use daw_proto::track::{
+    GROUP_SLOTS, GroupFamily, GroupFlagChange, GroupModifierChange, ReorderTracksBehavior,
+    TrackEvent, TrackGrouping, TrackStreamEvent, check_group_slot, group_slot_bit,
+};
 use daw_proto::{DawError, DawResult, ProjectContext, RecordInput, Track, TrackRef};
 use uuid::Uuid;
 
@@ -41,8 +44,8 @@ fn find_track_index(tracks: &[Track], r: &TrackRef) -> Option<usize> {
 fn group_followers(
     tracks: &[Track],
     origin: usize,
-    lead_of: impl Fn(&daw_proto::track::TrackGrouping) -> u64,
-    follow_of: impl Fn(&daw_proto::track::TrackGrouping) -> u64,
+    lead_of: impl Fn(&daw_proto::track::TrackGrouping) -> u128,
+    follow_of: impl Fn(&daw_proto::track::TrackGrouping) -> u128,
 ) -> Vec<usize> {
     let lead_mask = lead_of(&tracks[origin].grouping);
     if lead_mask == 0 {
@@ -424,29 +427,98 @@ impl Tracks for Standalone {
         Ok(())
     }
 
-    // Track-group slots are a REAPER concept; standalone has no equivalent,
-    // so these are no-ops (naming/membership) and "no free slot" (query).
-    fn set_group_name(&self, _project: ProjectContext, _slot: u32, _name: &str) -> DawResult<()> {
+    // Track-group slots: names live in the project-info store under the
+    // key REAPER uses, membership on `Track::grouping`.
+    fn set_group_name(&self, project: ProjectContext, slot: u32, name: &str) -> DawResult<()> {
+        check_group_slot(slot)?;
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            p.project_ext_state.insert(
+                (String::new(), format!("TRACK_GROUP_NAME:{slot}")),
+                name.to_string(),
+            );
+        })?;
         Ok(())
     }
 
     fn first_free_group_slot(
         &self,
-        _project: ProjectContext,
-        _band_start: u32,
-        _band_end: u32,
+        project: ProjectContext,
+        band_start: u32,
+        band_end: u32,
     ) -> Option<u32> {
-        None
+        let guid = resolve_project(self, &project)?;
+        let used = self.read_project(&guid, |p| {
+            p.tracks
+                .iter()
+                .fold(0u128, |acc, t| acc | t.grouping.member_mask())
+        })?;
+        (band_start..=band_end.min(GROUP_SLOTS)).find(|slot| used & group_slot_bit(*slot) == 0)
     }
 
     fn set_group_membership(
         &self,
-        _project: ProjectContext,
-        _track: TrackRef,
-        _slot: u32,
-        _member: bool,
+        project: ProjectContext,
+        track: TrackRef,
+        slot: u32,
+        member: bool,
     ) -> DawResult<()> {
+        check_group_slot(slot)?;
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            for fam in GroupFamily::ALL {
+                p.tracks[i].grouping.set_member(fam, slot, member);
+            }
+            Ok::<_, DawError>(())
+        })??;
         Ok(())
+    }
+
+    fn set_group_flags(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        change: GroupFlagChange,
+    ) -> DawResult<()> {
+        check_group_slot(change.slot)?;
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i]
+                .grouping
+                .set_role(change.family, change.slot, change.role);
+            Ok::<_, DawError>(())
+        })??;
+        Ok(())
+    }
+
+    fn set_group_modifier(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        change: GroupModifierChange,
+    ) -> DawResult<()> {
+        check_group_slot(change.slot)?;
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i]
+                .grouping
+                .set_modifier(change.modifier, change.slot, change.enabled);
+            Ok::<_, DawError>(())
+        })??;
+        Ok(())
+    }
+
+    fn group_flags(&self, project: ProjectContext, track: TrackRef) -> DawResult<TrackGrouping> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.read_project(&guid, |p| {
+            find_track_index(&p.tracks, &track)
+                .map(|i| p.tracks[i].grouping.clone())
+                .ok_or_else(not_found_track)
+        })
+        .ok_or_else(not_found_proj)?
     }
 
     fn set_selected(

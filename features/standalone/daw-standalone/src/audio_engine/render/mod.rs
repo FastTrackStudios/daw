@@ -771,10 +771,9 @@ impl ProjectRenderer {
             // VCA grouping (user guide §5.16): a follower's volume is
             // dB-added (= linear-multiplied) with every shared-group
             // lead's fader + volume envelope; the lead's pan (+ pan
-            // envelope) offsets the follower's pan; a MUTE ENVELOPE on
-            // the lead mutes followers (the lead's mute button does
-            // NOT — mute isn't a VCA parameter). Follower faders never
-            // move; this is playback-only.
+            // envelope) offsets the follower's pan; the lead's mute —
+            // button or MUTE ENVELOPE — silences followers. Follower
+            // faders and mute buttons never move; this is playback-only.
             let vca_leads: Vec<&TrackSnapshot> = if t.vca_follow != 0 {
                 tracks
                     .iter()
@@ -783,6 +782,7 @@ impl ProjectRenderer {
             } else {
                 Vec::new()
             };
+            let vca_lead_muted = vca_leads.iter().any(|l| l.muted);
             let mut vca_cursors: Vec<(
                 Option<EnvelopeCursor>,
                 Option<EnvelopeCursor>,
@@ -848,7 +848,7 @@ impl ProjectRenderer {
                         .and_then(|c| c.eval_at(time))
                         .map(|v| v > 0.5)
                         .unwrap_or(false);
-                    let muted = t.muted || env_muted || vca_env_muted;
+                    let muted = t.muted || env_muted || vca_lead_muted || vca_env_muted;
                     if muted {
                         bus.samples[frame * 2] = 0.0;
                         bus.samples[frame * 2 + 1] = 0.0;
