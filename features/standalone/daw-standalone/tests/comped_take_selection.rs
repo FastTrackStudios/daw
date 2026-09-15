@@ -62,13 +62,9 @@ fn only_item(daw: &Standalone, ctx: &ProjectContext) -> ItemRef {
 #[test]
 fn the_selected_take_plays_not_the_first_null_slot() {
     let daw = Standalone::new();
-    let loaded = daw_standalone::project_loader::load_rpp_text(
-        &daw,
-        "comped",
-        "/tmp/comped.rpp",
-        COMPED,
-    )
-    .expect("load");
+    let loaded =
+        daw_standalone::project_loader::load_rpp_text(&daw, "comped", "/tmp/comped.rpp", COMPED)
+            .expect("load");
     let ctx = ProjectContext::Project(loaded.project_guid.clone());
     let item = only_item(&daw, &ctx);
 
@@ -85,13 +81,9 @@ fn null_slots_still_occupy_take_indices() {
     // REAPER numbers empty comp lanes, so dropping them would silently
     // re-index every take on the item.
     let daw = Standalone::new();
-    let loaded = daw_standalone::project_loader::load_rpp_text(
-        &daw,
-        "comped",
-        "/tmp/comped.rpp",
-        COMPED,
-    )
-    .expect("load");
+    let loaded =
+        daw_standalone::project_loader::load_rpp_text(&daw, "comped", "/tmp/comped.rpp", COMPED)
+            .expect("load");
     let ctx = ProjectContext::Project(loaded.project_guid.clone());
     let item = only_item(&daw, &ctx);
 

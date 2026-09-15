@@ -189,7 +189,11 @@ fn multi_take_item_writes_one_marker_per_extra_take() {
     assert_eq!(item.takes.len(), 2);
 
     let out = item.to_rpp_string();
-    assert_eq!(count_token(&out, "TAKE"), 1, "one marker for take #1:\n{out}");
+    assert_eq!(
+        count_token(&out, "TAKE"),
+        1,
+        "one marker for take #1:\n{out}"
+    );
     assert_eq!(count_token(&out, "NAME"), 2, "one NAME per take:\n{out}");
     assert_eq!(count_token(&out, "GUID"), 2, "one GUID per take:\n{out}");
     assert_no_lane(&out, "multi-take");

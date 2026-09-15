@@ -847,13 +847,16 @@ mod tests {
         collection.process_regions();
 
         let regions = collection.regions_sorted();
-        assert_eq!(regions.len(), 1, "the unnamed pair should become one region");
+        assert_eq!(
+            regions.len(),
+            1,
+            "the unnamed pair should become one region"
+        );
         assert_eq!(regions[0].name, "");
         assert_eq!(regions[0].position, 0.0);
         assert_eq!(regions[0].end_position, Some(1.26315789473684));
         assert_eq!(
-            regions[0].guid,
-            "{E0AACDF0-DA7E-E14C-B531-1707BC2BA4D0}",
+            regions[0].guid, "{E0AACDF0-DA7E-E14C-B531-1707BC2BA4D0}",
             "the start line's real guid must survive, not fall back to empty"
         );
         assert!(
