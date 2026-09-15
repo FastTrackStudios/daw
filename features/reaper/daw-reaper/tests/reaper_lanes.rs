@@ -121,10 +121,18 @@ async fn renaming_and_switching_the_active_comp(
         (Some(first), Some(edit))
     );
 
-    // Lanes off: everything lane-shaped goes with them.
+    // No lane playing is a state REAPER holds, distinct from lane 0.
+    track.set_lane_count(3).await?;
+    track.set_lane_play_mask(0).await?;
+    assert_eq!(track.info().await?.lane_play_mask, 0);
+    track.set_lane_play_mask(0b101).await?;
+    assert_eq!(track.info().await?.lane_play_mask, 0b101);
+
+    // Lanes off: everything lane-shaped goes with them, the comping too.
     track.set_lane_count(0).await?;
     let info = track.info().await?;
     assert_eq!((info.lane_count, info.lane_play_mask), (0, 0));
     assert!(info.lane_names.is_empty());
+    assert_eq!(track.comping().await?, LaneComping::default());
     Ok(())
 }

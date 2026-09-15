@@ -372,6 +372,92 @@ pub struct CompAreaSettings {
     pub fade_out: f64,        // field 7 - crossfade out, seconds
 }
 
+/// `C_LANESETTINGS` bits this tree reads. The SDK's full list is in
+/// `reaper_plugin_functions.h`; these are the two anything here acts on.
+pub mod lane_settings {
+    /// Auto-remove empty lanes at the bottom.
+    pub const AUTO_REMOVE_EMPTY: i32 = 1;
+    /// Big lanes (else small lanes).
+    pub const BIG_LANES: i32 = 8;
+}
+
+/// The `LANEREC` / `ITEMLANES` / `LINKEDLANE` lines for a comping state,
+/// as REAPER writes them — the one place their text form lives, so the
+/// project-file exporters and the live backend's chunk patcher cannot
+/// drift apart. `LANEREC` is omitted for a track that has never comped,
+/// which is what REAPER itself writes.
+pub fn comping_lines(comping: &daw_proto::track::LaneComping, lane_count: u32) -> Vec<Vec<String>> {
+    let idx = |l: Option<u32>| l.map_or(-1i64, i64::from).to_string();
+    let mut lines = Vec::with_capacity(2 + comping.areas.len());
+    if *comping != daw_proto::track::LaneComping::default() {
+        lines.push(vec![
+            "LANEREC".to_string(),
+            idx(comping.record_lane),
+            idx(comping.comp_lane),
+            idx(comping.last_comp_lane),
+        ]);
+    }
+    lines.push(vec!["ITEMLANES".to_string(), lane_count.to_string()]);
+    for area in &comping.areas {
+        let a = comp_area_from_proto(area);
+        lines.push(vec![
+            "LINKEDLANE".to_string(),
+            a.start.to_string(),
+            a.end.to_string(),
+            a.source_lane.to_string(),
+            a.comp_lane.to_string(),
+            a.unknown_field_5.to_string(),
+            a.fade_in.to_string(),
+            a.fade_out.to_string(),
+        ]);
+    }
+    lines
+}
+
+/// The comping state those lines describe — the inverse of
+/// [`comping_lines`], over already-tokenized lines.
+pub fn comping_from_lines<'a>(
+    lines: impl Iterator<Item = &'a [String]>,
+) -> daw_proto::track::LaneComping {
+    let mut comping = daw_proto::track::LaneComping::default();
+    let lane = |t: &[String], i: usize| {
+        t.get(i)
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|&l| l >= 0.0)
+            .map(|l| l as u32)
+    };
+    let secs = |t: &[String], i: usize| t.get(i).and_then(|v| v.parse::<f64>().ok());
+    for tokens in lines {
+        match tokens.first().map(String::as_str) {
+            Some("LANEREC") => {
+                comping.record_lane = lane(tokens, 1);
+                comping.comp_lane = lane(tokens, 2);
+                comping.last_comp_lane = lane(tokens, 3);
+            }
+            Some("LINKEDLANE") => {
+                if let (Some(start), Some(end), Some(source_lane), Some(comp_lane)) = (
+                    secs(tokens, 1),
+                    secs(tokens, 2),
+                    lane(tokens, 3),
+                    lane(tokens, 4),
+                ) {
+                    comping.areas.push(comp_area_to_proto(&CompAreaSettings {
+                        start,
+                        end,
+                        source_lane: source_lane as i32,
+                        comp_lane: comp_lane as i32,
+                        unknown_field_5: -1,
+                        fade_in: secs(tokens, 6).unwrap_or(0.0),
+                        fade_out: secs(tokens, 7).unwrap_or(0.0),
+                    }));
+                }
+            }
+            _ => {}
+        }
+    }
+    comping
+}
+
 /// A comp area in the facade's terms.
 pub fn comp_area_to_proto(a: &CompAreaSettings) -> daw_proto::track::CompArea {
     use daw_proto::primitives::{Duration, PositionInSeconds};
@@ -406,7 +492,7 @@ pub fn comp_area_from_proto(a: &daw_proto::track::CompArea) -> CompAreaSettings 
 /// SDK's `C_LANESETTINGS` bitfield (&8 = big lanes), field 3 is "show
 /// only the playing lane"; the lane count is the number of `LANENAME`
 /// tokens; the play mask is `LANESOLO`'s first 64 bits.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FixedLaneState {
     pub lane_count: u32,
     pub lane_play_mask: u64,
@@ -432,6 +518,8 @@ pub struct FixedLaneFields {
     pub lane_solo: Option<(u32, u32)>,
     /// Every `LANENAME` token.
     pub lane_names: Vec<String>,
+    /// `ITEMLANES`, when the track carries one.
+    pub item_lanes: Option<u32>,
     /// The highest lane any item on the track sits on.
     pub max_item_lane: Option<u32>,
 }
@@ -439,12 +527,16 @@ pub struct FixedLaneFields {
 impl FixedLaneFields {
     pub fn decode(&self) -> FixedLaneState {
         use daw_proto::track::LaneDisplay;
-        // Lane count comes from LANENAME (one token per lane); fall back
-        // to the largest item lane index + 1 when names are absent.
-        let lane_count = match self.lane_names.len() as u32 {
-            0 if self.has_fixed_lanes => self.max_item_lane.map(|l| l + 1).unwrap_or(0),
-            0 => 0,
-            n => n,
+        // `ITEMLANES` is the count REAPER itself wrote, so it wins. A
+        // track saved before it existed falls back to the `LANENAME`
+        // token count, then to the largest lane an item sits on — a
+        // named lane and an occupied lane both prove the lane is there.
+        let lane_count = if !self.has_fixed_lanes {
+            0
+        } else {
+            let named = self.lane_names.len() as u32;
+            let occupied = self.max_item_lane.map_or(0, |l| l + 1);
+            self.item_lanes.unwrap_or(0).max(named).max(occupied)
         };
         // Lanes on, no LANESOLO (or an all-zero one) → lane 0 plays.
         let lane_play_mask = if lane_count == 0 {
@@ -459,7 +551,7 @@ impl FixedLaneFields {
             LaneDisplay::default()
         } else if self.show_play_only_lane {
             LaneDisplay::One
-        } else if self.settings & 8 != 0 {
+        } else if self.settings & lane_settings::BIG_LANES != 0 {
             LaneDisplay::Big
         } else {
             LaneDisplay::Small
@@ -762,6 +854,7 @@ impl Track {
                 .as_ref()
                 .map(|ln| ln.lane_names.clone())
                 .unwrap_or_default(),
+            item_lanes: self.item_lanes.filter(|&n| n >= 0).map(|n| n as u32),
             max_item_lane: self
                 .items
                 .iter()

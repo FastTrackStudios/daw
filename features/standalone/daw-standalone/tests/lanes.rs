@@ -161,6 +161,33 @@ fn the_layout_survives_a_save_and_reopen() {
     assert_layout(&reopened, &ctx, comp, &comping);
 }
 
+/// The lane count is the track's, not a count of the names REAPER
+/// happens to have written: three unnamed take lanes under a named comp
+/// are still four lanes when the project is reopened.
+#[test]
+fn unnamed_lanes_survive_a_save_and_reopen() {
+    let dir = TempDir::new();
+    let daw = Standalone::new();
+    let info = Projects::open(&daw, &fixture(&dir.0).to_string_lossy()).expect("open");
+    let ctx = ProjectContext::Project(info.guid.clone());
+    let track = TrackRef::Guid(TRACK.into());
+    daw.set_lane_count(ctx.clone(), track.clone(), 4)
+        .expect("lanes");
+    daw.set_lane_name(ctx.clone(), track.clone(), 3, "COMP")
+        .expect("name");
+    daw.set_lane_play_mask(ctx.clone(), track.clone(), 0b1000)
+        .expect("mask");
+    let written = save_project_as(&daw, &info.guid).expect("saved");
+
+    let reopened = Standalone::new();
+    let info = Projects::open(&reopened, &written.to_string_lossy()).expect("reopen");
+    let ctx = ProjectContext::Project(info.guid);
+    let t = Tracks::get(&reopened, ctx, track).expect("track");
+    assert_eq!(t.lane_count, 4, "names: {:?}", t.lane_names);
+    assert_eq!(t.lane_play_mask, 0b1000);
+    assert_eq!(t.lane_names[3], "COMP");
+}
+
 #[test]
 fn renaming_and_switching_the_active_comp() {
     let dir = TempDir::new();
