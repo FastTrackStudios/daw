@@ -765,6 +765,28 @@ impl RppSerialize for Track {
         if let Some(fm) = self.free_mode {
             out.push_str(&format!("{}FREEMODE {}\n", inner, free_mode_to_i32(&fm)));
         }
+        // Track-group membership. REAPER omits the line entirely when a
+        // track is in no group, and trims trailing zero fields; matching
+        // that keeps an ungrouped project byte-identical through a
+        // round-trip. Slots 65-128 have no known line — see
+        // `TrackGrouping::to_rpp_fields`.
+        for (key, fields) in [
+            ("GROUP_FLAGS", self.group_flags.as_deref()),
+            ("GROUP_FLAGS_HIGH", self.group_flags_high.as_deref()),
+        ] {
+            // `rposition` is both the "is this track in any group at
+            // all" test and the trailing-zero trim: no non-zero field
+            // means REAPER would not write the line.
+            let Some(last) = fields.and_then(|f| f.iter().rposition(|v| *v != 0)) else {
+                continue;
+            };
+            let joined = fields.unwrap_or_default()[..=last]
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(" ");
+            out.push_str(&format!("{inner}{key} {joined}\n"));
+        }
         if let Some(fl) = &self.fixed_lanes {
             out.push_str(&format!(
                 "{}FIXEDLANES {} {} {} {} {}\n",
@@ -1306,5 +1328,52 @@ mod tests {
         assert!(rpp.contains("  <ITEM\n"));
         assert!(rpp.contains("    <SOURCE WAVE\n"));
         assert!(rpp.contains("      FILE \"test.wav\"\n"));
+    }
+}
+
+#[cfg(test)]
+mod group_flags_tests {
+    use super::RppSerialize;
+    use crate::builder::TrackBuilder;
+    use crate::io::parse_project_text;
+
+    /// `GROUP_FLAGS` / `GROUP_FLAGS_HIGH` are written back exactly as
+    /// parsed, so a project that goes through the writer keeps its
+    /// groups. Values are the REAPER-saved fixture's (a lead of
+    /// everything in group 1; VCA follow of group 3 in the high line).
+    #[test]
+    fn group_flags_round_trip_through_the_writer() {
+        let mut track = TrackBuilder::new("Lead").build();
+        track.group_flags = Some(vec![
+            1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1,
+        ]);
+        track.group_flags_high = Some(vec![
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4,
+        ]);
+        let rpp = track.to_rpp_string();
+        assert!(
+            rpp.contains("\n  GROUP_FLAGS 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 1\n"),
+            "{rpp}"
+        );
+        assert!(
+            rpp.contains("\n  GROUP_FLAGS_HIGH 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 4\n"),
+            "{rpp}"
+        );
+
+        let project = format!("<REAPER_PROJECT 0.1 \"7.75/linux-x86_64\" 1700000000\n{rpp}>\n");
+        let parsed = parse_project_text(&project).unwrap();
+        let back = &parsed.tracks[0];
+        assert_eq!(back.group_flags, track.group_flags);
+        assert_eq!(back.group_flags_high, track.group_flags_high);
+    }
+
+    /// A track in no group writes no line — `None` and an empty Vec
+    /// alike — so an ungrouped project stays byte-identical.
+    #[test]
+    fn ungrouped_track_writes_no_group_line() {
+        let mut track = TrackBuilder::new("Plain").build();
+        assert!(!track.to_rpp_string().contains("GROUP_FLAGS"));
+        track.group_flags = Some(Vec::new());
+        assert!(!track.to_rpp_string().contains("GROUP_FLAGS"));
     }
 }

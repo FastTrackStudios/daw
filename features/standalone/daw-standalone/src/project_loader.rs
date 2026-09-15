@@ -254,7 +254,7 @@ fn populate_tracks(
                 lane_display,
             } = rt.fixed_lane_state();
 
-            let grouping = decode_grouping(
+            let grouping = daw_proto::track::TrackGrouping::from_rpp_fields(
                 rt.group_flags.as_deref().unwrap_or(&[]),
                 rt.group_flags_high.as_deref().unwrap_or(&[]),
             );
@@ -916,43 +916,6 @@ fn populate_tempo(
             summary.tempo_point_count += 1;
         }
     });
-}
-
-/// Decode `GROUP_FLAGS` (+ `_HIGH`, groups 33–64) into the proto
-/// grouping struct. Field order is REAPER's documented one (Track
-/// Grouping Parameters dialog / Ultraschall API docs):
-/// 1 Volume Lead, 2 Volume Follow, 3 Pan L, 4 Pan F, 5 Mute L,
-/// 6 Mute F, 7 Solo L, 8 Solo F, 9 RecArm L, 10 RecArm F,
-/// 11 Polarity L, 12 Polarity F, 13 AutoMode L, 14 AutoMode F,
-/// 15 Reverse Volume, 16 Reverse Pan, 17 No-lead-when-following,
-/// 18 Reverse Width, 19 Width L, 20 Width F, 21 VCA Lead,
-/// 22 VCA Follow, 23 VCA pre-FX Follow, 24 Media-Edit L, 25 Media-Edit F.
-fn decode_grouping(low: &[u32], high: &[u32]) -> daw_proto::track::TrackGrouping {
-    // 1-based field → folded u64 mask (low 32 groups | high 32).
-    let mask = |field: usize| -> u64 {
-        let lo = low.get(field - 1).copied().unwrap_or(0) as u64;
-        let hi = high.get(field - 1).copied().unwrap_or(0) as u64;
-        lo | (hi << 32)
-    };
-    daw_proto::track::TrackGrouping {
-        volume_lead: mask(1),
-        volume_follow: mask(2),
-        pan_lead: mask(3),
-        pan_follow: mask(4),
-        mute_lead: mask(5),
-        mute_follow: mask(6),
-        solo_lead: mask(7),
-        solo_follow: mask(8),
-        recarm_lead: mask(9),
-        recarm_follow: mask(10),
-        polarity_lead: mask(11),
-        polarity_follow: mask(12),
-        vca_lead: mask(21),
-        vca_follow: mask(22),
-        vca_prefx_follow: mask(23),
-        media_edit_lead: mask(24),
-        media_edit_follow: mask(25),
-    }
 }
 
 /// Convert an RPP track envelope block into the runtime envelope map
