@@ -17,7 +17,9 @@ use daw_proto::automation::EnvelopeShape;
 use daw_proto::item::{FadeShape, Item};
 use daw_proto::track::{LaneComping, LaneDisplay, Track};
 use dawfile_reaper::rpp_tree::RToken;
-use dawfile_reaper::types::track::FixedLaneFields;
+use dawfile_reaper::types::track::{
+    FixedLaneFields, comping_from_lines, comping_lines, lane_settings,
+};
 
 /// What an export changed.
 ///
@@ -247,8 +249,11 @@ fn lane_lines(node: &TrackNode, settings: i64) -> Vec<Vec<String>> {
     let track = &node.track;
     let big = track.lane_display == LaneDisplay::Big;
     let one = track.lane_display == LaneDisplay::One;
-    let settings = if big { settings | 8 } else { settings & !8 };
-    let lane_index = |lane: Option<u32>| lane.map(|l| l as i64).unwrap_or(-1).to_string();
+    let settings = if big {
+        settings | i64::from(lane_settings::BIG_LANES)
+    } else {
+        settings & !i64::from(lane_settings::BIG_LANES)
+    };
     let mut lines = vec![
         vec!["FREEMODE".into(), "2".into()],
         vec![
@@ -271,33 +276,19 @@ fn lane_lines(node: &TrackNode, settings: i64) -> Vec<Vec<String>> {
             "0".into(),
         ],
     ];
-    let comping = &node.comping;
-    if comping != &LaneComping::default() {
-        lines.push(vec![
-            "LANEREC".into(),
-            lane_index(comping.record_lane),
-            lane_index(comping.comp_lane),
-            lane_index(comping.last_comp_lane),
-        ]);
+    // LANEREC goes before LANENAME, as REAPER writes them; ITEMLANES and
+    // the comp areas after. The codec is `dawfile-reaper`'s, shared with
+    // the live backend's chunk patcher.
+    let mut comping = comping_lines(&node.comping, track.lane_count);
+    if let Some(at) = comping.iter().position(|l| l[0] == "LANEREC") {
+        lines.push(comping.remove(at));
     }
     if !track.lane_names.is_empty() {
         let mut line = vec!["LANENAME".to_string()];
         line.extend(track.lane_names.iter().cloned());
         lines.push(line);
     }
-    lines.push(vec!["ITEMLANES".into(), track.lane_count.to_string()]);
-    for area in &comping.areas {
-        lines.push(vec![
-            "LINKEDLANE".into(),
-            format_f64(area.start.as_seconds()),
-            format_f64(area.end.as_seconds()),
-            area.source_lane.to_string(),
-            area.comp_lane.to_string(),
-            "-1".into(),
-            format_f64(area.fade_in.as_seconds()),
-            format_f64(area.fade_out.as_seconds()),
-        ]);
-    }
+    lines.extend(comping);
     lines
 }
 
@@ -385,6 +376,9 @@ fn patch_lanes(chunk: &mut RChunk, node: &TrackNode, label: &str, report: &mut E
 
 /// What the importer would read from these lane lines, laid over the
 /// document's track so only the lane fields differ.
+///
+/// Both halves run the codecs `dawfile-reaper` exports, which is what
+/// keeps "unchanged" here meaning the same thing it means on import.
 fn decoded_lanes(lines: &[Vec<String>], node: &TrackNode) -> (Track, LaneComping) {
     let find = |k: &str| lines.iter().find(|t| t[0] == k);
     let int = |t: &[String], i: usize| {
@@ -401,6 +395,10 @@ fn decoded_lanes(lines: &[Vec<String>], node: &TrackNode) -> (Track, LaneComping
         lane_names: find("LANENAME")
             .map(|t| t[1..].to_vec())
             .unwrap_or_default(),
+        item_lanes: find("ITEMLANES")
+            .and_then(|t| int(t, 1))
+            .filter(|&n| n >= 0)
+            .map(|n| n as u32),
         max_item_lane: node.items.iter().filter_map(|i| i.item.fixed_lane).max(),
     };
     let state = fields.decode();
@@ -409,30 +407,7 @@ fn decoded_lanes(lines: &[Vec<String>], node: &TrackNode) -> (Track, LaneComping
     track.lane_play_mask = state.lane_play_mask;
     track.lane_names = state.lane_names;
     track.lane_display = state.lane_display;
-    let lane = |t: &[String], i: usize| int(t, i).filter(|&l| l >= 0).map(|l| l as u32);
-    let comping = LaneComping {
-        record_lane: find("LANEREC").and_then(|t| lane(t, 1)),
-        comp_lane: find("LANEREC").and_then(|t| lane(t, 2)),
-        last_comp_lane: find("LANEREC").and_then(|t| lane(t, 3)),
-        areas: lines
-            .iter()
-            .filter(|t| t[0] == "LINKEDLANE")
-            .filter_map(|t| {
-                Some(daw_proto::track::CompArea {
-                    start: daw_proto::PositionInSeconds::from_seconds(t.get(1)?.parse().ok()?),
-                    end: daw_proto::PositionInSeconds::from_seconds(t.get(2)?.parse().ok()?),
-                    source_lane: lane(t, 3)?,
-                    comp_lane: lane(t, 4)?,
-                    fade_in: daw_proto::Duration::from_seconds(
-                        t.get(6).and_then(|v| v.parse().ok()).unwrap_or(0.0),
-                    ),
-                    fade_out: daw_proto::Duration::from_seconds(
-                        t.get(7).and_then(|v| v.parse().ok()).unwrap_or(0.0),
-                    ),
-                })
-            })
-            .collect(),
-    };
+    let comping = comping_from_lines(lines.iter().map(Vec::as_slice));
     (track, comping)
 }
 
@@ -1106,9 +1081,11 @@ fn build_track(node: &TrackNode) -> RChunk {
         .push(node_line(&["TRACKID", node.id.as_str()]));
 
     if track.lane_count > 0 {
-        // A fresh lanes track: auto-remove empty lanes (&1), the way REAPER
-        // itself starts one.
-        for line in lane_lines(node, 1) {
+        // A fresh lanes track carries no `C_LANESETTINGS` bits: in
+        // particular NOT auto-remove-empty-lanes (&1), which is REAPER's
+        // own default and would silently drop the empty take lanes this
+        // document is explicitly asking for the moment REAPER opened it.
+        for line in lane_lines(node, 0) {
             let refs: Vec<&str> = line.iter().map(String::as_str).collect();
             chunk.children.push(node_line(&refs));
         }

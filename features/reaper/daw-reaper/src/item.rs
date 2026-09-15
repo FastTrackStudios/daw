@@ -75,6 +75,9 @@ static ITEM_CACHE: OnceLock<Mutex<HashMap<String, Vec<CachedItemState>>>> = Once
 struct CachedItemState {
     guid: String,
     track_guid: String,
+    /// The item's fixed lane, `None` off a fixed-lanes track. Carried so
+    /// a `Created` event announces the lane the item is actually on.
+    fixed_lane: Option<u32>,
     position: f64,
     length: f64,
     muted: bool,
@@ -159,6 +162,7 @@ pub fn poll_and_broadcast_items() {
             let track_guid = track
                 .map(|t| item_sw::get_track_guid(low, t))
                 .unwrap_or_default();
+            let fixed_lane = track.and_then(|t| item_fixed_lane(medium, item, t));
 
             let position = item_sw::get_item_info_value(medium, item, ItemAttributeKey::Position);
             let length = item_sw::get_item_info_value(medium, item, ItemAttributeKey::Length);
@@ -186,6 +190,7 @@ pub fn poll_and_broadcast_items() {
             current_states.push(CachedItemState {
                 guid,
                 track_guid,
+                fixed_lane,
                 position,
                 length,
                 muted,
@@ -267,7 +272,7 @@ pub fn poll_and_broadcast_items() {
                                 auto_stretch: false,
                                 color: None,
                                 group_id: None,
-                                fixed_lane: None,
+                                fixed_lane: curr.fixed_lane,
                                 take_count: 0,
                                 active_take_index: curr.active_take_index,
                             },

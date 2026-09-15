@@ -16,16 +16,10 @@ use std::os::raw::{c_char, c_void};
 use daw_proto::track::{CompArea, LaneComping, LaneDisplay};
 use daw_proto::{DawError, DawResult, Duration, PositionInSeconds};
 use dawfile_reaper::rpp_tree::tokenize;
+use dawfile_reaper::types::track::{
+    FixedLaneState, comping_from_lines, comping_lines, lane_settings,
+};
 use reaper_medium::{ChunkCacheHint, MediaTrack, TrackAttributeKey};
-
-/// A track's fixed lanes as the live API reports them.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct LiveLanes {
-    pub lane_count: u32,
-    pub lane_play_mask: u64,
-    pub lane_names: Vec<String>,
-    pub lane_display: LaneDisplay,
-}
 
 /// `I_FREEMODE` value meaning "fixed lanes enabled".
 const FREEMODE_FIXED_LANES: f64 = 2.0;
@@ -115,9 +109,9 @@ fn set_lane_name_raw(track: MediaTrack, lane: u32, name: &str) -> DawResult<()> 
 
 /// The track's fixed lanes, from the live API. All zeros on a track
 /// that is not in fixed-lanes mode.
-pub fn read_lanes(track: MediaTrack) -> LiveLanes {
+pub fn read_lanes(track: MediaTrack) -> FixedLaneState {
     if !has_fixed_lanes(track) {
-        return LiveLanes::default();
+        return FixedLaneState::default();
     }
     // SAFETY: main thread, resolved track.
     let lane_count = unsafe {
@@ -136,15 +130,21 @@ pub fn read_lanes(track: MediaTrack) -> LiveLanes {
         lane_names.push(lane_name(track, lane).unwrap_or_else(|| (lane + 1).to_string()));
     }
     let settings = char_attr(track, "C_LANESETTINGS").unwrap_or(0);
+    // `C_LANESCOLLAPSED` 1 is "lanes collapsed" — the one-lane end of
+    // REAPER's lane-button cycle, and the live-API counterpart of the
+    // `FIXEDLANES` field the project-file loaders map to `One`. The
+    // correspondence is read off REAPER's own output, not the SDK header,
+    // which documents neither field against the other; if they ever prove
+    // to be two settings rather than one, this is the line that is wrong.
     let collapsed = char_attr(track, "C_LANESCOLLAPSED").unwrap_or(0);
     let lane_display = if collapsed == 1 {
         LaneDisplay::One
-    } else if settings & 8 != 0 {
+    } else if settings & big_lanes_bit() != 0 {
         LaneDisplay::Big
     } else {
         LaneDisplay::Small
     };
-    LiveLanes {
+    FixedLaneState {
         lane_count,
         lane_play_mask,
         lane_names,
@@ -152,8 +152,16 @@ pub fn read_lanes(track: MediaTrack) -> LiveLanes {
     }
 }
 
-/// `C_LANESETTINGS` bit 1: auto-remove empty lanes at the bottom.
-const LANESETTINGS_AUTO_REMOVE_EMPTY: i8 = 1;
+/// The `C_LANESETTINGS` bits, as `char*` attributes carry them. The
+/// values are `dawfile-reaper`'s, so the live API and the project file
+/// read the same bitfield the same way.
+fn big_lanes_bit() -> i8 {
+    lane_settings::BIG_LANES as i8
+}
+
+fn auto_remove_empty_bit() -> i8 {
+    lane_settings::AUTO_REMOVE_EMPTY as i8
+}
 
 /// Set the lane count, switching fixed-lanes mode on or off with it.
 ///
@@ -171,12 +179,8 @@ pub fn write_lane_count(track: MediaTrack, count: u32) -> DawResult<()> {
             .map_err(|e| DawError::operation_failed(format!("set I_FREEMODE failed: {e}")))?;
         if count > 0 {
             let settings = char_attr(track, "C_LANESETTINGS").unwrap_or(0);
-            if settings & LANESETTINGS_AUTO_REMOVE_EMPTY != 0 {
-                set_char_attr(
-                    track,
-                    "C_LANESETTINGS",
-                    settings & !LANESETTINGS_AUTO_REMOVE_EMPTY,
-                );
+            if settings & auto_remove_empty_bit() != 0 {
+                set_char_attr(track, "C_LANESETTINGS", settings & !auto_remove_empty_bit());
             }
             m.set_media_track_info_value(
                 track,
@@ -185,6 +189,16 @@ pub fn write_lane_count(track: MediaTrack, count: u32) -> DawResult<()> {
             )
             .map_err(|e| DawError::operation_failed(format!("set I_NUMFIXEDLANES failed: {e}")))?;
         }
+    }
+    if count == 0 {
+        // Lanes off takes the comping with them: REAPER leaves LANEREC and
+        // the LINKEDLANE areas in the chunk, and re-enabling lanes later
+        // would otherwise come back holding a comp of lanes long gone.
+        let chunk = track_chunk(track)?;
+        set_track_chunk(
+            track,
+            &patch_chunk_comping(&chunk, &LaneComping::default(), 0),
+        )?;
     }
     m.update_timeline();
     let got = read_lanes(track).lane_count;
@@ -280,71 +294,11 @@ fn key_of(line: &str) -> &str {
 
 /// The comping state in a track chunk: `LANEREC` and every `LINKEDLANE`.
 pub fn comping_from_chunk(chunk: &str) -> LaneComping {
-    let mut comping = LaneComping::default();
-    let lane = |t: &[String], i: usize| {
-        t.get(i)
-            .and_then(|v| v.parse::<i64>().ok())
-            .filter(|&l| l >= 0)
-            .map(|l| l as u32)
-    };
-    let secs = |t: &[String], i: usize| t.get(i).and_then(|v| v.parse::<f64>().ok());
-    for (_, line) in depth_one_lines(chunk) {
-        let tokens: Vec<String> = tokenize(line).into_iter().map(|t| t.token).collect();
-        match key_of(line) {
-            "LANEREC" => {
-                comping.record_lane = lane(&tokens, 1);
-                comping.comp_lane = lane(&tokens, 2);
-                comping.last_comp_lane = lane(&tokens, 3);
-            }
-            "LINKEDLANE" => {
-                if let (Some(start), Some(end), Some(source_lane), Some(comp_lane)) = (
-                    secs(&tokens, 1),
-                    secs(&tokens, 2),
-                    lane(&tokens, 3),
-                    lane(&tokens, 4),
-                ) {
-                    comping.areas.push(CompArea {
-                        start: PositionInSeconds::from_seconds(start),
-                        end: PositionInSeconds::from_seconds(end),
-                        source_lane,
-                        comp_lane,
-                        fade_in: Duration::from_seconds(secs(&tokens, 6).unwrap_or(0.0).max(0.0)),
-                        fade_out: Duration::from_seconds(secs(&tokens, 7).unwrap_or(0.0).max(0.0)),
-                    });
-                }
-            }
-            _ => {}
-        }
-    }
-    comping
-}
-
-/// The comping lines for `comping` on a track with `lane_count` lanes,
-/// as REAPER writes them.
-fn comping_lines(comping: &LaneComping, lane_count: u32) -> Vec<String> {
-    let idx = |l: Option<u32>| l.map(|l| l as i64).unwrap_or(-1);
-    let mut lines = Vec::new();
-    if *comping != LaneComping::default() {
-        lines.push(format!(
-            "LANEREC {} {} {}",
-            idx(comping.record_lane),
-            idx(comping.comp_lane),
-            idx(comping.last_comp_lane)
-        ));
-    }
-    lines.push(format!("ITEMLANES {lane_count}"));
-    for a in &comping.areas {
-        lines.push(format!(
-            "LINKEDLANE {} {} {} {} -1 {} {}",
-            a.start.as_seconds(),
-            a.end.as_seconds(),
-            a.source_lane,
-            a.comp_lane,
-            a.fade_in.as_seconds(),
-            a.fade_out.as_seconds()
-        ));
-    }
-    lines
+    let lines: Vec<Vec<String>> = depth_one_lines(chunk)
+        .filter(|(_, line)| COMPING_KEYS.contains(&key_of(line)))
+        .map(|(_, line)| tokenize(line).into_iter().map(|t| t.token).collect())
+        .collect();
+    comping_from_lines(lines.iter().map(Vec::as_slice))
 }
 
 /// The chunk with its comping lines replaced by `comping`'s.
@@ -353,12 +307,12 @@ fn comping_lines(comping: &LaneComping, lane_count: u32) -> Vec<String> {
 /// was — or before the track's first nested block, or before its closing
 /// `>` — so everything else in the chunk stays exactly where REAPER put it.
 pub fn patch_chunk_comping(chunk: &str, comping: &LaneComping, lane_count: u32) -> String {
-    let old: Vec<usize> = depth_one_lines(chunk)
+    let old: std::collections::HashSet<usize> = depth_one_lines(chunk)
         .filter(|(_, line)| COMPING_KEYS.contains(&key_of(line)))
         .map(|(i, _)| i)
         .collect();
     let lines: Vec<&str> = chunk.lines().collect();
-    let insert_at = old.first().copied().unwrap_or_else(|| {
+    let insert_at = old.iter().min().copied().unwrap_or_else(|| {
         // Before the first nested block at depth 1, else before the
         // closing `>` of the track.
         let mut depth = 0i32;
@@ -387,7 +341,7 @@ pub fn patch_chunk_comping(chunk: &str, comping: &LaneComping, lane_count: u32) 
         if i == insert_at {
             for new in comping_lines(comping, lane_count) {
                 out.push_str(indent);
-                out.push_str(&new);
+                out.push_str(&new.join(" "));
                 out.push('\n');
             }
         }

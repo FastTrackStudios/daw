@@ -14,8 +14,8 @@ use daw_proto::marker::Marker;
 use daw_proto::primitives::{AutomationMode, Duration, Position, PositionInSeconds, TimeSignature};
 use daw_proto::stretch_marker::StretchMarker;
 use daw_proto::tempo_map::TempoPoint;
-use daw_proto::track::{CompArea, LaneComping, Track};
-use dawfile_reaper::types::track::FixedLaneFields;
+use daw_proto::track::Track;
+use dawfile_reaper::types::track::{FixedLaneFields, comping_from_lines};
 use std::collections::BTreeMap;
 
 /// What an import saw that it did not model.
@@ -264,7 +264,7 @@ fn read_track(
 
     let mut track = Track::new(guid, 0, String::new());
     let mut lanes = FixedLaneFields::default();
-    let mut comping = LaneComping::default();
+    let mut comping_lines: Vec<Vec<String>> = Vec::new();
     let mut envelopes = Vec::new();
     let mut items = Vec::new();
     let mut fx_chain = None;
@@ -321,18 +321,11 @@ fn read_track(
                     ));
                 }
                 "LANENAME" => lanes.lane_names = tokens(node).into_iter().skip(1).collect(),
-                "LANEREC" => {
-                    let lane = |i| param_i64(node, i).filter(|&l| l >= 0).map(|l| l as u32);
-                    comping.record_lane = lane(1);
-                    comping.comp_lane = lane(2);
-                    comping.last_comp_lane = lane(3);
+                "LANEREC" => comping_lines.push(tokens(node)),
+                "ITEMLANES" => {
+                    lanes.item_lanes = param_i64(node, 1).filter(|&n| n >= 0).map(|n| n as u32)
                 }
-                "ITEMLANES" => {}
-                "LINKEDLANE" => {
-                    if let Some(area) = read_comp_area(node) {
-                        comping.areas.push(area);
-                    }
-                }
+                "LINKEDLANE" => comping_lines.push(tokens(node)),
                 "NCHAN" | "TRACKID" | "BEAT" | "PERF" => {}
                 other => report.note("track", other),
             },
@@ -359,6 +352,7 @@ fn read_track(
         }
     }
 
+    let comping = comping_from_lines(comping_lines.iter().map(Vec::as_slice));
     lanes.max_item_lane = items.iter().filter_map(|i| i.item.fixed_lane).max();
     let lane_state = lanes.decode();
     track.lane_count = lane_state.lane_count;
@@ -439,12 +433,16 @@ fn read_item(
                 "COLOR" => item.color = param_i64(node, 1).map(|raw| raw as u32),
                 "GROUP" => item.group_id = param_i64(node, 1).map(|raw| raw as u32),
                 "NOTES" => item.label = param(node, 1),
-                // `YPOS <y> <height> [mode]`: on a fixed-lanes track each lane
-                // is `1/lane_count` tall, so the lane is `round(y/height)`.
-                // Cleared again by the track reader when the track has no
-                // lanes. There is no `LANE` token in a REAPER-written item.
+                // REAPER writes no `LANE` token in an `<ITEM>` — the lane is
+                // geometry: `YPOS <y> <height> [mode]`, where each lane on a
+                // fixed-lanes track is `1/lane_count` tall, so the lane is
+                // `round(y/height)`. `LANE` is read anyway, and wins, because
+                // this tree's own builder emits one; cleared again by the
+                // track reader when the track turns out to have no lanes.
+                "LANE" => item.fixed_lane = param_i64(node, 1).map(|lane| lane.max(0) as u32),
                 "YPOS" => {
-                    if let (Some(y), Some(height)) = (param_f64(node, 1), param_f64(node, 2))
+                    if item.fixed_lane.is_none()
+                        && let (Some(y), Some(height)) = (param_f64(node, 1), param_f64(node, 2))
                         && height > 1e-9
                     {
                         item.fixed_lane = Some((y / height).round().max(0.0) as u32);
@@ -719,18 +717,6 @@ fn read_envelope(chunk: &RChunk, owner: &EntityId, report: &mut ImportReport) ->
         },
         points,
     }
-}
-
-/// One `LINKEDLANE start end source_lane comp_lane -1 fade_in fade_out`.
-fn read_comp_area(node: &RNode) -> Option<CompArea> {
-    Some(CompArea {
-        start: PositionInSeconds::from_seconds(param_f64(node, 1)?),
-        end: PositionInSeconds::from_seconds(param_f64(node, 2)?),
-        source_lane: param_i64(node, 3)?.max(0) as u32,
-        comp_lane: param_i64(node, 4)?.max(0) as u32,
-        fade_in: Duration::from_seconds(param_f64(node, 6).unwrap_or(0.0).max(0.0)),
-        fade_out: Duration::from_seconds(param_f64(node, 7).unwrap_or(0.0).max(0.0)),
-    })
 }
 
 fn count_fx(chunk: &RChunk) -> u32 {
