@@ -15,6 +15,7 @@ use daw_proto::primitives::{AutomationMode, Duration, Position, PositionInSecond
 use daw_proto::stretch_marker::StretchMarker;
 use daw_proto::tempo_map::TempoPoint;
 use daw_proto::track::Track;
+use dawfile_reaper::types::track::{FixedLaneFields, comping_from_lines};
 use std::collections::BTreeMap;
 
 /// What an import saw that it did not model.
@@ -262,6 +263,8 @@ fn read_track(
     let id = EntityId::adopt(guid.clone());
 
     let mut track = Track::new(guid, 0, String::new());
+    let mut lanes = FixedLaneFields::default();
+    let mut comping_lines: Vec<Vec<String>> = Vec::new();
     let mut envelopes = Vec::new();
     let mut items = Vec::new();
     let mut fx_chain = None;
@@ -301,14 +304,28 @@ fn read_track(
                     // saying the track is not in the TCP.
                     track.visible_in_tcp = param_i64(node, 2).unwrap_or(0) & 2 == 0;
                 }
+                // Fixed lanes: the raw fields are collected here and decoded
+                // once the chunk is read, by the decoder `dawfile-reaper`
+                // shares — so the two loaders cannot read `FIXEDLANES`
+                // differently again (field 1 is `C_LANESETTINGS`, not a
+                // lane count; the play mask is `LANESOLO`, not field 2).
                 "FIXEDLANES" => {
-                    track.lane_count = param_i64(node, 1).unwrap_or(0).max(0) as u32;
-                    track.lane_play_mask = param_i64(node, 2).unwrap_or(0) as u64;
+                    lanes.has_fixed_lanes = true;
+                    lanes.settings = param_i64(node, 1).unwrap_or(0) as i32;
+                    lanes.show_play_only_lane = param_bool(node, 3).unwrap_or(false);
                 }
-                "LANENAME" => {
-                    let names = tokens(node);
-                    track.lane_names = names.into_iter().skip(2).collect();
+                "LANESOLO" => {
+                    lanes.lane_solo = Some((
+                        param_i64(node, 1).unwrap_or(0) as u32,
+                        param_i64(node, 2).unwrap_or(0) as u32,
+                    ));
                 }
+                "LANENAME" => lanes.lane_names = tokens(node).into_iter().skip(1).collect(),
+                "LANEREC" => comping_lines.push(tokens(node)),
+                "ITEMLANES" => {
+                    lanes.item_lanes = param_i64(node, 1).filter(|&n| n >= 0).map(|n| n as u32)
+                }
+                "LINKEDLANE" => comping_lines.push(tokens(node)),
                 "NCHAN" | "TRACKID" | "BEAT" | "PERF" => {}
                 other => report.note("track", other),
             },
@@ -335,6 +352,21 @@ fn read_track(
         }
     }
 
+    let comping = comping_from_lines(comping_lines.iter().map(Vec::as_slice));
+    lanes.max_item_lane = items.iter().filter_map(|i| i.item.fixed_lane).max();
+    let lane_state = lanes.decode();
+    track.lane_count = lane_state.lane_count;
+    track.lane_play_mask = lane_state.lane_play_mask;
+    track.lane_names = lane_state.lane_names;
+    track.lane_display = lane_state.lane_display;
+    if track.lane_count == 0 {
+        // `YPOS` also carries free-item-positioning geometry; a lane only
+        // means something on a lane-enabled track.
+        for item in &mut items {
+            item.item.fixed_lane = None;
+        }
+    }
+
     // `ISBUS <state> <depth-change>`: state 1 opens a folder, and the depth
     // change closes as many as it is negative.
     let parent = folder_stack.last().cloned();
@@ -356,6 +388,7 @@ fn read_track(
         items,
         fx_chain,
         input_fx_chain,
+        comping,
     }
 }
 
@@ -400,7 +433,21 @@ fn read_item(
                 "COLOR" => item.color = param_i64(node, 1).map(|raw| raw as u32),
                 "GROUP" => item.group_id = param_i64(node, 1).map(|raw| raw as u32),
                 "NOTES" => item.label = param(node, 1),
-                "LANE" => item.fixed_lane = param_i64(node, 1).map(|lane| lane as u32),
+                // REAPER writes no `LANE` token in an `<ITEM>` — the lane is
+                // geometry: `YPOS <y> <height> [mode]`, where each lane on a
+                // fixed-lanes track is `1/lane_count` tall, so the lane is
+                // `round(y/height)`. `LANE` is read anyway, and wins, because
+                // this tree's own builder emits one; cleared again by the
+                // track reader when the track turns out to have no lanes.
+                "LANE" => item.fixed_lane = param_i64(node, 1).map(|lane| lane.max(0) as u32),
+                "YPOS" => {
+                    if item.fixed_lane.is_none()
+                        && let (Some(y), Some(height)) = (param_f64(node, 1), param_f64(node, 2))
+                        && height > 1e-9
+                    {
+                        item.fixed_lane = Some((y / height).round().max(0.0) as u32);
+                    }
+                }
                 "FADEIN" => {
                     item.fade_in_shape = fade_shape(param_i64(node, 1).unwrap_or(0));
                     item.fade_in_length = Duration::from_seconds(param_f64(node, 2).unwrap_or(0.0));
@@ -455,7 +502,7 @@ fn read_item(
                 // `IGUID` is read ahead of this loop (it is the item's id, so it
                 // has to be known before anything else is built); the rest are
                 // REAPER bookkeeping the editor has no use for.
-                "IGUID" | "IID" | "ALLTAKES" | "YPOS" | "RECPASS" => {}
+                "IGUID" | "IID" | "ALLTAKES" | "RECPASS" => {}
                 other => report.note("item", other),
             },
             RNodeTree::Chunk(inner) => {

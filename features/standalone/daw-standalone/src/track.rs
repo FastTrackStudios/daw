@@ -7,7 +7,9 @@
 //! canonical state — fewer places for state to drift.
 
 use daw_proto::Tracks;
-use daw_proto::track::{ReorderTracksBehavior, TrackEvent, TrackStreamEvent};
+use daw_proto::track::{
+    Comp, CompArea, LaneComping, ReorderTracksBehavior, TrackEvent, TrackStreamEvent,
+};
 use daw_proto::{DawError, DawResult, ProjectContext, RecordInput, Track, TrackRef};
 use uuid::Uuid;
 
@@ -806,6 +808,191 @@ impl Tracks for Standalone {
                 .tcp_height_pixels = height_pixels;
             Ok::<(), DawError>(())
         })?
+    }
+
+    // ── Fixed lanes ─────────────────────────────────────────────────
+
+    fn set_lane_count(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        count: u32,
+    ) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let track_guid = p.tracks[i].guid.clone();
+            let t = &mut p.tracks[i];
+            let had = t.lane_count;
+            t.lane_count = count;
+            t.lane_names.truncate(count as usize);
+            t.lane_play_mask &= lane_bits(count);
+            if had == 0 && count > 0 {
+                // Lanes just switched on: lane 0 plays, as in REAPER.
+                t.lane_play_mask = 1;
+            }
+            let ext = p.track_ext.entry(track_guid.clone()).or_default();
+            if count == 0 {
+                ext.comping = LaneComping::default();
+            } else {
+                let keep = |l: Option<u32>| l.filter(|&l| l < count);
+                ext.comping.record_lane = keep(ext.comping.record_lane);
+                ext.comping.comp_lane = keep(ext.comping.comp_lane);
+                ext.comping.last_comp_lane = keep(ext.comping.last_comp_lane);
+                ext.comping
+                    .areas
+                    .retain(|a| a.comp_lane < count && a.source_lane < count);
+            }
+            // Items past the new end lose their lane; every item loses it
+            // when lanes go off.
+            for item_guid in p
+                .items_by_track
+                .get(&track_guid)
+                .cloned()
+                .unwrap_or_default()
+            {
+                if let Some(entry) = p.items.get_mut(&item_guid)
+                    && entry.item.fixed_lane.is_some_and(|l| l >= count)
+                {
+                    entry.item.fixed_lane = None;
+                }
+            }
+            Ok::<(), DawError>(())
+        })?
+    }
+
+    fn set_lane_play_mask(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        mask: u64,
+    ) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i].lane_play_mask = mask & lane_bits(p.tracks[i].lane_count);
+            Ok::<(), DawError>(())
+        })?
+    }
+
+    fn set_lane_name(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        lane: u32,
+        name: &str,
+    ) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let t = &mut p.tracks[i];
+            check_lane(lane, t.lane_count)?;
+            // Fill the gap up to `lane` with REAPER's default names, so
+            // the list stays positional.
+            while t.lane_names.len() <= lane as usize {
+                t.lane_names.push((t.lane_names.len() + 1).to_string());
+            }
+            t.lane_names[lane as usize] = name.to_string();
+            Ok::<(), DawError>(())
+        })?
+    }
+
+    // ── Comping ─────────────────────────────────────────────────────
+
+    fn comping(&self, project: ProjectContext, track: TrackRef) -> DawResult<LaneComping> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            Ok(p.track_ext
+                .get(&p.tracks[i].guid)
+                .map(|e| e.comping.clone())
+                .unwrap_or_default())
+        })?
+    }
+
+    fn set_comp_areas(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        areas: Vec<CompArea>,
+    ) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let lane_count = p.tracks[i].lane_count;
+            for a in &areas {
+                check_lane(a.comp_lane, lane_count)?;
+                check_lane(a.source_lane, lane_count)?;
+            }
+            let track_guid = p.tracks[i].guid.clone();
+            p.track_ext.entry(track_guid).or_default().comping.areas = areas;
+            Ok::<(), DawError>(())
+        })?
+    }
+
+    fn comps(&self, project: ProjectContext, track: TrackRef) -> DawResult<Vec<Comp>> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let t = &p.tracks[i];
+            Ok(p.track_ext
+                .get(&t.guid)
+                .map(|e| e.comping.comps(&t.lane_names))
+                .unwrap_or_default())
+        })?
+    }
+
+    fn create_comp(&self, project: ProjectContext, track: TrackRef, name: &str) -> DawResult<u32> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        let lane = self.with_project(&guid, |p| {
+            find_track_index(&p.tracks, &track)
+                .map(|i| p.tracks[i].lane_count)
+                .ok_or_else(not_found_track)
+        })??;
+        self.set_lane_count(project.clone(), track.clone(), lane + 1)?;
+        self.set_lane_name(project.clone(), track.clone(), lane, name)?;
+        self.set_active_comp(project, track, Some(lane))?;
+        Ok(lane)
+    }
+
+    fn set_active_comp(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        lane: Option<u32>,
+    ) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            if let Some(lane) = lane {
+                check_lane(lane, p.tracks[i].lane_count)?;
+            }
+            let track_guid = p.tracks[i].guid.clone();
+            let comping = &mut p.track_ext.entry(track_guid).or_default().comping;
+            if comping.comp_lane != lane {
+                comping.last_comp_lane = comping.comp_lane;
+                comping.comp_lane = lane;
+            }
+            Ok::<(), DawError>(())
+        })?
+    }
+}
+
+/// The bits of a play mask that name a lane the track has.
+fn lane_bits(lane_count: u32) -> u64 {
+    if lane_count >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << lane_count) - 1
+    }
+}
+
+/// Lane `lane` exists on a track with `lane_count` lanes.
+pub(crate) fn check_lane(lane: u32, lane_count: u32) -> DawResult<()> {
+    if lane < lane_count {
+        Ok(())
+    } else {
+        Err(DawError::out_of_range(lane, lane_count, "fixed lane"))
     }
 }
 

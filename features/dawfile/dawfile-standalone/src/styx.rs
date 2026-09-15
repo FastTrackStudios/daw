@@ -107,6 +107,7 @@ mod tests {
             }],
             fx_chain: None,
             input_fx_chain: None,
+            comping: daw_proto::track::LaneComping::default(),
         });
         document.reindex();
         document

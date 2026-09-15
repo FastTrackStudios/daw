@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use crate::Result;
 use crate::{DawClients, Envelopes, Error, FxChain, HardwareOutputs, Items, Receives, Sends};
-use daw_proto::{FxChainContext, ProjectContext, Track, TrackRef, track::ReorderTracksBehavior};
+use daw_proto::track::{Comp, CompArea, LaneComping, ReorderTracksBehavior};
+use daw_proto::{FxChainContext, ProjectContext, Track, TrackRef};
 
 /// Tracks handle for a specific project
 ///
@@ -607,6 +608,84 @@ impl TrackHandle {
         self.clients
             .track
             .set_tcp_height(self.context(), self.track_ref(), height_pixels)
+            .await??;
+        Ok(())
+    }
+
+    // =========================================================================
+    // Fixed lanes and comping
+    // =========================================================================
+
+    /// Set the number of fixed item lanes (`0` switches lanes off).
+    pub async fn set_lane_count(&self, count: u32) -> Result<()> {
+        self.clients
+            .track
+            .set_lane_count(self.context(), self.track_ref(), count)
+            .await??;
+        Ok(())
+    }
+
+    /// Set which lanes play: bit n = lane n audible.
+    pub async fn set_lane_play_mask(&self, mask: u64) -> Result<()> {
+        self.clients
+            .track
+            .set_lane_play_mask(self.context(), self.track_ref(), mask)
+            .await??;
+        Ok(())
+    }
+
+    /// Name a lane. Also how a comp is renamed — a comp's name is its
+    /// lane's name.
+    pub async fn set_lane_name(&self, lane: u32, name: &str) -> Result<()> {
+        self.clients
+            .track
+            .set_lane_name(self.context(), self.track_ref(), lane, name.to_string())
+            .await??;
+        Ok(())
+    }
+
+    /// The track's comping state: record / comping lanes and comp areas.
+    pub async fn comping(&self) -> Result<LaneComping> {
+        Ok(self
+            .clients
+            .track
+            .comping(self.context(), self.track_ref())
+            .await??)
+    }
+
+    /// Replace the track's comp areas.
+    pub async fn set_comp_areas(&self, areas: Vec<CompArea>) -> Result<()> {
+        self.clients
+            .track
+            .set_comp_areas(self.context(), self.track_ref(), areas)
+            .await??;
+        Ok(())
+    }
+
+    /// The track's named comps, ascending by lane.
+    pub async fn comps(&self) -> Result<Vec<Comp>> {
+        Ok(self
+            .clients
+            .track
+            .comps(self.context(), self.track_ref())
+            .await??)
+    }
+
+    /// Add a lane named `name`, make it the comping lane, and return its
+    /// index.
+    pub async fn create_comp(&self, name: &str) -> Result<u32> {
+        Ok(self
+            .clients
+            .track
+            .create_comp(self.context(), self.track_ref(), name.to_string())
+            .await??)
+    }
+
+    /// Make `lane` the comping lane (`None` = no comp active).
+    pub async fn set_active_comp(&self, lane: Option<u32>) -> Result<()> {
+        self.clients
+            .track
+            .set_active_comp(self.context(), self.track_ref(), lane)
             .await??;
         Ok(())
     }
