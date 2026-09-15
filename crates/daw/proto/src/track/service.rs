@@ -90,15 +90,18 @@ pub trait Tracks {
 
     // ── Track groups ────────────────────────────────────────────────
     //
-    // The DAW's fixed set of track-group slots (REAPER: 128, addressed
-    // 1-based). A slot bundles the flag families (volume/mute/solo/…) so
-    // members move together.
+    // The DAW's fixed set of track-group slots (REAPER 7: 128, addressed
+    // 1-based, `GROUP_SLOTS`). Each slot has ten lead/follow flag
+    // families (`GroupFamily`) and five modifiers (`GroupModifier`);
+    // a track's part in every slot is its `TrackGrouping`.
 
-    /// Set the display name of track-group `slot` (1-based).
+    /// Set the display name of track-group `slot` (1-based). Reads back
+    /// through `Projects::get_project_info_string("TRACK_GROUP_NAME:<slot>")`.
     fn set_group_name(&self, project: ProjectContext, slot: u32, name: &str) -> DawResult<()>;
 
     /// First slot in `[band_start, band_end]` (inclusive, 1-based) that no
-    /// track belongs to, or `None` if the band is full.
+    /// track is a member of through any family or modifier, or `None` if
+    /// the band is full.
     fn first_free_group_slot(
         &self,
         project: ProjectContext,
@@ -116,6 +119,33 @@ pub trait Tracks {
         slot: u32,
         member: bool,
     ) -> DawResult<()>;
+
+    /// Set `track`'s role in one family of one slot. Lead and follow are
+    /// exclusive per family and slot; `GroupRole::None` leaves the
+    /// family. Errors on a slot outside `1..=GROUP_SLOTS`.
+    fn set_group_flags(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        change: super::GroupFlagChange,
+    ) -> DawResult<()>;
+
+    /// Switch one modifier of one slot on or off for `track`.
+    fn set_group_modifier(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        change: super::GroupModifierChange,
+    ) -> DawResult<()>;
+
+    /// `track`'s live group membership, every family and modifier over
+    /// all slots. On REAPER this is the only read of the live matrix —
+    /// `Track::grouping` from `all`/`get` there is not populated.
+    fn group_flags(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+    ) -> DawResult<super::TrackGrouping>;
 
     // ── Selection ───────────────────────────────────────────────────
 

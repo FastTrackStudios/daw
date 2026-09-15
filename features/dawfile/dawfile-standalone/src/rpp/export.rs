@@ -233,6 +233,80 @@ fn patch_track(chunk: &mut RChunk, node: &TrackNode, report: &mut ExportReport) 
         }
     }
     patch_lanes(chunk, node, &label, report);
+    patch_group_flags(chunk, node, &label, report);
+}
+
+// ── track groups ───────────────────────────────────────────────────────
+
+/// Bring a track chunk's `GROUP_FLAGS` / `GROUP_FLAGS_HIGH` in line with
+/// the document.
+///
+/// A no-op when the lines already say what the document says, so an
+/// unedited export stays byte-identical, and the same shape as
+/// [`patch_lanes`] next door: the old lines are dropped and the new set
+/// inserted where the first of them was.
+///
+/// Placement for a track that has newly joined a group follows what
+/// REAPER writes — `GROUP_FLAGS` sits after `REC`/`VU` and before
+/// `TRACKHEIGHT`, i.e. after the lane lines [`patch_lanes`] has just
+/// placed, which is why this runs second.
+fn patch_group_flags(chunk: &mut RChunk, node: &TrackNode, label: &str, report: &mut ExportReport) {
+    const GROUP_KEYS: [&str; 2] = ["GROUP_FLAGS", "GROUP_FLAGS_HIGH"];
+    let is_group_line = |child: &RNodeTree| matches!(child, RNodeTree::Node(l) if GROUP_KEYS.contains(&key(l).as_str()));
+
+    let (low, high) = node.track.grouping.to_rpp_fields();
+    let wanted: Vec<Vec<String>> = [("GROUP_FLAGS", low), ("GROUP_FLAGS_HIGH", high)]
+        .into_iter()
+        .filter(|(_, fields)| !fields.is_empty())
+        .map(|(key, fields)| {
+            std::iter::once(key.to_string())
+                .chain(fields.iter().map(u32::to_string))
+                .collect()
+        })
+        .collect();
+
+    let existing: Vec<Vec<String>> = chunk
+        .children
+        .iter()
+        .filter_map(|child| match child {
+            RNodeTree::Node(line) if is_group_line(child) => Some(tokens(line)),
+            _ => None,
+        })
+        .collect();
+    if existing == wanted {
+        return;
+    }
+    report.changes.push(format!(
+        "{label} groups: {} lines \u{2192} {} lines",
+        existing.len(),
+        wanted.len()
+    ));
+
+    // Where REAPER would have put them: over the old lines if there were
+    // any, else just before TRACKHEIGHT, else before the first nested
+    // chunk — never after the items.
+    let insert_at = chunk
+        .children
+        .iter()
+        .position(is_group_line)
+        .or_else(|| {
+            chunk
+                .children
+                .iter()
+                .position(|child| matches!(child, RNodeTree::Node(l) if key(l) == "TRACKHEIGHT"))
+        })
+        .or_else(|| {
+            chunk
+                .children
+                .iter()
+                .position(|child| matches!(child, RNodeTree::Chunk(_)))
+        })
+        .unwrap_or(chunk.children.len());
+    chunk.children.retain(|child| !is_group_line(child));
+    for (offset, line) in wanted.iter().enumerate() {
+        let refs: Vec<&str> = line.iter().map(String::as_str).collect();
+        chunk.children.insert(insert_at + offset, node_line(&refs));
+    }
 }
 
 // ── fixed lanes ────────────────────────────────────────────────────────
@@ -1034,6 +1108,13 @@ fn take_runs(chunk: &RChunk) -> Vec<(usize, usize, Option<String>)> {
 // Minimal but well-formed: enough for REAPER to open the project and see the
 // entity, and nothing invented beyond what the document actually says.
 
+/// `GROUP_FLAGS 1 0 1 …` — the bitmask fields as one line.
+fn group_flag_line(key: &str, fields: &[u32]) -> RNodeTree {
+    let mut line = vec![RToken::new(key)];
+    line.extend(fields.iter().map(|f| RToken::new(f.to_string())));
+    RNodeTree::Node(RNode::from_tokens(line))
+}
+
 fn node_line(tokens: &[&str]) -> RNodeTree {
     RNodeTree::Node(RNode::from_tokens(
         tokens.iter().map(|token| RToken::new(*token)).collect(),
@@ -1075,6 +1156,17 @@ fn build_track(node: &TrackNode) -> RChunk {
     chunk
         .children
         .push(node_line(&["SEL", if track.selected { "1" } else { "0" }]));
+    // REAPER writes the group lines between REC/VU and TRACKHEIGHT —
+    // of the lines this builder emits, that is just before NCHAN.
+    let (group_low, group_high) = track.grouping.to_rpp_fields();
+    for (key, fields) in [
+        ("GROUP_FLAGS", &group_low),
+        ("GROUP_FLAGS_HIGH", &group_high),
+    ] {
+        if !fields.is_empty() {
+            chunk.children.push(group_flag_line(key, fields));
+        }
+    }
     chunk.children.push(node_line(&["NCHAN", "2"]));
     chunk
         .children

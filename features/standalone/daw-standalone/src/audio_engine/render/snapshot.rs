@@ -116,10 +116,10 @@ pub(crate) struct TrackSnapshot {
     /// track has no fixed lanes — every item plays.
     pub(crate) lane_play_mask: u64,
     /// VCA groups this track LEADS (its fader/mute scale followers).
-    pub(crate) vca_lead: u64,
+    pub(crate) vca_lead: u128,
     /// VCA groups this track FOLLOWS: effective gain = own fader ×
     /// every shared-group lead's fader; a muted lead mutes it.
-    pub(crate) vca_follow: u64,
+    pub(crate) vca_follow: u128,
     /// Track has hardware-output routes. v0 monitoring model: hw outs
     /// sum to master like a parent send (we only render one stereo
     /// device), so a `MAINSEND 0` track feeding the interface
