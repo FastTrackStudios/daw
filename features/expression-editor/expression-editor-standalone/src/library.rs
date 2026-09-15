@@ -243,18 +243,35 @@ mod tests {
     #[test]
     fn a_scan_from_the_repo_root_finds_real_material() {
         // The regression this pins: at MAX_DEPTH 3 the served runner
-        // scanned the whole monorepo and reported "0 openable", because
-        // every committed fixture sits deeper than that. A chooser whose
-        // list is empty on the repo it ships with is the bug.
+        // scanned the whole repo and reported "0 openable", because every
+        // committed fixture sits deeper than that. A chooser whose list is
+        // empty on the repo it ships with is the bug.
+        //
+        // It asks for material below depth 3 rather than for one kind: the
+        // `.mid` files this used to name lived in `crates/keyflow/`, which
+        // left for its own repo at the August 2026 split, and a depth test
+        // that names a specific format breaks every time the tree moves.
+        // What has to hold is that the walk reaches the fixtures — here
+        // `features/dawfile/dawfile-reaper/tests/fixtures/*.RPP` and
+        // `features/expression-editor/expression-editor-guitarpro/tests/
+        // fixtures/*.gp5`, at depths 5 and 6.
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../..")
             .canonicalize()
             .expect("repo root");
         let found = scan(&root);
+        // `label` is already the path relative to `root`, so "deeper than
+        // three directories" is "more than four path components".
+        let deep = found
+            .iter()
+            .filter(|e| Path::new(&e.label).components().count() > 4)
+            .count();
         assert!(
-            found.iter().any(|e| e.kind == Kind::Midi),
-            "no MIDI found under {} — the walk is too shallow again",
-            root.display()
+            deep > 0,
+            "nothing openable below depth 3 under {} — the walk is too \
+             shallow again; found {} entries in total",
+            root.display(),
+            found.len()
         );
     }
 

@@ -581,7 +581,13 @@ impl ItemBuilder {
         self
     }
 
-    /// Assign this item to a fixed lane index (`LANE`), REAPER 7+ comping.
+    /// Assign this item to a fixed lane index, REAPER 7+ comping.
+    ///
+    /// REAPER has no per-item `LANE` token — the lane lives in the item's
+    /// vertical geometry, `YPOS <lane/n> <1/n> 2`, and is derived back from
+    /// it on read. The lane *count* is not known until the track's
+    /// `LANENAME` list is set, so this records the index and
+    /// [`TrackBuilder::build`] resolves it into the `YPOS` line.
     pub fn fixed_lane(mut self, lane: i32) -> Self {
         self.item.lane = Some(lane);
         self
@@ -1203,7 +1209,50 @@ impl TrackBuilder {
                 raw_content: String::new(),
             });
         }
+        Self::resolve_fixed_lane_geometry(&mut self.track);
         self.track
+    }
+
+    /// Turn each item's fixed-lane index into the `YPOS` line REAPER
+    /// actually reads.
+    ///
+    /// `ItemBuilder::fixed_lane` records the index only; there is no `LANE`
+    /// token in an `<ITEM>` at any REAPER version (emitting one made REAPER
+    /// reject the whole project — see the note in `Item::write_rpp`). A
+    /// fixed-lanes track divides its height evenly, so lane `l` of `n` is
+    /// `YPOS l/n 1/n 2`, which is exactly what `Item::from_block` derives
+    /// the lane back from.
+    ///
+    /// The count comes from the track's `LANENAME` list when there is one,
+    /// and otherwise from the highest lane any item claims — a track with
+    /// lanes but no names still has to place its items.
+    fn resolve_fixed_lane_geometry(track: &mut Track) {
+        let named = track
+            .lane_names
+            .as_ref()
+            .map_or(0, |ln| ln.lane_names.len());
+        let claimed = track
+            .items
+            .iter()
+            .filter_map(|i| i.lane)
+            .max()
+            .map_or(0, |max| (max + 1).max(0) as usize);
+        let lanes = named.max(claimed);
+        if lanes == 0 {
+            return;
+        }
+        let height = 1.0 / lanes as f64;
+        for item in &mut track.items {
+            let Some(lane) = item.lane else { continue };
+            if item.y_pos.is_some() {
+                continue;
+            }
+            item.y_pos = Some(crate::types::item::ItemYPos {
+                y: f64::from(lane) * height,
+                height,
+                mode: 2,
+            });
+        }
     }
 
     fn ensure_volpan(&mut self) -> &mut VolPanSettings {
@@ -2407,5 +2456,72 @@ mod tests {
         assert!(rpp.contains("SOFFS 0.5"));
         assert!(rpp.contains("SM 0 0"));
         assert!(rpp.contains("SM 2 1.8"));
+    }
+
+    /// A lane index handed to `fixed_lane` has to survive serialization.
+    ///
+    /// It used to be written as a per-item `LANE <n>` line, which REAPER
+    /// rejects ("Project tokens not recognized: LANE"); removing that line
+    /// left `fixed_lane` with nowhere to go, so every Pro Tools comp track
+    /// came out as a FIXEDLANES track whose items were all stacked on lane
+    /// 0. The lane belongs in the item's vertical geometry.
+    #[test]
+    fn fixed_lanes_reach_the_rpp_as_ypos_geometry() {
+        use crate::types::track::{FixedLanesSettings, LaneNameSettings};
+
+        let project = ReaperProjectBuilder::new()
+            .track("Vocal", |mut t| {
+                for lane in 0..3 {
+                    t = t.item(0.0, 1.0, |i| {
+                        i.name(format!("Take {lane}")).fixed_lane(lane)
+                    });
+                }
+                t.fixed_lanes(FixedLanesSettings {
+                    bitfield: 9,
+                    allow_editing: false,
+                    show_play_only_lane: false,
+                    mask_playback: false,
+                    recording_behavior: 0,
+                })
+                .lane_names(LaneNameSettings {
+                    lane_count: 3,
+                    lane_names: vec!["Vocal".into(), "Vocal.01".into(), "Vocal.02".into()],
+                })
+            })
+            .build();
+
+        let rpp = project.to_rpp_string();
+        assert!(
+            !rpp.lines().any(|l| l.trim_start().starts_with("LANE ")),
+            "no item may carry a LANE token — REAPER has none:\n{rpp}"
+        );
+
+        // Three lanes: each item claims a third of the track height, at an
+        // offset of its own lane index.
+        let lanes: Vec<i32> = rpp
+            .lines()
+            .filter_map(|l| l.trim_start().strip_prefix("YPOS "))
+            .filter_map(|rest| {
+                let mut f = rest.split_whitespace();
+                let y: f64 = f.next()?.parse().ok()?;
+                let height: f64 = f.next()?.parse().ok()?;
+                assert!(
+                    (height - 1.0 / 3.0).abs() < 1e-9,
+                    "three lanes means a third of the height each, got {height}"
+                );
+                Some((y / height).round() as i32)
+            })
+            .collect();
+        assert_eq!(lanes, vec![0, 1, 2], "one item per lane, in order:\n{rpp}");
+
+        // And it reads back: the parser derives the lane from that geometry.
+        let reparsed = crate::io::parse_project_text(&rpp).expect("re-parse");
+        let mut back: Vec<i32> = reparsed.tracks[0]
+            .items
+            .iter()
+            .map(|i| i.lane.expect("lane derived from YPOS"))
+            .collect();
+        back.sort_unstable();
+        assert_eq!(back, vec![0, 1, 2]);
     }
 }

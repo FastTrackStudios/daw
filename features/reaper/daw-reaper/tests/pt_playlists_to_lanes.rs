@@ -13,7 +13,7 @@
 
 const FIXTURES: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../protools/dawfile-protools/tests/fixtures/"
+    "/../../dawfile/dawfile-protools/tests/fixtures/"
 );
 
 /// Count lines whose trimmed start is the given REAPER token (include the
@@ -24,13 +24,15 @@ fn count_token(rpp: &str, token: &str) -> usize {
         .count()
 }
 
-/// Per-item `LANE ` tokens only — excludes `LANENAME `/`LANEREC `/etc.
+/// Items placed on a fixed lane.
+///
+/// There is no per-item `LANE` token in REAPER's format — emitting one makes
+/// REAPER reject the project. A fixed-lanes track divides its height evenly
+/// and each item states its own slice as `YPOS <y> <height> <mode>`, which is
+/// what the lane is read back out of.
 fn count_item_lanes(rpp: &str) -> usize {
     rpp.lines()
-        .filter(|l| {
-            let t = l.trim_start();
-            t.starts_with("LANE ") || t == "LANE"
-        })
+        .filter(|l| l.trim_start().starts_with("YPOS "))
         .count()
 }
 
@@ -46,7 +48,7 @@ fn wonder_session_playlists_become_fixed_lanes() {
     );
     assert!(
         count_item_lanes(&rpp) > 0,
-        "wonder-session: expected per-item LANE assignments"
+        "wonder-session: expected per-item lane placement (YPOS)"
     );
     assert!(
         count_token(&rpp, "LANENAME ") > 0,
@@ -74,7 +76,7 @@ fn routing_examples_has_no_fixed_lanes() {
     assert_eq!(
         count_item_lanes(&rpp),
         0,
-        "routing-examples: expected no per-item LANE tokens"
+        "routing-examples: expected no per-item lane placement"
     );
     assert_eq!(
         count_token(&rpp, "LANENAME "),
