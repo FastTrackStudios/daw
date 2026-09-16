@@ -645,6 +645,9 @@ pub fn is_event_suppressed(suppression: &SuppressionSet, event: &SyncEvent) -> b
                 MarkerEvent::Removed(id) => Some(*id),
                 MarkerEvent::Changed(m) => m.id,
                 MarkerEvent::MarkersChanged(_) => None,
+                // The number this peer knew is the one its suppression
+                // was filed under, so that is the one to ask about.
+                MarkerEvent::Renumbered { from, .. } => Some(*from),
             };
             id.is_some_and(|id| {
                 suppression.is_suppressed(&SuppressionKey::marker(&event.project_guid, id))
@@ -657,6 +660,7 @@ pub fn is_event_suppressed(suppression: &SuppressionSet, event: &SyncEvent) -> b
                 RegionEvent::Removed(id) => Some(*id),
                 RegionEvent::Changed(r) => r.id,
                 RegionEvent::RegionsChanged(_) => None,
+                RegionEvent::Renumbered { from, .. } => Some(*from),
             };
             id.is_some_and(|id| {
                 suppression.is_suppressed(&SuppressionKey::region(&event.project_guid, id))

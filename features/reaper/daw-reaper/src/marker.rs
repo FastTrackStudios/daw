@@ -313,6 +313,18 @@ fn marker_cache() -> &'static Mutex<HashMap<String, HashMap<u32, Marker>>> {
     MARKER_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Is this the same marker, wearing a different number?
+///
+/// Everything a user can see, compared. The id is deliberately not:
+/// the whole question is whether the id changed underneath something
+/// that did not.
+fn same_but_for_the_number(old: &Marker, new: &Marker) -> bool {
+    old.name == new.name
+        && old.position == new.position
+        && old.color == new.color
+        && old.lane == new.lane
+}
+
 /// Poll REAPER marker state for every open project and emit
 /// `MarkerEvent`s for additions, removals, and modifications.
 ///
@@ -349,7 +361,47 @@ pub fn poll_and_broadcast_markers() {
 
         let prev = cache.entry(project_guid.clone()).or_default();
 
+        // Pair the numbers that vanished with the ones that appeared,
+        // before calling either a removal or an addition. REAPER's
+        // renumber action reassigns every id at once, and diffed by id
+        // that looks like the whole list being deleted and a set of
+        // strangers arriving in its place — which costs a client its
+        // selection, and costs a client mid-drag the right target.
+        //
+        // A pair is a removal and an addition identical in everything
+        // but the number. Two markers alike in name, position, colour
+        // and lane are indistinguishable to a user as well, so picking
+        // the wrong one of those cannot produce a wrong answer.
+        let gone: Vec<u32> = prev
+            .keys()
+            .copied()
+            .filter(|id| !fresh_by_id.contains_key(id))
+            .collect();
+        let mut arrived: Vec<u32> = fresh_by_id
+            .keys()
+            .copied()
+            .filter(|id| !prev.contains_key(id))
+            .collect();
+        let mut renumbered: HashMap<u32, u32> = HashMap::new();
+        for old_id in &gone {
+            let Some(old) = prev.get(old_id) else {
+                continue;
+            };
+            let found = arrived.iter().position(|new_id| {
+                fresh_by_id
+                    .get(new_id)
+                    .is_some_and(|new| same_but_for_the_number(old, new))
+            });
+            if let Some(at) = found {
+                renumbered.insert(*old_id, arrived.remove(at));
+            }
+        }
+
         for (id, marker) in &fresh_by_id {
+            // Its arrival was already reported as a renumbering.
+            if renumbered.values().any(|new_id| new_id == id) {
+                continue;
+            }
             match prev.get(id) {
                 None => hub.publish_marker(MarkerStreamEvent {
                     project_guid: project_guid.clone(),
@@ -364,13 +416,45 @@ pub fn poll_and_broadcast_markers() {
                 Some(_) => {}
             }
         }
-        for id in prev.keys() {
-            if !fresh_by_id.contains_key(id) {
-                hub.publish_marker(MarkerStreamEvent {
-                    project_guid: project_guid.clone(),
-                    event: MarkerEvent::Removed(*id),
-                });
+        for (old_id, new_id) in &renumbered {
+            let Some(marker) = fresh_by_id.get(new_id) else {
+                continue;
+            };
+            // The lane shadow is filed under the number, so it has to
+            // move with it. The SECTIONS lane is what makes a region a
+            // song section — a lane lost in a renumber is a verse that
+            // stops being a verse.
+            crate::safe_wrappers::ruler_lanes::carry_assigned_lane(
+                medium.low(),
+                reaper_medium::ProjectContext::Proj(result.project),
+                false,
+                *old_id,
+                *new_id,
+            );
+            hub.publish_marker(MarkerStreamEvent {
+                project_guid: project_guid.clone(),
+                event: MarkerEvent::Renumbered {
+                    from: *old_id,
+                    marker: marker.clone(),
+                },
+            });
+        }
+        for id in &gone {
+            if renumbered.contains_key(id) {
+                continue;
             }
+            // Gone for good: drop its lane so the next thing to take
+            // that number does not inherit it.
+            crate::safe_wrappers::ruler_lanes::forget_assigned_lane(
+                medium.low(),
+                reaper_medium::ProjectContext::Proj(result.project),
+                false,
+                *id,
+            );
+            hub.publish_marker(MarkerStreamEvent {
+                project_guid: project_guid.clone(),
+                event: MarkerEvent::Removed(*id),
+            });
         }
 
         *prev = fresh_by_id;

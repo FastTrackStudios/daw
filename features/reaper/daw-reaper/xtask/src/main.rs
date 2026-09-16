@@ -49,13 +49,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         env::set_var("FTS_REAPER_RESOURCES", &resources_dir);
     }
 
-    // The harness timeout covers the WHOLE `cargo test -p daw-reaper`
-    // run (a dozen test binaries, each opening project tabs) — the
-    // 60s default fits one binary, not the suite. Env still wins.
+    // Every test here talks to a REAPER that is already up, so the
+    // work is a few RPCs and a poll tick — the whole suite runs in
+    // seconds. The timeout is not a budget, it is how long a HUNG run
+    // costs before it admits it, and ten minutes of that is ten
+    // minutes of nothing. Anything genuinely slower says so by name:
+    // `REAPER_TEST_TIMEOUT_SECS=600 cargo run -p daw-reaper-xtask`.
     let timeout_secs: u64 = env::var("REAPER_TEST_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(600);
+        .unwrap_or(90);
     let mut runner = TestRunner::new(&resources_dir).with_timeout(timeout_secs);
     if gui {
         runner = runner.with_headless(false);

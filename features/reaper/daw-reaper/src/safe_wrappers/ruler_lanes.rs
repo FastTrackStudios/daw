@@ -81,6 +81,59 @@ pub fn assigned_lane(
     Some(lane)
 }
 
+/// Carry a lane assignment from one number to another.
+///
+/// The shadow is keyed on REAPER's marker/region number, and REAPER's
+/// "Renumber ... in timeline order" action reassigns those. Without
+/// this, a renumber leaves every assignment filed under a number that
+/// now belongs to something else — so the lane a region was PUT in
+/// silently becomes another region's lane, and FTS reads the ruler
+/// wrong from then on.
+///
+/// That matters more than it sounds: the SECTIONS lane is what makes a
+/// region a song section. A lane lost in a renumber is a verse that
+/// stops being a verse.
+pub fn carry_assigned_lane(
+    low: &ReaperLow,
+    project: ProjectContext,
+    is_region: bool,
+    from: u32,
+    to: u32,
+) {
+    let Some(lane) = assigned_lane(low, project, is_region, from) else {
+        return;
+    };
+    remember_assigned_lane(low, project, is_region, to, lane);
+    forget_assigned_lane(low, project, is_region, from);
+}
+
+/// Drop a lane assignment, in memory and in the project.
+///
+/// Called when the number it is filed under stops meaning what it
+/// meant — a renumbering, or the marker going away. Leaving it behind
+/// would hand the stale lane to whatever takes that number next.
+pub fn forget_assigned_lane(low: &ReaperLow, project: ProjectContext, is_region: bool, id: u32) {
+    if let Ok(mut lanes) = assigned_lanes().lock() {
+        lanes.remove(&(is_region, id));
+    }
+    let (Ok(section), Ok(key), Ok(empty)) = (
+        CString::new(EXT_STATE_SECTION),
+        CString::new(lane_key(is_region, id)),
+        CString::new(""),
+    ) else {
+        return;
+    };
+    // REAPER clears a key by setting it empty; there is no delete.
+    unsafe {
+        low.SetProjExtState(
+            project.to_raw(),
+            section.as_ptr(),
+            key.as_ptr(),
+            empty.as_ptr(),
+        );
+    }
+}
+
 fn lane_key(is_region: bool, id: u32) -> String {
     let kind = if is_region { "region" } else { "marker" };
     format!("{kind}:{id}")

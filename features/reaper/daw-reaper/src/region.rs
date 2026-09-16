@@ -274,6 +274,16 @@ fn region_cache() -> &'static Mutex<HashMap<String, HashMap<u32, Region>>> {
 }
 
 /// Poll REAPER region state for every open project. **Main thread only.**
+/// Is this the same region, wearing a different number?
+///
+/// Everything a user can see, compared — the id deliberately not.
+fn same_but_for_the_number(old: &Region, new: &Region) -> bool {
+    old.name == new.name
+        && old.time_range == new.time_range
+        && old.color == new.color
+        && old.lane == new.lane
+}
+
 pub fn poll_and_broadcast_regions() {
     let hub = crate::event_hub::hub();
     if hub.regions_subscriber_count() == 0 {
@@ -303,7 +313,20 @@ pub fn poll_and_broadcast_regions() {
 
         let prev = cache.entry(project_guid.clone()).or_default();
 
+        // See the matching note in `marker.rs`: markers and regions are
+        // one REAPER list wearing one set of numbers, and the renumber
+        // action reassigns them together.
+        let gone: Vec<u32> = prev
+            .keys()
+            .copied()
+            .filter(|id| !fresh_by_id.contains_key(id))
+            .collect();
+        let renumbered = crate::renumber::pair(prev, &fresh_by_id, same_but_for_the_number);
+
         for (id, region) in &fresh_by_id {
+            if renumbered.values().any(|new_id| new_id == id) {
+                continue;
+            }
             match prev.get(id) {
                 None => hub.publish_region(RegionStreamEvent {
                     project_guid: project_guid.clone(),
@@ -318,13 +341,45 @@ pub fn poll_and_broadcast_regions() {
                 Some(_) => {}
             }
         }
-        for id in prev.keys() {
-            if !fresh_by_id.contains_key(id) {
-                hub.publish_region(RegionStreamEvent {
-                    project_guid: project_guid.clone(),
-                    event: RegionEvent::Removed(*id),
-                });
+        for (old_id, new_id) in &renumbered {
+            let Some(region) = fresh_by_id.get(new_id) else {
+                continue;
+            };
+            // The lane shadow is filed under the number, so it has to
+            // move with it. The SECTIONS lane is what makes a region a
+            // song section — a lane lost in a renumber is a verse that
+            // stops being a verse.
+            crate::safe_wrappers::ruler_lanes::carry_assigned_lane(
+                medium.low(),
+                reaper_medium::ProjectContext::Proj(result.project),
+                true,
+                *old_id,
+                *new_id,
+            );
+            hub.publish_region(RegionStreamEvent {
+                project_guid: project_guid.clone(),
+                event: RegionEvent::Renumbered {
+                    from: *old_id,
+                    region: region.clone(),
+                },
+            });
+        }
+        for id in &gone {
+            if renumbered.contains_key(id) {
+                continue;
             }
+            // Gone for good: drop its lane so the next thing to take
+            // that number does not inherit it.
+            crate::safe_wrappers::ruler_lanes::forget_assigned_lane(
+                medium.low(),
+                reaper_medium::ProjectContext::Proj(result.project),
+                true,
+                *id,
+            );
+            hub.publish_region(RegionStreamEvent {
+                project_guid: project_guid.clone(),
+                event: RegionEvent::Removed(*id),
+            });
         }
 
         *prev = fresh_by_id;

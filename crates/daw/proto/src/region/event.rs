@@ -13,6 +13,19 @@ pub enum RegionEvent {
     Added(Region),
     /// A region was removed (contains the ID)
     Removed(u32),
+    /// The same region, under a new number.
+    ///
+    /// REAPER identifies a region only by its number, and its
+    /// "Renumber ... in timeline order" action reassigns those
+    /// wholesale. Diffed by id, that reads as every region being
+    /// deleted and a stranger appearing where it stood — so a client
+    /// holding a selection loses it, and one holding a drag moves the
+    /// wrong thing.
+    ///
+    /// The poller pairs a removal with an addition that matches it in
+    /// everything but the number, and says this instead. `from` is the
+    /// number the client knew; the region carries the one to use now.
+    Renumbered { from: u32, region: Region },
     /// A region was modified
     Changed(Region),
     /// Multiple regions changed (e.g., project reload)
