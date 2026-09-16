@@ -36,10 +36,12 @@ concurrency:
   group: reaper-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  FTS_CI: /var/lib/github-runner/fts-ci
-  CARGO_TARGET_DIR: /var/lib/github-runner/fts-ci/target-reaper
-  CARGO_HOME: /var/lib/github-runner/fts-ci/cargo-home
+# No FTS_CI here. The paths are resolved in the first step instead,
+# because a hard-coded /var/lib/github-runner is not writable by the
+# runner service — every run of this workflow since it was written died
+# in "Prepare persistent caches" with "Read-only file system", before a
+# single test. checks.yml already had the answer: ask systemd where its
+# cache went, and fall back to the home directory.
 
 jobs:
   reaper-integration:
@@ -50,8 +52,18 @@ jobs:
 
       - name: Prepare persistent caches
         run: |
-          mkdir -p "$CARGO_TARGET_DIR" "$CARGO_HOME"
-          nix develop .#reaper-test --profile "$FTS_CI/devshell-reaper" -c true
+          # `CacheDirectory=` in the runner unit, or the home directory
+          # when this runs anywhere else. Either way somewhere this
+          # process can actually write.
+          fts_ci="${CACHE_DIRECTORY:-$HOME/.cache}/fts-ci"
+          mkdir -p "$fts_ci/target-reaper" "$fts_ci/cargo-home"
+          {
+            echo "FTS_CI=$fts_ci"
+            echo "CARGO_TARGET_DIR=$fts_ci/target-reaper"
+            echo "CARGO_HOME=$fts_ci/cargo-home"
+          } >> "$GITHUB_ENV"
+          echo "caches: $fts_ci"
+          nix develop .#reaper-test --profile "$fts_ci/devshell-reaper" -c true
 
       # Resolve REAPER. Preferred: the exact 7.75 store path the dev
       # machine's rig uses (built from FastTrackStudios/reaper-flake) —
