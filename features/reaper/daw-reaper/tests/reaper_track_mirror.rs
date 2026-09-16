@@ -209,6 +209,11 @@ async fn a_late_subscriber_is_told_what_the_groups_already_are(
         .set_group_flags(7, GroupFamily::Volume, GroupRole::Follow)
         .await?;
 
+    // Subscribed only now, so this window is the late one. The sweep
+    // drops its cache whenever nothing is listening, which is what
+    // makes "late" mean the same thing for the second window as for
+    // the first — a cache left warm from a previous window would let
+    // this one learn nothing.
     let mut stream = tracks.subscribe().await?;
     let event = wait_for(&mut stream, |event| {
         matches!(event, TrackEvent::GroupingChanged { grouping, .. }

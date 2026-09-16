@@ -1621,10 +1621,17 @@ pub fn poll_and_broadcast_grouping() {
 
     let hub = crate::event_hub::hub();
     if hub.tracks_subscriber_count() == 0 {
-        // Nothing is listening, so the sweep is pure cost. Reset the
-        // cursor so the next subscriber starts at the top rather than
-        // wherever the last one happened to stop.
+        // Nothing is listening, so the sweep is pure cost. The cursor
+        // goes back to the top, and the CACHE is dropped: the sweep's
+        // other job is telling a window that has just attached what the
+        // groups already are, and it does that by finding an empty
+        // cache. A cache left warm from the last window would make the
+        // next one learn nothing at all, which is the very failure the
+        // sweep exists to fix.
         GROUPING_CURSOR.store(0, Ordering::Relaxed);
+        if let Ok(mut cache) = grouping_cache().lock() {
+            cache.clear();
+        }
         return;
     }
 
