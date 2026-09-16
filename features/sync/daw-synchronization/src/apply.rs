@@ -637,6 +637,11 @@ async fn apply_track(
         // syncs through `SyncDomain::Fx`, and applying this would at best
         // duplicate that and at worst fight it.
         TrackEvent::FxCountChanged { .. } => {}
+        // Same shape: a count is whatever the routing contains, and
+        // there is nothing to set. The routes themselves sync through
+        // `SyncDomain::Routing`, and applying this would at best
+        // duplicate that and at worst fight it.
+        TrackEvent::RouteCountsChanged { .. } => {}
         // A peer's record input is about THEIR hardware. "Audio channel
         // 3" is a socket on one interface and something else entirely
         // on another, so copying it across would point a peer's track

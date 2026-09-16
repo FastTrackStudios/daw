@@ -148,6 +148,23 @@ pub struct Track {
     /// Whether the track is visible in the MCP (mixer control panel)
     pub visible_in_mixer: bool,
 
+    // === Routing ===
+    /// How many sends this track has to other tracks, and how many
+    /// receives it has from them.
+    ///
+    /// On the track for the same reason as `record_input` and
+    /// `parent_send`: the IO indicator on every strip shows whether
+    /// there are any, and building a strip has to stay ONE bulk read.
+    /// Asking the routing service per track would make an N-track mixer
+    /// cost N extra round trips for two numbers.
+    ///
+    /// Counts, not the routes. A strip lights a lane; it does not draw
+    /// the destinations, and carrying them here would put a list that
+    /// changes independently inside the snapshot of something else.
+    pub send_count: u32,
+    /// See [`send_count`](Self::send_count).
+    pub receive_count: u32,
+
     // === FX Info ===
     /// Number of FX in the main FX chain
     pub fx_count: u32,
@@ -215,6 +232,8 @@ impl Track {
             grouping: TrackGrouping::default(),
             visible_in_tcp: true,
             visible_in_mixer: true,
+            send_count: 0,
+            receive_count: 0,
             fx_count: 0,
             input_fx_count: 0,
             height: None,

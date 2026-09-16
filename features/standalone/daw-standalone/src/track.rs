@@ -130,6 +130,30 @@ fn lanes_event(track: &daw_proto::Track) -> TrackEvent {
     }
 }
 
+/// Fill each track's send and receive counts from the routing maps.
+///
+/// Derived at read time rather than stored on the track, because the
+/// routing maps are the authority and a stored count would go stale the
+/// first time anything added a send without remembering to update it.
+/// The maps are keyed by guid, so this is a lookup per track and not a
+/// scan per track.
+fn fill_route_counts(p: &crate::sync::ProjectState, tracks: &mut [daw_proto::Track]) {
+    for track in tracks.iter_mut() {
+        track.send_count = p
+            .sends
+            .get(&track.guid)
+            .map_or(0, |routes: &Vec<daw_proto::TrackRoute>| {
+                u32::try_from(routes.len()).unwrap_or(u32::MAX)
+            });
+        track.receive_count = p
+            .receives
+            .get(&track.guid)
+            .map_or(0, |routes: &Vec<daw_proto::TrackRoute>| {
+                u32::try_from(routes.len()).unwrap_or(u32::MAX)
+            });
+    }
+}
+
 fn publish_track_events(daw: &Standalone, project_guid: &str, events: Vec<TrackEvent>) {
     for event in events {
         let event = TrackStreamEvent {
@@ -153,14 +177,23 @@ impl Tracks for Standalone {
         let Some(guid) = resolve_project(self, &project) else {
             return Vec::new();
         };
-        self.with_project(&guid, |p| p.tracks.clone())
-            .unwrap_or_default()
+        self.with_project(&guid, |p| {
+            let mut tracks = p.tracks.clone();
+            fill_route_counts(p, &mut tracks);
+            tracks
+        })
+        .unwrap_or_default()
     }
 
     fn get(&self, project: ProjectContext, track: TrackRef) -> Option<Track> {
         let guid = resolve_project(self, &project)?;
         self.with_project(&guid, |p| {
-            find_track_index(&p.tracks, &track).map(|i| p.tracks[i].clone())
+            find_track_index(&p.tracks, &track).map(|i| {
+                let mut one = [p.tracks[i].clone()];
+                fill_route_counts(p, &mut one);
+                let [track] = one;
+                track
+            })
         })
         .ok()
         .flatten()

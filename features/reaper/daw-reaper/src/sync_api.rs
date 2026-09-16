@@ -527,6 +527,8 @@ fn build_track_info(track: &reaper_high::Track) -> daw_proto::Track {
     let visible_in_mixer = track.is_shown(reaper_medium::TrackArea::Mcp);
     let (record_input, parent_send) = crate::track::record_input_and_parent_send(track);
     let height = crate::track::tcp_height(track);
+    let send_count = track.typed_send_count(reaper_high::SendPartnerType::Track);
+    let receive_count = track.receive_count();
 
     let lanes = track
         .raw()
@@ -577,6 +579,8 @@ fn build_track_info(track: &reaper_high::Track) -> daw_proto::Track {
         grouping: daw_proto::track::TrackGrouping::default(),
         visible_in_tcp,
         visible_in_mixer,
+        send_count,
+        receive_count,
         fx_count,
         input_fx_count,
         height,
