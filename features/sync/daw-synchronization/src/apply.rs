@@ -1713,6 +1713,12 @@ async fn apply_marker(
     let markers = project.markers();
 
     match event {
+        // A renumbering is REAPER's bookkeeping, not an edit. The
+        // marker is where it was, called what it was called; only the
+        // number moved, and the peer's numbers were never ours anyway
+        // — they go through `insert_marker_mapping`. Applying this
+        // would move a local marker for a change nobody made.
+        MarkerEvent::Renumbered { .. } => {}
         MarkerEvent::Added(marker) => {
             let pos = marker
                 .position
@@ -1792,6 +1798,8 @@ async fn apply_region(
     let regions = project.regions();
 
     match event {
+        // Same as the marker case: bookkeeping, not an edit.
+        RegionEvent::Renumbered { .. } => {}
         RegionEvent::Added(region) => {
             if let Some(id) = region.id {
                 suppression.suppress(SuppressionKey::region(project_guid, id));

@@ -38,6 +38,7 @@ pub mod batch;
 pub mod bootstrap;
 pub mod local_caller;
 pub mod plugin_services;
+pub mod renumber;
 pub mod services;
 
 pub mod extension_setup;

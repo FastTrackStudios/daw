@@ -15,6 +15,19 @@ pub enum MarkerEvent {
     Added(Marker),
     /// A marker was removed (contains the ID)
     Removed(u32),
+    /// The same marker, under a new number.
+    ///
+    /// REAPER identifies a marker only by its number, and its
+    /// "Renumber ... in timeline order" action reassigns those
+    /// wholesale. Diffed by id, that reads as every marker being
+    /// deleted and a stranger appearing where it stood — so a client
+    /// holding a selection loses it, and one holding a drag moves the
+    /// wrong thing.
+    ///
+    /// The poller pairs a removal with an addition that matches it in
+    /// everything but the number, and says this instead. `from` is the
+    /// number the client knew; the marker carries the one to use now.
+    Renumbered { from: u32, marker: Marker },
     /// A marker was modified
     Changed(Marker),
     /// Multiple markers changed (e.g., project reload)
