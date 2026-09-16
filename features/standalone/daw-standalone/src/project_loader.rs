@@ -314,6 +314,11 @@ fn populate_tracks(
                     .as_ref()
                     .map(|s| s.show_in_mixer)
                     .unwrap_or(true),
+                // Filled by `Tracks::all` from the routing maps, which
+                // are the authority — a count stored here would go
+                // stale the first time a send was added.
+                send_count: 0,
+                receive_count: 0,
                 fx_count: 0, // FX not loaded (synthetic standalone)
                 input_fx_count: 0,
                 // The project's own `TRACKHEIGHT`. Absent, or zero —

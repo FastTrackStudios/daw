@@ -120,6 +120,20 @@ pub enum TrackEvent {
     /// per-track routing call — so a mixer paid N round trips for it and
     /// then never heard about a change.
     ParentSendChanged { guid: String, enabled: bool },
+    /// The track gained or lost a send, or a receive.
+    ///
+    /// Both counts ride one event for the reason the FX counts do: a
+    /// strip draws the two lanes side by side, and one arriving without
+    /// the other is a frame where the indicator contradicts itself.
+    ///
+    /// A count and not the routes. What changed about a route — its
+    /// level, its destination — travels on the routing stream, which a
+    /// strip does not subscribe to because it does not draw any of it.
+    RouteCountsChanged {
+        guid: String,
+        send_count: u32,
+        receive_count: u32,
+    },
     /// The track's FX chains gained or lost plugins.
     ///
     /// `Track::fx_count` and `input_fx_count` were seeded by the bulk read

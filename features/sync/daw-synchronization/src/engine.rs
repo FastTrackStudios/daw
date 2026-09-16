@@ -516,7 +516,7 @@ pub fn is_event_suppressed(suppression: &SuppressionSet, event: &SyncEvent) -> b
             // Never suppressed, because it is never applied — see the
             // matching arm in `apply.rs`. The FX domain carries the change
             // that caused it.
-            TrackEvent::FxCountChanged { .. } => false,
+            TrackEvent::FxCountChanged { .. } | TrackEvent::RouteCountsChanged { .. } => false,
             // Never suppressed for the same reason: neither is ever
             // applied to a peer, so neither can echo back off one. See
             // the matching arms in `apply.rs`.

@@ -142,6 +142,10 @@ pub(crate) fn build_track_info(track: &reaper_high::Track) -> Track {
     let folder_depth = track.folder_depth_change();
     let is_folder = folder_depth > 0;
     let fx_count = track.normal_fx_chain().fx_count();
+    // One call each, the same cost as a chain's fx_count — which is
+    // why these can live in the bulk read at all.
+    let send_count = track.typed_send_count(reaper_high::SendPartnerType::Track);
+    let receive_count = track.receive_count();
     let input_fx_count = track.input_fx_chain().fx_count();
     let visible_in_tcp = track.is_shown(reaper_medium::TrackArea::Tcp);
     let visible_in_mixer = track.is_shown(reaper_medium::TrackArea::Mcp);
@@ -197,6 +201,8 @@ pub(crate) fn build_track_info(track: &reaper_high::Track) -> Track {
         grouping: daw_proto::track::TrackGrouping::default(),
         visible_in_tcp,
         visible_in_mixer,
+        send_count,
+        receive_count,
         fx_count,
         input_fx_count,
         height,
@@ -1466,6 +1472,13 @@ pub fn poll_and_broadcast_tracks() {
                         publish(TrackEvent::ParentSendChanged {
                             guid: guid.clone(),
                             enabled: track.parent_send,
+                        });
+                    }
+                    if p.send_count != track.send_count || p.receive_count != track.receive_count {
+                        publish(TrackEvent::RouteCountsChanged {
+                            guid: guid.clone(),
+                            send_count: track.send_count,
+                            receive_count: track.receive_count,
                         });
                     }
                     if p.fx_count != track.fx_count || p.input_fx_count != track.input_fx_count {

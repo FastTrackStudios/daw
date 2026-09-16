@@ -359,3 +359,75 @@ async fn height_depth_and_lanes_reach_a_subscriber(
 
     Ok(())
 }
+
+/// A send appearing changes the strip's IO indicator.
+///
+/// The counts are on the track rather than behind the routing service
+/// for the same reason `record_input` is: a mixer draws this on every
+/// strip, and asking per track would cost N round trips for two
+/// numbers. Before this the indicator was drawn from a hard-coded
+/// false, so a session full of sends showed none.
+#[reaper_test(isolated)]
+async fn a_send_changes_the_route_counts(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
+    let project = ctx.project().clone();
+    let tracks = project.tracks();
+    let source = tracks.add("Route Source", None).await?;
+    let bus = tracks.add("Route Bus", None).await?;
+    let mut stream = tracks.subscribe().await?;
+    settle(&mut stream, source.guid()).await?;
+
+    let source_guid = source.guid().to_owned();
+    let bus_guid = bus.guid().to_owned();
+    source.sends().add_to(bus.guid()).await?;
+
+    // Read both back first. If the COUNTS are wrong the diff can never
+    // fire, and a wrong read and a missing diff look identical from a
+    // timeout.
+    assert_eq!(
+        source.info().await?.send_count,
+        1,
+        "the bulk read does not see the send"
+    );
+    assert_eq!(
+        bus.info().await?.receive_count,
+        1,
+        "the bulk read does not see the receive"
+    );
+
+    // One action changes two tracks, and the poller reports them in
+    // whatever order it walks the project — which is not an order this
+    // test should depend on. So it collects until it has both rather
+    // than waiting for one and then the other.
+    let mut saw_send = false;
+    let mut saw_receive = false;
+    while !(saw_send && saw_receive) {
+        let event = wait_for(&mut stream, |event| {
+            matches!(event, TrackEvent::RouteCountsChanged { .. })
+        })
+        .await?;
+        let TrackEvent::RouteCountsChanged {
+            guid,
+            send_count,
+            receive_count,
+        } = &event
+        else {
+            eyre::bail!("not a route-counts event");
+        };
+        if *guid == source_guid {
+            assert_eq!(*send_count, 1, "the sender's send was not counted");
+            assert_eq!(
+                *receive_count, 0,
+                "the source gained a receive it never got"
+            );
+            saw_send = true;
+        } else if *guid == bus_guid {
+            assert_eq!(
+                *receive_count, 1,
+                "the destination's receive was not counted"
+            );
+            saw_receive = true;
+        }
+    }
+
+    Ok(())
+}
