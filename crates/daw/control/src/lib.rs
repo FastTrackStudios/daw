@@ -709,7 +709,6 @@ impl Daw {
 #[cfg(not(target_arch = "wasm32"))]
 mod global {
     use super::*;
-    use std::sync::OnceLock;
 
     /// The one native `Daw`, replaceable.
     ///
