@@ -79,6 +79,35 @@ pub enum TrackEvent {
         guid: String,
         grouping: super::TrackGrouping,
     },
+    /// The track's panel got taller or shorter.
+    ///
+    /// A view concern that lives in the PROJECT, not in the viewer: a
+    /// height set here is a height REAPER opens with. So a second
+    /// window showing the same session has to be told, or the two
+    /// disagree about a value they both draw from the same file.
+    HeightChanged { guid: String, height: Option<u32> },
+    /// The track's place in the folder tree changed.
+    ///
+    /// Structural, and the most structural of all: depth is relative,
+    /// so one track's change moves every track BELOW it between
+    /// levels. A client cannot patch this into the tree it holds — the
+    /// parent of a track it never heard about may have changed — which
+    /// is why the event carries the new depth and not a new tree.
+    FolderDepthChanged { guid: String, folder_depth: i32 },
+    /// The track's fixed lanes changed: how many, which ones play,
+    /// what they are called, how they are drawn.
+    ///
+    /// One event for the four together because they are read together
+    /// and drawn together. A comp view that learned the lane count
+    /// without the names would draw the right number of empty labels,
+    /// which is worse than not redrawing at all.
+    LanesChanged {
+        guid: String,
+        lane_count: u32,
+        lane_play_mask: u64,
+        lane_names: Vec<String>,
+        lane_display: super::LaneDisplay,
+    },
     /// Track was moved (index changed)
     Moved {
         guid: String,

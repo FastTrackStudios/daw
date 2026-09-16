@@ -277,3 +277,85 @@ async fn a_rename_reaches_a_subscriber(ctx: &daw::test::ReaperTestContext) -> ey
     .await?;
     Ok(())
 }
+
+/// Height, folder depth and lanes — the three a window drew and was
+/// never told about.
+///
+/// They were not merely undiffed: no `TrackEvent` carried them at all,
+/// so a second window's copy of any of the three was right once, on the
+/// read that built it, and a guess forever after. Height decides how
+/// tall a row is drawn, depth decides which folder a track is IN, and
+/// the lane fields decide what a comp view shows — none of them small
+/// enough to be wrong quietly.
+#[reaper_test(isolated)]
+async fn height_depth_and_lanes_reach_a_subscriber(
+    ctx: &daw::test::ReaperTestContext,
+) -> eyre::Result<()> {
+    let project = ctx.project().clone();
+    let tracks = project.tracks();
+    let tom = tracks.add("Mirror Tom", None).await?;
+    let mut stream = tracks.subscribe().await?;
+    // Wait for the poller to seed this project before touching
+    // anything. It reports everything already true as `Added` on the
+    // first tick that finds a subscriber, so a change made before that
+    // is folded into the snapshot instead of arriving as a change.
+    wait_for(
+        &mut stream,
+        |event| matches!(event, TrackEvent::Added(track) if track.guid == tom.guid()),
+    )
+    .await?;
+
+    tom.set_tcp_height(96).await?;
+    wait_for(&mut stream, |event| {
+        matches!(
+            event,
+            TrackEvent::HeightChanged {
+                height: Some(96),
+                ..
+            }
+        )
+    })
+    .await?;
+
+    // A folder is a depth, not a container, which is why this is a
+    // track field and not a tree operation.
+    tom.set_folder_depth(1).await?;
+    wait_for(&mut stream, |event| {
+        matches!(
+            event,
+            TrackEvent::FolderDepthChanged {
+                folder_depth: 1,
+                ..
+            }
+        )
+    })
+    .await?;
+
+    tom.set_lane_count(3).await?;
+    let lanes = wait_for(&mut stream, |event| {
+        matches!(event, TrackEvent::LanesChanged { lane_count: 3, .. })
+    })
+    .await?;
+    let TrackEvent::LanesChanged { lane_play_mask, .. } = &lanes else {
+        eyre::bail!("not a lanes event");
+    };
+    assert_ne!(
+        *lane_play_mask, 0,
+        "three lanes and none of them audible is a track that went silent"
+    );
+
+    // Renaming a lane carries the whole set, so a view never has the
+    // count without the names.
+    tom.set_lane_name(1, "Comp").await?;
+    let named = wait_for(&mut stream, |event| {
+        matches!(event, TrackEvent::LanesChanged { lane_names, .. }
+            if lane_names.iter().any(|n| n == "Comp"))
+    })
+    .await?;
+    let TrackEvent::LanesChanged { lane_count, .. } = &named else {
+        eyre::bail!("not a lanes event");
+    };
+    assert_eq!(*lane_count, 3, "the names arrived without the count");
+
+    Ok(())
+}

@@ -114,6 +114,22 @@ fn moved_events(before: &[Track], after: &[Track]) -> Vec<TrackEvent> {
         .collect()
 }
 
+/// The lanes event for a track, as it stands.
+///
+/// Built from the track rather than from the change, because the four
+/// fields are read together and drawn together: a comp view told the
+/// count without the names would draw the right number of empty
+/// labels, which is worse than not redrawing at all.
+fn lanes_event(track: &daw_proto::Track) -> TrackEvent {
+    TrackEvent::LanesChanged {
+        guid: track.guid.clone(),
+        lane_count: track.lane_count,
+        lane_play_mask: track.lane_play_mask,
+        lane_names: track.lane_names.clone(),
+        lane_display: track.lane_display,
+    }
+}
+
 fn publish_track_events(daw: &Standalone, project_guid: &str, events: Vec<TrackEvent>) {
     for event in events {
         let event = TrackStreamEvent {
@@ -777,9 +793,18 @@ impl Tracks for Standalone {
         let events = self.with_project_mut(&guid, |p| {
             let before = p.tracks.clone();
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let track_guid = p.tracks[i].guid.clone();
             p.tracks[i].folder_depth = folder_depth;
             reconcile_track_structure(&mut p.tracks);
-            Ok::<_, DawError>(moved_events(&before, &p.tracks))
+            // The depth change leads, because a client that reordered
+            // first and re-parented second would redraw the tree twice
+            // and be wrong in between.
+            let mut events = vec![TrackEvent::FolderDepthChanged {
+                guid: track_guid,
+                folder_depth,
+            }];
+            events.extend(moved_events(&before, &p.tracks));
+            Ok::<_, DawError>(events)
         })??;
         publish_track_events(self, &guid, events);
         Ok(())
@@ -914,15 +939,20 @@ impl Tracks for Standalone {
         height_pixels: u32,
     ) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
             let track_guid = p.tracks[i].guid.clone();
             p.track_ext
-                .entry(track_guid)
+                .entry(track_guid.clone())
                 .or_insert_with(TrackExt::default)
                 .tcp_height_pixels = height_pixels;
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(vec![TrackEvent::HeightChanged {
+                guid: track_guid,
+                height: Some(height_pixels),
+            }])
+        })??;
+        publish_track_events(self, &guid, events);
+        Ok(())
     }
 
     // ── Fixed lanes ─────────────────────────────────────────────────
@@ -983,11 +1013,13 @@ impl Tracks for Standalone {
         mask: u64,
     ) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
             p.tracks[i].lane_play_mask = mask & lane_bits(p.tracks[i].lane_count);
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(vec![lanes_event(&p.tracks[i])])
+        })??;
+        publish_track_events(self, &guid, events);
+        Ok(())
     }
 
     fn set_lane_name(
@@ -998,7 +1030,7 @@ impl Tracks for Standalone {
         name: &str,
     ) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
             let t = &mut p.tracks[i];
             check_lane(lane, t.lane_count)?;
@@ -1008,8 +1040,10 @@ impl Tracks for Standalone {
                 t.lane_names.push((t.lane_names.len() + 1).to_string());
             }
             t.lane_names[lane as usize] = name.to_string();
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(vec![lanes_event(t)])
+        })??;
+        publish_track_events(self, &guid, events);
+        Ok(())
     }
 
     // ── Comping ─────────────────────────────────────────────────────

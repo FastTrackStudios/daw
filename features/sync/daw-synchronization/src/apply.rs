@@ -651,6 +651,29 @@ async fn apply_track(
         // same groups without being told — and applying this would
         // fight that watcher over the same slots.
         TrackEvent::GroupingChanged { .. } => {}
+        // How tall a panel is drawn is how the person at THIS desk
+        // wants to look at the session. Two rooms working the same
+        // material do not share a screen, and one engineer scrolling
+        // to see the drums should not resize the other's arrange view.
+        TrackEvent::HeightChanged { .. } => {}
+        // Lanes hold takes, and takes are the one thing a second rig
+        // records for itself. Applying a lane layout from a peer would
+        // rename and re-mask lanes whose contents this machine has
+        // never heard, which is how a comp points at the wrong take.
+        TrackEvent::LanesChanged { .. } => {}
+        // Folder depth IS shared — it is the shape of the session, and
+        // two rooms disagreeing about which tracks are in the drum
+        // folder is exactly the divergence sync exists to prevent.
+        TrackEvent::FolderDepthChanged { guid, folder_depth } => {
+            let local = resolve_guid(guid);
+            suppression.suppress(SuppressionKey::track(&local, "folderdepth"));
+            if let Some(project) = resolve_project(daw, ctx).await
+                && let Ok(Some(track)) = project.tracks().by_guid(&local).await
+                && let Err(error) = track.set_folder_depth(*folder_depth).await
+            {
+                tracing::warn!(error = %error, "peer folder depth refused");
+            }
+        }
     }
 }
 
