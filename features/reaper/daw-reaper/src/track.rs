@@ -1565,6 +1565,35 @@ pub fn poll_and_broadcast_tracks() {
                             visible: track.visible_in_mixer,
                         });
                     }
+                    if p.height != track.height {
+                        publish(TrackEvent::HeightChanged {
+                            guid: guid.clone(),
+                            height: track.height,
+                        });
+                    }
+                    if p.folder_depth != track.folder_depth {
+                        publish(TrackEvent::FolderDepthChanged {
+                            guid: guid.clone(),
+                            folder_depth: track.folder_depth,
+                        });
+                    }
+                    // The four lane fields ride one event: they are read
+                    // together and drawn together, and a comp view told
+                    // the count without the names would draw the right
+                    // number of empty labels.
+                    if p.lane_count != track.lane_count
+                        || p.lane_play_mask != track.lane_play_mask
+                        || p.lane_names != track.lane_names
+                        || p.lane_display != track.lane_display
+                    {
+                        publish(TrackEvent::LanesChanged {
+                            guid: guid.clone(),
+                            lane_count: track.lane_count,
+                            lane_play_mask: track.lane_play_mask,
+                            lane_names: track.lane_names.clone(),
+                            lane_display: track.lane_display,
+                        });
+                    }
                 }
             }
         }

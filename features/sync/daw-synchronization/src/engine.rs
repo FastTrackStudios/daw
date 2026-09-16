@@ -521,6 +521,14 @@ pub fn is_event_suppressed(suppression: &SuppressionSet, event: &SyncEvent) -> b
             // applied to a peer, so neither can echo back off one. See
             // the matching arms in `apply.rs`.
             TrackEvent::RecordInputChanged { .. } | TrackEvent::GroupingChanged { .. } => false,
+            // Same again: a panel height is this desk's, and a lane
+            // layout describes takes only this machine has.
+            TrackEvent::HeightChanged { .. } | TrackEvent::LanesChanged { .. } => false,
+            // This one IS applied, so it CAN echo, and has to be
+            // suppressed like every other shared field.
+            TrackEvent::FolderDepthChanged { guid, .. } => {
+                suppression.is_suppressed(&SuppressionKey::track(guid, "folderdepth"))
+            }
         },
         SyncDomain::Fx(fe) => {
             // Apply side (apply.rs) suppresses chain-level FX events with
