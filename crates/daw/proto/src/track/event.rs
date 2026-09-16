@@ -46,6 +46,39 @@ pub enum TrackEvent {
         guid: String,
         monitor: super::InputMonitoringMode,
     },
+    /// The track's record input changed — which physical channel, or
+    /// which MIDI device and channel, it records from.
+    ///
+    /// Added because something already writes it: applying a patch list
+    /// sets every source track's input in one undo step, and without an
+    /// event a second client keeps showing whatever the inputs were
+    /// when it last read them. An engineer looking at two screens that
+    /// disagree about where a take is coming from is the worst possible
+    /// moment for a stale field.
+    RecordInputChanged {
+        guid: String,
+        input: super::RecordInput,
+    },
+    /// The track's group membership changed.
+    ///
+    /// Published by the **writers** rather than diffed by the track
+    /// poller, and that is a cost decision worth stating. Reading a
+    /// track's grouping is tens of FFI calls (ten flag families across
+    /// four slot windows); doing that for every track on a 30 Hz timer
+    /// would be hundreds of thousands of calls a second on REAPER's
+    /// main thread, which is the one thread that must never be busy.
+    ///
+    /// So every change made *through the facade* is reported the instant
+    /// it is made — which is every change FTS makes, since the grouping
+    /// watcher is what manages groups. A change made by hand in REAPER's
+    /// own matrix dialog reaches no setter of ours, and is covered
+    /// separately by a sweep that reads a fixed slice of the tracks each
+    /// tick: flat cost whatever the session's size, a second or so of lag
+    /// on an edit a human made in a dialog.
+    GroupingChanged {
+        guid: String,
+        grouping: super::TrackGrouping,
+    },
     /// Track was moved (index changed)
     Moved {
         guid: String,

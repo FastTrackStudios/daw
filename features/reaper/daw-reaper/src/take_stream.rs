@@ -68,12 +68,22 @@ pub fn subscribe_takes() -> Option<broadcast::Receiver<TakeEvent>> {
     TAKE_BROADCASTER.get().map(|tx| tx.subscribe())
 }
 
+/// Send one take event to both places it has to go: the dedicated
+/// broadcast channel and the cross-domain bus.
+fn emit_take(tx: &broadcast::Sender<TakeEvent>, event: TakeEvent) {
+    crate::event_hub::hub().publish_take(event.clone());
+    let _ = tx.send(event);
+}
+
 /// Poll REAPER take state for every open project. **Main thread only.**
 pub fn poll_and_broadcast_takes() {
     let Some(tx) = TAKE_BROADCASTER.get() else {
         return;
     };
-    if tx.receiver_count() == 0 {
+    // A subscriber on the cross-domain bus counts too — see the same
+    // note on the item poller. Without it, asking the bus for take
+    // changes is what stops them being produced.
+    if tx.receiver_count() == 0 && crate::event_hub::hub().takes_subscriber_count() == 0 {
         return;
     }
     let Some(cache_cell) = TAKE_CACHE.get() else {
@@ -149,11 +159,14 @@ fn diff_and_emit(
     // Deleted.
     for p in prev {
         if !p.guid.is_empty() && !curr_by_guid.contains_key(p.guid.as_str()) {
-            let _ = tx.send(TakeEvent::Deleted {
-                project_guid: project_guid.to_string(),
-                item_guid: item_guid.to_string(),
-                take_guid: p.guid.clone(),
-            });
+            emit_take(
+                tx,
+                TakeEvent::Deleted {
+                    project_guid: project_guid.to_string(),
+                    item_guid: item_guid.to_string(),
+                    take_guid: p.guid.clone(),
+                },
+            );
         }
     }
 
@@ -165,45 +178,60 @@ fn diff_and_emit(
         match prev_by_guid.get(c.guid.as_str()) {
             None => {
                 if let Some(take) = curr_full.get(i) {
-                    let _ = tx.send(TakeEvent::Created {
-                        project_guid: project_guid.to_string(),
-                        item_guid: item_guid.to_string(),
-                        take: take.clone(),
-                    });
+                    emit_take(
+                        tx,
+                        TakeEvent::Created {
+                            project_guid: project_guid.to_string(),
+                            item_guid: item_guid.to_string(),
+                            take: take.clone(),
+                        },
+                    );
                 }
             }
             Some(prev) => {
                 if prev.name != c.name {
-                    let _ = tx.send(TakeEvent::NameChanged {
-                        project_guid: project_guid.to_string(),
-                        item_guid: item_guid.to_string(),
-                        take_guid: c.guid.clone(),
-                        name: c.name.clone(),
-                    });
+                    emit_take(
+                        tx,
+                        TakeEvent::NameChanged {
+                            project_guid: project_guid.to_string(),
+                            item_guid: item_guid.to_string(),
+                            take_guid: c.guid.clone(),
+                            name: c.name.clone(),
+                        },
+                    );
                 }
                 if (prev.pitch - c.pitch).abs() > PITCH_THRESHOLD {
-                    let _ = tx.send(TakeEvent::PitchChanged {
-                        project_guid: project_guid.to_string(),
-                        item_guid: item_guid.to_string(),
-                        take_guid: c.guid.clone(),
-                        pitch: c.pitch,
-                    });
+                    emit_take(
+                        tx,
+                        TakeEvent::PitchChanged {
+                            project_guid: project_guid.to_string(),
+                            item_guid: item_guid.to_string(),
+                            take_guid: c.guid.clone(),
+                            pitch: c.pitch,
+                        },
+                    );
                 }
                 if (prev.play_rate - c.play_rate).abs() > PLAY_RATE_THRESHOLD {
-                    let _ = tx.send(TakeEvent::PlayRateChanged {
-                        project_guid: project_guid.to_string(),
-                        item_guid: item_guid.to_string(),
-                        take_guid: c.guid.clone(),
-                        play_rate: c.play_rate,
-                    });
+                    emit_take(
+                        tx,
+                        TakeEvent::PlayRateChanged {
+                            project_guid: project_guid.to_string(),
+                            item_guid: item_guid.to_string(),
+                            take_guid: c.guid.clone(),
+                            play_rate: c.play_rate,
+                        },
+                    );
                 }
                 if (prev.volume - c.volume).abs() > VOLUME_THRESHOLD {
-                    let _ = tx.send(TakeEvent::VolumeChanged {
-                        project_guid: project_guid.to_string(),
-                        item_guid: item_guid.to_string(),
-                        take_guid: c.guid.clone(),
-                        volume: c.volume,
-                    });
+                    emit_take(
+                        tx,
+                        TakeEvent::VolumeChanged {
+                            project_guid: project_guid.to_string(),
+                            item_guid: item_guid.to_string(),
+                            take_guid: c.guid.clone(),
+                            volume: c.volume,
+                        },
+                    );
                 }
             }
         }

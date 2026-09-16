@@ -593,6 +593,39 @@ fn write_group_bit(
 /// API. The masks are filled through the proto's own `set_role` /
 /// `set_modifier`, so REAPER's group names are the only thing this
 /// backend knows that `TrackGrouping` does not.
+/// Tell subscribers that one track's grouping changed.
+///
+/// Called from the writers, not from the poller. Reading a track's
+/// grouping is tens of FFI calls — ten flag families across four slot
+/// windows — and doing that for every track on the 30 Hz timer would
+/// put hundreds of thousands of calls a second on REAPER's main
+/// thread, the one thread that must never be busy. Here the read costs
+/// that once, for one track, at the moment something changed.
+///
+/// A change made by hand in REAPER's own group matrix dialog is
+/// therefore not reported. That wants a subscribed poller of its own,
+/// the way FX and routing have one.
+fn publish_grouping(ctx: &ProjectContext, track_ref: &TrackRef) {
+    let Some(project) = resolve_project(ctx) else {
+        return;
+    };
+    let Some(track) = resolve_track(&project, track_ref) else {
+        return;
+    };
+    let Ok(raw) = track.raw() else {
+        return;
+    };
+    let low = ReaperHigh::get().medium_reaper().low();
+    let Ok(grouping) = read_track_grouping(low, raw.as_ptr()) else {
+        return;
+    };
+    let guid = track.guid().to_string_without_braces();
+    crate::event_hub::hub().publish_track(daw_proto::track::TrackStreamEvent {
+        project_guid: crate::project_context::project_guid(&project),
+        event: TrackEvent::GroupingChanged { guid, grouping },
+    });
+}
+
 fn read_track_grouping(
     low: &reaper_low::Reaper,
     track: *mut reaper_low::raw::MediaTrack,
@@ -890,6 +923,7 @@ impl Tracks for crate::Reaper {
             write_group_bit(low, raw.as_ptr(), &format!("{base}_LEAD"), slot, member)?;
             write_group_bit(low, raw.as_ptr(), &format!("{base}_FOLLOW"), slot, member)?;
         }
+        publish_grouping(&project, &track);
         Ok(())
     }
 
@@ -921,6 +955,7 @@ impl Tracks for crate::Reaper {
             change.slot,
             follow,
         )?;
+        publish_grouping(&project, &track);
         Ok(())
     }
 
@@ -941,7 +976,9 @@ impl Tracks for crate::Reaper {
             group_modifier_api_name(change.modifier),
             change.slot,
             change.enabled,
-        )
+        )?;
+        publish_grouping(&project, &track);
+        Ok(())
     }
 
     fn group_flags(&self, project: ProjectContext, track: TrackRef) -> DawResult<TrackGrouping> {
@@ -1486,6 +1523,47 @@ pub fn poll_and_broadcast_tracks() {
                             new_index: track.index,
                         });
                     }
+                    // The fields the window renders a control for and
+                    // was never told about. Each was readable on
+                    // demand, so the first draw was right and every
+                    // later one was a guess — the worst shape of stale,
+                    // because nothing looks wrong.
+                    if p.phase_inverted != track.phase_inverted {
+                        publish(TrackEvent::PhaseInvertedChanged {
+                            guid: guid.clone(),
+                            inverted: track.phase_inverted,
+                        });
+                    }
+                    if p.input_monitor != track.input_monitor {
+                        publish(TrackEvent::InputMonitorChanged {
+                            guid: guid.clone(),
+                            monitor: track.input_monitor,
+                        });
+                    }
+                    if p.record_input != track.record_input {
+                        publish(TrackEvent::RecordInputChanged {
+                            guid: guid.clone(),
+                            input: track.record_input,
+                        });
+                    }
+                    if p.automation_mode != track.automation_mode {
+                        publish(TrackEvent::AutomationModeChanged {
+                            guid: guid.clone(),
+                            mode: track.automation_mode,
+                        });
+                    }
+                    if p.visible_in_tcp != track.visible_in_tcp {
+                        publish(TrackEvent::TcpVisibilityChanged {
+                            guid: guid.clone(),
+                            visible: track.visible_in_tcp,
+                        });
+                    }
+                    if p.visible_in_mixer != track.visible_in_mixer {
+                        publish(TrackEvent::MixerVisibilityChanged {
+                            guid: guid.clone(),
+                            visible: track.visible_in_mixer,
+                        });
+                    }
                 }
             }
         }
@@ -1502,3 +1580,111 @@ pub fn poll_and_broadcast_tracks() {
 }
 
 // ── Tracks::subscribe impl ─────────────────────────────────────────────
+
+// ── Streaming: poll + broadcast grouping ───────────────────────────────
+
+/// How many tracks one tick reads grouping for.
+///
+/// Reading one track's grouping is ~100 FFI calls (25 flag names across
+/// four 32-slot windows), so a whole-project sweep on a 30 Hz timer
+/// scales with track count on the one thread that must never be busy.
+/// A fixed window per tick makes the cost flat instead: a 275-track
+/// session is swept in about a second and a half, and no single tick is
+/// ever more expensive than a small one.
+const GROUPING_TRACKS_PER_TICK: usize = 8;
+
+static GROUPING_CACHE: OnceLock<Mutex<HashMap<String, HashMap<String, TrackGrouping>>>> =
+    OnceLock::new();
+static GROUPING_CURSOR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn grouping_cache() -> &'static Mutex<HashMap<String, HashMap<String, TrackGrouping>>> {
+    GROUPING_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Poll track grouping for a slice of the open tracks and publish what
+/// changed. **Main thread only.**
+///
+/// The writers already publish [`TrackEvent::GroupingChanged`], so every
+/// change FTS makes is reported the instant it is made. This covers the
+/// one path no writer sees: a group edited by hand in REAPER's own
+/// matrix dialog, which reaches no setter of ours. That is a human
+/// action in a dialog, so a second or so of lag costs nothing, and
+/// paying for it in a flat slice per tick keeps a large session from
+/// being the expensive case.
+///
+/// The first sweep after a subscriber appears finds an empty cache, so
+/// every track that is in a group announces itself — which is also how
+/// a freshly attached window learns the grouping at all, since the bulk
+/// track read deliberately leaves it empty.
+pub fn poll_and_broadcast_grouping() {
+    use std::sync::atomic::Ordering;
+
+    let hub = crate::event_hub::hub();
+    if hub.tracks_subscriber_count() == 0 {
+        // Nothing is listening, so the sweep is pure cost. Reset the
+        // cursor so the next subscriber starts at the top rather than
+        // wherever the last one happened to stop.
+        GROUPING_CURSOR.store(0, Ordering::Relaxed);
+        return;
+    }
+
+    let reaper = ReaperHigh::get();
+    let medium = reaper.medium_reaper();
+    let low = medium.low();
+
+    // Enumerating projects and tracks is pointer work; only the grouping
+    // read below is expensive, which is why the whole tree is walked and
+    // only a window of it is read.
+    let mut all: Vec<(String, reaper_high::Track)> = Vec::new();
+    for tab_index in 0..MAX_PROJECT_TABS {
+        let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
+            break;
+        };
+        let project = Project::new(result.project);
+        let guid = project_guid(&project);
+        for track in project.tracks() {
+            all.push((guid.clone(), track));
+        }
+    }
+    if all.is_empty() {
+        return;
+    }
+
+    let start = GROUPING_CURSOR.load(Ordering::Relaxed) % all.len();
+    let count = GROUPING_TRACKS_PER_TICK.min(all.len());
+    GROUPING_CURSOR.store((start + count) % all.len(), Ordering::Relaxed);
+
+    let mut cache = grouping_cache().lock().expect("grouping cache poisoned");
+
+    for offset in 0..count {
+        let (project_guid_str, track) = &all[(start + offset) % all.len()];
+        let Ok(raw) = track.raw() else { continue };
+        let Ok(grouping) = read_track_grouping(low, raw.as_ptr()) else {
+            continue;
+        };
+        let guid = track.guid().to_string_without_braces();
+        let per_project = cache.entry(project_guid_str.clone()).or_default();
+        match per_project.get(&guid) {
+            Some(previous) if *previous == grouping => {}
+            _ => {
+                per_project.insert(guid.clone(), grouping.clone());
+                hub.publish_track(TrackStreamEvent {
+                    project_guid: project_guid_str.clone(),
+                    event: TrackEvent::GroupingChanged { guid, grouping },
+                });
+            }
+        }
+    }
+
+    // A track removed while this was not looking would otherwise keep a
+    // cache entry forever, and a new track reusing nothing would still
+    // pay for it on every lock.
+    let live: std::collections::HashSet<(String, String)> = all
+        .iter()
+        .map(|(project, track)| (project.clone(), track.guid().to_string_without_braces()))
+        .collect();
+    cache.retain(|project, tracks| {
+        tracks.retain(|guid, _| live.contains(&(project.clone(), guid.clone())));
+        !tracks.is_empty()
+    });
+}

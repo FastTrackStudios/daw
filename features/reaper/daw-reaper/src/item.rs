@@ -91,6 +91,18 @@ const ITEM_POSITION_THRESHOLD: f64 = 0.001; // 1ms
 const ITEM_LENGTH_THRESHOLD: f64 = 0.001; // 1ms
 const ITEM_VOLUME_THRESHOLD: f64 = 0.0001;
 
+/// Send one item event to both places it has to go: the dedicated
+/// broadcast channel and the cross-domain bus.
+///
+/// One function rather than two calls at each site, because the second
+/// of two calls is the one that gets forgotten when a variant is added.
+fn emit_item(tx: Option<&broadcast::Sender<ItemEvent>>, event: ItemEvent) {
+    crate::event_hub::hub().publish_item(event.clone());
+    if let Some(tx) = tx {
+        let _ = tx.send(event);
+    }
+}
+
 /// Initialize item and take broadcasters.
 /// Called by the extension during initialization.
 pub fn init_item_broadcaster() {
@@ -113,8 +125,13 @@ pub fn subscribe_items() -> Option<broadcast::Receiver<ItemEvent>> {
 pub fn poll_and_broadcast_items() {
     let item_tx = ITEM_BROADCASTER.get();
 
-    // Skip if no subscribers
-    let has_item_subs = item_tx.map(|t| t.receiver_count() > 0).unwrap_or(false);
+    // Anyone on the cross-domain bus counts as a subscriber too. They
+    // did not before, so a client watching the bus for item moves kept
+    // this poller asleep and then waited forever for the events it was
+    // keeping asleep — a silence that reads exactly like a broken
+    // stream.
+    let has_item_subs = item_tx.map(|t| t.receiver_count() > 0).unwrap_or(false)
+        || crate::event_hub::hub().items_subscriber_count() > 0;
     if !has_item_subs {
         return;
     }
@@ -225,15 +242,15 @@ pub fn poll_and_broadcast_items() {
 
             // Deleted items: in prev but not in curr
             for prev in &prev_states {
-                if !prev.guid.is_empty()
-                    && !curr_guids.contains_key(prev.guid.as_str())
-                    && let Some(tx) = item_tx
-                {
-                    let _ = tx.send(ItemEvent::Deleted {
-                        project_guid: project_guid.clone(),
-                        track_guid: prev.track_guid.clone(),
-                        item_guid: prev.guid.clone(),
-                    });
+                if !prev.guid.is_empty() && !curr_guids.contains_key(prev.guid.as_str()) {
+                    emit_item(
+                        item_tx,
+                        ItemEvent::Deleted {
+                            project_guid: project_guid.clone(),
+                            track_guid: prev.track_guid.clone(),
+                            item_guid: prev.guid.clone(),
+                        },
+                    );
                 }
             }
 
@@ -247,36 +264,41 @@ pub fn poll_and_broadcast_items() {
                 } else {
                     // New item — emit Created with a full Item snapshot
                     // We build a lightweight Item here; the subscriber can query for full details
-                    if let Some(tx) = item_tx {
-                        let _ = tx.send(ItemEvent::Created {
-                            project_guid: project_guid.clone(),
-                            track_guid: curr.track_guid.clone(),
-                            item: Item {
-                                label: None,
-                                guid: curr.guid.clone(),
+                    {
+                        emit_item(
+                            item_tx,
+                            ItemEvent::Created {
+                                project_guid: project_guid.clone(),
                                 track_guid: curr.track_guid.clone(),
-                                index: 0,
-                                position: daw_proto::PositionInSeconds::from_seconds(curr.position),
-                                length: Duration::from_seconds(curr.length),
-                                snap_offset: Duration::from_seconds(0.0),
-                                muted: curr.muted,
-                                selected: curr.selected,
-                                locked: false,
-                                volume: curr.volume,
-                                fade_in_length: Duration::from_seconds(0.0),
-                                fade_out_length: Duration::from_seconds(0.0),
-                                fade_in_shape: FadeShape::Linear,
-                                fade_out_shape: FadeShape::Linear,
-                                beat_attach_mode: BeatAttachMode::Time,
-                                loop_source: false,
-                                auto_stretch: false,
-                                color: None,
-                                group_id: None,
-                                fixed_lane: curr.fixed_lane,
-                                take_count: 0,
-                                active_take_index: curr.active_take_index,
+                                item: Item {
+                                    label: None,
+                                    guid: curr.guid.clone(),
+                                    track_guid: curr.track_guid.clone(),
+                                    index: 0,
+                                    position: daw_proto::PositionInSeconds::from_seconds(
+                                        curr.position,
+                                    ),
+                                    length: Duration::from_seconds(curr.length),
+                                    snap_offset: Duration::from_seconds(0.0),
+                                    muted: curr.muted,
+                                    selected: curr.selected,
+                                    locked: false,
+                                    volume: curr.volume,
+                                    fade_in_length: Duration::from_seconds(0.0),
+                                    fade_out_length: Duration::from_seconds(0.0),
+                                    fade_in_shape: FadeShape::Linear,
+                                    fade_out_shape: FadeShape::Linear,
+                                    beat_attach_mode: BeatAttachMode::Time,
+                                    loop_source: false,
+                                    auto_stretch: false,
+                                    color: None,
+                                    group_id: None,
+                                    fixed_lane: curr.fixed_lane,
+                                    take_count: 0,
+                                    active_take_index: curr.active_take_index,
+                                },
                             },
-                        });
+                        );
                     }
                 }
             }
@@ -298,66 +320,85 @@ fn emit_item_diffs(
     prev: &CachedItemState,
     curr: &CachedItemState,
 ) {
-    let Some(tx) = item_tx else { return };
-
     if (prev.position - curr.position).abs() > ITEM_POSITION_THRESHOLD {
-        let _ = tx.send(ItemEvent::PositionChanged {
-            project_guid: project_guid.to_string(),
-            item_guid: curr.guid.clone(),
-            old_position: prev.position,
-            new_position: curr.position,
-        });
+        emit_item(
+            item_tx,
+            ItemEvent::PositionChanged {
+                project_guid: project_guid.to_string(),
+                item_guid: curr.guid.clone(),
+                old_position: prev.position,
+                new_position: curr.position,
+            },
+        );
     }
 
     if (prev.length - curr.length).abs() > ITEM_LENGTH_THRESHOLD {
-        let _ = tx.send(ItemEvent::LengthChanged {
-            project_guid: project_guid.to_string(),
-            item_guid: curr.guid.clone(),
-            old_length: prev.length,
-            new_length: curr.length,
-        });
+        emit_item(
+            item_tx,
+            ItemEvent::LengthChanged {
+                project_guid: project_guid.to_string(),
+                item_guid: curr.guid.clone(),
+                old_length: prev.length,
+                new_length: curr.length,
+            },
+        );
     }
 
     if prev.track_guid != curr.track_guid {
-        let _ = tx.send(ItemEvent::MovedToTrack {
-            project_guid: project_guid.to_string(),
-            item_guid: curr.guid.clone(),
-            old_track_guid: prev.track_guid.clone(),
-            new_track_guid: curr.track_guid.clone(),
-        });
+        emit_item(
+            item_tx,
+            ItemEvent::MovedToTrack {
+                project_guid: project_guid.to_string(),
+                item_guid: curr.guid.clone(),
+                old_track_guid: prev.track_guid.clone(),
+                new_track_guid: curr.track_guid.clone(),
+            },
+        );
     }
 
     if prev.muted != curr.muted {
-        let _ = tx.send(ItemEvent::MuteChanged {
-            project_guid: project_guid.to_string(),
-            item_guid: curr.guid.clone(),
-            muted: curr.muted,
-        });
+        emit_item(
+            item_tx,
+            ItemEvent::MuteChanged {
+                project_guid: project_guid.to_string(),
+                item_guid: curr.guid.clone(),
+                muted: curr.muted,
+            },
+        );
     }
 
     if prev.selected != curr.selected {
-        let _ = tx.send(ItemEvent::SelectionChanged {
-            project_guid: project_guid.to_string(),
-            item_guid: curr.guid.clone(),
-            selected: curr.selected,
-        });
+        emit_item(
+            item_tx,
+            ItemEvent::SelectionChanged {
+                project_guid: project_guid.to_string(),
+                item_guid: curr.guid.clone(),
+                selected: curr.selected,
+            },
+        );
     }
 
     if (prev.volume - curr.volume).abs() > ITEM_VOLUME_THRESHOLD {
-        let _ = tx.send(ItemEvent::VolumeChanged {
-            project_guid: project_guid.to_string(),
-            item_guid: curr.guid.clone(),
-            volume: curr.volume,
-        });
+        emit_item(
+            item_tx,
+            ItemEvent::VolumeChanged {
+                project_guid: project_guid.to_string(),
+                item_guid: curr.guid.clone(),
+                volume: curr.volume,
+            },
+        );
     }
 
     if prev.active_take_index != curr.active_take_index {
-        let _ = tx.send(ItemEvent::ActiveTakeChanged {
-            project_guid: project_guid.to_string(),
-            item_guid: curr.guid.clone(),
-            old_take_index: prev.active_take_index,
-            new_take_index: curr.active_take_index,
-        });
+        emit_item(
+            item_tx,
+            ItemEvent::ActiveTakeChanged {
+                project_guid: project_guid.to_string(),
+                item_guid: curr.guid.clone(),
+                old_take_index: prev.active_take_index,
+                new_take_index: curr.active_take_index,
+            },
+        );
     }
 }
 

@@ -786,3 +786,70 @@ async fn track_subscribe_emits_mutation_events_through_in_process_daw() -> eyre:
 
     Ok(())
 }
+
+/// **The two events a second client needed and never got.**
+///
+/// Both fields were written, read back correctly by anyone who asked
+/// again, and never announced — so a window that had already read them
+/// kept showing the old value with nothing to say otherwise. Found by
+/// pointing the session window at a live REAPER.
+///
+/// Pinned against standalone for the same reason as the test above:
+/// REAPER cannot be driven in CI, and a consumer written against
+/// standalone and then run under REAPER is exactly who the gap failed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn record_input_and_grouping_reach_a_subscriber() -> eyre::Result<()> {
+    use daw_proto::track::{GroupFamily, GroupRole};
+
+    let bundle = build_in_process_daw(seeded()).await?;
+    let project = bundle.daw.current_project().await?;
+    let tracks = project.tracks();
+    let kick = tracks.add("Kick", None).await?;
+
+    let mut rx = tracks.subscribe().await?;
+    {
+        use daw_proto::track::TracksStreamSource;
+        let hub = bundle.standalone.events_hub().clone();
+        settle_subscription(move || hub.subscriber_count(), 1).await;
+    }
+
+    // Applying a patch list sets every source track's input in one undo
+    // step. Without this event a second screen keeps showing where a
+    // take used to come from, which is the worst possible field to be
+    // stale about while tracking.
+    kick.set_record_input(daw_proto::track::RecordInput::Audio { channel: 3 })
+        .await?;
+    let input = wait_for_track_event(&mut rx, |event| {
+        matches!(event, TrackEvent::RecordInputChanged { .. })
+    })
+    .await?;
+    assert!(matches!(
+        input.event,
+        TrackEvent::RecordInputChanged {
+            input: daw_proto::track::RecordInput::Audio { channel: 3 },
+            ..
+        }
+    ));
+
+    // Grouping is written by the FTS grouping watcher; a window attached
+    // beside it would never have seen a VCA appear.
+    kick.set_group_flags(128, GroupFamily::Vca, GroupRole::Lead)
+        .await?;
+    let grouped = wait_for_track_event(&mut rx, |event| {
+        matches!(event, TrackEvent::GroupingChanged { .. })
+    })
+    .await?;
+
+    // The event carries the state AFTER the change, so a client applies
+    // it without asking again — a round trip per change on a link that
+    // is not free is how a mirror falls behind what it mirrors.
+    let TrackEvent::GroupingChanged { grouping, .. } = &grouped.event else {
+        eyre::bail!("not a grouping event");
+    };
+    let read_back = kick.group_flags().await?;
+    assert_eq!(
+        grouping, &read_back,
+        "the event disagreed with a fresh read"
+    );
+    Ok(())
+}

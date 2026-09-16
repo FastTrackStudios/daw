@@ -271,6 +271,29 @@ impl DawEventHub {
         self.bus_hub.subscriber_count()
     }
 
+    /// Put an item event on the cross-domain bus.
+    ///
+    /// Items had a broadcast channel of their own and nothing else, so
+    /// `DawEvent::Item` was a variant nobody ever published — a client
+    /// on the bus saw tracks move and never saw an item move, which
+    /// reads as the item stream being broken rather than absent.
+    pub fn publish_item(&self, event: daw_proto::item::ItemEvent) {
+        self.bus_hub.publish(DawEvent::Item(event));
+    }
+
+    pub fn items_subscriber_count(&self) -> usize {
+        self.bus_hub.subscriber_count()
+    }
+
+    /// Put a take event on the bus. Same shape, same reason.
+    pub fn publish_take(&self, event: daw_proto::item::TakeEvent) {
+        self.bus_hub.publish(DawEvent::Take(event));
+    }
+
+    pub fn takes_subscriber_count(&self) -> usize {
+        self.bus_hub.subscriber_count()
+    }
+
     pub fn tracks_subscriber_count(&self) -> usize {
         self.tracks_tx.receiver_count()
             + self.tracks_hub.subscriber_count()
