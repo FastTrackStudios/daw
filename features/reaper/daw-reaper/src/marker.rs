@@ -22,6 +22,7 @@
 //! (e.g. `CurrentThreadDispatcher` for unit tests without REAPER
 //! running) use a newtype wrapper with its own `HasDispatcher` impl.
 
+use daw_control::lock::LockExt;
 use std::any::Any;
 use std::ffi::CString;
 use std::future::Future;
@@ -324,7 +325,7 @@ pub fn poll_and_broadcast_markers() {
 
     let reaper = ReaperHigh::get();
     let medium = reaper.medium_reaper();
-    let mut cache = marker_cache().lock().expect("marker cache mutex poisoned");
+    let mut cache = marker_cache().lock_recoverable("marker::cache");
 
     let mut seen_projects: Vec<String> = Vec::new();
 

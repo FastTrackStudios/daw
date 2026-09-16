@@ -15,6 +15,7 @@
 //! needs source-pointer comparison rather than the lightweight diff
 //! used here. Apply side is wired regardless.
 
+use daw_control::lock::LockExt;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -89,7 +90,7 @@ pub fn poll_and_broadcast_takes() {
     let Some(cache_cell) = TAKE_CACHE.get() else {
         return;
     };
-    let mut cache = cache_cell.lock().expect("take cache mutex poisoned");
+    let mut cache = cache_cell.lock_recoverable("take_stream::cache");
 
     let medium = ReaperHigh::get().medium_reaper();
 

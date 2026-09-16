@@ -9,6 +9,7 @@
 //! already hold a main-thread proof (no need to go through the
 //! singleton trait).
 
+use daw_control::lock::LockExt;
 use std::ffi::CString;
 
 use daw_proto::Regions;
@@ -281,7 +282,7 @@ pub fn poll_and_broadcast_regions() {
 
     let reaper = ReaperHigh::get();
     let medium = reaper.medium_reaper();
-    let mut cache = region_cache().lock().expect("region cache mutex poisoned");
+    let mut cache = region_cache().lock_recoverable("region::cache");
 
     let mut seen_projects: Vec<String> = Vec::new();
 

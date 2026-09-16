@@ -10,6 +10,7 @@
 //! `assign_parent_guids`) are kept `pub(crate)` so other modules
 //! (midi, batch, etc.) can reuse them.
 
+use daw_control::lock::LockExt;
 use std::cell::RefCell;
 
 use daw_proto::Tracks;
@@ -1412,7 +1413,7 @@ pub fn poll_and_broadcast_tracks() {
 
     let reaper = ReaperHigh::get();
     let medium = reaper.medium_reaper();
-    let mut cache = track_cache().lock().expect("track cache mutex poisoned");
+    let mut cache = track_cache().lock_recoverable("track::cache");
 
     let mut seen_projects: Vec<String> = Vec::new();
 
@@ -1629,9 +1630,9 @@ pub fn poll_and_broadcast_grouping() {
         // next one learn nothing at all, which is the very failure the
         // sweep exists to fix.
         GROUPING_CURSOR.store(0, Ordering::Relaxed);
-        if let Ok(mut cache) = grouping_cache().lock() {
-            cache.clear();
-        }
+        grouping_cache()
+            .lock_recoverable("track::grouping_cache")
+            .clear();
         return;
     }
 
@@ -1661,7 +1662,7 @@ pub fn poll_and_broadcast_grouping() {
     let count = GROUPING_TRACKS_PER_TICK.min(all.len());
     GROUPING_CURSOR.store((start + count) % all.len(), Ordering::Relaxed);
 
-    let mut cache = grouping_cache().lock().expect("grouping cache poisoned");
+    let mut cache = grouping_cache().lock_recoverable("track::grouping_cache");
 
     for offset in 0..count {
         let (project_guid_str, track) = &all[(start + offset) % all.len()];

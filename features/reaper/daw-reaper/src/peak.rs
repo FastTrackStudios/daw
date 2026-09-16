@@ -1,5 +1,6 @@
 //! `impl Peaks for Reaper` — track meters + take waveform peaks.
 
+use daw_control::lock::LockExt;
 use daw_proto::{ItemRef, Peaks, ProjectContext, TakePeakData, TakeRef, TrackPeak, TrackRef};
 use reaper_high::Reaper;
 use reaper_medium::TakeAttributeKey;
@@ -392,7 +393,7 @@ pub fn poll_and_broadcast_meters() {
         .collect();
 
     let tracks = {
-        let mut holds = meter_holds().lock().expect("meter holds mutex poisoned");
+        let mut holds = meter_holds().lock_recoverable("peak::meter_holds");
         holds
             .entry(project_guid.clone())
             .or_default()
