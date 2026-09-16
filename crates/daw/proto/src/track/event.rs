@@ -68,11 +68,13 @@ pub enum TrackEvent {
     /// would be hundreds of thousands of calls a second on REAPER's
     /// main thread, which is the one thread that must never be busy.
     ///
-    /// So every change made *through the facade* is reported — which is
-    /// every change FTS makes, since the grouping watcher is what
-    /// manages groups. A change made by hand in REAPER's own group
-    /// matrix dialog is **not** covered; that needs its own subscribed
-    /// poller, the way FX and routing have one.
+    /// So every change made *through the facade* is reported the instant
+    /// it is made — which is every change FTS makes, since the grouping
+    /// watcher is what manages groups. A change made by hand in REAPER's
+    /// own matrix dialog reaches no setter of ours, and is covered
+    /// separately by a sweep that reads a fixed slice of the tracks each
+    /// tick: flat cost whatever the session's size, a second or so of lag
+    /// on an edit a human made in a dialog.
     GroupingChanged {
         guid: String,
         grouping: super::TrackGrouping,

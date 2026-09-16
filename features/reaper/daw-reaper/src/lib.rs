@@ -159,6 +159,7 @@ pub use marker::poll_and_broadcast_markers;
 pub use region::poll_and_broadcast_regions;
 
 // Tracks polling — coarse Added/Removed only for Phase 2.
+pub use track::poll_and_broadcast_grouping;
 pub use track::poll_and_broadcast_tracks;
 
 // Live meter frames — reads active-project track peaks per tick and
