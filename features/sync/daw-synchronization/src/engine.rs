@@ -517,6 +517,10 @@ pub fn is_event_suppressed(suppression: &SuppressionSet, event: &SyncEvent) -> b
             // matching arm in `apply.rs`. The FX domain carries the change
             // that caused it.
             TrackEvent::FxCountChanged { .. } => false,
+            // Never suppressed for the same reason: neither is ever
+            // applied to a peer, so neither can echo back off one. See
+            // the matching arms in `apply.rs`.
+            TrackEvent::RecordInputChanged { .. } | TrackEvent::GroupingChanged { .. } => false,
         },
         SyncDomain::Fx(fe) => {
             // Apply side (apply.rs) suppresses chain-level FX events with

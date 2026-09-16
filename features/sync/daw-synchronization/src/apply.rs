@@ -637,6 +637,20 @@ async fn apply_track(
         // syncs through `SyncDomain::Fx`, and applying this would at best
         // duplicate that and at worst fight it.
         TrackEvent::FxCountChanged { .. } => {}
+        // A peer's record input is about THEIR hardware. "Audio channel
+        // 3" is a socket on one interface and something else entirely
+        // on another, so copying it across would point a peer's track
+        // at whatever happens to be plugged into that number. The patch
+        // list is how inputs are shared between machines, and it
+        // resolves roles through each room's own studio profile
+        // precisely so this cannot happen.
+        TrackEvent::RecordInputChanged { .. } => {}
+        // Grouping is derived, not shared. Each peer's own grouping
+        // watcher rebuilds FTS groups from the taxonomy every time a
+        // track changes, deterministically, so a peer already has the
+        // same groups without being told — and applying this would
+        // fight that watcher over the same slots.
+        TrackEvent::GroupingChanged { .. } => {}
     }
 }
 

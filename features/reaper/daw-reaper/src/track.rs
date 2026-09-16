@@ -593,6 +593,39 @@ fn write_group_bit(
 /// API. The masks are filled through the proto's own `set_role` /
 /// `set_modifier`, so REAPER's group names are the only thing this
 /// backend knows that `TrackGrouping` does not.
+/// Tell subscribers that one track's grouping changed.
+///
+/// Called from the writers, not from the poller. Reading a track's
+/// grouping is tens of FFI calls — ten flag families across four slot
+/// windows — and doing that for every track on the 30 Hz timer would
+/// put hundreds of thousands of calls a second on REAPER's main
+/// thread, the one thread that must never be busy. Here the read costs
+/// that once, for one track, at the moment something changed.
+///
+/// A change made by hand in REAPER's own group matrix dialog is
+/// therefore not reported. That wants a subscribed poller of its own,
+/// the way FX and routing have one.
+fn publish_grouping(ctx: &ProjectContext, track_ref: &TrackRef) {
+    let Some(project) = resolve_project(ctx) else {
+        return;
+    };
+    let Some(track) = resolve_track(&project, track_ref) else {
+        return;
+    };
+    let Ok(raw) = track.raw() else {
+        return;
+    };
+    let low = ReaperHigh::get().medium_reaper().low();
+    let Ok(grouping) = read_track_grouping(low, raw.as_ptr()) else {
+        return;
+    };
+    let guid = track.guid().to_string_without_braces();
+    crate::event_hub::hub().publish_track(daw_proto::track::TrackStreamEvent {
+        project_guid: crate::project_context::project_guid(&project),
+        event: TrackEvent::GroupingChanged { guid, grouping },
+    });
+}
+
 fn read_track_grouping(
     low: &reaper_low::Reaper,
     track: *mut reaper_low::raw::MediaTrack,
@@ -890,6 +923,7 @@ impl Tracks for crate::Reaper {
             write_group_bit(low, raw.as_ptr(), &format!("{base}_LEAD"), slot, member)?;
             write_group_bit(low, raw.as_ptr(), &format!("{base}_FOLLOW"), slot, member)?;
         }
+        publish_grouping(&project, &track);
         Ok(())
     }
 
@@ -921,6 +955,7 @@ impl Tracks for crate::Reaper {
             change.slot,
             follow,
         )?;
+        publish_grouping(&project, &track);
         Ok(())
     }
 
@@ -941,7 +976,9 @@ impl Tracks for crate::Reaper {
             group_modifier_api_name(change.modifier),
             change.slot,
             change.enabled,
-        )
+        )?;
+        publish_grouping(&project, &track);
+        Ok(())
     }
 
     fn group_flags(&self, project: ProjectContext, track: TrackRef) -> DawResult<TrackGrouping> {

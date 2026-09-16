@@ -466,13 +466,25 @@ impl Tracks for Standalone {
     ) -> DawResult<()> {
         check_group_slot(slot)?;
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let changed = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
             for fam in GroupFamily::ALL {
                 p.tracks[i].grouping.set_member(fam, slot, member);
             }
-            Ok::<_, DawError>(())
+            Ok::<_, DawError>((p.tracks[i].guid.clone(), p.tracks[i].grouping.clone()))
         })??;
+        // Standalone emits from its setters, the way it does for every
+        // other field — so a client hears the same event whichever
+        // backend it is attached to.
+        let (guid_of_track, grouping) = changed;
+        publish_track_events(
+            self,
+            &guid,
+            vec![TrackEvent::GroupingChanged {
+                guid: guid_of_track,
+                grouping,
+            }],
+        );
         Ok(())
     }
 
@@ -484,13 +496,25 @@ impl Tracks for Standalone {
     ) -> DawResult<()> {
         check_group_slot(change.slot)?;
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let changed = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
             p.tracks[i]
                 .grouping
                 .set_role(change.family, change.slot, change.role);
-            Ok::<_, DawError>(())
+            Ok::<_, DawError>((p.tracks[i].guid.clone(), p.tracks[i].grouping.clone()))
         })??;
+        // Standalone emits from its setters, the way it does for every
+        // other field — so a client hears the same event whichever
+        // backend it is attached to.
+        let (guid_of_track, grouping) = changed;
+        publish_track_events(
+            self,
+            &guid,
+            vec![TrackEvent::GroupingChanged {
+                guid: guid_of_track,
+                grouping,
+            }],
+        );
         Ok(())
     }
 
@@ -502,13 +526,25 @@ impl Tracks for Standalone {
     ) -> DawResult<()> {
         check_group_slot(change.slot)?;
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let changed = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
             p.tracks[i]
                 .grouping
                 .set_modifier(change.modifier, change.slot, change.enabled);
-            Ok::<_, DawError>(())
+            Ok::<_, DawError>((p.tracks[i].guid.clone(), p.tracks[i].grouping.clone()))
         })??;
+        // Standalone emits from its setters, the way it does for every
+        // other field — so a client hears the same event whichever
+        // backend it is attached to.
+        let (guid_of_track, grouping) = changed;
+        publish_track_events(
+            self,
+            &guid,
+            vec![TrackEvent::GroupingChanged {
+                guid: guid_of_track,
+                grouping,
+            }],
+        );
         Ok(())
     }
 
@@ -777,7 +813,7 @@ impl Tracks for Standalone {
         input: RecordInput,
     ) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
             let track_guid = p.tracks[i].guid.clone();
             // Mirrored onto the stored `Track` as well as the side map:
@@ -785,11 +821,19 @@ impl Tracks for Standalone {
             // the two must not disagree.
             p.tracks[i].record_input = input;
             p.track_ext
-                .entry(track_guid)
+                .entry(track_guid.clone())
                 .or_insert_with(TrackExt::default)
                 .record_input = input;
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(vec![TrackEvent::RecordInputChanged {
+                guid: track_guid,
+                input,
+            }])
+        })??;
+        // Applying a patch list sets every source track's input at once,
+        // and a second client that is not told keeps showing where a
+        // take used to come from.
+        publish_track_events(self, &guid, events);
+        Ok(())
     }
 
     fn reorder_selected(
