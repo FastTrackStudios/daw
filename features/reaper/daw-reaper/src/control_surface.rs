@@ -56,7 +56,14 @@ use crate::transport::read_transport_state_for_project;
 ///   equivalent in the 30 Hz poller path (FX parameter changes, marker /
 ///   region nudges). Everything else falls back to the poller, which gives
 ///   33 ms latency but no echo problem for bidirectional sync. This is
-///   what the multi-instance sync test uses.
+///   what the multi-instance sync test uses, and what the session window
+///   attached to a live REAPER runs: it applies what it receives, so
+///   `Full` would feed it its own writes back. Buying the 33 ms back
+///   would mean giving every event an origin so a client could drop its
+///   own echo — a field on the wire that every future publisher has to
+///   set correctly, to shave one poll tick off a change somebody else
+///   made. The window's own moves are already immediate; the wait is
+///   only on changes made in REAPER, where a tick is not noticeable.
 /// - [`Mode::Off`] — middleware registers but every callback returns
 ///   `false`. Equivalent to not registering at all; kept so the surface
 ///   can be hot-toggled without re-registering with REAPER.
