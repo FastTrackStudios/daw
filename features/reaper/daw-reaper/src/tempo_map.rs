@@ -12,6 +12,7 @@
 //! and `get_tempo_and_time_sig_at_on_main_thread` stay public for
 //! callers that hold a main-thread proof (batch sync dispatcher etc).
 
+use daw_control::lock::LockExt;
 use daw_proto::TempoMap;
 use daw_proto::tempo_map::TempoMapEvent;
 use daw_proto::{
@@ -69,7 +70,7 @@ pub fn poll_and_broadcast_tempo_map() {
 
     let reaper = ReaperHigh::get();
     let medium = reaper.medium_reaper();
-    let mut cache = cache().lock().expect("tempo cache mutex poisoned");
+    let mut cache = cache().lock_recoverable("tempo_map::cache");
 
     let mut seen_projects: Vec<String> = Vec::new();
 

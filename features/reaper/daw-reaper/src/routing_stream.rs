@@ -10,6 +10,7 @@
 //! - Emit `RouteCreated`, `RouteDeleted`, `VolumeChanged`,
 //!   `PanChanged`, `MuteChanged` per the field-level diff.
 
+use daw_control::lock::LockExt;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -184,7 +185,7 @@ pub fn poll_and_broadcast_routing() {
     let Some(cache_cell) = ROUTING_CACHE.get() else {
         return;
     };
-    let mut cache = cache_cell.lock().expect("routing cache mutex poisoned");
+    let mut cache = cache_cell.lock_recoverable("routing_stream::cache");
 
     let medium = ReaperHigh::get().medium_reaper();
 

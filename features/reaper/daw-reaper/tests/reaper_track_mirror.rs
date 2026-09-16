@@ -227,3 +227,37 @@ async fn a_late_subscriber_is_told_what_the_groups_already_are(
 
     Ok(())
 }
+
+/// **Canary: the 30 Hz track poller publishes nothing to a live
+/// subscriber.**
+///
+/// A rename has been diffed by `poll_and_broadcast_tracks` since long
+/// before any of this, and it does not arrive. Neither do the six
+/// fields above, for the same reason — so the suite above is failing on
+/// a fault underneath it, not on its own subject.
+///
+/// What narrows it: `a_group_written_through_the_facade_is_announced`
+/// PASSES. That event is published by the writer, inside the RPC
+/// handler, onto the same hub, and a subscriber receives it. So the
+/// socket, the router, the stream service and the hub all work. Only
+/// the events published from the timer callback are missing, which
+/// points at the timer body rather than at any diff in it.
+///
+/// Kept as a test rather than a comment because the thing to know is
+/// whether it still fails, and nothing else in this repo asks. No
+/// existing test subscribed to anything, which is how a dead poller
+/// stayed invisible. See daw#20.
+#[reaper_test(isolated)]
+async fn a_rename_reaches_a_subscriber(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
+    let project = ctx.project().clone();
+    let tracks = project.tracks();
+    let probe = tracks.add("Probe", None).await?;
+    let mut stream = tracks.subscribe().await?;
+    probe.rename("Probe Renamed").await?;
+    wait_for(
+        &mut stream,
+        |event| matches!(event, TrackEvent::Renamed { name, .. } if name == "Probe Renamed"),
+    )
+    .await?;
+    Ok(())
+}

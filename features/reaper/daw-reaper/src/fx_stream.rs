@@ -20,6 +20,7 @@
 //! source (or an explicit hook from REAPER's param-change callback)
 //! can publish without further plumbing.
 
+use daw_control::lock::LockExt;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -156,7 +157,7 @@ pub fn poll_and_broadcast_fx() {
     let Some(cache_cell) = FX_CACHE.get() else {
         return;
     };
-    let mut cache = cache_cell.lock().expect("fx cache mutex poisoned");
+    let mut cache = cache_cell.lock_recoverable("fx_stream::cache");
 
     let reaper_high = ReaperHigh::get();
     let medium = reaper_high.medium_reaper();
