@@ -55,9 +55,15 @@ pub(super) fn write_missing_sources(
                     }
                 };
                 item.children.insert(end, RNodeTree::Chunk(source));
+                // Named by the ITEM as well as the take. A take id is
+                // minted when the take is, so a take created by an
+                // edit has an id that appears nowhere the caller has
+                // ever seen — and a report line naming only that is
+                // unattributable by construction. Anyone auditing the
+                // churn of an edit knows which ITEMS they touched.
                 report
                     .changes
-                    .push(format!("take {}: source added", take.id));
+                    .push(format!("item {}: take {}: source added", node.id, take.id));
             }
         }
     }
