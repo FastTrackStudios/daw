@@ -52,6 +52,31 @@ async fn wait_for(
     }
 }
 
+/// Wait until the poller has this project in its cache.
+///
+/// The cache is seeded the first time a tick finds a subscriber, and
+/// everything already true at that moment is reported as `Added` rather
+/// than as a field change. So a test that subscribes and immediately
+/// flips a field races that tick: the flip lands before the seed, the
+/// seed reports it as part of the track's initial state, and the field
+/// event the test is waiting for is never produced because by then
+/// nothing has changed.
+///
+/// A window does not hit this, because it subscribes once at startup
+/// and everything it cares about happens later. A test has to wait for
+/// the same thing to be true.
+async fn settle(
+    stream: &mut daw::rpc::EventStream<daw_proto::track::TrackStreamEvent>,
+    guid: &str,
+) -> eyre::Result<()> {
+    wait_for(
+        stream,
+        |event| matches!(event, TrackEvent::Added(track) if track.guid == guid),
+    )
+    .await?;
+    Ok(())
+}
+
 /// Flip the six fields the poller read and never reported.
 ///
 /// One test rather than six, because the cost here is the REAPER tab
@@ -69,6 +94,7 @@ async fn the_fields_the_poller_used_to_drop_reach_a_subscriber(
     let tracks = project.tracks();
     let kick = tracks.add("Mirror Kick", None).await?;
     let mut stream = tracks.subscribe().await?;
+    settle(&mut stream, kick.guid()).await?;
 
     kick.set_phase_inverted(true).await?;
     wait_for(&mut stream, |event| {
@@ -153,6 +179,7 @@ async fn a_group_written_through_the_facade_is_announced(
     let tracks = project.tracks();
     let kick = tracks.add("Grouped Kick", None).await?;
     let mut stream = tracks.subscribe().await?;
+    settle(&mut stream, kick.guid()).await?;
 
     kick.set_group_flags(128, GroupFamily::Vca, GroupRole::Lead)
         .await?;
@@ -228,31 +255,20 @@ async fn a_late_subscriber_is_told_what_the_groups_already_are(
     Ok(())
 }
 
-/// **Canary: the 30 Hz track poller publishes nothing to a live
-/// subscriber.**
+/// The negative control for the whole file.
 ///
 /// A rename has been diffed by `poll_and_broadcast_tracks` since long
-/// before any of this, and it does not arrive. Neither do the six
-/// fields above, for the same reason — so the suite above is failing on
-/// a fault underneath it, not on its own subject.
-///
-/// What narrows it: `a_group_written_through_the_facade_is_announced`
-/// PASSES. That event is published by the writer, inside the RPC
-/// handler, onto the same hub, and a subscriber receives it. So the
-/// socket, the router, the stream service and the hub all work. Only
-/// the events published from the timer callback are missing, which
-/// points at the timer body rather than at any diff in it.
-///
-/// Kept as a test rather than a comment because the thing to know is
-/// whether it still fails, and nothing else in this repo asks. No
-/// existing test subscribed to anything, which is how a dead poller
-/// stayed invisible. See daw#20.
+/// before any of this work, so if it does not arrive, nothing above is
+/// testing its own subject — it is testing whether live track streaming
+/// works at all. Nothing in this repo had ever subscribed to a stream
+/// inside a real REAPER, so that question had no answer until now.
 #[reaper_test(isolated)]
 async fn a_rename_reaches_a_subscriber(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     let project = ctx.project().clone();
     let tracks = project.tracks();
     let probe = tracks.add("Probe", None).await?;
     let mut stream = tracks.subscribe().await?;
+    settle(&mut stream, probe.guid()).await?;
     probe.rename("Probe Renamed").await?;
     wait_for(
         &mut stream,

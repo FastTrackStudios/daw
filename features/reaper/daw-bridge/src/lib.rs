@@ -424,6 +424,14 @@ extern "C" fn timer_callback() {
             daw::reaper::poll_and_broadcast_routing();
             daw::reaper::poll_and_broadcast_takes();
             daw::reaper::poll_and_broadcast_meters();
+            // Reads a slice of the tracks per tick rather than all of
+            // them, so the cost is flat whatever the session's size. It
+            // is the only thing that sees a group edited by hand in
+            // REAPER's own matrix dialog, and the only way a window
+            // that has just attached learns the grouping at all — the
+            // bulk track read leaves it empty because reading it is
+            // about a hundred calls per track.
+            daw::reaper::poll_and_broadcast_grouping();
 
             // Process deferred toolbar operations
             daw::reaper::process_toolbar_ops();
