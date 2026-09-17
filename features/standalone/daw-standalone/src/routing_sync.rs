@@ -108,14 +108,25 @@ fn find_route_by_ref(routes: &[TrackRoute], p: &ProjectState, rref: &RouteRef) -
 }
 
 /// Synthesize the receive mirror on the destination side from a send.
-fn make_receive_mirror(send: &TrackRoute) -> Option<TrackRoute> {
+///
+/// The ends are SWAPPED, which is the whole subtlety: a route is stored
+/// in a list belonging to one track, and `dest_track_*` is the OTHER
+/// end of it. For a send that is where the signal goes; for a receive
+/// it is where the signal comes from. REAPER fills it from
+/// `TrackRoute::partner()` and means exactly that, so a mirror that
+/// copied both ends unchanged would name the track doing the looking —
+/// and every consumer listing receives would print its own name back at
+/// it. (Reported from the session panel; see daw#30.)
+fn make_receive_mirror(send: &TrackRoute, from_name: Option<String>) -> Option<TrackRoute> {
     let dest_guid = send.dest_track_guid.clone()?;
     Some(TrackRoute {
         index: 0,
         route_type: RouteType::Receive,
-        source_track_guid: send.source_track_guid.clone(),
-        dest_track_guid: Some(dest_guid),
-        dest_track_name: send.dest_track_name.clone(),
+        // The receiving track owns this route…
+        source_track_guid: dest_guid,
+        // …and the far end is the track feeding it.
+        dest_track_guid: Some(send.source_track_guid.clone()),
+        dest_track_name: from_name,
         hw_output_index: None,
         hw_output_name: None,
         volume: send.volume,
@@ -144,10 +155,19 @@ fn sync_receive_mirror(p: &mut ProjectState, send: &TrackRoute) {
     let Some(dest_guid) = send.dest_track_guid.as_ref().cloned() else {
         return;
     };
+    // The name of the track doing the sending, looked up while the
+    // state is in hand: a receive names its partner, and the send it
+    // was built from carries only the partner's guid.
+    let from_name = p
+        .tracks
+        .iter()
+        .find(|track| track.guid == send.source_track_guid)
+        .map(|track| track.name.clone());
     let receives = p.receives.entry(dest_guid).or_default();
-    // Drop any existing receive from the same source.
-    receives.retain(|r| r.source_track_guid != send.source_track_guid);
-    if let Some(mirror) = make_receive_mirror(send) {
+    // Drop any existing receive from the same source — which is the
+    // far end of a receive, and therefore its `dest_track_guid`.
+    receives.retain(|r| r.dest_track_guid.as_deref() != Some(send.source_track_guid.as_str()));
+    if let Some(mirror) = make_receive_mirror(send, from_name) {
         receives.push(mirror);
         renumber(receives);
     }
@@ -155,7 +175,7 @@ fn sync_receive_mirror(p: &mut ProjectState, send: &TrackRoute) {
 
 fn drop_receive_mirror(p: &mut ProjectState, src_guid: &str, dest_guid: &str) {
     if let Some(receives) = p.receives.get_mut(dest_guid) {
-        receives.retain(|r| r.source_track_guid != src_guid);
+        receives.retain(|r| r.dest_track_guid.as_deref() != Some(src_guid));
         renumber(receives);
     }
 }
@@ -387,8 +407,11 @@ impl Routing for Standalone {
                 }
             } else if removed.route_type == RouteType::Receive {
                 // Removing a receive on the dest implicitly removes
-                // the matching send on the source.
-                let src = removed.source_track_guid.clone();
+                // the matching send on the source. The source is the
+                // receive's FAR end — `dest_track_guid`, the same field
+                // a send puts its destination in — and the near end is
+                // the track whose list this was.
+                let src = removed.dest_track_guid.clone().unwrap_or_default();
                 let dest = track_guid.clone();
                 if let Some(sends) = p.sends.get_mut(&src) {
                     sends.retain(|s| s.dest_track_guid.as_deref() != Some(dest.as_str()));

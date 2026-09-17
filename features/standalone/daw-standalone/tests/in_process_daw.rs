@@ -255,9 +255,16 @@ async fn track_structure_routing_and_colors_through_in_process_daw() -> eyre::Re
     assert!((sends[0].volume - 0.75).abs() < 1e-9);
     assert!((sends[0].pan + 0.25).abs() < 1e-9);
 
+    // A receive belongs to the track it is listed on, and names the
+    // track feeding it at the far end — the same field a send puts its
+    // destination in, which is what REAPER does. See daw#30: a mirror
+    // that copied both ends unchanged made this list say "drum bus is
+    // fed by drum bus".
     let receives = drum_bus.receives().all().await?;
     assert_eq!(receives.len(), 1);
-    assert_eq!(receives[0].source_track_guid, kick.guid());
+    assert_eq!(receives[0].source_track_guid, drum_bus.guid());
+    assert_eq!(receives[0].dest_track_guid.as_deref(), Some(kick.guid()));
+    assert_eq!(receives[0].dest_track_name.as_deref(), Some("Kick"));
     assert!((receives[0].volume - 0.75).abs() < 1e-9);
 
     kick.select().await?;

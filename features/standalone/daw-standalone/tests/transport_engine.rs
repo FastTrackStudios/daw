@@ -152,10 +152,15 @@ async fn routing_send_mirrors_to_dest_receive() {
     assert_eq!(sends[0].dest_track_guid.as_deref(), Some(dest.as_str()));
     assert_eq!(sends[0].route_type, RouteType::Send);
 
-    // Receive auto-mirrored on the destination.
+    // Receive auto-mirrored on the destination, with the ends the way
+    // round REAPER writes them: the route belongs to the track it is
+    // listed on, and `dest_track_*` is the OTHER end — where the signal
+    // goes for a send, where it comes from for a receive. (daw#30.)
     let receives = Routing::receives(&daw, ctx.clone(), TrackRef::Guid(dest.clone()));
     assert_eq!(receives.len(), 1);
-    assert_eq!(receives[0].source_track_guid, src);
+    assert_eq!(receives[0].source_track_guid, dest);
+    assert_eq!(receives[0].dest_track_guid.as_deref(), Some(src.as_str()));
+    assert_eq!(receives[0].dest_track_name.as_deref(), Some("Drums"));
     assert_eq!(receives[0].route_type, RouteType::Receive);
 
     // Mutating the send propagates to the mirror.

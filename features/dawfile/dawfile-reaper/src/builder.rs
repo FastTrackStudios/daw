@@ -363,8 +363,25 @@ impl MidiSourceBuilder {
             ));
         }
 
-        // Sort by absolute tick (stable sort preserves insertion order for same tick)
-        self.events.sort_by_key(|(tick, _)| *tick);
+        // By absolute tick, and at equal ticks note-offs BEFORE
+        // note-ons.
+        //
+        // That second rule is not cosmetic. A reader pairs a note-on to
+        // the next note-off of the same pitch, so a chord held exactly
+        // to the bar line where the next one begins emits
+        //
+        //     on  C @ 3840   (the next chord)
+        //     off C @ 3840   (the one that just ended)
+        //
+        // and the reader hands the SECOND chord the FIRST one's
+        // note-off and calls it zero length — from MIDI that is correct
+        // in every other respect. Offs first makes the pairing
+        // unambiguous, and it is what every DAW writes. (daw#28.)
+        //
+        // Stable, so events that are neither keep the order they were
+        // added in.
+        self.events
+            .sort_by_key(|(tick, event)| (*tick, u8::from(!is_note_off(event))));
 
         // Convert absolute ticks to delta ticks
         let mut last_tick: u64 = 0;
@@ -1672,6 +1689,19 @@ impl Default for ReaperProjectBuilder {
 // Tests
 // ===========================================================================
 
+/// Whether an event ends a note.
+///
+/// A note-on with velocity zero is a note-off — the running-status
+/// idiom, and a reader that missed it would pair the wrong events for
+/// exactly the reason the sort exists.
+fn is_note_off(event: &MidiEvent) -> bool {
+    match event.bytes.first() {
+        Some(status) if status & 0xF0 == 0x80 => true,
+        Some(status) if status & 0xF0 == 0x90 => event.bytes.get(2).is_some_and(|vel| *vel == 0),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2102,6 +2132,74 @@ mod tests {
         // Note-off at tick 480
         assert_eq!(midi.events[1].delta_ticks, 480);
         assert_eq!(midi.events[1].bytes, vec![0x80, 60, 0]);
+    }
+
+    /// A note that ends exactly where the next begins: the off comes
+    /// first.
+    ///
+    /// A reader pairs a note-on to the next note-off of the same pitch,
+    /// so an on-before-off at one tick hands the SECOND note the
+    /// FIRST's ending and calls it zero length. Every other note in a
+    /// held progression comes out with no length, from MIDI that is
+    /// correct in every other respect. (daw#28.)
+    #[test]
+    fn a_note_off_comes_before_the_note_on_that_shares_its_tick() {
+        let midi = MidiSourceBuilder::new()
+            .ticks_per_qn(960)
+            .note(0, 0, 60, 96, 960)
+            .at(960)
+            .note(0, 0, 60, 96, 960)
+            .build();
+
+        let kinds: Vec<(u8, u8)> = midi
+            .events
+            .iter()
+            .map(|event| (event.bytes[0] & 0xF0, event.bytes[1]))
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![(0x90, 60), (0x80, 60), (0x90, 60), (0x80, 60)],
+            "the second note-on arrived before the first note-off"
+        );
+        // And the deltas still add up to where the notes are.
+        let mut at = 0;
+        let ticks: Vec<u64> = midi
+            .events
+            .iter()
+            .map(|event| {
+                at += u64::from(event.delta_ticks);
+                at
+            })
+            .collect();
+        assert_eq!(ticks, vec![0, 960, 960, 1920]);
+    }
+
+    /// A note-on with velocity zero is a note-off, and sorts like one.
+    #[test]
+    fn a_zero_velocity_note_on_is_an_ending() {
+        let midi = MidiSourceBuilder::new()
+            .ticks_per_qn(960)
+            .note_on(0, 0, 60, 96)
+            .note_on(960, 0, 62, 96)
+            .at(960)
+            .note_on(0, 0, 60, 0)
+            .build();
+
+        let at_960: Vec<Vec<u8>> = {
+            let mut at = 0;
+            midi.events
+                .iter()
+                .filter_map(|event| {
+                    at += u64::from(event.delta_ticks);
+                    (at == 960).then(|| event.bytes.clone())
+                })
+                .collect()
+        };
+        assert_eq!(
+            at_960.first().map(|bytes| bytes[1]),
+            Some(60),
+            "the ending did not come first: {at_960:?}"
+        );
     }
 
     #[test]
