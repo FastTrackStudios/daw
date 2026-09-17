@@ -751,7 +751,10 @@ impl Tracks for Standalone {
                 }
             }
             for receives in p.receives.values_mut() {
-                receives.retain(|route| route.source_track_guid != removed);
+                // The far end of a receive is its `dest_track_guid` —
+                // the track that was feeding this one. See
+                // `routing_sync::make_receive_mirror`.
+                receives.retain(|route| route.dest_track_guid.as_deref() != Some(removed.as_str()));
                 for (idx, route) in receives.iter_mut().enumerate() {
                     route.index = idx as u32;
                 }
