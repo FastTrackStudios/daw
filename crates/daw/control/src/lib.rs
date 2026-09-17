@@ -118,6 +118,7 @@ use std::sync::Arc;
 
 // Service clients are internal — consumers use high-level handles instead.
 pub(crate) use daw_proto::ActionRegistrationClient;
+pub(crate) use daw_proto::AudioAccessorsClient;
 pub(crate) use daw_proto::AudioEngineClient;
 pub(crate) use daw_proto::AutomationClient;
 pub(crate) use daw_proto::DawFileOpsClient;
@@ -242,6 +243,7 @@ architect::clients! {
         pub(crate) live_midi: LiveMidiClient,
         pub(crate) midi: MidiClient,
         pub(crate) peaks: PeaksClient,
+        pub(crate) audio_accessor: AudioAccessorsClient,
         pub(crate) audio_engine: AudioEngineClient,
         pub(crate) ext_state: ExtStateClient,
         pub(crate) health: HealthClient,
@@ -544,6 +546,19 @@ impl Daw {
     /// # Ok(())
     /// # }
     /// ```
+    /// Read a track's audio as samples.
+    ///
+    /// What a detector needs and peaks cannot give: peaks are the
+    /// loudest value across a block, so a transient's EDGE is only ever
+    /// located to the nearest block — which is the one measurement a
+    /// tempo map is made of.
+    #[must_use]
+    pub fn audio(&self) -> Audio {
+        Audio {
+            clients: self.clients.clone(),
+        }
+    }
+
     pub fn audio_engine(&self) -> AudioEngine {
         AudioEngine::new(self.clients.clone())
     }
@@ -822,5 +837,71 @@ mod global {
         pub fn is_initialized() -> bool {
             Self::try_get().is_some()
         }
+    }
+}
+
+/// Reading a track's audio, for anything that has to measure it.
+///
+/// An accessor is a REAPER resource and has to be given back, so this
+/// opens one, reads, and closes rather than handing the caller a handle
+/// to forget about. A detector reads a few seconds once; an accessor
+/// left open holds the take.
+#[derive(Clone)]
+pub struct Audio {
+    clients: std::sync::Arc<DawClients>,
+}
+
+impl Audio {
+    /// Samples from a track, mixed to mono.
+    ///
+    /// Mono because everything that measures audio for TIMING wants one
+    /// signal — a transient is a moment, and asking which channel it
+    /// happened in is a question nobody has. Stereo callers can read
+    /// the accessor directly.
+    ///
+    /// # Errors
+    ///
+    /// When the track cannot be resolved or the accessor cannot be
+    /// created.
+    pub async fn mono(
+        &self,
+        project: &str,
+        track: daw_proto::TrackRef,
+        from: f64,
+        seconds: f64,
+        sample_rate: f64,
+    ) -> Result<Vec<f64>> {
+        let context = daw_proto::ProjectContext::Project(project.to_owned());
+        let accessor = self
+            .clients
+            .audio_accessor
+            .create_track_accessor(context, track)
+            .await?
+            .ok_or_else(|| Error::InvalidOperation("no audio accessor for that track".into()))?;
+
+        let channels = 2;
+        let wanted = (seconds.max(0.0) * sample_rate).ceil();
+        let data = self
+            .clients
+            .audio_accessor
+            .get_samples(daw_proto::audio_accessor::GetSamplesRequest {
+                accessor_id: accessor.clone(),
+                sample_rate,
+                num_channels: channels,
+                start_time: from.max(0.0),
+                num_samples: u32::try_from(wanted as i64).unwrap_or(0),
+            })
+            .await?;
+        // Given back whatever the read did: an accessor is a resource,
+        // and a detector that leaked one per press would hold every
+        // take it ever looked at.
+        let _ = self.clients.audio_accessor.destroy_accessor(accessor).await;
+
+        let channels = data.num_channels.max(1) as usize;
+        Ok(data
+            .samples
+            .chunks(channels)
+            .map(|frame| frame.iter().sum::<f64>() / frame.len().max(1) as f64)
+            .collect())
     }
 }
