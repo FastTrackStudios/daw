@@ -205,29 +205,90 @@ fn node_token(device_name: &str) -> String {
 /// The full `node.name` of the live ALSA device matching `name_match` in the
 /// requested direction (`capture` → `alsa_input.*`, else `alsa_output.*`).
 /// `None` when no such node is present. Used to build `pw-link` endpoints.
+///
+/// # One device, many nodes
+///
+/// An interface with several routes is several PipeWire nodes. An Arturia
+/// MiniFuse 4 presents eight capture nodes — `Mic1`, `Mic2`, `Line4` (inputs
+/// 1+2), `Line5` (inputs 3+4), a loopback, and a `.split` sibling for each —
+/// and every one of them reports the same `node.nick`, "MiniFuse 4". So the
+/// name a person picks in prefs cannot identify a node on its own, and taking
+/// whichever the enumeration happened to list first meant:
+///
+/// - a `.split` node, whose ports are not `capture_N`, so every link failed
+///   and the filter sat at `paused` — the silent-rig case
+///   [`default_device_node_name`] warns about; or
+/// - `Line5`, which is inputs **3+4** presented under the same name as inputs
+///   1+2, so a guitar in input 1 was inaudible and nothing said why.
+///
+/// Two rules fix that, and both are about being predictable:
+///
+/// 1. **`.split` nodes are skipped.** They are WirePlumber's internal halves,
+///    never a link target.
+/// 2. **Candidates are sorted, and the first is taken**, so the choice is the
+///    same on every machine and every boot rather than whatever the
+///    enumeration happened to emit first.
+///
+/// Sorted-first is *deterministic*, not *correct*: on a MiniFuse 4 it picks
+/// `Line3`, which is the loopback, because "Line3" sorts before "Mic1". A
+/// device with one route is unambiguous; a device with several has to be told
+/// apart.
+///
+/// **Every whitespace-separated token must appear in the node name**, which is
+/// how it is told apart: `"MiniFuse 4 Mic1"` selects the mono instrument
+/// input, `"MiniFuse 4 Line4"` the stereo pair on inputs 1+2. Spaces inside a
+/// token become underscores, so the label a player reads still matches.
+/// [`device_node_names`] lists every candidate when a guess is wrong.
 pub fn device_node_name(name_match: &str, capture: bool) -> Option<String> {
+    device_node_names(name_match, capture).into_iter().next()
+}
+
+/// Every linkable node matching `name_match`, in the deterministic order
+/// [`device_node_name`] picks from.
+///
+/// Public because "which node did it choose, and what else was there" is the
+/// first question when an interface does not appear, and answering it should
+/// not require running `pw-cli` by hand.
+pub fn device_node_names(name_match: &str, capture: bool) -> Vec<String> {
     let listing = Command::new("pw-cli")
         .args(["ls", "Node"])
         .output()
         .ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default();
+    matching_nodes(&listing, name_match, capture)
+}
+
+/// The selection itself, over a `pw-cli ls Node` listing — separated from
+/// running `pw-cli` so the rules can be tested against a real listing rather
+/// than against whatever hardware the test machine happens to have.
+fn matching_nodes(listing: &str, name_match: &str, capture: bool) -> Vec<String> {
     let prefix = if capture {
         "alsa_input."
     } else {
         "alsa_output."
     };
-    let token = node_token(name_match);
-    for line in listing.lines() {
-        let t = line.trim();
-        if let Some(name) = t.strip_prefix("node.name = ") {
-            let name = name.trim_matches('"');
-            if name.starts_with(prefix) && name.contains(&token) {
-                return Some(name.to_string());
-            }
-        }
-    }
-    None
+    // Every token has to appear, so a pref can narrow by route as well as by
+    // device: "MiniFuse 4 Mic1" matches the mono input and nothing else.
+    let tokens: Vec<String> = name_match
+        .split_whitespace()
+        .map(node_token)
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    let mut found: Vec<String> = listing
+        .lines()
+        .filter_map(|line| {
+            let name = line.trim().strip_prefix("node.name = ")?.trim_matches('"');
+            let keep = name.starts_with(prefix)
+                && !name.ends_with(".split")
+                && tokens.iter().all(|t| name.contains(t.as_str()));
+            keep.then(|| name.to_string())
+        })
+        .collect();
+    found.sort();
+    found.dedup();
+    found
 }
 
 /// The session manager's current default sink (or source) node name.
@@ -368,4 +429,105 @@ pub fn restart_session_manager() -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod node_selection_tests {
+    use super::matching_nodes;
+
+    /// A real `pw-cli ls Node` excerpt: a MiniFuse 4 as PipeWire's UCM profile
+    /// presents it — five capture routes, three playback, a `.split` sibling
+    /// for each — plus a single-route interface for contrast.
+    const LISTING: &str = r#"
+		node.name = "alsa_input.usb-ARTURIA_MiniFuse_4_8860400264110319-00.HiFi__Line5__source"
+		node.name = "alsa_input.usb-ARTURIA_MiniFuse_4_8860400264110319-00.HiFi__Line5__source.split"
+		node.name = "alsa_input.usb-ARTURIA_MiniFuse_4_8860400264110319-00.HiFi__Mic1__source.split"
+		node.name = "alsa_input.usb-ARTURIA_MiniFuse_4_8860400264110319-00.HiFi__Mic1__source"
+		node.name = "alsa_input.usb-ARTURIA_MiniFuse_4_8860400264110319-00.HiFi__Line4__source"
+		node.name = "alsa_input.usb-ARTURIA_MiniFuse_4_8860400264110319-00.HiFi__Line3__source"
+		node.name = "alsa_input.usb-ARTURIA_MiniFuse_4_8860400264110319-00.HiFi__Mic2__source"
+		node.name = "alsa_output.usb-ARTURIA_MiniFuse_4_8860400264110319-00.HiFi__Line1__sink"
+		node.name = "alsa_output.usb-ARTURIA_MiniFuse_4_8860400264110319-00.HiFi__Line2__sink.split"
+		node.name = "alsa_output.usb-ARTURIA_MiniFuse_4_8860400264110319-00.HiFi__Line2__sink"
+		node.name = "alsa_input.usb-Yamaha_Corporation_Yamaha_TF-00.capture.0.0"
+		node.name = "alsa_output.usb-Yamaha_Corporation_Yamaha_TF-00.playback.0.0"
+"#;
+
+    /// `.split` nodes are WirePlumber's internal halves. Their ports are not
+    /// `capture_N`, so linking to one fails every link and leaves the filter
+    /// paused — a rig that runs, meters dead, in silence.
+    #[test]
+    fn split_nodes_are_never_candidates() {
+        let found = matching_nodes(LISTING, "MiniFuse 4", true);
+        assert!(!found.is_empty());
+        assert!(
+            found.iter().all(|n| !n.ends_with(".split")),
+            "got {found:?}"
+        );
+    }
+
+    /// The choice is the same on every machine and every boot. Sorted, not
+    /// enumeration order — which for this device listed inputs 3+4 first.
+    #[test]
+    fn selection_is_deterministic() {
+        let a = matching_nodes(LISTING, "MiniFuse 4", true);
+        let mut shuffled: Vec<&str> = LISTING.lines().collect();
+        shuffled.reverse();
+        let b = matching_nodes(&shuffled.join("\n"), "MiniFuse 4", true);
+        assert_eq!(a, b, "order of the listing must not change the answer");
+    }
+
+    /// Deterministic is not the same as right: on this device the first sorted
+    /// capture node is the loopback. Pinned so the honest limit stays visible
+    /// — a multi-route device has to be told apart, and the doc comment says
+    /// so.
+    #[test]
+    fn the_default_is_first_sorted_not_first_input() {
+        let first = matching_nodes(LISTING, "MiniFuse 4", true)
+            .into_iter()
+            .next()
+            .expect("a candidate");
+        assert!(first.contains("Line3"), "got {first}");
+    }
+
+    /// Every token must appear, which is how one route is named: the mono
+    /// instrument input, or the stereo pair on inputs 1+2.
+    #[test]
+    fn a_route_can_be_named() {
+        assert_eq!(
+            matching_nodes(LISTING, "MiniFuse 4 Mic1", true),
+            vec![
+                "alsa_input.usb-ARTURIA_MiniFuse_4_8860400264110319-00.HiFi__Mic1__source"
+                    .to_string()
+            ]
+        );
+        assert_eq!(
+            matching_nodes(LISTING, "MiniFuse 4 Line4", true),
+            vec![
+                "alsa_input.usb-ARTURIA_MiniFuse_4_8860400264110319-00.HiFi__Line4__source"
+                    .to_string()
+            ]
+        );
+    }
+
+    /// Direction is part of the match: an input name finds no playback node,
+    /// so a mistyped pref reads as "device absent" rather than linking audio
+    /// backwards.
+    #[test]
+    fn direction_is_respected() {
+        assert!(matching_nodes(LISTING, "MiniFuse 4 Mic1", false).is_empty());
+        let out = matching_nodes(LISTING, "MiniFuse 4", false);
+        assert!(out.iter().all(|n| n.starts_with("alsa_output.")), "{out:?}");
+        assert!(out[0].contains("Line1"), "main output first: {out:?}");
+    }
+
+    /// A single-route interface needs no disambiguation, and a space in the
+    /// label still matches the underscored node name.
+    #[test]
+    fn a_single_route_device_is_unambiguous() {
+        assert_eq!(
+            matching_nodes(LISTING, "Yamaha TF", true),
+            vec!["alsa_input.usb-Yamaha_Corporation_Yamaha_TF-00.capture.0.0".to_string()]
+        );
+    }
 }
