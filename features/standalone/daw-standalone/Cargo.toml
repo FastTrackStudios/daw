@@ -139,11 +139,13 @@ bootstrap = ["dep:daw-control", "dep:eyre"]
 # native testing of the same flow.
 http-resolver = ["dep:ureq"]
 # Host CLAP plugins (load .clap bundles, inspect params, process audio).
-# Native-only (clack-host dynamically loads native dylibs).
-clap-host = ["dep:clack-host", "dep:clack-extensions", "dep:raw-window-handle-06"]
+# Native-only (clack-host dynamically loads native dylibs). A hosted
+# plugin only runs inside the audio engine, so this pulls `audio`.
+clap-host = ["audio", "dep:clack-host", "dep:clack-extensions", "dep:raw-window-handle-06"]
 # Host VST3 plugins (load .vst3 bundles, inspect descriptor, process audio).
-# Native-only (libloading + native dylibs).
-vst3-host = ["dep:vst3", "dep:libloading"]
+# Native-only (libloading + native dylibs). Pulls `audio` for the same
+# reason as clap-host — on its own it did not compile.
+vst3-host = ["audio", "dep:vst3", "dep:libloading"]
 # Browser bindings: a wasm-bindgen wrapper that an AudioWorklet
 # processor can construct + drive. Only meaningful on wasm32.
 web = ["decode", "dep:wasm-bindgen", "dep:js-sys"]

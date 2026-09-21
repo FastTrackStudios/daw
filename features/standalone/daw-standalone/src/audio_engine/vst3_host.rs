@@ -178,6 +178,9 @@ struct Vst3Module {
     // _lib (unloads library). See LoadedVst3Plugin for the rationale.
     factory: ComPtr<IPluginFactory>,
     exit_fn: Option<unsafe extern "system" fn() -> bool>,
+    /// The `CFBundleRef` handed to `bundleEntry` on macOS; released after
+    /// `bundleExit`. Null elsewhere (and for single-file bundles).
+    entry_arg: *mut c_void,
     _lib: Library,
 }
 
@@ -192,22 +195,34 @@ impl Vst3Module {
         // Module entry: `bundleEntry` (macOS), `ModuleEntry` (Linux),
         // `InitDll` (Windows). Errors-out only if the symbol exists
         // *and* the call returned false.
+        //
+        // macOS plugins get their own `CFBundleRef` — many use it to find
+        // resources in the bundle, and crash or refuse to load on null.
+        let entry_arg = module_entry_arg(bundle_path);
         unsafe {
             if let Ok(entry) = lib.get::<unsafe extern "system" fn(*mut c_void) -> bool>(
                 module_entry_symbol().as_bytes(),
-            ) && !entry(ptr::null_mut())
+            ) && !entry(entry_arg)
             {
+                release_module_entry_arg(entry_arg);
                 return Err(Vst3HostError::ModuleEntry);
             }
         }
 
         // Resolve GetPluginFactory.
-        let factory: ComPtr<IPluginFactory> = unsafe {
+        let factory: Result<ComPtr<IPluginFactory>, Vst3HostError> = unsafe {
             let get_factory = lib
                 .get::<unsafe extern "system" fn() -> *mut IPluginFactory>(b"GetPluginFactory")
                 .map_err(|_| Vst3HostError::NoFactory)?;
             let raw = get_factory();
-            ComPtr::from_raw(raw).ok_or(Vst3HostError::NoFactory)?
+            ComPtr::from_raw(raw).ok_or(Vst3HostError::NoFactory)
+        };
+        let factory = match factory {
+            Ok(factory) => factory,
+            Err(err) => {
+                release_module_entry_arg(entry_arg);
+                return Err(err);
+            }
         };
 
         // Stash the exit function pointer before we move `lib` into
@@ -223,6 +238,7 @@ impl Vst3Module {
             _lib: lib,
             factory,
             exit_fn,
+            entry_arg,
         })
     }
 
@@ -273,6 +289,7 @@ impl Drop for Vst3Module {
                 let _ = exit();
             }
         }
+        release_module_entry_arg(self.entry_arg);
     }
 }
 
@@ -1717,6 +1734,68 @@ fn resolve_lib_path(bundle: &Path) -> Result<PathBuf, Vst3HostError> {
         }
     }
     Err(Vst3HostError::BundleLayout)
+}
+
+/// The argument for the module entry call. On macOS that is a
+/// `CFBundleRef` for the `.vst3` bundle (VST3 SDK `bundleEntry`);
+/// everywhere else the host passes null.
+#[cfg(target_os = "macos")]
+fn module_entry_arg(bundle: &Path) -> *mut c_void {
+    use std::os::unix::ffi::OsStrExt;
+
+    if !bundle.is_dir() {
+        return ptr::null_mut();
+    }
+    let bytes = bundle.as_os_str().as_bytes();
+    // SAFETY: plain CoreFoundation create calls; each returned object is
+    // either null or owned by us (the Create rule). The URL is released
+    // here, the bundle in `release_module_entry_arg`.
+    unsafe {
+        let url = cf::CFURLCreateFromFileSystemRepresentation(
+            ptr::null(),
+            bytes.as_ptr(),
+            bytes.len() as isize,
+            true,
+        );
+        if url.is_null() {
+            return ptr::null_mut();
+        }
+        let bundle = cf::CFBundleCreate(ptr::null(), url);
+        cf::CFRelease(url);
+        bundle
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn module_entry_arg(_bundle: &Path) -> *mut c_void {
+    ptr::null_mut()
+}
+
+fn release_module_entry_arg(arg: *mut c_void) {
+    #[cfg(target_os = "macos")]
+    if !arg.is_null() {
+        // SAFETY: `arg` came from CFBundleCreate and is released once.
+        unsafe { cf::CFRelease(arg) };
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = arg;
+}
+
+#[cfg(target_os = "macos")]
+mod cf {
+    use std::ffi::c_void;
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        pub fn CFURLCreateFromFileSystemRepresentation(
+            allocator: *const c_void,
+            buffer: *const u8,
+            buf_len: isize,
+            is_directory: bool,
+        ) -> *mut c_void;
+        pub fn CFBundleCreate(allocator: *const c_void, bundle_url: *mut c_void) -> *mut c_void;
+        pub fn CFRelease(cf: *mut c_void);
+    }
 }
 
 fn module_entry_symbol() -> &'static str {
