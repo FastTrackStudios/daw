@@ -893,6 +893,30 @@ impl Standalone {
         crate::audio_engine::AudioEngine::attached_to(self, guid)
     }
 
+    /// Attach the low-latency **duplex** engine to project `guid`: one
+    /// realtime callback reads the input and renders the project for the
+    /// same cycle (PipeWire on Linux, a CoreAudio IOProc on macOS). This is
+    /// the live-monitoring path; [`attach_audio_engine`](Self::attach_audio_engine)
+    /// bridges separate input and output streams through a ring instead.
+    /// Drop the returned engine to stop audio.
+    #[cfg(all(feature = "audio", any(target_os = "linux", target_os = "macos")))]
+    pub fn attach_duplex_engine(
+        &self,
+        guid: &str,
+        prefs: &daw_audio_io::AudioIoPrefs,
+    ) -> Result<crate::audio_engine::DuplexAudioEngine, String> {
+        let bundle = self.transport_engine_for(guid);
+        bundle.disable_soft_clock();
+        let track_count = self.read_project(guid, |p| p.tracks.len()).unwrap_or(0);
+        self.set_meters(crate::metering::Meters::new(track_count));
+        crate::audio_engine::DuplexAudioEngine::with_project_prefs(
+            self.clone(),
+            guid.to_string(),
+            bundle.shared.clone(),
+            prefs,
+        )
+    }
+
     /// As [`attach_audio_engine`](Self::attach_audio_engine), with the
     /// output device, sample rate and buffer size taken from `prefs`.
     #[cfg(all(feature = "audio", not(target_arch = "wasm32")))]

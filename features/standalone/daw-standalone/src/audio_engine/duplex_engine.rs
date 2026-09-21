@@ -1,6 +1,7 @@
-//! Native PipeWire **duplex** engine — drives the project renderer from one
+//! Native **duplex** engine — drives the project renderer from one
 //! realtime callback (input + output, same cycle, no ring bridge between
-//! separate streams). This is the low-latency path real DAWs use; it replaces
+//! separate streams). The backend is PipeWire `pw_filter` on Linux and a
+//! CoreAudio HAL IOProc on macOS (`daw_audio_io::duplex::Backend`). This is the low-latency path real DAWs use; it replaces
 //! the cpal output-stream + separate input-stream + lock-free ring of
 //! [`AudioEngine`](super::AudioEngine) for live-input work.
 //!
@@ -12,10 +13,13 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "linux")]
 use std::time::Duration;
 
 use daw_audio_io::duplex::{Backend, DuplexBackend, DuplexConfig, EngineStats, ProcessBlock};
-use daw_audio_io::{AudioIoPrefs, pw};
+use daw_audio_io::AudioIoPrefs;
+#[cfg(target_os = "linux")]
+use daw_audio_io::pw;
 
 use crate::Standalone;
 use crate::audio_engine::render::ProjectRenderer;
@@ -25,14 +29,16 @@ use crate::transport_engine::TransportShared;
 /// Default graph node name, when `AudioIoPrefs::node_name` is empty.
 const NODE_NAME: &str = "FTS-Signal";
 
-/// A live audio engine driven by a native PipeWire duplex `pw_filter`.
-/// Dropping it stops audio (the backend tears down its node + thread loop).
+/// A live audio engine driven by the platform duplex backend. Dropping it
+/// stops audio (the backend tears down its node / IOProc).
 pub struct DuplexAudioEngine {
     shared: Arc<TransportShared>,
     _backend: Backend,
     _renderer: Arc<ProjectRenderer>,
     stats: Arc<EngineStats>,
     sample_rate: u32,
+    /// Hardware `(input, output)` latency in frames, when the backend knows.
+    latency: Option<(u32, u32)>,
     /// Tells the link watchdog thread to exit (set on drop).
     linker_stop: Arc<AtomicBool>,
 }
@@ -86,7 +92,9 @@ impl DuplexAudioEngine {
         shared: Arc<TransportShared>,
         prefs: &AudioIoPrefs,
     ) -> Result<Self, String> {
-        let sample_rate = prefs.sample_rate_opt().unwrap_or(48_000);
+        let sample_rate = prefs
+            .sample_rate_opt()
+            .unwrap_or_else(|| native_rate(prefs));
         let buffer = prefs.buffer_size_opt().unwrap_or(128);
         shared.set_sample_rate(sample_rate);
 
@@ -199,11 +207,20 @@ impl DuplexAudioEngine {
             }),
         )?;
         let stats = backend.stats();
+        let latency = backend.latency_frames();
+        if backend.sample_rate() != sample_rate {
+            return Err(format!(
+                "duplex backend runs at {} Hz, renderer was built for {sample_rate} Hz",
+                backend.sample_rate()
+            ));
+        }
 
         // Wire the duplex node to the hardware (a DSP filter isn't auto-linked).
         // Async + retried: the node's ports take a beat to appear in the graph.
         // The thread then stays alive as a re-link watchdog for device loss.
         let linker_stop = Arc::new(AtomicBool::new(false));
+        // CoreAudio opens the devices itself; only a graph needs linking.
+        #[cfg(target_os = "linux")]
         spawn_linker(
             prefs.clone(),
             in_channels,
@@ -217,6 +234,7 @@ impl DuplexAudioEngine {
             _renderer: renderer,
             stats,
             sample_rate,
+            latency,
             linker_stop,
         })
     }
@@ -232,6 +250,29 @@ impl DuplexAudioEngine {
     pub fn shared(&self) -> &Arc<TransportShared> {
         &self.shared
     }
+    /// Hardware `(input, output)` latency in frames at
+    /// [`sample_rate`](Self::sample_rate) — their sum is the round trip from
+    /// the input jack to the output. `None` when the backend cannot tell.
+    pub fn latency_frames(&self) -> Option<(u32, u32)> {
+        self.latency
+    }
+}
+
+/// The rate to run at when none is requested. PipeWire resamples to any
+/// rate, so the historical 48 kHz stands; CoreAudio runs the device's clock
+/// directly, so keep whatever the device is already at rather than
+/// switching an interface other apps may be using.
+fn native_rate(prefs: &AudioIoPrefs) -> u32 {
+    #[cfg(target_os = "macos")]
+    {
+        let host = daw_audio_io::audio_host();
+        let name = prefs.output_name().or(prefs.input_name());
+        if let Ok(caps) = daw_audio_io::device_caps(&host, name, false) {
+            return caps.default_sample_rate;
+        }
+    }
+    let _ = prefs;
+    48_000
 }
 
 /// Highest hardware input channel any track records from, or `None`.
@@ -248,6 +289,7 @@ fn max_armed_channel(daw: &Standalone, project_guid: &str) -> Option<usize> {
     .flatten()
 }
 
+#[cfg(target_os = "linux")]
 /// One watchdog pass over every expected hardware↔duplex link.
 #[derive(Default)]
 struct LinkPass {
@@ -262,6 +304,7 @@ struct LinkPass {
 /// Idempotently (re-)establish every expected link for this engine's device
 /// prefs. `Exists` = healthy, `Created` = it was missing and came back (device
 /// re-enumerated / first appearance), `Failed` = the port is gone.
+#[cfg(target_os = "linux")]
 fn link_pass(
     input: Option<&str>,
     output: Option<&str>,
@@ -354,6 +397,7 @@ fn link_pass(
 /// power blip, cable re-seat) is re-linked automatically instead of leaving
 /// the engine "running" into a disconnected graph. Exits when `stop` is set
 /// (the owning [`DuplexAudioEngine`] sets it on drop).
+#[cfg(target_os = "linux")]
 fn spawn_linker(
     prefs: AudioIoPrefs,
     in_channels: usize,

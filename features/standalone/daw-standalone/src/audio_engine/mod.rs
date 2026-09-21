@@ -32,8 +32,9 @@
 pub mod aux_render;
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub mod decoder;
-/// Native PipeWire duplex engine (one realtime callback, no ring). Linux-only.
-#[cfg(all(feature = "audio", target_os = "linux"))]
+/// Native duplex engine (one realtime callback, no ring): PipeWire on
+/// Linux, CoreAudio on macOS.
+#[cfg(all(feature = "audio", any(target_os = "linux", target_os = "macos")))]
 pub mod duplex_engine;
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub mod materialize;
@@ -65,7 +66,7 @@ pub mod test_tone;
 pub use aux_render::{AuxClock, AuxRenderer};
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub use decoder::{DecodedAudio, decode_audio, decode_audio_with_extension};
-#[cfg(all(feature = "audio", target_os = "linux"))]
+#[cfg(all(feature = "audio", any(target_os = "linux", target_os = "macos")))]
 pub use duplex_engine::{DuplexAudioEngine, PhonesBus};
 #[cfg(feature = "audio")]
 pub use mixer::{AudioEngine, TrackHandle};

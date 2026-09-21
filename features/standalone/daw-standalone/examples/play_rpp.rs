@@ -13,6 +13,9 @@
 //! - `--rate <hz>`     request a device sample rate (applied to the device)
 //! - `--buffer <n>`    request a device buffer size in frames
 //! - `--device <name>` output device by name substring
+//! - `--in <name>`     input device by name substring (duplex)
+//! - `--duplex`        use the low-latency duplex engine (one realtime
+//!                     callback for input and output) instead of cpal
 //! - `--list-devices`  print output devices and what they accept, then exit
 //!
 //! Pipeline:
@@ -116,12 +119,22 @@ fn main() -> Result<(), String> {
 
     // Attach the cpal audio engine. The output callback now renders
     // the loaded project every block. Dropping `_engine` stops audio.
-    let engine = daw
-        .attach_audio_engine_with_prefs(&proj.project_guid, &args.prefs)
-        .map_err(|e| format!("{e} (try --list-devices for what the device accepts)"))?;
+    let hint = |e: String| format!("{e} (try --list-devices for what the device accepts)");
+    // Held for its lifetime: dropping either engine stops audio.
+    let (_engine, stats, rate, latency): (Box<dyn std::any::Any>, _, _, _) = if args.duplex {
+        let engine = daw
+            .attach_duplex_engine(&proj.project_guid, &args.prefs)
+            .map_err(hint)?;
+        let (stats, rate, latency) = (Some(engine.stats()), engine.sample_rate(), engine.latency_frames());
+        (Box::new(engine), stats, rate, latency)
+    } else {
+        let engine = daw
+            .attach_audio_engine_with_prefs(&proj.project_guid, &args.prefs)
+            .map_err(hint)?;
+        let (stats, rate) = (engine.stats(), engine.sample_rate());
+        (Box::new(engine), stats, rate, None)
+    };
     let ctx = ProjectContext::Project(proj.project_guid.clone());
-    let stats = engine.stats();
-    let rate = engine.sample_rate();
 
     println!("{HELP}");
     // The first callback reports the block size the device actually runs at.
@@ -129,8 +142,16 @@ fn main() -> Result<(), String> {
     if let Some(stats) = &stats {
         let frames = stats.block_frames.load(std::sync::atomic::Ordering::Relaxed);
         println!(
-            "  device: {rate} Hz, {frames}-frame blocks ({:.2} ms)",
+            "  {} engine: {rate} Hz, {frames}-frame blocks ({:.2} ms)",
+            if args.duplex { "duplex" } else { "cpal" },
             frames as f64 * 1000.0 / rate as f64
+        );
+    }
+    if let Some((i, o)) = latency {
+        println!(
+            "  hardware round trip: {} frames ({:.2} ms)",
+            i + o,
+            (i + o) as f64 * 1000.0 / rate as f64
         );
     }
     status(&daw, &ctx);
@@ -147,6 +168,20 @@ fn main() -> Result<(), String> {
     }
 
     let _ = Transport::stop(&daw, ctx);
+    if let Some(stats) = &stats {
+        use std::sync::atomic::Ordering::Relaxed;
+        let (_, peak_ms) = stats.render_ms();
+        let frames = stats.block_frames.load(Relaxed);
+        println!(
+            "  {} blocks, {} over budget, {} xruns; render mean {:.3} ms, peak {:.3} ms (budget {:.3} ms)",
+            stats.calls.load(Relaxed),
+            stats.over_budget.load(Relaxed),
+            stats.xruns.load(Relaxed),
+            stats.mean_render_ms(),
+            peak_ms,
+            frames as f64 * 1000.0 / rate as f64,
+        );
+    }
     Ok(())
 }
 
@@ -211,13 +246,14 @@ fn run_command(daw: &Standalone, ctx: &ProjectContext, line: &str) -> Result<Flo
     Ok(Flow::Continue)
 }
 
-const USAGE: &str =
-    "usage: play_rpp [--rate <hz>] [--buffer <frames>] [--device <name>] [--list-devices] <rpp-file>";
+const USAGE: &str = "usage: play_rpp [--rate <hz>] [--buffer <frames>] [--device <name>] \
+     [--in <name>] [--duplex] [--list-devices] <rpp-file>";
 
 struct Args {
     path: Option<String>,
     prefs: AudioIoPrefs,
     list_devices: bool,
+    duplex: bool,
 }
 
 impl Args {
@@ -226,6 +262,7 @@ impl Args {
             path: None,
             prefs: AudioIoPrefs::default(),
             list_devices: false,
+            duplex: false,
         };
         let mut it = std::env::args().skip(1);
         while let Some(arg) = it.next() {
@@ -234,6 +271,8 @@ impl Args {
                 "--rate" => args.prefs.sample_rate = parse_u32(&value("--rate")?)?,
                 "--buffer" => args.prefs.buffer_size = parse_u32(&value("--buffer")?)?,
                 "--device" => args.prefs.output_device = value("--device")?,
+                "--in" => args.prefs.input_device = value("--in")?,
+                "--duplex" => args.duplex = true,
                 "--list-devices" => args.list_devices = true,
                 flag if flag.starts_with("--") => return Err(format!("unknown option {flag}\n{USAGE}")),
                 _ => args.path = Some(arg),
