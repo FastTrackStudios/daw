@@ -2889,6 +2889,7 @@ dependencies = [
  "pipewire",
  "rtrb",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
