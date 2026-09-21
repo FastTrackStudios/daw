@@ -144,7 +144,7 @@ impl Markers for Standalone {
                 .markers
                 .get_mut(&id)
                 .ok_or_else(|| DawError::not_found("Marker", &id.to_string()))?;
-            m.color = if color == 0 { None } else { Some(color) };
+            m.color = crate::color_from_service(color);
             Ok::<_, DawError>(m.clone())
         })??;
         publish_marker_event(self, &guid, MarkerEvent::Changed(marker));

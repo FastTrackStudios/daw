@@ -808,7 +808,7 @@ impl Tracks for Standalone {
         let event = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
             let track_guid = p.tracks[i].guid.clone();
-            let color = if color == 0 { None } else { Some(color) };
+            let color = crate::color_from_service(color);
             p.tracks[i].color = color;
             Ok::<_, DawError>(TrackEvent::ColorChanged {
                 guid: track_guid,

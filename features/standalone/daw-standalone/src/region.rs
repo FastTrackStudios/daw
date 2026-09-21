@@ -132,7 +132,7 @@ impl Regions for Standalone {
                 .regions
                 .get_mut(&id)
                 .ok_or_else(|| DawError::not_found("Region", &id.to_string()))?;
-            r.color = if color == 0 { None } else { Some(color) };
+            r.color = crate::color_from_service(color);
             Ok::<_, DawError>(r.clone())
         })??;
         publish_region_event(self, &guid, RegionEvent::Changed(region));

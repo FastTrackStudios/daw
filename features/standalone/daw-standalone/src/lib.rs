@@ -113,3 +113,22 @@ pub use sync::Standalone;
 /// waveforms from REAPER's own peak mipmaps.
 #[cfg(feature = "reapeaks")]
 pub use dawfile_reaper::reapeaks;
+
+/// A colour as the service surface receives it, as this backend stores it
+/// (`0xRRGGBB`, `None` = default).
+///
+/// Callers written for REAPER pass its native form — `0x01BBGGRR`, the
+/// top flag meaning "custom colour set" — which is what
+/// `color_palette::Color::to_reaper_native` produces and what the `.rpp`
+/// loader already converts from. A value carrying that flag is read that
+/// way; one without it is taken as plain `0xRRGGBB`. Zero is no colour.
+pub(crate) fn color_from_service(c: u32) -> Option<u32> {
+    if c == 0 {
+        return None;
+    }
+    if c & 0x0100_0000 != 0 {
+        let (r, g, b) = (c & 0xff, (c >> 8) & 0xff, (c >> 16) & 0xff);
+        return Some((r << 16) | (g << 8) | b);
+    }
+    Some(c & 0x00ff_ffff)
+}
