@@ -45,7 +45,8 @@ pub mod duplex_pw;
 pub mod monitor;
 
 pub use device::{
-    DeviceInfo, device_name, input_channels, input_devices, output_devices, pick_device,
+    DeviceCaps, DeviceInfo, device_caps, device_name, input_channels, input_devices,
+    output_devices, pick_device,
 };
 pub use host::{audio_host, host_is_graph, host_is_jack, host_is_pipewire};
 pub use open::{OpenedInput, OpenedOutput, open_input, open_output};

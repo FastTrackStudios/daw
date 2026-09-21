@@ -160,3 +160,81 @@ pub fn pick_device(
         )
     })
 }
+
+/// What a device can be asked for: the sample rates and buffer sizes it
+/// accepts. Used to validate a requested [`AudioIoPrefs`](crate::AudioIoPrefs)
+/// rate/buffer before opening, and to populate a settings picker.
+#[derive(Clone, Debug, Default, PartialEq, Facet)]
+pub struct DeviceCaps {
+    pub name: String,
+    /// The device's current (native) rate.
+    pub default_sample_rate: u32,
+    /// Common rates the device supports, ascending.
+    pub sample_rates: Vec<u32>,
+    /// Smallest and largest buffer size (frames) the device accepts, when
+    /// the driver reports a range. `None` = unknown (let the host decide).
+    pub buffer_range: Option<(u32, u32)>,
+}
+
+impl DeviceCaps {
+    /// Whether `frames` is inside the reported buffer range (true when the
+    /// range is unknown — the open itself will then be the judge).
+    pub fn accepts_buffer(&self, frames: u32) -> bool {
+        self.buffer_range
+            .is_none_or(|(min, max)| (min..=max).contains(&frames))
+    }
+
+    /// Whether `rate` is one of the supported rates.
+    pub fn accepts_rate(&self, rate: u32) -> bool {
+        self.sample_rates.contains(&rate)
+    }
+}
+
+/// The rates a settings picker offers; a device's supported ranges are
+/// intersected with these (a range is continuous, a picker is not).
+const COMMON_RATES: &[u32] = &[
+    22_050, 32_000, 44_100, 48_000, 88_200, 96_000, 176_400, 192_000,
+];
+
+/// Capabilities of the input or output device matching `name` (or the
+/// default device when `None`).
+pub fn device_caps(host: &cpal::Host, name: Option<&str>, input: bool) -> Result<DeviceCaps, String> {
+    let device = pick_device(host, name, input)?;
+    let (default, ranges) = if input {
+        (
+            device.default_input_config(),
+            device.supported_input_configs().map(|r| r.collect::<Vec<_>>()),
+        )
+    } else {
+        (
+            device.default_output_config(),
+            device.supported_output_configs().map(|r| r.collect::<Vec<_>>()),
+        )
+    };
+    let default = default.map_err(|e| format!("device default config: {e}"))?;
+    let ranges = ranges.map_err(|e| format!("device supported configs: {e}"))?;
+
+    let mut sample_rates: Vec<u32> = COMMON_RATES
+        .iter()
+        .copied()
+        .filter(|&r| {
+            ranges
+                .iter()
+                .any(|c| (c.min_sample_rate()..=c.max_sample_rate()).contains(&r))
+        })
+        .collect();
+    if !sample_rates.contains(&default.sample_rate()) {
+        sample_rates.push(default.sample_rate());
+        sample_rates.sort_unstable();
+    }
+    let buffer_range = match default.buffer_size() {
+        cpal::SupportedBufferSize::Range { min, max } => Some((*min, *max)),
+        cpal::SupportedBufferSize::Unknown => None,
+    };
+    Ok(DeviceCaps {
+        name: device_name(&device),
+        default_sample_rate: default.sample_rate(),
+        sample_rates,
+        buffer_range,
+    })
+}

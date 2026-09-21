@@ -893,6 +893,17 @@ impl Standalone {
         crate::audio_engine::AudioEngine::attached_to(self, guid)
     }
 
+    /// As [`attach_audio_engine`](Self::attach_audio_engine), with the
+    /// output device, sample rate and buffer size taken from `prefs`.
+    #[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
+    pub fn attach_audio_engine_with_prefs(
+        &self,
+        guid: &str,
+        prefs: &daw_audio_io::AudioIoPrefs,
+    ) -> Result<crate::audio_engine::AudioEngine, String> {
+        crate::audio_engine::AudioEngine::attached_to_prefs(self, guid, prefs)
+    }
+
     /// Whether a loaded plugin instance is backing the given FX
     /// guid. `false` for synthetic / failed-to-load entries.
     pub fn has_plugin_instance(&self, fx_guid: &str) -> bool {

@@ -268,6 +268,11 @@ pub struct AudioEngine {
     /// Media read-ahead worker (project mode only) — stops with the engine.
     #[cfg(not(target_arch = "wasm32"))]
     _prefetch: Option<super::prefetch::PrefetchWorker>,
+    /// Realtime metrics from the output callback — the block size the
+    /// device actually runs at, render time, over-budget blocks. Same
+    /// type the duplex engine reports. Project mode only.
+    #[cfg(not(target_arch = "wasm32"))]
+    stats: Option<Arc<daw_audio_io::duplex::EngineStats>>,
 }
 
 impl AudioEngine {
@@ -304,6 +309,18 @@ impl AudioEngine {
     /// all handled here. Drop the returned `AudioEngine` to stop the
     /// stream.
     pub fn attached_to(daw: &Standalone, project_guid: &str) -> Result<Self, String> {
+        Self::attached_to_prefs(daw, project_guid, &AudioIoPrefs::default())
+    }
+
+    /// As [`attached_to`](Self::attached_to), but the device, sample rate
+    /// and buffer size come from `prefs`. A requested rate is applied to the
+    /// device itself (CoreAudio's nominal rate); a requested buffer must be
+    /// inside the device's supported range or opening fails.
+    pub fn attached_to_prefs(
+        daw: &Standalone,
+        project_guid: &str,
+        prefs: &AudioIoPrefs,
+    ) -> Result<Self, String> {
         let bundle = daw.transport_engine_for(project_guid);
         bundle.disable_soft_clock();
         // One meter cell per project track — `ProjectRenderer` writes
@@ -312,7 +329,12 @@ impl AudioEngine {
             .read_project(project_guid, |p| p.tracks.len())
             .unwrap_or(0);
         daw.set_meters(crate::metering::Meters::new(track_count));
-        Self::with_project(daw.clone(), project_guid.to_string(), bundle.shared.clone())
+        Self::with_project_prefs(
+            daw.clone(),
+            project_guid.to_string(),
+            bundle.shared.clone(),
+            prefs,
+        )
     }
 
     /// Create an engine that shares its sample clock with the given
@@ -411,6 +433,8 @@ impl AudioEngine {
             // Private-track-list mode mixes from memory — no mmap to warm.
             #[cfg(not(target_arch = "wasm32"))]
             _prefetch: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            stats: None,
         })
     }
 
@@ -513,6 +537,8 @@ impl AudioEngine {
             .soft_clock_enabled
             .clone();
         let stream_error = Arc::new(AtomicBool::new(false));
+        #[cfg(not(target_arch = "wasm32"))]
+        let stats = Arc::new(daw_audio_io::duplex::EngineStats::default());
         let stream = match out.sample_format {
             SampleFormat::F32 => Self::build_project_stream::<f32>(
                 &out.device,
@@ -522,6 +548,8 @@ impl AudioEngine {
                 aux.clone(),
                 soft_clock_enabled.clone(),
                 stream_error.clone(),
+                #[cfg(not(target_arch = "wasm32"))]
+                stats.clone(),
             )?,
             SampleFormat::I16 => Self::build_project_stream::<i16>(
                 &out.device,
@@ -531,6 +559,8 @@ impl AudioEngine {
                 aux.clone(),
                 soft_clock_enabled.clone(),
                 stream_error.clone(),
+                #[cfg(not(target_arch = "wasm32"))]
+                stats.clone(),
             )?,
             SampleFormat::U16 => Self::build_project_stream::<u16>(
                 &out.device,
@@ -540,6 +570,8 @@ impl AudioEngine {
                 aux.clone(),
                 soft_clock_enabled.clone(),
                 stream_error.clone(),
+                #[cfg(not(target_arch = "wasm32"))]
+                stats.clone(),
             )?,
             format => return Err(format!("Unsupported sample format: {format:?}")),
         };
@@ -564,6 +596,8 @@ impl AudioEngine {
             _input_stream: input_stream,
             #[cfg(not(target_arch = "wasm32"))]
             _prefetch: prefetch,
+            #[cfg(not(target_arch = "wasm32"))]
+            stats: Some(stats),
         })
     }
 
@@ -667,6 +701,7 @@ impl AudioEngine {
         aux: AuxSlot,
         soft_clock_enabled: Arc<AtomicBool>,
         stream_error: Arc<AtomicBool>,
+        #[cfg(not(target_arch = "wasm32"))] stats: Arc<daw_audio_io::duplex::EngineStats>,
     ) -> Result<Stream, String> {
         let channels = config.channels as usize;
         // Publish the device's real channel count so the metronome UI can
@@ -711,6 +746,15 @@ impl AudioEngine {
                         return;
                     }
                     let num_frames = num_samples / channels;
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let t0 = std::time::Instant::now();
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        stats.calls.fetch_add(1, AtomicOrdering::Relaxed);
+                        stats
+                            .block_frames
+                            .store(num_frames as u32, AtomicOrdering::Relaxed);
+                    }
                     let playing = shared.play_state().is_advancing();
                     let start = shared.playhead_samples().0.max(0) as u64;
                     let pos_seconds = start as f64 / sample_rate as f64;
@@ -798,6 +842,8 @@ impl AudioEngine {
                     }
 
                     shared.advance(num_frames as u32);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    stats.record_render_at(t0.elapsed().as_nanos() as u64, sample_rate);
                 },
                 move |err| {
                     // Device died (e.g. PipeWire dropped the connection). The
@@ -817,6 +863,14 @@ impl AudioEngine {
             )
             .map_err(|e| format!("Failed to build output stream: {e}"))?;
         Ok(stream)
+    }
+
+    /// Realtime metrics from the output callback (project mode): the block
+    /// size the device actually runs at, render time, over-budget blocks.
+    /// `None` for the legacy track-list engines.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn stats(&self) -> Option<Arc<daw_audio_io::duplex::EngineStats>> {
+        self.stats.clone()
     }
 
     /// Access the shared transport state — useful for wiring into the

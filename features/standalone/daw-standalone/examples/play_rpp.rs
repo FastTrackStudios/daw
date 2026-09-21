@@ -8,6 +8,13 @@
 //! cargo run --release -p daw-standalone --features rpp-loader --example play_rpp -- /path/to/song.rpp
 //! ```
 //!
+//! Options (before or after the path):
+//!
+//! - `--rate <hz>`     request a device sample rate (applied to the device)
+//! - `--buffer <n>`    request a device buffer size in frames
+//! - `--device <name>` output device by name substring
+//! - `--list-devices`  print output devices and what they accept, then exit
+//!
 //! Pipeline:
 //! 1. `project_loader::load_rpp_via_bay` parses the file + materializes
 //!    audio sources through a project-relative resolver.
@@ -22,6 +29,7 @@
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
+use daw_audio_io::AudioIoPrefs;
 use daw_proto::ProjectContext;
 use daw_proto::transport::service::Transport;
 use daw_standalone::media_bay::ProjectRelativeResolver;
@@ -40,6 +48,7 @@ commands:
   t <bpm>        set tempo
   r <rate>       set play rate (1.0 = normal)
   ?              show transport state
+  d              list output devices and what they accept
   h              this help
   q              quit";
 
@@ -51,9 +60,12 @@ fn main() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let _guard = rt.enter();
 
-    let path = std::env::args()
-        .nth(1)
-        .ok_or("usage: play_rpp <rpp-file>")?;
+    let args = Args::parse()?;
+    if args.list_devices {
+        list_devices();
+        return Ok(());
+    }
+    let path = args.path.ok_or(USAGE)?;
     let rpp_path = PathBuf::from(&path);
     let rpp_text = std::fs::read_to_string(&rpp_path).map_err(|e| e.to_string())?;
     let project_dir = rpp_path
@@ -104,10 +116,23 @@ fn main() -> Result<(), String> {
 
     // Attach the cpal audio engine. The output callback now renders
     // the loaded project every block. Dropping `_engine` stops audio.
-    let _engine = daw.attach_audio_engine(&proj.project_guid)?;
+    let engine = daw
+        .attach_audio_engine_with_prefs(&proj.project_guid, &args.prefs)
+        .map_err(|e| format!("{e} (try --list-devices for what the device accepts)"))?;
     let ctx = ProjectContext::Project(proj.project_guid.clone());
+    let stats = engine.stats();
+    let rate = engine.sample_rate();
 
     println!("{HELP}");
+    // The first callback reports the block size the device actually runs at.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    if let Some(stats) = &stats {
+        let frames = stats.block_frames.load(std::sync::atomic::Ordering::Relaxed);
+        println!(
+            "  device: {rate} Hz, {frames}-frame blocks ({:.2} ms)",
+            frames as f64 * 1000.0 / rate as f64
+        );
+    }
     status(&daw, &ctx);
     prompt();
 
@@ -177,12 +202,68 @@ fn run_command(daw: &Standalone, ctx: &ProjectContext, line: &str) -> Result<Flo
             Transport::set_playrate(daw, ctx.clone(), rate).map_err(err)?;
         }
         ("?", []) => {}
+        ("d", []) => list_devices(),
         ("h", []) => println!("{HELP}"),
         ("q", []) => return Ok(Flow::Quit),
         _ => return Err(format!("unknown command `{}` (h for help)", line.trim())),
     }
     status(daw, ctx);
     Ok(Flow::Continue)
+}
+
+const USAGE: &str =
+    "usage: play_rpp [--rate <hz>] [--buffer <frames>] [--device <name>] [--list-devices] <rpp-file>";
+
+struct Args {
+    path: Option<String>,
+    prefs: AudioIoPrefs,
+    list_devices: bool,
+}
+
+impl Args {
+    fn parse() -> Result<Self, String> {
+        let mut args = Args {
+            path: None,
+            prefs: AudioIoPrefs::default(),
+            list_devices: false,
+        };
+        let mut it = std::env::args().skip(1);
+        while let Some(arg) = it.next() {
+            let mut value = |flag: &str| it.next().ok_or(format!("{flag} needs a value\n{USAGE}"));
+            match arg.as_str() {
+                "--rate" => args.prefs.sample_rate = parse_u32(&value("--rate")?)?,
+                "--buffer" => args.prefs.buffer_size = parse_u32(&value("--buffer")?)?,
+                "--device" => args.prefs.output_device = value("--device")?,
+                "--list-devices" => args.list_devices = true,
+                flag if flag.starts_with("--") => return Err(format!("unknown option {flag}\n{USAGE}")),
+                _ => args.path = Some(arg),
+            }
+        }
+        Ok(args)
+    }
+}
+
+fn parse_u32(s: &str) -> Result<u32, String> {
+    s.parse().map_err(|_| format!("`{s}` is not a whole number"))
+}
+
+fn list_devices() {
+    let host = daw_audio_io::audio_host();
+    for dev in daw_audio_io::output_devices(&host) {
+        match daw_audio_io::device_caps(&host, Some(&dev.name), false) {
+            Ok(caps) => println!(
+                "  {}  ({} ch)  rates {:?}  buffer {}  [now {} Hz]",
+                caps.name,
+                dev.channels,
+                caps.sample_rates,
+                caps.buffer_range
+                    .map(|(a, b)| format!("{a}..={b}"))
+                    .unwrap_or_else(|| "?".into()),
+                caps.default_sample_rate,
+            ),
+            Err(e) => println!("  {}  ({e})", dev.name),
+        }
+    }
 }
 
 /// `90`, `90.5` or `1:30` → seconds.
