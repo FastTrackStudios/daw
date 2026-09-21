@@ -186,7 +186,25 @@ fn default_reaper_executable(resources: &std::path::Path) -> String {
     env::var("FTS_REAPER_EXECUTABLE")
         .ok()
         .or_else(|| which_command("reaper"))
+        .or_else(macos_reaper_app)
         .unwrap_or_else(|| "reaper".to_string())
+}
+
+/// REAPER on macOS is an app bundle, not a `reaper` on PATH.
+fn macos_reaper_app() -> Option<String> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let exe = "REAPER.app/Contents/MacOS/REAPER";
+    let mut roots = vec![PathBuf::from("/Applications")];
+    if let Some(home) = env::var_os("HOME") {
+        roots.push(PathBuf::from(home).join("Applications"));
+    }
+    roots
+        .into_iter()
+        .map(|root| root.join(exe))
+        .find(|path| path.is_file())
+        .map(|path| path.to_string_lossy().to_string())
 }
 
 fn reaper_profile(
@@ -478,7 +496,7 @@ fn install_available_daw_bridge(user_plugins: &std::path::Path) -> Result<()> {
         return Ok(());
     };
 
-    let dest = user_plugins.join("reaper_daw_bridge.so");
+    let dest = user_plugins.join(format!("reaper_daw_bridge.{}", env::consts::DLL_EXTENSION));
     if fs::read_link(&dest).ok().as_deref() == Some(source.as_path()) {
         return Ok(());
     }
@@ -499,19 +517,24 @@ fn install_available_daw_bridge(user_plugins: &std::path::Path) -> Result<()> {
 }
 
 fn find_built_daw_bridge() -> Option<PathBuf> {
+    let lib = format!(
+        "{}reaper_daw_bridge.{}",
+        env::consts::DLL_PREFIX,
+        env::consts::DLL_EXTENSION
+    );
     let mut candidates = Vec::new();
     if let Ok(exe) = env::current_exe()
         && let Some(profile_dir) = exe.parent()
     {
-        candidates.push(profile_dir.join("libreaper_daw_bridge.so"));
+        candidates.push(profile_dir.join(&lib));
         if let Some(target_dir) = profile_dir.parent() {
-            candidates.push(target_dir.join("debug/libreaper_daw_bridge.so"));
-            candidates.push(target_dir.join("release/libreaper_daw_bridge.so"));
+            candidates.push(target_dir.join("debug").join(&lib));
+            candidates.push(target_dir.join("release").join(&lib));
         }
     }
     if let Ok(cwd) = env::current_dir() {
-        candidates.push(cwd.join("target/debug/libreaper_daw_bridge.so"));
-        candidates.push(cwd.join("target/release/libreaper_daw_bridge.so"));
+        candidates.push(cwd.join("target/debug").join(&lib));
+        candidates.push(cwd.join("target/release").join(&lib));
     }
     candidates.into_iter().find(|path| path.is_file())
 }

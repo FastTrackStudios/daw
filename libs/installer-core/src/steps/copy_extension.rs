@@ -19,13 +19,11 @@ pub async fn copy_extension(
     let plugins_dir = reaper_dir.join("UserPlugins");
     tokio::fs::create_dir_all(&plugins_dir).await?;
 
-    let ext_name = if cfg!(target_os = "macos") {
-        "libreaper_fts.dylib"
-    } else {
-        "libreaper_fts.so"
-    };
+    // REAPER only loads UserPlugins files named `reaper_*`; cargo's `lib`
+    // prefix on the built cdylib has to go.
+    let ext_name = format!("reaper_fts.{}", std::env::consts::DLL_EXTENSION);
 
-    let dest = plugins_dir.join(ext_name);
+    let dest = plugins_dir.join(&ext_name);
 
     let _ = tx
         .send(InstallEvent::StepProgress {

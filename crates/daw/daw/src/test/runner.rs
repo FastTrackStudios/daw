@@ -159,9 +159,11 @@ impl TestRunner {
             return Err("Failed to build daw-bridge".into());
         }
 
-        let lib_path = cargo_target_dir(daw_workspace).join("release/libreaper_daw_bridge.so");
+        let lib_path = cargo_target_dir(daw_workspace)
+            .join("release")
+            .join(cdylib_file_name("reaper_daw_bridge"));
         let plugins_dir = self.resources_dir.join("UserPlugins");
-        install_plugin(&lib_path, "reaper_daw_bridge.so", &plugins_dir)?;
+        install_plugin(&lib_path, &reaper_plugin_file_name("reaper_daw_bridge"), &plugins_dir)?;
         Ok(())
     }
 
@@ -169,7 +171,8 @@ impl TestRunner {
     ///
     /// `workspace` should point to the workspace root. `package` is the cargo
     /// package name (e.g. `"reaper-input-extension"`). `lib_name` is the output
-    /// library name (e.g. `"reaper_fts_input.so"`).
+    /// library name (e.g. `"reaper_fts_input.so"`); a `.so` suffix is
+    /// swapped for the platform's own by [`install_plugin`].
     pub fn install_extension(
         &self,
         workspace: &Path,
@@ -212,7 +215,7 @@ impl TestRunner {
 
         let lib_path = cargo_target_dir(workspace)
             .join(profile_label)
-            .join(format!("lib{}.so", extension.lib_stem));
+            .join(cdylib_file_name(&extension.lib_stem));
         let plugins_dir = self.resources_dir.join("UserPlugins");
         install_plugin(&lib_path, &extension.plugin_name, &plugins_dir)?;
         Ok(())
@@ -1074,6 +1077,7 @@ pub fn which_command(name: &str) -> Option<String> {
 pub fn resolve_reaper_exe() -> String {
     std::env::var("FTS_REAPER_EXECUTABLE")
         .or_else(|_| which_command("reaper").ok_or(()))
+        .or_else(|_| macos_reaper_app().ok_or(()))
         .unwrap_or_else(|_| "reaper".to_string())
 }
 
@@ -1084,7 +1088,26 @@ pub fn resolve_reaper_exe() -> String {
 /// that links libSwell with X11 and GL support. This function always uses
 /// `which reaper` to find the GUI binary from the user's Nix profile.
 pub fn resolve_gui_reaper_exe() -> String {
-    which_command("reaper").unwrap_or_else(|| "reaper".to_string())
+    which_command("reaper")
+        .or_else(macos_reaper_app)
+        .unwrap_or_else(|| "reaper".to_string())
+}
+
+/// REAPER on macOS is an app bundle, not a `reaper` on PATH.
+fn macos_reaper_app() -> Option<String> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let exe = "REAPER.app/Contents/MacOS/REAPER";
+    let mut roots = vec![PathBuf::from("/Applications")];
+    if let Ok(home) = std::env::var("HOME") {
+        roots.push(PathBuf::from(home).join("Applications"));
+    }
+    roots
+        .into_iter()
+        .map(|root| root.join(exe))
+        .find(|path| path.is_file())
+        .map(|path| path.to_string_lossy().to_string())
 }
 
 /// Canonical REAPER resources directory shared by all rigs and CI.
@@ -1124,7 +1147,13 @@ pub fn install_plugin(
 ) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(user_plugins_dir)?;
 
-    let dest = user_plugins_dir.join(lib_name);
+    // Callers historically spell the name `reaper_foo.so`; REAPER on macOS
+    // only scans UserPlugins for `reaper_*.dylib`.
+    let lib_name = match lib_name.strip_suffix(".so") {
+        Some(stem) => reaper_plugin_file_name(stem),
+        None => lib_name.to_string(),
+    };
+    let dest = user_plugins_dir.join(&lib_name);
 
     // Remove existing symlink/file
     let _ = std::fs::remove_file(&dest);
@@ -1137,6 +1166,22 @@ pub fn install_plugin(
 
     println!("  Installed {} -> {}", dest.display(), lib_path.display());
     Ok(())
+}
+
+/// The file cargo writes for a cdylib with lib name `stem`:
+/// `libfoo.so` on Linux, `libfoo.dylib` on macOS, `foo.dll` on Windows.
+pub fn cdylib_file_name(stem: &str) -> String {
+    format!(
+        "{}{stem}.{}",
+        std::env::consts::DLL_PREFIX,
+        std::env::consts::DLL_EXTENSION
+    )
+}
+
+/// The name REAPER loads an extension under from UserPlugins:
+/// `reaper_foo.so` / `reaper_foo.dylib` / `reaper_foo.dll`.
+pub fn reaper_plugin_file_name(stem: &str) -> String {
+    format!("{stem}.{}", std::env::consts::DLL_EXTENSION)
 }
 
 /// Print a section header. In CI (GitHub Actions) emits `::group::` for collapsible logs.

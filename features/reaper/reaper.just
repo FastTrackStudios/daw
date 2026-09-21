@@ -15,8 +15,11 @@
 # extensions cannot interfere with a test.
 
 # Where a dev install puts things. REAPER's resource dir, not its
-# install dir — the .so goes in UserPlugins beside the user's own.
-export REAPER_HOME := env_var_or_default("REAPER_HOME", env_var("HOME") / ".config/REAPER")
+# install dir — the library goes in UserPlugins beside the user's own.
+export REAPER_HOME := env_var_or_default("REAPER_HOME", if os() == "macos" { env_var("HOME") / "Library/Application Support/REAPER" } else { env_var("HOME") / ".config/REAPER" })
+
+# cargo's cdylib suffix, which is also what REAPER scans UserPlugins for.
+dylib := if os() == "macos" { "dylib" } else { "so" }
 
 # Release because the host has an audio thread, and a debug build of the
 # graph can xrun.
@@ -26,18 +29,18 @@ build:
     cargo build --release -p daw-bridge
 
 # A symlink rather than a copy so a rebuild is live: REAPER picks up the
-# new .so on its next start without this recipe being run again.
+# new library on its next start without this recipe being run again.
 
 # Build and link the bridge into REAPER's UserPlugins
 install: build
     mkdir -p "{{REAPER_HOME}}/UserPlugins"
-    ln -sf "{{justfile_directory()}}/../../target/release/libreaper_daw_bridge.so" \
-        "{{REAPER_HOME}}/UserPlugins/reaper_daw_bridge.so"
+    ln -sf "{{justfile_directory()}}/target/release/libreaper_daw_bridge.{{dylib}}" \
+        "{{REAPER_HOME}}/UserPlugins/reaper_daw_bridge.{{dylib}}"
     @echo "linked into {{REAPER_HOME}}/UserPlugins — restart REAPER to load it"
 
 # Unlink the bridge, leaving the build alone
 uninstall:
-    rm -f "{{REAPER_HOME}}/UserPlugins/reaper_daw_bridge.so"
+    rm -f "{{REAPER_HOME}}/UserPlugins/reaper_daw_bridge.{{dylib}}"
     @echo "unlinked from {{REAPER_HOME}}/UserPlugins"
 
 # Follow the live extension log.
@@ -49,7 +52,7 @@ log:
 
 # Follow the integration rig's log
 test-log:
-    tail -f "{{justfile_directory()}}/../../target/fts-reaper-test/fts-daw-reaper.log"
+    tail -f "{{justfile_directory()}}/target/fts-reaper-test/fts-daw-reaper.log"
 
 # The filter matches TEST NAMES, not file names, and a filter matching
 # nothing passes with zero tests run — which looks exactly like success.
