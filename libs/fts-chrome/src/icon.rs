@@ -47,6 +47,20 @@ pub enum Icon {
     /// The capture catalog (download from a cloud).
     Tones,
     // Chrome affordances.
+    /// Bypass / engage (the power symbol).
+    Power,
+    /// Zoom a panel to full size.
+    Expand,
+    /// A marked default.
+    Star,
+    /// Confirm.
+    Check,
+    /// Edit / rename.
+    Pencil,
+    /// A note (tuner idle).
+    Note,
+    /// Opens a menu below.
+    ChevronDown,
     /// The command palette (⌘).
     Command,
     /// Reload / refresh.
@@ -107,6 +121,13 @@ impl Icon {
             Icon::Setlist => &["M3 6h13", "M3 12h9", "M3 18h9", "M21 6v10", "M18.5 18.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"],
             Icon::Control => &["M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z", "M12 12l4-4"],
             Icon::Tones => &["M20 16.6A5 5 0 0 0 18 7h-1.3A8 8 0 1 0 4 15.3", "M12 12v9", "M8 17l4 4 4-4"],
+            Icon::Power => &["M12 2v10", "M18.4 6.6a9 9 0 1 1-12.77.04"],
+            Icon::Expand => &["M15 3h6v6", "M9 21H3v-6", "M21 3l-7 7", "M3 21l7-7"],
+            Icon::Star => &["M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"],
+            Icon::Check => &["M20 6 9 17l-5-5"],
+            Icon::Pencil => &["M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"],
+            Icon::Note => &["M9 18V5l12-2v13", "M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M18 19a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"],
+            Icon::ChevronDown => &["M6 9l6 6 6-6"],
             Icon::Command => &["M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"],
             Icon::Refresh => &["M21 12a9 9 0 1 1-3-6.7", "M21 4v5h-5"],
             Icon::RailLeft => &["M4 5h16v14H4z", "M10 5v14"],
