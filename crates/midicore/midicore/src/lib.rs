@@ -40,7 +40,7 @@ pub mod attach;
 /// port, it discovers hot-plug from the registry instead of polling (which
 /// on the midir/JACK path meant creating and destroying a client several
 /// times a second), and it needs no `pw-jack` wrapper.
-#[cfg(feature = "pipewire")]
+#[cfg(all(feature = "pipewire", target_os = "linux"))]
 pub mod pipewire {
     pub use midicore_pipewire::*;
 }

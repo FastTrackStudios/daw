@@ -6,7 +6,9 @@ authors.workspace = true
 license.workspace = true
 description = "Native PipeWire MIDI input backend for midicore — ONE graph node with ONE merged MIDI port, no JACK shim."
 
-[dependencies]
+# PipeWire is Linux-only. Other platforms get an empty crate so the
+# workspace still builds there; `midicore::pipewire` is Linux-only too.
+[target.'cfg(target_os = "linux")'.dependencies]
 midicore-proto.workspace = true
 pipewire = "0.10"
 libspa = "0.10"
@@ -14,5 +16,5 @@ libspa-sys = "0.10"
 eyre = { workspace = true }
 tracing = { workspace = true }
 
-[dev-dependencies]
+[target.'cfg(target_os = "linux")'.dev-dependencies]
 tracing-subscriber.workspace = true

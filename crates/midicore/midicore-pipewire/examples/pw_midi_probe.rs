@@ -5,9 +5,15 @@
 //! cargo run -p midicore-pipewire --example pw_midi_probe -- S88   # one device
 //! ```
 //! No `pw-jack` — that is the point.
+#[cfg(target_os = "linux")]
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(target_os = "linux")]
 use std::sync::Arc;
 
+#[cfg(not(target_os = "linux"))]
+fn main() {}
+
+#[cfg(target_os = "linux")]
 fn main() -> eyre::Result<()> {
     tracing_subscriber::fmt().with_env_filter("info").init();
 

@@ -36,6 +36,7 @@
 //! thread; the handle talks to it over a `pw::channel`. `sink` is called on
 //! that loop's realtime data thread — keep it cheap and non-blocking, exactly
 //! as with midir.
+#![cfg(target_os = "linux")]
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
