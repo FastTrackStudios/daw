@@ -38,6 +38,9 @@ pub struct DuplexConfig {
     /// caller links the node to the hardware.
     pub input_device: Option<String>,
     pub output_device: Option<String>,
+    /// Let a built-in microphone be the capture device — see
+    /// [`input_guard`](crate::input_guard). Off by default.
+    pub allow_builtin_mic: bool,
 }
 
 /// One realtime block handed to the `process` closure. `inputs[c]` and

@@ -165,6 +165,7 @@ impl DuplexAudioEngine {
                 .output_name()
                 .or(prefs.input_name())
                 .map(str::to_string),
+            allow_builtin_mic: prefs.allow_builtin_mic,
         };
         let backend = Backend::start(
             cfg,
@@ -310,6 +311,7 @@ fn link_pass(
     output: Option<&str>,
     in_channels: usize,
     node_name: &str,
+    allow_builtin_mic: bool,
 ) -> LinkPass {
     use daw_audio_io::pw::LinkStatus;
     fn run(pass: &mut LinkPass, src: &str, dst: &str) {
@@ -331,7 +333,10 @@ fn link_pass(
     let in_dev = match input {
         Some(n) => pw::device_node_name(n, true),
         None => pw::default_device_node_name(true),
-    };
+    }
+    // Never link a built-in mic into a live rig: through the speakers it
+    // feeds back. The node plays output-only instead (see input_guard).
+    .filter(|dev| daw_audio_io::input_guard::check_input(dev, allow_builtin_mic).is_ok());
     let out_dev = match output {
         Some(n) => pw::device_node_name(n, false),
         None => pw::default_device_node_name(false),
@@ -478,7 +483,13 @@ fn spawn_linker(
                 dead_passes = 0;
             }
 
-            let pass = link_pass(input.as_deref(), output.as_deref(), in_channels, &node_name);
+            let pass = link_pass(
+                input.as_deref(),
+                output.as_deref(),
+                in_channels,
+                &node_name,
+                prefs.allow_builtin_mic,
+            );
             let now_linked = pass.live == pass.total;
             if now_linked && !was_linked {
                 if ever_linked {
