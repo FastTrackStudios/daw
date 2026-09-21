@@ -51,6 +51,15 @@ tailwind-check: tailwind
     fi
     echo "tailwind-signal.css is up to date"
 
+# ── Standalone playback ──────────────────────────────────────────────────
+# Open a REAPER project in daw-standalone and play it through the default
+# output device, with a transport prompt on stdin (h for help). Release,
+# because a debug build of the render path can xrun.
+
+# Play an .rpp through the standalone engine
+play RPP:
+    cargo run --release -p daw-standalone --features rpp-loader --example play_rpp -- "{{RPP}}"
+
 # ── Live Rigs (carried from the dissolved signal workspace) ──────────────
 # Open a live instrument rig: live input → FX chain (NAM amp / cab / plugins)
 # → output, routed through PipeWire via cpal's NATIVE PipeWire backend. Each
