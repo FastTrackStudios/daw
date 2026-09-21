@@ -70,6 +70,9 @@ pub use decoder::{DecodedAudio, decode_audio, decode_audio_with_extension};
 pub use duplex_engine::{DuplexAudioEngine, PhonesBus};
 #[cfg(feature = "audio")]
 pub use mixer::{AudioEngine, TrackHandle};
+/// Realtime metrics both engines report (block size, render time, xruns).
+#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
+pub use daw_audio_io::duplex::EngineStats;
 #[cfg(feature = "audio")]
 pub use routing::{MixerRouting, RoutingSnapshot};
 pub use source::AudioSource;

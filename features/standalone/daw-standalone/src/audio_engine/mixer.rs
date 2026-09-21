@@ -679,7 +679,13 @@ impl AudioEngine {
                         }
                     }
                 },
-                move |err| error!("Audio input stream error: {err}"),
+                move |err| {
+                    if is_xrun(&err) {
+                        tracing::warn!("Audio input stream xrun: {err}");
+                    } else {
+                        error!("Audio input stream error: {err}");
+                    }
+                },
                 None,
             )
             .map_err(|e| format!("Failed to build input stream: {e}"))?;
@@ -737,6 +743,8 @@ impl AudioEngine {
             };
             hook(buf, &clock);
         };
+        #[cfg(not(target_arch = "wasm32"))]
+        let stats_on_error = stats.clone();
         let stream = device
             .build_output_stream(
                 *config,
@@ -846,6 +854,17 @@ impl AudioEngine {
                     stats.record_render_at(t0.elapsed().as_nanos() as u64, sample_rate);
                 },
                 move |err| {
+                    // An xrun is a glitch, not a death: CoreAudio reports
+                    // every underrun here and the stream keeps running.
+                    // Treating it as a dead device re-enabled the soft
+                    // clock beside a callback that was still advancing the
+                    // playhead, and asked for a pointless re-attach.
+                    if is_xrun(&err) {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        stats_on_error.xruns.fetch_add(1, AtomicOrdering::Relaxed);
+                        tracing::warn!("Audio stream xrun: {err}");
+                        return;
+                    }
                     // Device died (e.g. PipeWire dropped the connection). The
                     // callback that drives `advance()` will stop firing, so
                     // re-enable the soft clock NOW — the playhead must never
@@ -930,6 +949,10 @@ impl AudioEngine {
                     }
                 },
                 move |err| {
+                    if is_xrun(&err) {
+                        tracing::warn!("Audio stream xrun: {err}");
+                        return;
+                    }
                     // Private-mixer path has no project soft clock to fall back
                     // on, but still flag the death so a supervisor can reopen.
                     stream_error.store(true, AtomicOrdering::Relaxed);
@@ -1085,4 +1108,10 @@ impl AudioEngine {
             .map(|t| t.buffer.duration_seconds())
             .fold(0.0f64, f64::max)
     }
+}
+
+/// Whether a stream error is only a buffer under/overrun — a glitch the
+/// stream survives — rather than a device that has gone away.
+fn is_xrun(err: &cpal::Error) -> bool {
+    err.kind() == cpal::ErrorKind::Xrun
 }
