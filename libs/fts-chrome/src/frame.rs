@@ -128,92 +128,19 @@ pub fn TopBar(
     on_expand: Option<EventHandler<()>>,
 ) -> Element {
     let chrome = use_chrome();
-    let crumbs = chrome.trail();
     let tabs = chrome.active_tabs();
     let status = chrome.active_status();
-    // Which crumb's sibling menu is open, by index.
-    let mut menu = use_signal(|| None::<usize>);
 
     rsx! {
         div {
             style: "position: relative; display: flex; align-items: center; gap: 12px; \
                     height: {BAR_H}px; flex-shrink: 0; padding: 0 8px 0 10px; \
                     border-bottom: 1px solid {LINE}; background: #0b0b0e; user-select: none;",
+            TrafficLights {}
             if let Some(leading) = leading { {leading} }
 
             // ── the trail: where you are, and the way back ──────────────
-            div { style: "display: flex; align-items: center; gap: 6px; min-width: 0;",
-                for (i, crumb) in crumbs.iter().enumerate() {
-                    {
-                        let last = i + 1 == crumbs.len();
-                        let has_menu = !crumb.menu.is_empty();
-                        let on_click = crumb.on_click;
-                        let items = crumb.menu.clone();
-                        let label = crumb.label.clone();
-                        rsx! {
-                            // Separator lives inside the crumb's own box: the
-                            // key has to sit on the first node of the block.
-                            div { key: "crumb-{i}", style: "position: relative; display: flex; align-items: center; gap: 6px;",
-                                if i > 0 {
-                                    span { style: "color: #3f3f46; font-size: 11px;", "▸" }
-                                }
-                                button {
-                                    style: format!(
-                                        "appearance: none; border: none; background: transparent; \
-                                         padding: 4px 6px; border-radius: 6px; white-space: nowrap; \
-                                         font-size: {}; font-weight: {}; color: {}; cursor: {};",
-                                        if last { "13px" } else { "12px" },
-                                        if last { "700" } else { "500" },
-                                        if last { TEXT } else { "#a1a1aa" },
-                                        if on_click.is_some() || has_menu { "pointer" } else { "default" },
-                                    ),
-                                    onclick: move |_| {
-                                        if has_menu {
-                                            let open = menu() == Some(i);
-                                            menu.set(if open { None } else { Some(i) });
-                                        } else if let Some(cb) = on_click {
-                                            cb.call(());
-                                        }
-                                    },
-                                    "{label}"
-                                    if has_menu {
-                                        span { style: "margin-left: 5px; font-size: 8px; color: {DIM};", "▼" }
-                                    }
-                                }
-                                if menu() == Some(i) {
-                                    div {
-                                        style: "position: absolute; top: 100%; left: 0; z-index: 200; \
-                                                margin-top: 4px; min-width: 180px; padding: 4px; \
-                                                display: flex; flex-direction: column; gap: 1px; \
-                                                border: 1px solid #2b2b31; border-radius: 10px; \
-                                                background: #0d0d10; box-shadow: 0 12px 32px #000c;",
-                                        for (n, (name, current, pick)) in items.iter().enumerate() {
-                                            button {
-                                                key: "{n}",
-                                                style: format!(
-                                                    "appearance: none; text-align: left; border: none; \
-                                                     border-radius: 6px; padding: 6px 9px; font-size: 11px; \
-                                                     cursor: pointer; background: {}; color: {};",
-                                                    if *current { "#101821" } else { "transparent" },
-                                                    if *current { ACCENT } else { "#d4d4d8" },
-                                                ),
-                                                onclick: {
-                                                    let pick = *pick;
-                                                    move |_| {
-                                                        menu.set(None);
-                                                        pick.call(());
-                                                    }
-                                                },
-                                                "{name}"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            Crumbs {}
 
             // ── the current view's pages ────────────────────────────────
             if !tabs.is_empty() {
@@ -384,6 +311,204 @@ pub fn PanelHost(id: String, children: Element) -> Element {
                 }
             }
             div { style: "flex: 1; min-height: 0; overflow: auto;", {children} }
+        }
+    }
+}
+
+/// The crumb trail — where you are, and the way back; a crumb with a menu
+/// opens its siblings. Part of [`TopBar`], and usable on its own in a view
+/// that claims the bar ([`crate::use_bar_claim`]).
+#[component]
+pub fn Crumbs(
+    /// Only the deepest crumb (with its sibling menu) — for a view whose own
+    /// layout already says where you are, so the bar needs just the switch.
+    #[props(default)]
+    current_only: bool,
+) -> Element {
+    let chrome = use_chrome();
+    let mut crumbs = chrome.trail();
+    if current_only && crumbs.len() > 1 {
+        crumbs = crumbs.split_off(crumbs.len() - 1);
+    }
+    // Which crumb's sibling menu is open, by index.
+    let mut menu = use_signal(|| None::<usize>);
+    rsx! {
+    div { style: "display: flex; align-items: center; gap: 6px; min-width: 0;",
+        for (i, crumb) in crumbs.iter().enumerate() {
+            {
+                let last = i + 1 == crumbs.len();
+                let has_menu = !crumb.menu.is_empty();
+                let on_click = crumb.on_click;
+                let items = crumb.menu.clone();
+                let label = crumb.label.clone();
+                rsx! {
+                    // Separator lives inside the crumb's own box: the
+                    // key has to sit on the first node of the block.
+                    div { key: "crumb-{i}", style: "position: relative; display: flex; align-items: center; gap: 6px;",
+                        if i > 0 {
+                            span { style: "color: #52525b; font-size: 13px;", "›" }
+                        }
+                        button {
+                            style: format!(
+                                "appearance: none; border: none; background: transparent; \
+                                 padding: 4px 6px; border-radius: 6px; white-space: nowrap; \
+                                 font-size: {}; font-weight: {}; color: {}; cursor: {};",
+                                if last { "13px" } else { "12px" },
+                                if last { "700" } else { "500" },
+                                if last { TEXT } else { "#a1a1aa" },
+                                if on_click.is_some() || has_menu { "pointer" } else { "default" },
+                            ),
+                            onclick: move |_| {
+                                if has_menu {
+                                    let open = menu() == Some(i);
+                                    menu.set(if open { None } else { Some(i) });
+                                } else if let Some(cb) = on_click {
+                                    cb.call(());
+                                }
+                            },
+                            "{label}"
+                            if has_menu {
+                                span { style: "margin-left: 5px; font-size: 8px; color: {DIM};", "▼" }
+                            }
+                        }
+                        if menu() == Some(i) {
+                            div {
+                                style: "position: absolute; top: 100%; left: 0; z-index: 200; \
+                                        margin-top: 4px; min-width: 180px; padding: 4px; \
+                                        display: flex; flex-direction: column; gap: 1px; \
+                                        border: 1px solid #2b2b31; border-radius: 10px; \
+                                        background: #0d0d10; box-shadow: 0 12px 32px #000c;",
+                                for (n, (name, current, pick)) in items.iter().enumerate() {
+                                    button {
+                                        key: "{n}",
+                                        style: format!(
+                                            "appearance: none; text-align: left; border: none; \
+                                             border-radius: 6px; padding: 6px 9px; font-size: 11px; \
+                                             cursor: pointer; background: {}; color: {};",
+                                            if *current { "#101821" } else { "transparent" },
+                                            if *current { ACCENT } else { "#d4d4d8" },
+                                        ),
+                                        onclick: {
+                                            let pick = *pick;
+                                            move |_| {
+                                                menu.set(None);
+                                                pick.call(());
+                                            }
+                                        },
+                                        "{name}"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    }
+}
+
+/// The bar's slack: press to move the window, double-click to maximise —
+/// the [`crate::WindowActions`] the shell provided. Grows to fill the bar;
+/// inert (but still a spacer) where there is no shell.
+#[component]
+pub fn DragSpace() -> Element {
+    let actions = try_use_context::<crate::WindowActions>();
+    rsx! {
+        div {
+            style: "flex: 1; align-self: stretch; min-width: 12px;",
+            onmousedown: move |_| { if let Some(a) = actions { a.drag.call(()) } },
+            ondoubleclick: move |_| { if let Some(a) = actions { a.expand.call(()) } },
+        }
+    }
+}
+
+/// Glyphs hidden until the pointer is over the group, as on macOS.
+const LIGHTS_CSS: &str = ".fts-lights .fts-light-glyph{opacity:0}\
+                          .fts-lights:hover .fts-light-glyph{opacity:1}";
+
+/// The macOS traffic lights — close, minimise, zoom — at the bar's left
+/// corner, where a Mac puts them: red, yellow, green dots whose glyphs show
+/// while the pointer is over the group. The bar is the title bar (the native
+/// decorations are off), so these *are* the window's controls. Nothing off
+/// macOS (the controls sit in [`WindowCluster`] there) or without a shell.
+#[component]
+pub fn TrafficLights() -> Element {
+    let actions = try_use_context::<crate::WindowActions>();
+    let Some(actions) = actions.filter(|_| cfg!(target_os = "macos")) else {
+        return rsx! {};
+    };
+    let lights: [(&str, &str, &str, Callback<()>); 3] = [
+        ("Close", "#ff5f57", "×", actions.close),
+        ("Minimize", "#febc2e", "−", actions.minimize),
+        ("Zoom", "#28c840", "+", actions.maximize),
+    ];
+    rsx! {
+        // Glyphs appear on hover of the whole group, as on macOS — a
+        // stylesheet rule, since inline styles have no :hover.
+        document::Style { {LIGHTS_CSS} }
+        div {
+            class: "fts-lights",
+            style: "display: flex; align-items: center; gap: 8px; padding: 0 6px 0 4px; \
+                    flex-shrink: 0;",
+            for (title, color, glyph, on_click) in lights {
+                button {
+                    key: "{title}",
+                    title: "{title}",
+                    style: "appearance: none; display: flex; align-items: center; \
+                            justify-content: center; width: 12px; height: 12px; padding: 0; \
+                            border: none; border-radius: 999px; cursor: default; \
+                            background: {color}; box-shadow: inset 0 0 0 0.5px #0000003d;",
+                    onclick: move |_| on_click.call(()),
+                    span {
+                        class: "fts-light-glyph",
+                        style: "font-size: 10px; line-height: 10px; font-weight: 700; \
+                                color: #00000099;",
+                        "{glyph}"
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The app cluster at the bar's right end: the settings gear (when the shell
+/// has a settings flyout) and — off macOS, where they live in
+/// [`TrafficLights`] instead — minimise / maximise / close. Nothing where no
+/// shell provided [`crate::WindowActions`].
+#[component]
+pub fn WindowCluster() -> Element {
+    let Some(actions) = try_use_context::<crate::WindowActions>() else {
+        return rsx! {};
+    };
+    let buttons = !cfg!(target_os = "macos");
+    rsx! {
+        div { style: "display: flex; align-items: center; gap: 2px; margin-left: 2px;",
+            if let Some(settings) = actions.settings {
+                WindowButton {
+                    icon: Icon::Settings,
+                    title: "Settings".to_string(),
+                    on_click: move |()| settings.call(()),
+                }
+            }
+            if buttons {
+                WindowButton {
+                    icon: Icon::Minimize,
+                    title: "Minimize".to_string(),
+                    on_click: move |()| actions.minimize.call(()),
+                }
+                WindowButton {
+                    icon: Icon::Maximize,
+                    title: "Maximize".to_string(),
+                    on_click: move |()| actions.maximize.call(()),
+                }
+                WindowButton {
+                    icon: Icon::Close,
+                    title: "Close".to_string(),
+                    danger: true,
+                    on_click: move |()| actions.close.call(()),
+                }
+            }
         }
     }
 }

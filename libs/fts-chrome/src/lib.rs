@@ -55,7 +55,10 @@ use dioxus::prelude::*;
 mod frame;
 mod icon;
 
-pub use frame::{AppFrame, IconRail, PanelHost, PanelRail, TopBar, WindowButton};
+pub use frame::{
+    AppFrame, Crumbs, DragSpace, IconRail, PanelHost, PanelRail, TopBar, TrafficLights, WindowButton,
+    WindowCluster,
+};
 pub use icon::{Glyph, Icon};
 
 /// A step in the crumb trail. Clicking it navigates there; if it carries
@@ -296,6 +299,11 @@ pub struct Chrome {
     pub open_panel: Signal<Option<String>>,
     /// The level beneath the workspace (the rigs, under Signal).
     pub sub_rail: Signal<Vec<RailItem>>,
+    /// How many mounted views have claimed the bar ([`use_bar_claim`]). While
+    /// any has, the app hides its own [`TopBar`] and the view's header *is*
+    /// the one bar — built from the same pieces: [`Crumbs`], [`DragSpace`],
+    /// [`WindowCluster`].
+    pub bar_claims: Signal<u32>,
 }
 
 impl Chrome {
@@ -307,6 +315,7 @@ impl Chrome {
             panels: Signal::new(BTreeMap::new()),
             open_panel: Signal::new(None),
             sub_rail: Signal::new(Vec::new()),
+            bar_claims: Signal::new(0),
         }
     }
 
@@ -470,6 +479,55 @@ pub fn use_chrome_level(depth: Depth) -> ChromeLevel {
     let chrome = use_chrome();
     use_drop(move || chrome.clear(depth));
     ChromeLevel { chrome, depth }
+}
+
+impl Chrome {
+    /// Whether a view is drawing the bar itself (see [`use_bar_claim`]).
+    pub fn bar_claimed(&self) -> bool {
+        (self.bar_claims)() > 0
+    }
+}
+
+/// Claim the app's bar for this view: while it is mounted the app hides its
+/// own [`TopBar`], and the view renders one bar of its own that includes
+/// [`Crumbs`], a [`DragSpace`] and the [`WindowCluster`]. One bar instead of
+/// the app's stacked on top of the view's.
+///
+/// A no-op without an app around it (standalone, plugin, web remote) — the
+/// private fallback chrome has no bar to hide.
+pub fn use_bar_claim() {
+    let chrome = use_chrome();
+    use_hook(move || {
+        let mut claims = chrome.bar_claims;
+        claims += 1;
+    });
+    use_drop(move || {
+        let mut claims = chrome.bar_claims;
+        let n = *claims.peek();
+        claims.set(n.saturating_sub(1));
+    });
+}
+
+/// What the window can do, supplied by the app shell (desktop: drag, zoom,
+/// minimise, close; an app settings flyout). Provided with
+/// [`provide_window_actions`]; read by [`DragSpace`] and [`WindowCluster`],
+/// which render nothing where no shell provided it (web, phone, plugin).
+#[derive(Clone, Copy, PartialEq)]
+pub struct WindowActions {
+    /// Press on empty bar space: move the window.
+    pub drag: Callback<()>,
+    /// Double-click empty bar space: maximise / restore.
+    pub expand: Callback<()>,
+    pub minimize: Callback<()>,
+    pub maximize: Callback<()>,
+    pub close: Callback<()>,
+    /// The app's settings flyout, when it has one.
+    pub settings: Option<Callback<()>>,
+}
+
+/// Install the shell's [`WindowActions`] at the app root.
+pub fn provide_window_actions(actions: WindowActions) {
+    use_context_provider(|| actions);
 }
 
 /// Install the chrome at the app root.
