@@ -81,6 +81,17 @@ pub struct Item {
     pub fixed_lane: Option<u32>,
 
     // Takes
+    /// How far into the source the ACTIVE take starts, in seconds.
+    ///
+    /// The take's own `start_offset`, lifted onto the item because a
+    /// window that draws the waveform needs it for every item it draws
+    /// and cannot afford a take fetch each — the same reason
+    /// `send_count` and `receive_count` sit on `Track`. Zero when there
+    /// is no take.
+    ///
+    /// Read-only here: `TakeService::set_start_offset` is what changes
+    /// it, and this follows on the next read.
+    pub start_offset: Duration,
     /// Number of takes in this item
     pub take_count: u32,
     /// Index of the currently active take
@@ -154,6 +165,7 @@ impl Default for Item {
             group_id: None,
             label: None,
             fixed_lane: None,
+            start_offset: Duration::ZERO,
             take_count: 0,
             active_take_index: 0,
         }

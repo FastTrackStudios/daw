@@ -294,6 +294,7 @@ pub fn poll_and_broadcast_items() {
                                     color: None,
                                     group_id: None,
                                     fixed_lane: curr.fixed_lane,
+                                    start_offset: Duration::ZERO,
                                     take_count: 0,
                                     active_take_index: curr.active_take_index,
                                 },
@@ -581,6 +582,13 @@ impl ReaperItem {
             0
         };
 
+        // The active take's offset into its source, for the window's
+        // waveform. Zero when the item has no take — an empty item
+        // draws nothing, so there is nothing to offset.
+        let start_offset = active_take
+            .map(|take| item_sw::get_take_info_value(medium, take, TakeAttributeKey::StartOffs))
+            .unwrap_or(0.0);
+
         Some(Item {
             label: {
                 let text = item_sw::get_item_notes(low, item);
@@ -606,6 +614,7 @@ impl ReaperItem {
             color,
             group_id,
             fixed_lane,
+            start_offset: Duration::from_seconds(start_offset),
             take_count,
             active_take_index,
         })

@@ -73,6 +73,24 @@ fn resolve_track_guid(p: &ProjectState, track: &TrackRef) -> Option<String> {
     }
 }
 
+/// The item as stored, with the active take's `start_offset` filled in.
+///
+/// Derived on read rather than mirrored into `ItemEntry`, so there is
+/// one place the offset lives and `set_start_offset` cannot leave the
+/// item saying something the take disagrees with. Zero when the item
+/// has no takes.
+fn with_start_offset(p: &ProjectState, guid: &str, item: &Item) -> Item {
+    let mut item = item.clone();
+    item.start_offset = p
+        .takes
+        .get(guid)
+        .and_then(|list| list.takes.get(list.active_idx as usize))
+        .map_or(daw_proto::primitives::Duration::ZERO, |take| {
+            take.start_offset
+        });
+    item
+}
+
 fn item_guid_from_ref(p: &ProjectState, item: &ItemRef) -> Option<String> {
     match item {
         ItemRef::Guid(g) => Some(g.clone()),
@@ -131,7 +149,9 @@ impl Items for Standalone {
         let guid = resolve_project(self, &project)?;
         self.with_project(&guid, |p| {
             let item_guid = item_guid_from_ref(p, &item)?;
-            p.items.get(&item_guid).map(|e| e.item.clone())
+            p.items
+                .get(&item_guid)
+                .map(|e| with_start_offset(p, &item_guid, &e.item))
         })
         .ok()
         .flatten()
@@ -142,7 +162,10 @@ impl Items for Standalone {
             return Vec::new();
         };
         self.with_project(&guid, |p| {
-            p.items.values().map(|e| e.item.clone()).collect()
+            p.items
+                .iter()
+                .map(|(guid, e)| with_start_offset(p, guid, &e.item))
+                .collect()
         })
         .unwrap_or_default()
     }
