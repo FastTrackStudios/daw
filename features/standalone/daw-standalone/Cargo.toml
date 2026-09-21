@@ -97,6 +97,7 @@ eyre = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 base64 = "0.22"
 dawfile-reaper = { workspace = true }
+tempfile = { workspace = true }
 
 [features]
 # Resident source decoding (fts-sample/symphonium) without cpal.

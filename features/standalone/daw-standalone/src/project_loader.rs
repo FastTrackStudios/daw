@@ -1226,6 +1226,11 @@ fn apply_fx_node(
 /// - `$HOME/.vst3`, `/usr/lib/vst3`, `/usr/local/lib/vst3` (Linux)
 /// - `~/Library/Audio/Plug-Ins/VST3`, `/Library/Audio/Plug-Ins/VST3` (macOS)
 /// - `$HOME/.clap`, `/usr/lib/clap`, `/usr/local/lib/clap` (Linux)
+/// - `~/Library/Audio/Plug-Ins/CLAP`, `/Library/Audio/Plug-Ins/CLAP` (macOS)
+/// - the same pattern for VST2 (`.vst`, `/usr/lib/vst`, `Plug-Ins/VST`)
+///
+/// Each root is searched directly, then through vendor folders (see
+/// [`PLUGIN_FOLDER_DEPTH`]).
 ///
 /// Returns the absolute path if found. Bare filenames in `.rpp`
 /// files are how REAPER refers to plugins; the host resolves them
@@ -1271,20 +1276,54 @@ fn resolve_plugin_path(
         PluginType::Vst => {
             if let Some(h) = &home {
                 roots.push(h.join(".vst"));
+                #[cfg(target_os = "macos")]
+                roots.push(h.join("Library/Audio/Plug-Ins/VST"));
             }
             roots.push(PathBuf::from("/usr/lib/vst"));
             roots.push(PathBuf::from("/usr/local/lib/vst"));
+            #[cfg(target_os = "macos")]
+            roots.push(PathBuf::from("/Library/Audio/Plug-Ins/VST"));
         }
         _ => return None,
     }
 
-    for root in roots {
-        let candidate = root.join(filename);
-        if candidate.exists() {
-            return candidate.to_str().map(|s| s.to_string());
+    // Direct hits first, then vendor folders.
+    for depth in [0, PLUGIN_FOLDER_DEPTH] {
+        for root in &roots {
+            if let Some(path) = find_plugin_in(root, filename, depth) {
+                return path.to_str().map(|s| s.to_string());
+            }
         }
     }
     None
+}
+
+/// How deep [`find_plugin_in`] descends below a search root. macOS
+/// installers nest by vendor and category — Universal Audio ships
+/// `Plug-Ins/VST3/Universal Audio/Compressors and Limiters/Foo.vst3`.
+const PLUGIN_FOLDER_DEPTH: usize = 3;
+
+/// `dir/filename`, or the same inside a subfolder up to `depth` levels
+/// down. A plugin bundle is itself a directory, so anything with an
+/// extension is a plugin, not a folder, and is not descended into.
+fn find_plugin_in(
+    dir: &std::path::Path,
+    filename: &str,
+    depth: usize,
+) -> Option<std::path::PathBuf> {
+    let candidate = dir.join(filename);
+    if candidate.exists() {
+        return Some(candidate);
+    }
+    if depth == 0 {
+        return None;
+    }
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|sub| sub.is_dir() && sub.extension().is_none())
+        .find_map(|sub| find_plugin_in(&sub, filename, depth - 1))
 }
 
 /// Per-track mixer widths, from the project's `<EXTSTATE>` block.
@@ -1378,5 +1417,24 @@ fn record_input_from_rpp(raw: i32) -> daw_proto::track::RecordInput {
     let channel = if raw >= 1024 { raw - 1024 } else { raw };
     RecordInput::Audio {
         channel: channel.max(0) as u32,
+    }
+}
+
+#[cfg(test)]
+mod plugin_search_tests {
+    use super::find_plugin_in;
+
+    #[test]
+    fn finds_a_plugin_in_nested_vendor_folders_but_not_inside_bundles() {
+        let root = tempfile::tempdir().unwrap();
+        let nested = root.path().join("Universal Audio/Compressors and Limiters");
+        std::fs::create_dir_all(nested.join("UAD API 2500.vst3/Contents")).unwrap();
+        // A same-named file inside another bundle must not be found.
+        std::fs::create_dir_all(root.path().join("Other.vst3/Hidden.vst3")).unwrap();
+
+        let hit = find_plugin_in(root.path(), "UAD API 2500.vst3", 3).unwrap();
+        assert_eq!(hit, nested.join("UAD API 2500.vst3"));
+        assert!(find_plugin_in(root.path(), "UAD API 2500.vst3", 1).is_none());
+        assert!(find_plugin_in(root.path(), "Hidden.vst3", 3).is_none());
     }
 }
