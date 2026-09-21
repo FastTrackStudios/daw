@@ -79,6 +79,25 @@ impl TrackShape {
     }
 }
 
+/// Where a new last child goes, and what its arrival costs the tracks
+/// already there.
+///
+/// Worked out from a [`TrackTree`] snapshot alone, which is what makes
+/// the arithmetic testable: the bug this type exists to fix was in the
+/// sums, not in the backend calls, and a test that needed a backend to
+/// reach them is a test nobody writes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppendPlan {
+    /// The mixer index the newcomer is inserted at.
+    pub index: u32,
+    /// The track currently terminating the subtree and the depth it must
+    /// take instead, when there is one to fix.
+    pub retarget: Option<(String, i32)>,
+    /// How many levels the newcomer closes — the parent, plus whatever
+    /// the old terminator handed over.
+    pub closes: i32,
+}
+
 /// An immutable snapshot of a project's whole track list, for navigating
 /// the folder tree without re-querying the backend per lookup.
 ///
@@ -132,6 +151,26 @@ impl TrackTree {
         self.get(track.parent_guid.as_deref()?)
     }
 
+    /// How many folders `track` sits inside. A top-level track is 0.
+    ///
+    /// Walked through `parent_guid` rather than summed from
+    /// `folder_depth`, because the depths are what an append is in the
+    /// middle of fixing and the parent links are not.
+    pub fn nesting_of(&self, track: &Track) -> usize {
+        let mut nesting = 0;
+        let mut at = track;
+        while let Some(parent) = self.parent_of(at) {
+            nesting += 1;
+            at = parent;
+            // A cycle in `parent_guid` would hang this. It should not
+            // happen; a project that has one should not also hang.
+            if nesting > self.tracks.len() {
+                break;
+            }
+        }
+        nesting
+    }
+
     /// The subtree under `guid` as nested [`TrackShape`]s — read entirely
     /// from this snapshot, no per-node backend query. Pair with
     /// [`TracksExt::append_shape`] to clone an existing subtree's shape
@@ -144,11 +183,74 @@ impl TrackTree {
             .collect()
     }
 
+    /// Plan the append of a new last child of `guid`.
+    ///
+    /// A terminator closes every folder from its own parent outward.
+    /// Once a newcomer follows it, it must stop at the folders strictly
+    /// INSIDE `guid`, and the newcomer takes over the rest. The old rule
+    /// here was "one level fewer", which is right only when the
+    /// terminator's outermost closed folder is `guid` itself —
+    /// appending onto a container whose last mic closes amp *and*
+    /// channel *and* part closed the folder early, and the newcomer
+    /// landed outside the container it was meant to join.
+    ///
+    /// A parent with no children yet is its own terminator, and whatever
+    /// IT was closing passes to the newcomer too: a leaf channel closing
+    /// its part becomes a folder, and the part still has to be closed by
+    /// somebody.
+    pub fn plan_append(&self, guid: &str) -> Option<AppendPlan> {
+        let parent = self.get(guid)?;
+        let index = self.subtree_end_index(guid).unwrap_or(parent.index + 1);
+        let Some(previous) = self.at_index(index.saturating_sub(1)) else {
+            return Some(AppendPlan {
+                index,
+                retarget: None,
+                closes: 1,
+            });
+        };
+        if previous.guid == guid {
+            return Some(AppendPlan {
+                index,
+                retarget: None,
+                closes: 1 + (-parent.folder_depth).max(0),
+            });
+        }
+        if previous.folder_depth >= 0 {
+            return Some(AppendPlan {
+                index,
+                retarget: None,
+                closes: 1,
+            });
+        }
+        let closed = -previous.folder_depth;
+        let inside = i32::try_from(
+            self.nesting_of(previous)
+                .saturating_sub(self.nesting_of(parent) + 1),
+        )
+        .unwrap_or(0);
+        let keep = inside.min(closed);
+        Some(AppendPlan {
+            index,
+            retarget: Some((previous.guid.clone(), -keep)),
+            closes: closed - keep,
+        })
+    }
+
     /// The index just past the end of `guid`'s subtree — where a new last
     /// child should be inserted, or `guid`'s own next-sibling position if
     /// it has no children yet.
     pub fn subtree_end_index(&self, guid: &str) -> Option<u32> {
         let parent = self.get(guid)?;
+        // A track that does not open a folder has no subtree, so its
+        // subtree ends immediately after it. Without this the walk below
+        // starts at a cumulative depth of zero and the very next track
+        // satisfies its stop condition — returning a position one track
+        // too far, which put a first child on the far side of whatever
+        // happened to follow its parent. The doc above always said this
+        // is what it does; the code did not.
+        if parent.folder_depth <= 0 {
+            return Some(parent.index + 1);
+        }
         let mut depth = 0;
         for track in self.tracks.iter().filter(|t| t.index >= parent.index) {
             depth += track.folder_depth;
@@ -293,9 +395,15 @@ pub trait TracksExt: Tracks + Items + Projects {
     /// `parent_guid`, opening `parent_guid` as a folder if it isn't one
     /// already.
     fn append_shape(&self, parent_guid: &str, shape: &[TrackShape]) -> Result<(), DawError> {
-        let insertion_index = self.prepare_append(parent_guid)?;
+        let (insertion_index, closes) = self.prepare_append(parent_guid)?;
         self.set_depth(parent_guid, 1)?;
-        self.insert_shape_at(shape, insertion_index)
+        let mut flat = TrackShape::flatten(shape);
+        if let Some(last) = flat.last_mut() {
+            // `flatten` already closes one level for the parent. Anything
+            // beyond that is what the old terminator handed over.
+            last.1 -= closes - 1;
+        }
+        self.insert_flat_at(&flat, insertion_index)
     }
 
     /// Create `shape` starting at an explicit mixer position, without any
@@ -304,45 +412,212 @@ pub trait TracksExt: Tracks + Items + Projects {
     /// where the subtree goes (e.g. mid-restructure, when the tree is
     /// briefly not well-formed enough for a subtree-end walk).
     fn insert_shape_at(&self, shape: &[TrackShape], index: u32) -> Result<(), DawError> {
-        for (offset, (name, depth)) in TrackShape::flatten(shape).into_iter().enumerate() {
-            let track = self.insert_track_at(&name, index + offset as u32)?;
-            self.set_depth(&track, depth)?;
+        self.insert_flat_at(&TrackShape::flatten(shape), index)
+    }
+
+    /// The same, from already-flattened `(name, depth)` pairs — for the
+    /// callers that have adjusted a depth before inserting.
+    fn insert_flat_at(&self, flat: &[(String, i32)], index: u32) -> Result<(), DawError> {
+        for (offset, (name, depth)) in flat.iter().enumerate() {
+            let at = index + u32::try_from(offset).unwrap_or(u32::MAX);
+            let track = self.insert_track_at(name, at)?;
+            self.set_depth(&track, *depth)?;
         }
         Ok(())
     }
 
-    /// The index to insert a new last child of `parent_guid` at, having
-    /// first made room for it.
+    /// Carry out a [`TrackTree::plan_append`]: fix the old terminator and
+    /// say where the newcomer goes and how much it closes.
     ///
-    /// Whatever track currently sits just before that index is the one
-    /// terminating `parent_guid`'s subtree, so it closes one level too
-    /// many once a new sibling follows it — its `folder_depth` is bumped
-    /// by one and the newcomer takes over closing the folder. That
-    /// terminator isn't necessarily a *direct* child: appending a third
-    /// channel after `L/[mic]`, `R/[mic]` means fixing up `R`'s last mic,
-    /// a grandchild closing two levels (`-2` → `-1`).
-    ///
-    /// The index is computed from a single snapshot taken *before* that
-    /// fixup — it changes what a fresh subtree-end walk would see, so
-    /// recomputing afterwards silently yields the wrong position.
-    fn prepare_append(&self, parent_guid: &str) -> Result<u32, DawError> {
-        let tree = self.track_tree();
-        let parent = tree
-            .get(parent_guid)
+    /// The plan is computed from a single snapshot taken *before* the
+    /// fixup — the fixup changes what a fresh subtree-end walk would
+    /// see, so recomputing afterwards silently yields the wrong
+    /// position.
+    fn prepare_append(&self, parent_guid: &str) -> Result<(u32, i32), DawError> {
+        let plan = self
+            .track_tree()
+            .plan_append(parent_guid)
             .ok_or_else(|| DawError::invalid_object("track", parent_guid))?;
-        let insertion_index = tree
-            .subtree_end_index(parent_guid)
-            .unwrap_or(parent.index + 1);
-
-        if let Some(previous) = tree.at_index(insertion_index.saturating_sub(1))
-            // `parent` itself when it has no children yet — nothing to fix.
-            && previous.guid != parent_guid
-            && previous.folder_depth < 0
-        {
-            self.set_depth(&previous.guid, previous.folder_depth + 1)?;
+        if let Some((guid, depth)) = plan.retarget {
+            self.set_depth(&guid, depth)?;
         }
-        Ok(insertion_index)
+        Ok((plan.index, plan.closes))
     }
 }
 
 impl<D: Tracks + Items + Projects + ?Sized> TracksExt for D {}
+
+#[cfg(test)]
+mod append_plan_tests {
+    use super::{AppendPlan, TrackTree};
+    use crate::Track;
+
+    /// One track. `parent` is the guid it hangs under, `depth` REAPER's
+    /// relative folder depth.
+    fn track(index: u32, guid: &str, parent: Option<&str>, depth: i32) -> Track {
+        Track {
+            guid: guid.to_owned(),
+            name: guid.to_uppercase(),
+            index,
+            parent_guid: parent.map(str::to_owned),
+            folder_depth: depth,
+            ..Track::default()
+        }
+    }
+
+    /// A guitar's worth of nesting: part > channel > amp > mic, where the
+    /// single mic closes all three at once. This is the shape #90 was
+    /// found on.
+    fn three_deep() -> TrackTree {
+        TrackTree::new(vec![
+            track(0, "part", None, 1),
+            track(1, "channel", Some("part"), 1),
+            track(2, "amp", Some("channel"), 1),
+            track(3, "mic", Some("amp"), -3),
+        ])
+    }
+
+    /// Appending a second mic under the amp. The old mic stops closing
+    /// anything; the newcomer closes all three.
+    #[test]
+    fn a_terminator_closing_three_levels_hands_over_all_three() {
+        let plan = three_deep().plan_append("amp").expect("the amp is there");
+        assert_eq!(
+            plan,
+            AppendPlan {
+                index: 4,
+                retarget: Some(("mic".to_owned(), 0)),
+                closes: 3,
+            },
+            "the old rule gave the mic -2 and the newcomer -1, which closed \
+             the amp early and put the new mic outside it"
+        );
+    }
+
+    /// Appending a second amp under the channel. The mic keeps closing
+    /// the amp and hands over the channel and the part.
+    #[test]
+    fn a_terminator_keeps_the_levels_inside_the_parent() {
+        let plan = three_deep()
+            .plan_append("channel")
+            .expect("the channel is there");
+        assert_eq!(
+            plan,
+            AppendPlan {
+                index: 4,
+                retarget: Some(("mic".to_owned(), -1)),
+                closes: 2,
+            }
+        );
+    }
+
+    /// And appending at the top: the mic keeps amp and channel, the
+    /// newcomer takes the part.
+    #[test]
+    fn appending_at_the_top_leaves_the_inner_folders_closed() {
+        let plan = three_deep().plan_append("part").expect("the part is there");
+        assert_eq!(
+            plan,
+            AppendPlan {
+                index: 4,
+                retarget: Some(("mic".to_owned(), -2)),
+                closes: 1,
+            }
+        );
+    }
+
+    /// The case the old rule got right, kept so a future simplification
+    /// has to stay right about it: a grandchild closing two levels,
+    /// appending a third channel.
+    #[test]
+    fn a_grandchild_closing_two_levels_still_hands_over_one() {
+        let tree = TrackTree::new(vec![
+            track(0, "part", None, 1),
+            track(1, "l", Some("part"), 1),
+            track(2, "l-mic", Some("l"), -1),
+            track(3, "r", Some("part"), 1),
+            track(4, "r-mic", Some("r"), -2),
+        ]);
+        let plan = tree.plan_append("part").expect("the part is there");
+        assert_eq!(
+            plan,
+            AppendPlan {
+                index: 5,
+                retarget: Some(("r-mic".to_owned(), -1)),
+                closes: 1,
+            }
+        );
+    }
+
+    /// A parent with nothing under it yet is its own terminator, and
+    /// whatever it was closing passes to the newcomer — or the folder it
+    /// used to close never closes at all.
+    #[test]
+    fn a_childless_parent_hands_over_what_it_was_closing() {
+        let tree = TrackTree::new(vec![
+            track(0, "part", None, 1),
+            track(1, "channel", Some("part"), -1),
+        ]);
+        let plan = tree.plan_append("channel").expect("the channel is there");
+        assert_eq!(
+            plan,
+            AppendPlan {
+                index: 2,
+                retarget: None,
+                // The channel it is about to open, and the part the
+                // channel was closing as a leaf.
+                closes: 2,
+            }
+        );
+    }
+
+    /// A plain childless parent mid-list closes only itself.
+    #[test]
+    fn a_childless_parent_closing_nothing_costs_one_level() {
+        let tree = TrackTree::new(vec![track(0, "a", None, 0), track(1, "b", None, 0)]);
+        let plan = tree.plan_append("a").expect("a is there");
+        assert_eq!(
+            plan,
+            AppendPlan {
+                index: 1,
+                retarget: None,
+                closes: 1,
+            }
+        );
+    }
+
+    /// A leaf parent's first child goes straight after it, not after
+    /// whatever follows it.
+    ///
+    /// `subtree_end_index` walked from a cumulative depth of zero, so
+    /// the very next track met its stop condition and the index came
+    /// back one too far — a first child landed on the far side of its
+    /// parent's next sibling.
+    #[test]
+    fn a_first_child_goes_straight_after_its_parent() {
+        let tree = TrackTree::new(vec![
+            track(0, "a", None, 0),
+            track(1, "b", None, 0),
+            track(2, "c", None, 0),
+        ]);
+        assert_eq!(tree.subtree_end_index("a"), Some(1));
+        assert_eq!(
+            tree.plan_append("a").map(|p| p.index),
+            Some(1),
+            "the child was put after b"
+        );
+    }
+
+    /// Nesting is walked through the parent links, not summed from the
+    /// depths — the depths are what an append is in the middle of
+    /// fixing.
+    #[test]
+    fn nesting_is_counted_through_the_parents() {
+        let tree = three_deep();
+        let of = |guid: &str| tree.nesting_of(tree.get(guid).expect(guid));
+        assert_eq!(
+            (of("part"), of("channel"), of("amp"), of("mic")),
+            (0, 1, 2, 3)
+        );
+    }
+}
