@@ -353,3 +353,79 @@ fn load_vst3(_path: &str) -> Result<Option<Box<dyn PluginInstance>>, PluginError
 // Convenience so `Path` import on the cfg(feature) branch is used.
 #[allow(dead_code)]
 fn _path_import(_: &Path) {}
+
+// ── Render context ──────────────────────────────────────────────────────
+
+std::thread_local! {
+    static RENDER_FRAME: std::cell::Cell<Option<(u64, u64)>> = const { std::cell::Cell::new(None) };
+}
+
+/// Every block any renderer renders gets the next number, so "this block"
+/// is unambiguous even when a loop or a seek renders the same frames again.
+static RENDER_CYCLE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Where on the timeline the block being processed starts, in output
+/// samples — `Some` only while the project renderer is calling plugins.
+///
+/// `PluginEvents` carries no transport, and a plugin normally needs none.
+/// This is for the few that must agree with each other about *when*: the
+/// guide instruments on the Count and Guide tracks, where a spoken cue
+/// takes the place of the count note under it.
+#[must_use]
+pub fn render_frame() -> Option<u64> {
+    RENDER_FRAME.with(std::cell::Cell::get).map(|(_, frame)| frame)
+}
+
+/// Which render pass this is — a number no other block shares. Plugins
+/// that pass information between tracks within a block key it by this,
+/// not by [`render_frame`]: the same frames are rendered again on every
+/// loop pass and after a seek back.
+#[must_use]
+pub fn render_cycle() -> Option<u64> {
+    RENDER_FRAME.with(std::cell::Cell::get).map(|(cycle, _)| cycle)
+}
+
+/// Publishes [`render_frame`] for the life of the guard.
+pub(crate) struct RenderFrameGuard;
+
+impl RenderFrameGuard {
+    pub(crate) fn enter(start_frame: u64) -> Self {
+        let cycle = RENDER_CYCLE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        RENDER_FRAME.with(|c| c.set(Some((cycle, start_frame))));
+        Self
+    }
+}
+
+impl Drop for RenderFrameGuard {
+    fn drop(&mut self) {
+        RENDER_FRAME.with(|c| c.set(None));
+    }
+}
+
+std::thread_local! {
+    static TRACK_MUTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the track whose FX chain is being processed is muted. Mute is
+/// applied at the fader, after the chain, so a muted track's plugins still
+/// run — this is how one knows its output will not be heard.
+#[must_use]
+pub fn track_muted() -> bool {
+    TRACK_MUTED.with(std::cell::Cell::get)
+}
+
+/// Publishes [`track_muted`] while a track's chain is processed.
+pub(crate) struct TrackMutedGuard;
+
+impl TrackMutedGuard {
+    pub(crate) fn enter(muted: bool) -> Self {
+        TRACK_MUTED.with(|c| c.set(muted));
+        Self
+    }
+}
+
+impl Drop for TrackMutedGuard {
+    fn drop(&mut self) {
+        TRACK_MUTED.with(|c| c.set(false));
+    }
+}

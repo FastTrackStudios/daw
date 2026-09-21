@@ -414,6 +414,7 @@ impl ProjectRenderer {
     /// Render `frames` stereo frames starting at `start_frame` (in
     /// output-rate samples). Returns a fresh `StereoBuffer`.
     pub fn render_block(&self, start_frame: u64, frames: usize) -> StereoBuffer {
+        let _frame = crate::plugin::RenderFrameGuard::enter(start_frame);
         let mut master = StereoBuffer::zeroed(frames, self.sample_rate);
         if frames == 0 {
             return master;
@@ -672,6 +673,10 @@ impl ProjectRenderer {
                     self.sample_rate,
                     frames,
                 );
+                // Mute is applied at the fader, after the chain, so a muted
+                // track's plugins still run (tails, meters). Say so to the
+                // plugins that need to know — see `plugin::track_muted`.
+                let _muted = crate::plugin::TrackMutedGuard::enter(t.muted);
                 for (i, fx_guid) in t.fx_chain.iter().enumerate() {
                     if !t.fx_enabled.get(i).copied().unwrap_or(true) {
                         continue;
