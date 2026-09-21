@@ -41,6 +41,10 @@ pub mod pw;
 #[cfg(target_os = "linux")]
 pub mod duplex_pw;
 
+/// CoreAudio AUHAL duplex backend (macOS).
+#[cfg(target_os = "macos")]
+pub mod duplex_coreaudio;
+
 #[cfg(feature = "monitor")]
 pub mod monitor;
 

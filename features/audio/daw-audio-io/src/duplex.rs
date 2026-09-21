@@ -11,7 +11,7 @@
 //! | OS | impl | mechanism |
 //! |----|------|-----------|
 //! | Linux | [`crate::duplex_pw::PipewireBackend`] | `pw_filter` (capture+playback ports, one process cb) |
-//! | macOS | _todo_ | CoreAudio AUHAL duplex unit |
+//! | macOS | [`crate::duplex_coreaudio::CoreAudioBackend`] | AUHAL unit, input pulled in the output render callback |
 //! | Windows | _todo_ | WASAPI duplex / ASIO |
 //!
 //! The rig's signal processing (tap input channel → FX chain → stereo out) is the
@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
 
 /// What the backend opens: channel counts + the desired block size.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct DuplexConfig {
     /// Graph node name (how it appears in patchbays).
     pub name: String,
@@ -32,6 +32,12 @@ pub struct DuplexConfig {
     /// Desired block size + rate as `(frames, rate)` → a per-node latency request
     /// (e.g. `(64, 48000)`). `None` lets the graph decide.
     pub latency: Option<(u32, u32)>,
+    /// Capture / playback device by name substring (`None` = system
+    /// default). Backends without a graph (CoreAudio) open these devices
+    /// themselves; graph backends (PipeWire) ignore them — there the
+    /// caller links the node to the hardware.
+    pub input_device: Option<String>,
+    pub output_device: Option<String>,
 }
 
 /// One realtime block handed to the `process` closure. `inputs[c]` and
@@ -150,9 +156,19 @@ pub trait DuplexBackend: Send + Sized {
     fn stats(&self) -> Arc<EngineStats>;
     /// The graph node name, so the caller can wire device ports to it.
     fn node_name(&self) -> &str;
+    /// Hardware latency in frames at [`sample_rate`](Self::sample_rate),
+    /// as `(input, output)`: everything between the jack and the callback
+    /// (converter, driver, safety offset, one buffer) and back out. Their
+    /// sum is the round trip a player hears. `None` when the backend cannot
+    /// tell.
+    fn latency_frames(&self) -> Option<(u32, u32)> {
+        None
+    }
 }
 
 // The platform backend. Linux = native PipeWire `pw_filter`; other platforms
 // land here as they're implemented.
 #[cfg(target_os = "linux")]
 pub use crate::duplex_pw::PipewireBackend as Backend;
+#[cfg(target_os = "macos")]
+pub use crate::duplex_coreaudio::CoreAudioBackend as Backend;

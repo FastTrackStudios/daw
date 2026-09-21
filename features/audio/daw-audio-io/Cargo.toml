@@ -23,6 +23,9 @@ tracing = { workspace = true }
 # SPSC lock-free ring for the duplex monitor's input → output handoff.
 rtrb = { version = "0.3", optional = true }
 
+[dev-dependencies]
+tracing-subscriber.workspace = true
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # PipeWire is the Linux audio host, unconditionally: cpal's native pipewire
 # backend (real device names, per-node latency) + the raw pw_filter duplex

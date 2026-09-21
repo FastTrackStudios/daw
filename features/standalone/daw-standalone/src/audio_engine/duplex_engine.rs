@@ -151,6 +151,12 @@ impl DuplexAudioEngine {
             inputs: in_ports,
             outputs: out_ports,
             latency: Some((buffer, sample_rate)),
+            input_device: prefs.input_name().map(str::to_string),
+            // A guitar rig monitors through the interface it plays into.
+            output_device: prefs
+                .output_name()
+                .or(prefs.input_name())
+                .map(str::to_string),
         };
         let backend = Backend::start(
             cfg,
