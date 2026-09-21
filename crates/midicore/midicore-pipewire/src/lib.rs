@@ -49,7 +49,10 @@ use pw::spa;
 use spa::param::format::{MediaSubtype, MediaType};
 use spa::pod::Pod;
 
-use midicore_proto::{Direction, MidiEvent, PortId, PortInfo, PortSelector, TimedEvent};
+use midicore_proto::{
+    BackendError, Direction, InputBackend, InputConfig, MaybeSend, MidiEvent, PortId, PortInfo,
+    PortSelector, TimedEvent,
+};
 
 /// Handshake between the caller and the loop thread: `None` while the stream
 /// is still connecting, then the outcome, once.
@@ -242,6 +245,19 @@ impl MidiInput {
     where
         F: Fn(TimedEvent) + Send + 'static,
     {
+        Self::open_selecting(node_name, vec![selector], sink)
+    }
+
+    /// Open a node called `node_name` linked to the union of `selectors` from
+    /// its first reconcile — no window where it links a narrower or wider set.
+    fn open_selecting<F>(
+        node_name: &str,
+        selectors: Vec<PortSelector>,
+        sink: F,
+    ) -> eyre::Result<Self>
+    where
+        F: Fn(TimedEvent) + Send + 'static,
+    {
         init();
         let (tx, rx) = pw::channel::channel();
         let linked = Arc::new(RwLock::new(Vec::new()));
@@ -252,7 +268,7 @@ impl MidiInput {
             std::thread::Builder::new()
                 .name("midicore-pw".into())
                 .spawn(move || {
-                    let outcome = run_loop(&node_name, selector, sink, rx, &linked, &ready);
+                    let outcome = run_loop(&node_name, selectors, sink, rx, &linked, &ready);
                     if let Err(e) = outcome {
                         tracing::error!("midicore-pipewire: loop stopped: {e}");
                         signal_ready(&ready, Err(e.to_string()));
@@ -317,6 +333,40 @@ impl Drop for MidiInput {
     }
 }
 
+impl InputBackend for MidiInput {
+    const NAME: &'static str = "pipewire";
+
+    fn sources() -> Vec<PortInfo> {
+        input_devices()
+    }
+
+    fn open<F>(config: InputConfig, sink: F) -> Result<Self, BackendError>
+    where
+        F: Fn(TimedEvent) + MaybeSend + 'static,
+    {
+        Self::open_selecting(&config.name, config.selectors, sink)
+            .map_err(|e| BackendError(e.to_string()))
+    }
+
+    fn select(&self, selectors: Vec<PortSelector>) {
+        self.set_selectors(selectors);
+    }
+
+    fn connected(&self) -> Vec<PortInfo> {
+        let mut names = self.ports();
+        names.sort();
+        names
+            .into_iter()
+            .map(|name| PortInfo {
+                id: PortId(name.clone()),
+                name,
+                direction: Direction::Input,
+                virtual_port: false,
+            })
+            .collect()
+    }
+}
+
 fn signal_ready(ready: &Ready, r: Result<(), String>) {
     let (lock, cv) = &**ready;
     if let Ok(mut guard) = lock.lock() {
@@ -330,21 +380,14 @@ fn signal_ready(ready: &Ready, r: Result<(), String>) {
 /// Does `selector` want `port`? Mirrors the midir backend's matching rules so
 /// a stored port name behaves identically on either backend.
 fn wants(selector: &PortSelector, port: &str) -> bool {
-    match selector {
-        PortSelector::All => true,
-        PortSelector::Default => true,
-        PortSelector::Id(PortId(id)) => port == id,
-        PortSelector::NameContains(needle) => {
-            needle.is_empty() || port.to_lowercase().contains(&needle.to_lowercase())
-        }
-        // A virtual port is a node other apps connect *to*; nothing to link.
-        PortSelector::Virtual(_) => false,
-    }
+    // A virtual port is a node other apps connect *to*; `matches` never
+    // selects an existing source for one, so there is nothing to link.
+    selector.matches(port)
 }
 
 fn run_loop<F>(
     node_name: &str,
-    selector: PortSelector,
+    selectors: Vec<PortSelector>,
     sink: F,
     rx: pw::channel::Receiver<Cmd>,
     linked: &Arc<RwLock<Vec<String>>>,
@@ -445,7 +488,7 @@ where
 
     // ── Graph state, all owned by this thread ───────────────────────────────
     let state = Rc::new(RefCell::new(GraphState {
-        selectors: vec![selector],
+        selectors,
         nodes: HashMap::new(),
         sources: HashMap::new(),
         in_ports: HashMap::new(),
