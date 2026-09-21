@@ -18,6 +18,18 @@ use daw_proto::event_bus::{DawEvent, EventBus, EventBusStreamSource};
 impl EventBus for crate::Reaper {}
 
 impl EventBusStreamSource for crate::Reaper {
+    /// The first frame every subscriber gets, so a client can tell when
+    /// it is actually attached.
+    ///
+    /// `subscribe` returns before the hub has the sink, and there is no
+    /// replay, so anything published in that gap went to nobody — a
+    /// consumer that subscribed and immediately caused an event could
+    /// wait forever for it. The marker rides at the front of the new
+    /// subscriber's mailbox, ahead of anything published in between.
+    fn events_intro(&self) -> Option<DawEvent> {
+        Some(DawEvent::Attached)
+    }
+
     fn events_hub(&self) -> &architect::PubSub<DawEvent> {
         crate::event_hub::hub().bus_hub()
     }

@@ -82,6 +82,15 @@ wasm-bindgen = { version = "0.2", optional = true }
 js-sys = { version = "0.3", optional = true }
 
 [dev-dependencies]
+# This crate, with the features its own tests need.
+#
+# A self dev-dependency is how a crate turns a feature on for its test
+# targets without turning it on for everyone who depends on it.
+# `comped_take_selection` reads a `.rpp`, which lives behind
+# `rpp-project` — without this the test does not compile, and because a
+# crate's test targets are built as a set, it took every other test in
+# daw-standalone down with it.
+daw-standalone = { path = ".", features = ["rpp-project", "bootstrap"] }
 daw-proto = { workspace = true }
 daw-control = { workspace = true }
 eyre = { workspace = true }

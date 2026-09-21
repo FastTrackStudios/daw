@@ -21,25 +21,6 @@ fn seeded() -> Standalone {
     s
 }
 
-/// Wait until the backend has actually attached the bus subscription.
-///
-/// `Events::subscribe` returns as soon as the in-flight `events(tx)` call is
-/// parked on a task; the server attaches the sink to its `PubSub` hub a
-/// moment later. A `PubSub` has no replay buffer, so anything published in
-/// that window goes to nobody — "subscribe before the gesture" is only true
-/// once the hub has the sink. Polling the hub's subscriber count makes it
-/// true rather than likely.
-async fn bus_attached(standalone: &Standalone) {
-    use daw_proto::event_bus::EventBusStreamSource;
-    for _ in 0..400 {
-        if standalone.events_hub().subscriber_count() > 0 {
-            return;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-    }
-    panic!("the event-bus subscription never attached");
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fader_gesture_reaches_engine_and_echoes_on_bus() -> eyre::Result<()> {
     let bundle = build_in_process_daw(seeded()).await?;
@@ -58,8 +39,15 @@ async fn fader_gesture_reaches_engine_and_echoes_on_bus() -> eyre::Result<()> {
     state.handle_midi(&[0x90, 0x33, 0x7F], 0);
     state.handle_midi(&[0x90, 0x33, 0x00], 50);
 
-    // Subscribe the bus BEFORE the gesture so the echo is observable —
-    // subscribing is not synchronous, see `bus_attached` and session#85.
+    // Subscribe the bus BEFORE the gesture so the echo is observable.
+    //
+    // This used to need a `bus_attached` helper polling the hub's
+    // subscriber count, because `subscribe` returned before the server
+    // had the sink and anything published in the gap went to nobody.
+    // `subscribe` now waits for the backend's `Attached` marker, which
+    // the attach itself puts at the front of the mailbox — so being
+    // here means the sink is attached, for a remote client as much as
+    // for this in-process one. See session#85.
     let mut bus = bundle
         .daw
         .events()
@@ -68,7 +56,6 @@ async fn fader_gesture_reaches_engine_and_echoes_on_bus() -> eyre::Result<()> {
             ..Default::default()
         })
         .await?;
-    bus_attached(&bundle.standalone).await;
 
     // Fader strip 0 to the unity mark.
     let raw = mcu::encode_fader(0, taper::volume_to_fader(0.5));

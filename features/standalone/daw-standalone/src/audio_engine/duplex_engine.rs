@@ -287,31 +287,54 @@ fn link_pass(
         Some(n) => pw::device_node_name(n, false),
         None => pw::default_device_node_name(false),
     };
+    // The device's own port names, in channel order, rather than an assumed
+    // `capture_{n}` / `playback_{n}`. A multichannel interface presented as
+    // one node numbers its ports (a Yamaha TF has `capture_1..34`); a device
+    // PipeWire presents through a UCM profile names them by channel (a
+    // MiniFuse 4 route has `capture_FL` / `capture_FR`). Assuming the first
+    // shape meant every link to the second failed silently and the engine ran
+    // into nothing at `paused`.
     match in_dev {
         Some(dev) => {
-            for c in 0..in_channels {
+            let ports = pw::node_ports(&dev, true);
+            if ports.is_empty() {
+                tracing::warn!(
+                    device.node = %dev,
+                    "audio: capture device has no audio ports to link"
+                );
+            }
+            // Only as many as the filter has inputs for, and only as many as
+            // the device has: a mono instrument input feeds one.
+            for (c, port) in ports.iter().take(in_channels).enumerate() {
                 run(
                     &mut pass,
-                    &format!("{dev}:capture_{}", c + 1),
+                    &format!("{dev}:{port}"),
                     &format!("{node_name}:input_{c}"),
                 );
             }
+            pass.total += in_channels.saturating_sub(ports.len());
         }
         // Device node absent — all its links count as down.
         None => pass.total += in_channels,
     }
     match out_dev {
         Some(dev) => {
-            run(
-                &mut pass,
-                &format!("{node_name}:output_0"),
-                &format!("{dev}:playback_1"),
-            );
-            run(
-                &mut pass,
-                &format!("{node_name}:output_1"),
-                &format!("{dev}:playback_2"),
-            );
+            let ports = pw::node_ports(&dev, false);
+            if ports.is_empty() {
+                tracing::warn!(
+                    device.node = %dev,
+                    "audio: playback device has no audio ports to link"
+                );
+            }
+            // Stereo out: the first two of whatever the device calls them.
+            for (c, port) in ports.iter().take(2).enumerate() {
+                run(
+                    &mut pass,
+                    &format!("{node_name}:output_{c}"),
+                    &format!("{dev}:{port}"),
+                );
+            }
+            pass.total += 2usize.saturating_sub(ports.len().min(2));
         }
         None => pass.total += 2,
     }

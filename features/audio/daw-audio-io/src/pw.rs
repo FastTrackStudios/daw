@@ -316,6 +316,47 @@ pub fn default_device_node_name(capture: bool) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
+/// The audio port names of `node`, in graph order — `capture_FL`,
+/// `capture_1`, `capture_MONO`, whatever this device actually calls them.
+///
+/// `output` selects the direction as PipeWire sees it: a capture device's
+/// ports are *outputs* (it produces audio), a playback device's are *inputs*.
+///
+/// Callers used to assume `capture_{n}` / `playback_{n}`, which holds for a
+/// multichannel interface presented as one node — a Yamaha TF names its ports
+/// `capture_1..34`. It does not hold for a device PipeWire presents through a
+/// UCM profile: a MiniFuse 4's routes name theirs by channel (`capture_FL`,
+/// `capture_FR`, `monitor_FL`), so every link to `capture_1` failed and the
+/// engine sat at `paused`, running into nothing.
+///
+/// Order is the graph's, not sorted: it is channel order, and `FL` before
+/// `FR` is the difference between stereo and swapped stereo.
+///
+/// MIDI ports are excluded — this is for wiring audio.
+pub fn node_ports(node: &str, output: bool) -> Vec<String> {
+    let flag = if output { "-o" } else { "-i" };
+    let listing = Command::new("pw-link")
+        .args([flag])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    node_ports_in(&listing, node)
+}
+
+/// The port-name extraction, over a `pw-link -o` / `-i` listing.
+fn node_ports_in(listing: &str, node: &str) -> Vec<String> {
+    listing
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            let (owner, port) = line.rsplit_once(':')?;
+            (owner == node).then(|| port.trim().to_string())
+        })
+        .filter(|port| !port.to_lowercase().contains("midi"))
+        .collect()
+}
+
 /// Link one PipeWire port to another (`"node:port"` endpoints), best-effort.
 /// Returns whether the link command reported success.
 pub fn link(src: &str, dst: &str) -> bool {
@@ -529,5 +570,87 @@ mod node_selection_tests {
             matching_nodes(LISTING, "Yamaha TF", true),
             vec!["alsa_input.usb-Yamaha_Corporation_Yamaha_TF-00.capture.0.0".to_string()]
         );
+    }
+}
+
+#[cfg(test)]
+mod node_port_tests {
+    use super::node_ports_in;
+
+    /// A real `pw-link -o` excerpt: a numbered multichannel interface, a UCM
+    /// device that names ports by channel, and a MIDI bridge.
+    const LISTING: &str = r#"
+Midi-Bridge:MiniFuse 4: MIDI 1 (capture)
+alsa_input.usb-ARTURIA_MiniFuse_4-00.HiFi__Line4__source:capture_FL
+alsa_input.usb-ARTURIA_MiniFuse_4-00.HiFi__Line4__source:capture_FR
+alsa_input.usb-ARTURIA_MiniFuse_4-00.HiFi__Mic1__source:capture_MONO
+alsa_input.usb-Yamaha_Corporation_Yamaha_TF-00.capture.0.0:capture_1
+alsa_input.usb-Yamaha_Corporation_Yamaha_TF-00.capture.0.0:capture_2
+alsa_input.usb-Yamaha_Corporation_Yamaha_TF-00.capture.0.0:capture_3
+"#;
+
+    /// The names come from the device, whatever shape they are. Assuming
+    /// `capture_1` is what left a UCM device linked to nothing.
+    #[test]
+    fn ports_are_read_not_assumed() {
+        assert_eq!(
+            node_ports_in(
+                LISTING,
+                "alsa_input.usb-ARTURIA_MiniFuse_4-00.HiFi__Line4__source"
+            ),
+            vec!["capture_FL".to_string(), "capture_FR".to_string()]
+        );
+        assert_eq!(
+            node_ports_in(
+                LISTING,
+                "alsa_input.usb-Yamaha_Corporation_Yamaha_TF-00.capture.0.0"
+            ),
+            vec![
+                "capture_1".to_string(),
+                "capture_2".to_string(),
+                "capture_3".to_string()
+            ]
+        );
+    }
+
+    /// Channel order, not sorted: `FL` before `FR` is the difference between
+    /// stereo and swapped stereo.
+    #[test]
+    fn order_is_the_graphs() {
+        let ports = node_ports_in(
+            LISTING,
+            "alsa_input.usb-ARTURIA_MiniFuse_4-00.HiFi__Line4__source",
+        );
+        assert_eq!(ports.first().map(String::as_str), Some("capture_FL"));
+    }
+
+    /// A mono input has one port, so a stereo assumption would have linked a
+    /// port that does not exist.
+    #[test]
+    fn a_mono_input_has_one_port() {
+        assert_eq!(
+            node_ports_in(
+                LISTING,
+                "alsa_input.usb-ARTURIA_MiniFuse_4-00.HiFi__Mic1__source"
+            )
+            .len(),
+            1
+        );
+    }
+
+    /// MIDI is not audio wiring.
+    #[test]
+    fn midi_ports_are_excluded() {
+        assert!(node_ports_in(LISTING, "Midi-Bridge").is_empty());
+    }
+
+    /// An absent node yields nothing rather than a partial match on a node
+    /// whose name merely starts the same way.
+    #[test]
+    fn a_prefix_is_not_a_match() {
+        assert!(
+            node_ports_in(LISTING, "alsa_input.usb-ARTURIA_MiniFuse_4-00.HiFi__Line4").is_empty()
+        );
+        assert!(node_ports_in(LISTING, "nothing-like-this").is_empty());
     }
 }

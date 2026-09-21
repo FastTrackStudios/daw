@@ -183,6 +183,10 @@ fn spawn_bus_forwarder(ctx: ForwarderCtx, daw: daw::rpc::Daw, filter: BusFilter)
 async fn to_sync_domain(daw: &daw::rpc::Daw, ev: &DawEvent) -> Option<(String, SyncDomain)> {
     use daw::service::{ItemEvent, RoutingEvent, TakeEvent, TransportEvent};
     Some(match ev {
+        // Not a session change at all — the subscription saying it is
+        // live. `daw_control::Events` consumes it, so this is only
+        // reachable by something reading the raw stream.
+        DawEvent::Attached => return None,
         DawEvent::Track(e) => (e.project_guid.clone(), SyncDomain::Track(e.event.clone())),
         DawEvent::Fx(e) => (e.project_guid.clone(), SyncDomain::Fx(e.event.clone())),
         DawEvent::Marker(e) => (e.project_guid.clone(), SyncDomain::Marker(e.event.clone())),

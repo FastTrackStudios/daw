@@ -860,3 +860,87 @@ async fn record_input_and_grouping_reach_a_subscriber() -> eyre::Result<()> {
     );
     Ok(())
 }
+
+/// Subscribing to the bus and immediately causing an event does not
+/// lose the event.
+///
+/// `Events::subscribe` parks the in-flight `events(tx)` call on a task
+/// and returns, and the server attaches the sink some time after that.
+/// `PubSub` has no replay, so everything published in that gap used to
+/// be delivered to nobody — and the consumer waited forever for an
+/// event that had already happened.
+///
+/// Every other subscription test here works around it by polling the
+/// backend's subscriber count (`settle_subscription`), which is correct
+/// for an in-process test holding the `Standalone` and no help at all to
+/// a remote client. This one deliberately does NOT: the backend now
+/// answers a new subscriber with `DawEvent::Attached` as the first frame
+/// of its mailbox, and `subscribe` waits for it before returning. If
+/// that regresses, this test hangs until its timeout rather than going
+/// quietly green. See session#85.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bus_subscriber_does_not_miss_what_it_causes() -> eyre::Result<()> {
+    let bundle = build_in_process_daw(seeded()).await?;
+    let project = bundle.daw.current_project().await?;
+
+    let mut bus = bundle
+        .daw
+        .events()
+        .subscribe(BusFilter {
+            tracks: true,
+            ..Default::default()
+        })
+        .await?;
+
+    // No settle, no sleep, no poll. Straight to the mutation.
+    project.add_track("Drums", None).await?;
+
+    let event = tokio::time::timeout(std::time::Duration::from_secs(5), bus.recv())
+        .await
+        .expect("the event a subscriber caused never arrived")?
+        .expect("bus closed");
+    let mut got = None;
+    let _ = event.map(|e| got = Some(e));
+    assert!(
+        matches!(got, Some(DawEvent::Track(_))),
+        "expected the track event this test caused, got {got:?}"
+    );
+    Ok(())
+}
+
+/// And the marker itself never reaches a consumer.
+///
+/// It is an implementation detail of the attach, filtered out on both
+/// routes — `subscribe` swallows it and `admits` rejects it — so a
+/// consumer matching exhaustively on `DawEvent` never has to think
+/// about it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_attached_marker_is_never_delivered() -> eyre::Result<()> {
+    let bundle = build_in_process_daw(seeded()).await?;
+    let project = bundle.daw.current_project().await?;
+
+    let mut bus = bundle
+        .daw
+        .events()
+        .subscribe(BusFilter {
+            tracks: true,
+            ..Default::default()
+        })
+        .await?;
+    project.add_track("Bass", None).await?;
+
+    for _ in 0..4 {
+        let Ok(Ok(Some(event))) =
+            tokio::time::timeout(std::time::Duration::from_millis(500), bus.recv()).await
+        else {
+            break;
+        };
+        let mut got = None;
+        let _ = event.map(|e| got = Some(e));
+        assert!(
+            !matches!(got, Some(DawEvent::Attached)),
+            "the attach marker reached a consumer"
+        );
+    }
+    Ok(())
+}

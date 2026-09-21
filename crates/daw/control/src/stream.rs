@@ -65,6 +65,33 @@ where
         }
     }
 
+    /// Block until the server has attached this stream's sink.
+    ///
+    /// Reads frames off the RAW channel, bypassing `admit`, until one
+    /// satisfies `is_attached` — the backend's intro marker, which the
+    /// attach itself puts at the front of the mailbox. Anything read on
+    /// the way is dropped: nothing can legitimately precede the marker,
+    /// so a frame that does is from a previous life of the channel.
+    ///
+    /// Returns `Ok(())` if the stream ends first, which is not an error:
+    /// a subscription to a backend that is going away has nothing to
+    /// wait for.
+    pub(crate) async fn await_marker(
+        &mut self,
+        is_marker: impl Fn(&T) -> bool,
+    ) -> Result<(), vox::RxError> {
+        loop {
+            match self.rx.recv().await? {
+                None => return Ok(()),
+                Some(ev) => {
+                    if is_marker(ev.get()) {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+
     /// Next admitted event. Same contract as `vox::Rx::recv`.
     pub async fn recv(&mut self) -> Result<Option<vox::SelfRef<T>>, vox::RxError> {
         loop {

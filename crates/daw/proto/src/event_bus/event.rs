@@ -43,6 +43,16 @@ pub enum DawEvent {
     Take(TakeEvent),
     /// Routing change (carries `project_guid` per variant).
     Routing(RoutingEvent),
+    /// The subscription is live — the first frame every subscriber gets,
+    /// and the only one that is not about the session.
+    ///
+    /// `subscribe` returns before the server has the sink, and `PubSub`
+    /// has no replay, so anything published in that gap used to be
+    /// delivered to nobody. This is put at the FRONT of a new
+    /// subscriber's mailbox by the attach itself, so a client that waits
+    /// for it knows nothing can have been missed. `daw_control::Events`
+    /// waits for it and swallows it; no consumer ever sees one.
+    Attached,
 }
 
 /// Per-subscriber filter. Every flag defaults to off; callers opt in

@@ -37,7 +37,7 @@ impl Events {
         let stream = self.clients.event_bus_stream.clone();
         let (raw_tx, raw_rx) = vox::channel();
         let enabled = filter.any();
-        Ok(crate::EventStream::spawn(
+        let mut events = crate::EventStream::spawn(
             async move {
                 if enabled {
                     let _ = stream.events(raw_tx).await;
@@ -48,7 +48,34 @@ impl Events {
             },
             raw_rx,
             Box::new(move |ev| admits(&filter, ev)),
-        ))
+        );
+        // Wait until the hub actually has the sink.
+        //
+        // `EventStream::spawn` parks the call on a task and returns, so
+        // without this `subscribe` returns before the server has
+        // attached — and `PubSub` has no replay, so everything
+        // published in that gap went to nobody. A consumer that
+        // subscribed and immediately caused an event could wait forever
+        // for it, which is what made
+        // `daw-csi::in_process fader_gesture_reaches_engine_and_echoes_on_bus`
+        // red and had to be worked around by polling the hub's
+        // subscriber count — correct for an in-process test holding the
+        // backend, and no help at all to a remote client.
+        //
+        // The backend puts `Attached` at the FRONT of the new
+        // subscriber's mailbox as part of the attach itself, so by the
+        // time it arrives nothing can have been missed. Swallowed here:
+        // `admits` also rejects it, so it can never reach a consumer by
+        // either route.
+        if enabled {
+            // A channel that ends while we wait is a backend going away,
+            // not a failure to subscribe: the stream reads as ended,
+            // which is what the caller would have seen anyway.
+            let _ = events
+                .await_marker(|ev| matches!(ev, DawEvent::Attached))
+                .await;
+        }
+        Ok(events)
     }
 
     /// Convenience: subscribe with `BusFilter::all()`. Use this when
@@ -76,6 +103,8 @@ fn admits(filter: &BusFilter, ev: &DawEvent) -> bool {
         DawEvent::TransportPosition(t) => {
             filter.transport_position && !filter.project_rejects(&t.project_guid)
         }
+        // Never a consumer's business: `subscribe` consumes it.
+        DawEvent::Attached => false,
         DawEvent::Project(_) => filter.projects,
         DawEvent::Item(e) => filter.items && !filter.project_rejects(item_guid(e)),
         DawEvent::Take(e) => filter.takes && !filter.project_rejects(take_guid(e)),
