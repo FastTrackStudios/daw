@@ -77,6 +77,10 @@ impl Markers for Standalone {
             p.next_marker_id += 1;
             let marker = Marker {
                 id: Some(id),
+                lane: crate::sync::project::default_lane(
+                    &p.ruler_lanes,
+                    crate::sync::RulerLane::DEFAULT_MARKER,
+                ),
                 ..Marker::new(
                     Position::from_time(PositionInSeconds::from_seconds(position)),
                     name.to_string(),

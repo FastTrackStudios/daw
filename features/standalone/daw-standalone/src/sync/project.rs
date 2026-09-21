@@ -444,7 +444,9 @@ impl Projects for Standalone {
             "PROJECT_TIMESIG_NUM" => p.transport.time_signature.numerator as f64,
             "PROJECT_TIMESIG_DENOM" => p.transport.time_signature.denominator as f64,
             "PROJECT_BPM" => p.transport.tempo.bpm(),
-            _ => 0.0,
+            _ => ruler_lane_flags_key(key)
+                .and_then(|i| p.ruler_lanes.get(&i))
+                .map_or(0.0, |lane| f64::from(lane.flags)),
         }
     }
 
@@ -466,7 +468,11 @@ impl Projects for Standalone {
                 p.transport.time_signature =
                     daw_proto::primitives::TimeSignature::new(num, value as u32);
             }
-            _ => {}
+            other => {
+                if let Some(i) = ruler_lane_flags_key(other) {
+                    set_ruler_lane_flags(&mut p.ruler_lanes, i, value as u32);
+                }
+            }
         });
     }
 
@@ -497,17 +503,12 @@ impl Projects for Standalone {
     }
 
     fn set_ruler_lane_name(&self, project: ProjectContext, lane_index: u32, name: &str) {
-        // Store ruler-lane names in project_ext_state under a
-        // synthetic section so they round-trip through get/set
-        // without needing a dedicated field on ProjectState.
+        // Naming a lane creates it, as `RULER_LANE_NAME:N` does in REAPER.
         let Some(guid) = resolve_ctx_guid(self, &project) else {
             return;
         };
         let _ = self.with_project_mut(&guid, |p| {
-            p.project_ext_state.insert(
-                ("daw-standalone:ruler_lanes".into(), format!("{lane_index}")),
-                name.to_string(),
-            );
+            p.ruler_lanes.entry(lane_index).or_default().name = name.to_string();
         });
     }
 
@@ -520,11 +521,8 @@ impl Projects for Standalone {
         };
         s.projects
             .get(&guid)
-            .and_then(|p| {
-                p.project_ext_state
-                    .get(&("daw-standalone:ruler_lanes".into(), format!("{lane_index}")))
-                    .cloned()
-            })
+            .and_then(|p| p.ruler_lanes.get(&lane_index))
+            .map(|lane| lane.name.clone())
             .unwrap_or_default()
     }
 
@@ -533,14 +531,49 @@ impl Projects for Standalone {
             return 0;
         };
         let Ok(s) = self.state.lock() else { return 0 };
+        // REAPER's lanes are a contiguous 0..count run; a gap is an
+        // unnamed lane, not a missing one. So the count is one past the
+        // highest index, never the number of named entries.
         s.projects
             .get(&guid)
-            .map(|p| {
-                p.project_ext_state
-                    .keys()
-                    .filter(|(section, _)| section == "daw-standalone:ruler_lanes")
-                    .count() as u32
-            })
-            .unwrap_or(0)
+            .and_then(|p| p.ruler_lanes.keys().next_back())
+            .map_or(0, |last| last + 1)
     }
+}
+
+/// The lane index in a `RULER_LANE_FLAGS:N` project-info key.
+fn ruler_lane_flags_key(key: &str) -> Option<u32> {
+    key.strip_prefix("RULER_LANE_FLAGS:")?.parse().ok()
+}
+
+/// Set a lane's flags. A default flag is exclusive, as in REAPER: making
+/// one lane the default region (or marker) lane takes it off the others.
+fn set_ruler_lane_flags(
+    lanes: &mut std::collections::BTreeMap<u32, crate::sync::RulerLane>,
+    index: u32,
+    flags: u32,
+) {
+    use crate::sync::RulerLane;
+    for exclusive in [RulerLane::DEFAULT_REGION, RulerLane::DEFAULT_MARKER] {
+        if flags & exclusive != 0 {
+            for (i, lane) in lanes.iter_mut() {
+                if *i != index {
+                    lane.flags &= !exclusive;
+                }
+            }
+        }
+    }
+    lanes.entry(index).or_default().flags = flags;
+}
+
+/// The lane a fresh region (`DEFAULT_REGION`) or marker (`DEFAULT_MARKER`)
+/// lands on, if the project has flagged one.
+pub(crate) fn default_lane(
+    lanes: &std::collections::BTreeMap<u32, crate::sync::RulerLane>,
+    flag: u32,
+) -> Option<u32> {
+    lanes
+        .iter()
+        .find(|(_, lane)| lane.flags & flag != 0)
+        .map(|(i, _)| *i)
 }

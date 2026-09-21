@@ -831,16 +831,18 @@ fn populate_markers_regions(
         // grouping cannot be labelled. Stored where the `Project`
         // service's ruler-lane accessors already read from, so a loaded
         // project answers them the same way a hand-set one does.
+        // The file numbers lanes from 1 (`RULERLANE 1 8 "SONG"`); the
+        // service surface is REAPER's API, which numbers them from 0.
         for lane in &project.ruler_lanes {
-            if lane.index < 0 || lane.name.is_empty() {
+            let Some(index) = file_lane_to_api(Some(lane.index)) else {
                 continue;
-            }
-            p.project_ext_state.insert(
-                (
-                    "daw-standalone:ruler_lanes".into(),
-                    format!("{}", lane.index),
-                ),
-                lane.name.clone(),
+            };
+            p.ruler_lanes.insert(
+                index,
+                crate::sync::RulerLane {
+                    name: lane.name.clone(),
+                    flags: lane.flags.max(0) as u32,
+                },
             );
         }
         for mr in &project.markers_regions.markers {
@@ -861,7 +863,7 @@ fn populate_markers_regions(
                 } else {
                     Some(mr.guid.clone())
                 },
-                lane: mr.lane.map(|l| l as u32),
+                lane: file_lane_to_api(mr.lane),
             };
             p.markers.insert(id, m);
             summary.marker_count += 1;
@@ -883,7 +885,7 @@ fn populate_markers_regions(
                 } else {
                     Some(mr.guid.clone())
                 },
-                lane: mr.lane.map(|l| l as u32),
+                lane: file_lane_to_api(mr.lane),
             };
             p.regions.insert(id, r);
             summary.region_count += 1;
@@ -1437,4 +1439,10 @@ mod plugin_search_tests {
         assert!(find_plugin_in(root.path(), "UAD API 2500.vst3", 1).is_none());
         assert!(find_plugin_in(root.path(), "Hidden.vst3", 3).is_none());
     }
+}
+
+/// A lane number as the `.rpp` writes it (1-based; 0 or absent = no lane)
+/// to the 0-based index REAPER's API — and so this backend — uses.
+fn file_lane_to_api(lane: Option<i32>) -> Option<u32> {
+    lane.filter(|l| *l >= 1).map(|l| (l - 1) as u32)
 }

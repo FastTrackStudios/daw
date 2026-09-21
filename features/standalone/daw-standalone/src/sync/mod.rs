@@ -19,7 +19,7 @@ mod daw;
 // markers ported to architect::rpc — `impl Markers for Standalone`
 // lives at `crate::marker`. The borrowed `StandaloneMarkers<'a>` view
 // retired with the port.
-mod project;
+pub(crate) mod project;
 // regions ported to architect::rpc — see `crate::region`.
 // routing ported to architect::rpc — see `crate::routing_sync`.
 // takes ported to architect::rpc — see `crate::take`.
@@ -30,6 +30,6 @@ mod project;
 // Standalone` lives at `crate::transport`.
 
 pub use daw::{
-    EnvelopeData, EnvelopeKey, FxChainKey, FxEntry, ItemEntry, ProjectState, Standalone,
-    StandaloneState, TakeList, TrackExt,
+    EnvelopeData, EnvelopeKey, FxChainKey, FxEntry, ItemEntry, ProjectState, RulerLane,
+    Standalone, StandaloneState, TakeList, TrackExt,
 };

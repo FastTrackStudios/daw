@@ -70,6 +70,10 @@ impl Regions for Standalone {
             p.next_region_id += 1;
             let mut region = Region::from_seconds(start, end, name.to_string());
             region.id = Some(id);
+            region.lane = crate::sync::project::default_lane(
+                &p.ruler_lanes,
+                crate::sync::RulerLane::DEFAULT_REGION,
+            );
             p.regions.insert(id, region.clone());
             (id, region)
         })?;
