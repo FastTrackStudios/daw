@@ -999,23 +999,46 @@ mod tests {
         // Now walk the WHOLE sample the way a voice does, waiting for the
         // streamer the way an audio thread cannot. Every sample must match
         // the source: chunk boundaries, prefetch and eviction included.
+        // In RUNS, the way a voice reads.
+        //
+        // This used to walk sample by sample and, on every miss, sleep
+        // 2ms and re-read — up to 200 times, per sample. That is one
+        // wait per SAMPLE where the streamer publishes one CHUNK at a
+        // time, and it took 131 seconds: long enough that nextest's
+        // slow timeout killed it, so the streaming path this covers was
+        // never actually reported on. `run` resolves the chunk once for
+        // the whole run, which is both the API a voice uses and one
+        // wait per chunk instead of 24,000. See session#86.
         let total = n * ch as usize;
         let mut worst = 0.0f32;
         let mut i = 0usize;
+        let mut out = vec![0.0f32; CHUNK_FRAMES as usize * ch as usize];
         while i < total {
-            let mut got = s.sample(i);
-            if got == 0.0 && pcm[i] != 0.0 {
-                // A miss: wait for the fill, then read again.
-                for _ in 0..200 {
-                    std::thread::sleep(std::time::Duration::from_millis(2));
-                    got = s.sample(i);
-                    if got != 0.0 {
+            let want = out.len().min(total - i);
+            let Some(buf) = out.get_mut(..want) else {
+                break;
+            };
+            let mut filled = s.run(i, buf);
+            if filled == 0 {
+                // The chunk is not published yet. `run` has asked for
+                // it; wait for it once.
+                for _ in 0..500 {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                    let Some(buf) = out.get_mut(..want) else {
+                        break;
+                    };
+                    filled = s.run(i, buf);
+                    if filled > 0 {
                         break;
                     }
                 }
             }
-            worst = worst.max((got - pcm[i]).abs());
-            i += 1;
+            assert!(filled > 0, "the streamer never filled the chunk at {i}");
+            for (k, got) in out.iter().take(filled).enumerate() {
+                let expected = pcm.get(i + k).copied().unwrap_or(0.0);
+                worst = worst.max((got - expected).abs());
+            }
+            i += filled;
         }
         assert!(worst < 0.01, "worst streamed error {worst}");
         // And it never grew past its working set while doing it.
