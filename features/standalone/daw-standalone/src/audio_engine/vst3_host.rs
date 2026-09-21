@@ -161,6 +161,7 @@ impl Vst3Host {
         Ok(LoadedVst3Plugin {
             descriptor,
             activation: None,
+            initialized: false,
             controller,
             processor,
             component,
@@ -315,6 +316,11 @@ pub struct LoadedVst3Plugin {
     // → _component_handler → _module so the bundle stays mapped
     // until every COM ref is gone.
     activation: Option<ActivationGuard>,
+    /// `IPluginBase::initialize` has run on the component (and a separate
+    /// controller). Tracked apart from `activation` because state and
+    /// parameter calls are legal — and required to be preceded by
+    /// initialize — on a plugin the audio engine has not prepared yet.
+    initialized: bool,
     controller: Option<ControllerHandle>,
     processor: ComPtr<IAudioProcessor>,
     component: ComPtr<IComponent>,
@@ -361,7 +367,6 @@ struct ActivationGuard {
     /// inside are reseated each block to the current scratch slices.
     in_ptrs: [*mut f32; 2],
     out_ptrs: [*mut f32; 2],
-    initialized: bool,
     processing_started: bool,
     active: bool,
     /// Host-implemented IEventList that the plugin reads MIDI input
@@ -802,14 +807,13 @@ impl LoadedVst3Plugin {
         &self.descriptor
     }
 
-    /// Activate the plugin: initialize → setupProcessing →
-    /// setActive(true) → setProcessing(true). Subsequent
-    /// `process_block` calls reuse the activated state.
-    pub fn prepare(&mut self, sample_rate: f64, block_size: u32) -> Result<(), Vst3HostError> {
-        if self.activation.is_some() {
-            self.deactivate();
+    /// `IPluginBase::initialize` the component (and a separate
+    /// controller), wire the controller up, and sync its state.
+    /// Idempotent; undone by [`Self::terminate`].
+    fn ensure_initialized(&mut self) -> Result<(), Vst3HostError> {
+        if self.initialized {
+            return Ok(());
         }
-
         unsafe {
             // 1. IPluginBase::initialize on the component, with our
             // HostApplication as the context. Some plugins (notably
@@ -874,6 +878,22 @@ impl LoadedVst3Plugin {
                 }
             }
 
+        }
+        self.initialized = true;
+        Ok(())
+    }
+
+    /// Activate the plugin: initialize → setupProcessing →
+    /// setActive(true) → setProcessing(true). Subsequent
+    /// `process_block` calls reuse the activated state.
+    pub fn prepare(&mut self, sample_rate: f64, block_size: u32) -> Result<(), Vst3HostError> {
+        if self.activation.is_some() {
+            self.deactivate();
+        }
+
+        self.ensure_initialized()?;
+
+        unsafe {
             // 2. setupProcessing.
             let mut setup = ProcessSetup {
                 processMode: ProcessModes_::kRealtime as i32,
@@ -883,7 +903,7 @@ impl LoadedVst3Plugin {
             };
             let res = self.processor.setupProcessing(&mut setup);
             if res != kResultOk && res != kResultTrue {
-                let _ = self.component.terminate();
+                self.terminate();
                 return Err(Vst3HostError::SetupProcessing);
             }
 
@@ -943,7 +963,7 @@ impl LoadedVst3Plugin {
             // 4. setActive(true).
             let res = self.component.setActive(1);
             if res != kResultOk && res != kResultTrue {
-                let _ = self.component.terminate();
+                self.terminate();
                 return Err(Vst3HostError::Activate);
             }
 
@@ -951,7 +971,7 @@ impl LoadedVst3Plugin {
             let res = self.processor.setProcessing(1);
             if res != kResultOk && res != kResultTrue && res != kNotImplemented {
                 let _ = self.component.setActive(0);
-                let _ = self.component.terminate();
+                self.terminate();
                 return Err(Vst3HostError::StartProcessing);
             }
         }
@@ -1019,7 +1039,6 @@ impl LoadedVst3Plugin {
             scratch_r,
             in_ptrs: [ptr::null_mut(); 2],
             out_ptrs: [ptr::null_mut(); 2],
-            initialized: true,
             processing_started: true,
             active: true,
             event_list_owner,
@@ -1246,6 +1265,7 @@ impl LoadedVst3Plugin {
     ///
     /// Same blob round-trips through [`Self::load_state`].
     pub fn save_state(&mut self) -> Result<Vec<u8>, Vst3HostError> {
+        self.ensure_initialized()?;
         let comp_state = self.read_state_from(StateOwner::Component)?;
         let ctrl_state = self
             .controller
@@ -1286,6 +1306,7 @@ impl LoadedVst3Plugin {
             return Err(Vst3HostError::BadStateBlob);
         }
         let ctrl_state = &state[ctrl_len_off + 4..ctrl_len_off + 4 + ctrl_len];
+        self.ensure_initialized()?;
 
         // Apply to the audio component (IComponent::setState).
         unsafe {
@@ -1365,31 +1386,40 @@ impl LoadedVst3Plugin {
                 let _ = self.component.setActive(0);
                 act.active = false;
             }
-            if act.initialized {
-                if let Some(c) = self.controller.as_mut() {
-                    // Detach the host-installed component handler
-                    // before terminating so the controller doesn't
-                    // call back into our wrapper after Drop.
-                    let _ = c.ptr.setComponentHandler(ptr::null_mut());
-                    // Disconnect the connection points (best-effort).
-                    if c.separate {
-                        if let (Some(comp_cp), Some(ctrl_cp)) = (
-                            self.component.cast::<IConnectionPoint>(),
-                            c.ptr.cast::<IConnectionPoint>(),
-                        ) {
-                            let _ = comp_cp.disconnect(ctrl_cp.as_ptr());
-                            let _ = ctrl_cp.disconnect(comp_cp.as_ptr());
-                        }
-                        if c.initialized {
-                            let _ = c.ptr.terminate();
-                            c.initialized = false;
-                        }
+        }
+        self.terminate();
+    }
+
+    /// Reverse of [`Self::ensure_initialized`]: detach and disconnect the
+    /// controller, then `terminate()` both halves. Idempotent.
+    fn terminate(&mut self) {
+        if !self.initialized {
+            return;
+        }
+        unsafe {
+            if let Some(c) = self.controller.as_mut() {
+                // Detach the host-installed component handler
+                // before terminating so the controller doesn't
+                // call back into our wrapper after Drop.
+                let _ = c.ptr.setComponentHandler(ptr::null_mut());
+                // Disconnect the connection points (best-effort).
+                if c.separate {
+                    if let (Some(comp_cp), Some(ctrl_cp)) = (
+                        self.component.cast::<IConnectionPoint>(),
+                        c.ptr.cast::<IConnectionPoint>(),
+                    ) {
+                        let _ = comp_cp.disconnect(ctrl_cp.as_ptr());
+                        let _ = ctrl_cp.disconnect(comp_cp.as_ptr());
+                    }
+                    if c.initialized {
+                        let _ = c.ptr.terminate();
+                        c.initialized = false;
                     }
                 }
-                let _ = self.component.terminate();
-                act.initialized = false;
             }
+            let _ = self.component.terminate();
         }
+        self.initialized = false;
     }
 
     // ── Parameter access (via IEditController) ─────────────────────
@@ -1397,6 +1427,9 @@ impl LoadedVst3Plugin {
     /// All parameters this plugin exposes. Empty vec if the plugin
     /// has no controller or `getParameterCount` returned 0.
     pub fn params(&mut self) -> Vec<Vst3ParamInfo> {
+        if self.ensure_initialized().is_err() {
+            return Vec::new();
+        }
         let Some(c) = self.controller.as_ref() else {
             return Vec::new();
         };
@@ -1447,6 +1480,9 @@ impl LoadedVst3Plugin {
 
     /// Current plain (de-normalized) value of a parameter.
     pub fn param_value(&mut self, id: u32) -> Option<f64> {
+        if self.ensure_initialized().is_err() {
+            return None;
+        }
         let c = self.controller.as_ref()?;
         unsafe {
             let n = c.ptr.getParamNormalized(id);
@@ -1457,6 +1493,9 @@ impl LoadedVst3Plugin {
     /// Format a plain-value parameter as the plugin would display
     /// it (e.g. `"-12.0 dB"`).
     pub fn value_to_text(&mut self, id: u32, plain_value: f64) -> Option<String> {
+        if self.ensure_initialized().is_err() {
+            return None;
+        }
         let c = self.controller.as_ref()?;
         unsafe {
             let normalized = c.ptr.plainParamToNormalized(id, plain_value);
@@ -1471,6 +1510,9 @@ impl LoadedVst3Plugin {
 
     /// Parse a display string back to a plain parameter value.
     pub fn text_to_value(&mut self, id: u32, text: &str) -> Option<f64> {
+        if self.ensure_initialized().is_err() {
+            return None;
+        }
         let c = self.controller.as_ref()?;
         unsafe {
             let mut wide: Vec<u16> = text.encode_utf16().collect();
@@ -1505,6 +1547,8 @@ pub struct Vst3ParamInfo {
 impl Drop for LoadedVst3Plugin {
     fn drop(&mut self) {
         self.deactivate();
+        // Initialized for a state/param call but never prepared.
+        self.terminate();
     }
 }
 
