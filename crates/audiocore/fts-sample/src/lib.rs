@@ -82,7 +82,7 @@ pub use probe::{probe, AudioInfo, WavFormat};
 
 #[cfg(feature = "load")]
 pub use load::{
-    decode_bytes, load_audio, load_audio_async, load_mono_f32, load_planar_f32, AudioData,
+    decode_bytes, decode_bytes_at, load_audio, load_audio_async, load_mono_f32, load_planar_f32, AudioData,
     LoadedAudio, ResampleQuality,
 };
 #[cfg(feature = "mapped")]
