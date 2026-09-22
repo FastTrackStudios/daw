@@ -61,6 +61,10 @@ pub mod budget;
 pub mod cache;
 #[cfg(feature = "engine-core")]
 pub mod flac_index;
+/// An Ogg Vorbis stream decoded a window at a time — the session's
+/// proxies, streamed (see the module docs).
+#[cfg(feature = "engine-core")]
+pub mod ogg_stream;
 #[cfg(feature = "engine-core")]
 pub mod stream;
 #[cfg(feature = "engine-native")]

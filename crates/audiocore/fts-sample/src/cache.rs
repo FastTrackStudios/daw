@@ -3209,7 +3209,7 @@ fn load_ogg_vorbis_bytes(bytes: &[u8]) -> Result<SampleData, SamplerError> {
 /// runtime never encodes). `quality` is the libvorbis base-quality scale
 /// (-0.2..=1.0, oggenc's `-q` divided by 10).
 #[cfg(feature = "engine-native")]
-fn encode_ogg_vorbis(
+pub fn encode_ogg_vorbis(
     frames: &[f32],
     channels: u16,
     sample_rate: u32,
@@ -3250,6 +3250,99 @@ fn encode_ogg_vorbis(
     encoder.encode_audio_block(&planar).map_err(vorb)?;
     encoder.finish().map_err(vorb)?;
     Ok(out)
+}
+
+/// Write an Ogg Vorbis proxy of a WAV (16/24/32-bit integer or 32-bit
+/// float), at its own rate and channel count, a block at a time — a
+/// seven-minute stem never sits in memory as PCM. `quality` is libvorbis's
+/// base quality (-0.2..=1.0; 0.4 ≈ 128 kbps stereo, oggenc `-q4`). Returns
+/// the frames written.
+///
+/// The proxies a session plays from where the originals are too heavy to
+/// move (a browser, a phone): `Media/Bass.wav` → `Media/Proxies/Bass.ogg`.
+///
+/// # Errors
+///
+/// The WAV does not open or read, or the encoder refuses its format.
+#[cfg(feature = "engine-native")]
+pub fn write_ogg_proxy(
+    src: &std::path::Path,
+    dst: &std::path::Path,
+    quality: f32,
+) -> Result<u64, SamplerError> {
+    use std::num::{NonZeroU32, NonZeroU8};
+    use vorbis_rs::{VorbisBitrateManagementStrategy, VorbisEncoderBuilder};
+
+    const BLOCK: usize = 16_384;
+    let vorb = |e: vorbis_rs::VorbisError| invalid_data(format!("vorbis encode failed: {e}"));
+    let wav = |e: hound::Error| invalid_data(format!("{}: {e}", src.display()));
+
+    let mut reader = hound::WavReader::open(src).map_err(wav)?;
+    let spec = reader.spec();
+    let channels = usize::from(spec.channels.max(1));
+    let channels_nz = NonZeroU8::new(u8::try_from(spec.channels).map_err(|_| {
+        invalid_data(format!("vorbis: unsupported channel count {}", spec.channels))
+    })?)
+    .ok_or_else(|| invalid_data("vorbis: zero channels"))?;
+    let rate_nz =
+        NonZeroU32::new(spec.sample_rate).ok_or_else(|| invalid_data("vorbis: zero sample rate"))?;
+
+    let out = std::fs::File::create(dst)?;
+    let mut encoder = VorbisEncoderBuilder::new(rate_nz, channels_nz, std::io::BufWriter::new(out))
+        .map_err(vorb)?
+        .bitrate_management_strategy(VorbisBitrateManagementStrategy::QualityVbr {
+            target_quality: quality,
+        })
+        .build()
+        .map_err(vorb)?;
+
+    let scale = match spec.sample_format {
+        hound::SampleFormat::Float => 1.0,
+        hound::SampleFormat::Int => 1.0 / (1u64 << (spec.bits_per_sample.max(1) - 1)) as f32,
+    };
+    let mut planar: Vec<Vec<f32>> = vec![Vec::with_capacity(BLOCK); channels];
+    let mut frames = 0u64;
+    let flush = |planar: &mut Vec<Vec<f32>>,
+                     encoder: &mut vorbis_rs::VorbisEncoder<_>|
+     -> Result<(), SamplerError> {
+        if !planar[0].is_empty() {
+            encoder.encode_audio_block(&*planar).map_err(vorb)?;
+            for channel in planar.iter_mut() {
+                channel.clear();
+            }
+        }
+        Ok(())
+    };
+    let push = |i: usize, value: f32, planar: &mut Vec<Vec<f32>>| {
+        planar[i % channels].push(value);
+    };
+    match spec.sample_format {
+        hound::SampleFormat::Float => {
+            for (i, sample) in reader.samples::<f32>().enumerate() {
+                push(i, sample.map_err(wav)?, &mut planar);
+                if i % channels == channels - 1 {
+                    frames += 1;
+                    if planar[0].len() == BLOCK {
+                        flush(&mut planar, &mut encoder)?;
+                    }
+                }
+            }
+        }
+        hound::SampleFormat::Int => {
+            for (i, sample) in reader.samples::<i32>().enumerate() {
+                push(i, sample.map_err(wav)? as f32 * scale, &mut planar);
+                if i % channels == channels - 1 {
+                    frames += 1;
+                    if planar[0].len() == BLOCK {
+                        flush(&mut planar, &mut encoder)?;
+                    }
+                }
+            }
+        }
+    }
+    flush(&mut planar, &mut encoder)?;
+    encoder.finish().map_err(vorb)?;
+    Ok(frames)
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, SamplerError> {
@@ -3488,6 +3581,49 @@ mod tests {
             corr > 0.98,
             "decoded audio should correlate with source, got {corr}"
         );
+    }
+
+    /// A 24-bit stem, proxied a block at a time, decodes back to the same
+    /// length and the same tone — the block boundaries leave no seams.
+    #[test]
+    fn a_wav_proxies_to_ogg_a_block_at_a_time() {
+        let dir = std::env::temp_dir().join(format!("ogg-proxy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let (src, dst) = (dir.join("Bass.wav"), dir.join("Bass.ogg"));
+        let (rate, frames) = (44_100u32, 44_100 * 3 + 777);
+        let tone = |i: usize| (i as f32 / rate as f32 * 110.0 * std::f32::consts::TAU).sin() * 0.5;
+        {
+            let spec = hound::WavSpec {
+                channels: 2,
+                sample_rate: rate,
+                bits_per_sample: 24,
+                sample_format: hound::SampleFormat::Int,
+            };
+            let mut writer = hound::WavWriter::create(&src, spec).expect("wav");
+            for i in 0..frames {
+                let v = (tone(i) * 8_388_607.0) as i32;
+                writer.write_sample(v).expect("left");
+                writer.write_sample(-v).expect("right");
+            }
+            writer.finalize().expect("finalize");
+        }
+        let written = write_ogg_proxy(&src, &dst, 0.4).expect("proxy");
+        assert_eq!(written, frames as u64);
+
+        let ogg = std::fs::read(&dst).expect("read proxy");
+        assert!(ogg.len() < frames * 2 * 3 / 4, "a proxy is smaller than its stem");
+        let decoded = load_ogg_vorbis_bytes(&ogg).expect("decode");
+        let decoded = decoded.to_f32();
+        assert!(
+            (decoded.len() / 2).abs_diff(frames) < 2048,
+            "{} frames back, {frames} in",
+            decoded.len() / 2
+        );
+        let worst = (4096..frames - 4096)
+            .map(|i| (decoded[i * 2] - tone(i)).abs().max((decoded[i * 2 + 1] + tone(i)).abs()))
+            .fold(0.0f32, f32::max);
+        assert!(worst < 0.05, "the tone survives, both channels: {worst}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
