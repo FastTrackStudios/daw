@@ -27,6 +27,9 @@ pub enum AudioSource {
     /// Memory-mapped WAV, converted per block (uncompressed formats).
     #[cfg(not(target_arch = "wasm32"))]
     PcmFile(PcmFile),
+    /// Decoded a window at a time around the playhead, from a compressed
+    /// proxy held in memory ([`super::streamed`]) — the browser's source.
+    Streamed(super::streamed::Streamed),
 }
 
 impl AudioSource {
@@ -35,6 +38,7 @@ impl AudioSource {
             AudioSource::Memory(d) => d.channels,
             #[cfg(not(target_arch = "wasm32"))]
             AudioSource::PcmFile(p) => p.channels(),
+            AudioSource::Streamed(s) => s.channels(),
         }
     }
 
@@ -43,6 +47,7 @@ impl AudioSource {
             AudioSource::Memory(d) => d.sample_rate,
             #[cfg(not(target_arch = "wasm32"))]
             AudioSource::PcmFile(p) => p.sample_rate(),
+            AudioSource::Streamed(s) => s.sample_rate(),
         }
     }
 
@@ -51,6 +56,7 @@ impl AudioSource {
             AudioSource::Memory(d) => d.frame_count(),
             #[cfg(not(target_arch = "wasm32"))]
             AudioSource::PcmFile(p) => p.frames(),
+            AudioSource::Streamed(s) => usize::try_from(s.frames()).unwrap_or(usize::MAX),
         }
     }
 
@@ -92,6 +98,15 @@ impl AudioSource {
                 let r1 = p.sample(i1, 1);
                 (l, r0 + (r1 - r0) * frac)
             }
+            AudioSource::Streamed(s) => {
+                let l0 = s.sample(i0, 0);
+                let l = l0 + (s.sample(i1, 0) - l0) * frac;
+                if s.channels() <= 1 {
+                    return (l, l);
+                }
+                let r0 = s.sample(i0, 1);
+                (l, r0 + (s.sample(i1, 1) - r0) * frac)
+            }
         }
     }
 
@@ -114,12 +129,20 @@ impl AudioSource {
                 let s1 = p.sample(i1, ch);
                 s0 + (s1 - s0) * frac
             }
+            AudioSource::Streamed(s) => {
+                let s0 = s.sample(i0, ch);
+                s0 + (s.sample(i1, ch) - s0) * frac
+            }
         }
     }
 
-    /// Prefetch a window (no-op for in-memory sources).
+    /// Prefetch a window (no-op for in-memory sources). A streamed source
+    /// takes it as where playback is reading, and decodes there next.
     #[allow(unused_variables)]
     pub fn prefetch(&self, start_frame: usize, frames: usize) {
+        if let AudioSource::Streamed(s) = self {
+            s.want(start_frame as u64);
+        }
         #[cfg(not(target_arch = "wasm32"))]
         if let AudioSource::PcmFile(p) = self {
             p.prefetch(start_frame, frames);
@@ -153,6 +176,8 @@ impl AudioSource {
                     i += ch;
                 }
             }
+            // Read below, one sample at a time: only the resident window.
+            AudioSource::Streamed(_) => {}
             #[cfg(not(target_arch = "wasm32"))]
             AudioSource::PcmFile(p) => {
                 let ch = p.channels().max(1) as usize;
@@ -209,6 +234,14 @@ impl AudioSource {
                         }
                     }
                 }
+            }
+        }
+        if let AudioSource::Streamed(s) = self {
+            let hi = hi.min(usize::try_from(s.frames()).unwrap_or(usize::MAX));
+            for i in lo..hi {
+                let v = s.sample(i, channel);
+                mn = mn.min(v);
+                mx = mx.max(v);
             }
         }
         if mn > mx { (0.0, 0.0) } else { (mn, mx) }

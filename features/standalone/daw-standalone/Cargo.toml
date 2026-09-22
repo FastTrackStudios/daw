@@ -94,6 +94,8 @@ daw-standalone = { path = ".", features = ["rpp-project", "bootstrap"] }
 daw-proto = { workspace = true }
 daw-control = { workspace = true }
 eyre = { workspace = true }
+# `streamed_playback` encodes the proxy it streams.
+fts-sample = { workspace = true, features = ["engine-native"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 base64 = "0.22"
 dawfile-reaper = { workspace = true }
@@ -150,6 +152,10 @@ vst3-host = ["audio", "dep:vst3", "dep:libloading"]
 # Browser bindings: a wasm-bindgen wrapper that an AudioWorklet
 # processor can construct + drive. Only meaningful on wasm32.
 web = ["decode", "dep:wasm-bindgen", "dep:js-sys"]
+# Streamed takes decoded from Ogg Vorbis proxies a window at a time
+# (`audio_engine::streamed`) — pure Rust, wasm-clean: how a browser plays
+# a session whose originals it cannot hold.
+stream-ogg = ["decode", "fts-sample/engine-core"]
 
 [[example]]
 name = "meter_probe"

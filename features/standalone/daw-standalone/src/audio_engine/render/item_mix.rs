@@ -59,6 +59,8 @@ pub(crate) fn mix_item_into_bus(
     let last_frame = audio.frame_count().saturating_sub(1);
 
     let mut wrote = false;
+    // A streamed source decodes where it is read: say so once a block.
+    let mut told = !matches!(audio, AudioSource::Streamed(_));
     for frame in 0..bus.frames {
         let block_time = block_start_seconds + (frame as f64 / output_rate_f);
         if block_time < item_start || block_time >= item_end {
@@ -113,6 +115,10 @@ pub(crate) fn mix_item_into_bus(
         // (`as usize` truncates toward zero == floor for the
         // non-negative values guaranteed above.)
         let i0 = source_frame_f as usize;
+        if !told {
+            audio.prefetch(i0, bus.frames);
+            told = true;
+        }
         let frac = (source_frame_f - i0 as f64) as f32;
         let i1 = (i0 + 1).min(last_frame);
         // REAPER channel mode: how the source's channels map onto the

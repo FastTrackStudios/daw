@@ -161,6 +161,15 @@ pub fn attach_audio_source(
     });
 }
 
+/// Attach any source for a take — a [`Streamed`](super::streamed::Streamed)
+/// one, decoded around the playhead from a proxy, is what a browser
+/// attaches.
+pub fn attach_source(daw: &Standalone, project_guid: &str, take_guid: &str, source: AudioSource) {
+    let _ = daw.with_project_mut(project_guid, |p| {
+        p.audio_sources.insert(take_guid.to_string(), Arc::new(source));
+    });
+}
+
 /// Drop the decoded source for a take (e.g. unload to save memory
 /// while keeping project structure).
 pub fn detach_audio_source(daw: &Standalone, project_guid: &str, take_guid: &str) {
