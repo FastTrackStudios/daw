@@ -1,6 +1,6 @@
 //! DAWproject as an **interop** target.
 //!
-//! Native is ours (`<name>.daw`); DAWproject is how a session reaches
+//! Native is ours (`<name>.session`); DAWproject is how a session reaches
 //! Bitwig, Cubase or Studio One. It was seriously considered as the
 //! native format and rejected on one fact: a `.dawproject` is a ZIP,
 //! which is the worst possible dedup target — compressed, monolithic,
@@ -29,7 +29,7 @@
 //! sibilance, de-breathing — composited into the item's one volume
 //! envelope. DAWproject has one gain expression per lane and no home
 //! for the four, exactly as REAPER's item chunk has one `VOLENV`. So
-//! the *composite* crosses and the sources stay in the `.daw`.
+//! the *composite* crosses and the sources stay in the `.session`.
 //!
 //! That is a real limit, and the important part is that it is not
 //! silent: a mix handed to Cubase keeps its volume ride, and the four
@@ -57,7 +57,7 @@ use crate::id::EntityId;
 use daw_proto::automation::EnvelopeType;
 use dawfile_dawproject::types as dp;
 
-/// Convert a `.daw` document into a DAWproject.
+/// Convert a `.session` document into a DAWproject.
 pub fn to_dawproject(document: &DawDocument) -> dp::DawProject {
     let first = document.tempo_map.first();
     let transport = dp::Transport {
@@ -259,7 +259,7 @@ fn composite_of(item: &crate::document::ItemNode) -> Option<&crate::document::En
     Some(first)
 }
 
-/// Convert a DAWproject into a `.daw` document.
+/// Convert a DAWproject into a `.session` document.
 ///
 /// Entities get fresh ids: DAWproject's ids are XML cross-reference
 /// strings scoped to one file, not stable identities we may adopt as our
@@ -304,6 +304,7 @@ pub fn from_dawproject(
             fx_chain: None,
             input_fx_chain: None,
             comping: daw_proto::track::LaneComping::default(),
+            receives: Vec::new(),
         });
     }
 

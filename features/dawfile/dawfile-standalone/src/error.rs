@@ -1,15 +1,15 @@
-//! Errors for the `.daw` format.
+//! Errors for the `.session` format.
 
 use thiserror::Error;
 
-/// Anything that can go wrong reading, writing or converting a `.daw`.
+/// Anything that can go wrong reading, writing or converting a `.session`.
 #[derive(Debug, Error)]
 pub enum DawError {
     /// Filesystem failure.
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 
-    /// The `.daw` text did not parse as styx, or did not match the schema.
+    /// The `.session` text did not parse as styx, or did not match the schema.
     #[error("parsing {path}: {message}")]
     Parse {
         /// What was being parsed (a file path, or `<memory>`).
@@ -29,8 +29,8 @@ pub enum DawError {
     Serialize(String),
 
     /// A project directory did not have the shape the format requires:
-    /// exactly `<name>.daw` and `objects/`.
-    #[error("{path} is not a .daw project: {reason}")]
+    /// exactly `<name>.session` and `objects/`.
+    #[error("{path} is not a .session project: {reason}")]
     NotAProject {
         /// The directory inspected.
         path: String,

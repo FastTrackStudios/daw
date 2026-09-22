@@ -1,4 +1,4 @@
-//! The `.daw` project format.
+//! The `.session` project format.
 //!
 //! FastTrackStudio's native project format, built to the design settled in
 //! [#155][]. Styx on the inside under an aliased extension; the readable,
@@ -7,14 +7,19 @@
 //! entries; REAPER `.rpp` as a proven-lossless round trip and DAWproject as
 //! interop rather than a native format.
 //!
+//! The extension is `.session` — a session is what the thing *is*, and it
+//! is what the app, the session domain and the user all call it. Projects
+//! written by an earlier build as `.daw` still open; the styx inside is
+//! byte-for-byte the same, only the name changed.
+//!
 //! [#155]: https://github.com/FastTrackStudios/FastTrackStudio/issues/155
 //!
 //! ## The shape of a project
 //!
 //! ```text
-//! Belief.daw/
-//!   Belief.daw          styx — tracks, items, takes, envelopes, tempo map,
-//!                       markers, editor state, provenance
+//! Belief.session/
+//!   Belief.session      styx — tracks, items, takes, envelopes, tempo map,
+//!                       markers, routing, editor state, provenance
 //!   objects/            immutable, content-addressed blobs — FX chains,
 //!                       MIDI source data, the verbatim imported source
 //! ```
@@ -52,8 +57,8 @@
 //!     document.track_mut(&track).unwrap().track.volume = 0.5;
 //! });
 //!
-//! // Save as a `.daw` project directory.
-//! project.save("Belief.daw")?;
+//! // Save as a `.session` project directory.
+//! project.save("Belief.session")?;
 //! # Ok::<(), dawfile_standalone::DawError>(())
 //! ```
 //!
@@ -83,11 +88,11 @@ pub mod template;
 
 pub use document::{
     DawDocument, EditorState, EnvelopeNode, FORMAT_VERSION, ItemNode, MarkerNode, Provenance,
-    SourceFormat, SourceRef, TakeNode, TrackNode,
+    ReceiveNode, SourceFormat, SourceRef, TakeNode, TrackNode,
 };
 pub use edit::{DocumentEdit, DocumentQuery};
 pub use error::{DawError, DawResult};
 pub use id::{EntityId, ObjectId};
 pub use objects::ObjectStore;
-pub use project::{DAW_EXTENSION, DawProject, OBJECTS_DIR};
+pub use project::{DAW_EXTENSION, DawProject, OBJECTS_DIR, PROJECT_EXTENSIONS, SESSION_EXTENSION};
 pub use rpp::{ExportReport, ImportReport};

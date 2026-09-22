@@ -1,4 +1,4 @@
-//! The `.daw` file's text form.
+//! The `.session` file's text form.
 //!
 //! Styx on the inside, under an aliased extension so the format can diverge
 //! from stock styx later without a rename (#155 decision 1). The file is the
@@ -12,7 +12,7 @@
 //!   should say nothing about colour.
 //! - **Multi-line, not inline.** A hand-editable file wants one field per
 //!   line so a diff of one changed value is one changed line. That matters
-//!   more here than usual: `<name>.daw` is the only thing in the project
+//!   more here than usual: `<name>.session` is the only thing in the project
 //!   that can conflict on sync, and a human resolving that conflict reads
 //!   the diff (#155 decision 7).
 
@@ -20,7 +20,7 @@ use crate::document::DawDocument;
 use crate::error::{DawError, DawResult};
 use styx_format::FormatOptions;
 
-/// Render a document to `.daw` text.
+/// Render a document to `.session` text.
 ///
 /// Two passes, because `facet-styx` splits the job: the serializer decides
 /// *what* is written (and is the only thing that knows about `omit_none`),
@@ -36,7 +36,7 @@ pub fn to_text(document: &DawDocument) -> DawResult<String> {
     ))
 }
 
-/// Parse `.daw` text into a document.
+/// Parse `.session` text into a document.
 ///
 /// `origin` names what is being parsed, for the error message only.
 pub fn from_text(text: &str, origin: &str) -> DawResult<DawDocument> {
@@ -108,6 +108,7 @@ mod tests {
             fx_chain: None,
             input_fx_chain: None,
             comping: daw_proto::track::LaneComping::default(),
+            receives: Vec::new(),
         });
         document.reindex();
         document

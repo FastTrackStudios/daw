@@ -22,7 +22,7 @@
 //! ```
 
 use crate::document::{
-    DawDocument, EnvelopeNode, ItemNode, MarkerNode, SourceRef, TakeNode, TrackNode,
+    DawDocument, EnvelopeNode, ItemNode, MarkerNode, ReceiveNode, SourceRef, TakeNode, TrackNode,
 };
 use crate::error::{DawError, DawResult};
 use crate::id::EntityId;
@@ -114,6 +114,16 @@ pub trait DocumentEdit {
     fn add_marker(&mut self, position: f64, name: impl Into<String>) -> EntityId;
     /// Add a region and return its id.
     fn add_region(&mut self, start: f64, end: f64, name: impl Into<String>) -> EntityId;
+
+    /// Route `source` into `destination` as a post-fader stereo send at
+    /// unity, replacing an existing send between the same pair.
+    ///
+    /// Named from the destination's side because that is where REAPER
+    /// keeps the fact, and idempotent because a routing pass that runs
+    /// twice should not double the gain into the bus.
+    fn add_send(&mut self, source: &EntityId, destination: &EntityId) -> DawResult<()>;
+    /// Remove the send from `source` into `destination`, if there is one.
+    fn remove_send(&mut self, source: &EntityId, destination: &EntityId) -> DawResult<()>;
 }
 
 impl DocumentQuery for DawDocument {
@@ -217,8 +227,12 @@ impl DocumentEdit for DawDocument {
             fx_chain: None,
             input_fx_chain: None,
             comping: daw_proto::track::LaneComping::default(),
+            receives: Vec::new(),
         });
         self.reindex();
+        // Appending a row changes what the *previous* last row closes, so
+        // the folder encoding is refreshed even though nothing was nested.
+        self.rebuild_folder_encoding();
         id
     }
 
@@ -239,8 +253,11 @@ impl DocumentEdit for DawDocument {
             if node.parent.as_ref() == Some(id) {
                 node.parent = removed.parent.clone();
             }
+            // A send out of a track that no longer exists is not a send.
+            node.receives.retain(|receive| &receive.source != id);
         }
         self.reindex();
+        self.rebuild_folder_encoding();
         Ok(removed)
     }
 
@@ -277,6 +294,7 @@ impl DocumentEdit for DawDocument {
         })?;
         node.parent = parent;
         self.reindex();
+        self.rebuild_folder_encoding();
         Ok(())
     }
 
@@ -303,6 +321,7 @@ impl DocumentEdit for DawDocument {
         };
         self.tracks.insert(to, node);
         self.reindex();
+        self.rebuild_folder_encoding();
         Ok(())
     }
 
@@ -473,7 +492,14 @@ impl DocumentEdit for DawDocument {
     }
 
     fn add_marker(&mut self, position: f64, name: impl Into<String>) -> EntityId {
-        let id = EntityId::new();
+        // Minted in REAPER's brace form rather than as a bare UUID: the
+        // `.rpp` importer only recognises a marker GUID that looks like
+        // one, so a bare id would come back derived and the marker would
+        // change identity on every export/import round trip.
+        let id = EntityId::adopt(format!(
+            "{{{}}}",
+            uuid::Uuid::new_v4().to_string().to_uppercase()
+        ));
         self.markers.push(MarkerNode {
             id: id.clone(),
             marker: Marker {
@@ -495,6 +521,50 @@ impl DocumentEdit for DawDocument {
             node.region_end_seconds = Some(end);
         }
         id
+    }
+
+    fn add_send(&mut self, source: &EntityId, destination: &EntityId) -> DawResult<()> {
+        if self.track(source).is_none() {
+            return Err(DawError::NoSuchEntity {
+                kind: "track",
+                id: source.to_string(),
+            });
+        }
+        if source == destination {
+            return Err(DawError::NoSuchEntity {
+                kind: "track",
+                id: format!("{source} cannot send to itself"),
+            });
+        }
+        let node = self
+            .track_mut(destination)
+            .ok_or_else(|| DawError::NoSuchEntity {
+                kind: "track",
+                id: destination.to_string(),
+            })?;
+        let receive = ReceiveNode::new(source.clone());
+        match node
+            .receives
+            .iter_mut()
+            .find(|existing| &existing.source == source)
+        {
+            Some(existing) => *existing = receive,
+            None => node.receives.push(receive),
+        }
+        self.reindex();
+        Ok(())
+    }
+
+    fn remove_send(&mut self, source: &EntityId, destination: &EntityId) -> DawResult<()> {
+        let node = self
+            .track_mut(destination)
+            .ok_or_else(|| DawError::NoSuchEntity {
+                kind: "track",
+                id: destination.to_string(),
+            })?;
+        node.receives.retain(|existing| &existing.source != source);
+        self.reindex();
+        Ok(())
     }
 }
 

@@ -3,13 +3,13 @@
 //! A project directory has **exactly two entries** (#155 decision 4):
 //!
 //! ```text
-//! Belief.daw/
-//!   Belief.daw          the readable source of truth
+//! Belief.session/
+//!   Belief.session      the readable source of truth
 //!   objects/            immutable, content-addressed blobs
 //! ```
 //!
 //! Everything human-readable — tracks, items, takes, envelopes, tempo map,
-//! editor state — is in the one file. Everything large is in `objects/`,
+//! markers, routing, editor state — is in the one file. Everything large is in `objects/`,
 //! hash-named and never mutated, which is what makes sync conflicts on large
 //! data structurally impossible.
 //!
@@ -34,7 +34,21 @@ use std::path::{Path, PathBuf};
 pub const OBJECTS_DIR: &str = "objects";
 
 /// The extension of the manifest, and of the project directory itself.
+///
+/// A session is what the thing *is* — the tracks, the takes, the tempo
+/// map, the arrangement — and `.session` is what the app, the session
+/// domain and the user all call it. `.daw` is still opened (see
+/// [`DAW_EXTENSION`]); only the name changed, never the bytes.
+pub const SESSION_EXTENSION: &str = "session";
+
+/// The extension projects were written with before `.session`.
+///
+/// Still accepted on load, so a project saved by an earlier build opens
+/// without conversion. Never written.
 pub const DAW_EXTENSION: &str = "daw";
+
+/// Every extension [`DawProject::load`] recognises, newest first.
+pub const PROJECT_EXTENSIONS: [&str; 2] = [SESSION_EXTENSION, DAW_EXTENSION];
 
 /// An open project: the document, its objects, and whether it has been
 /// touched since it was loaded.
@@ -93,13 +107,28 @@ impl DawProject {
         let outcome = mutate(&mut self.document);
         self.document.reindex();
         self.modified = true;
+        self.mark_diverged();
         outcome
+    }
+
+    /// Record that the document no longer matches the bytes it was
+    /// imported from.
+    ///
+    /// Kept in the document rather than beside it because `modified` is
+    /// cleared by saving: without this, a project edited, saved and
+    /// reopened would export its *original* `.rpp` and throw the edits
+    /// away. See [`crate::Provenance::edited`].
+    fn mark_diverged(&mut self) {
+        if let Some(provenance) = self.document.provenance.as_mut() {
+            provenance.edited = true;
+        }
     }
 
     /// Store bytes and return their id, for a caller that needs to attach a
     /// blob (an FX chain, a rendered take) to the document.
     pub fn put_object(&mut self, bytes: impl Into<Vec<u8>>) -> crate::id::ObjectId {
         self.modified = true;
+        self.mark_diverged();
         self.objects.put(bytes)
     }
 
@@ -138,7 +167,11 @@ impl DawProject {
                 provenance.format
             )));
         }
-        if !self.modified {
+        // The verbatim shortcut is only honest while the document still
+        // *is* the source. `modified` alone would not do: saving clears
+        // it, and a reopened project would then export the bytes it came
+        // from rather than the session it now holds.
+        if !self.modified && !provenance.edited {
             let bytes = self.objects.get(&provenance.source)?;
             return Ok(String::from_utf8_lossy(bytes).into_owned());
         }
@@ -150,7 +183,7 @@ impl DawProject {
         rpp::to_rpp_patched(&self.document, &self.objects)
     }
 
-    /// The `.daw` manifest text.
+    /// The `.session` manifest text.
     pub fn to_text(&self) -> DawResult<String> {
         styx::to_text(&self.document)
     }
@@ -200,6 +233,15 @@ impl DawProject {
 
         self.objects.write_dir(&dir.join(OBJECTS_DIR))?;
         std::fs::write(manifest_path(dir, &self.document.name), text)?;
+        // A project directory has exactly two entries. Saving one that was
+        // opened from an older `.daw` manifest must therefore retire it
+        // rather than leave two spellings of the same document side by
+        // side, which is the one state `find_manifest` cannot call an
+        // honest project.
+        let legacy = dir.join(format!("{}.{DAW_EXTENSION}", self.document.name));
+        if legacy.exists() {
+            std::fs::remove_file(&legacy)?;
+        }
         self.modified = false;
         Ok(())
     }
@@ -355,11 +397,19 @@ impl DawProject {
 }
 
 /// Where the manifest for a project named `name` lives inside `dir`.
+///
+/// Always `.session`: a project saved by an older build is read through
+/// its `.daw` manifest and written back as `.session`, because the
+/// content is identical and carrying two spellings forward forever buys
+/// nothing.
 pub fn manifest_path(dir: &Path, name: &str) -> PathBuf {
-    dir.join(format!("{name}.{DAW_EXTENSION}"))
+    dir.join(format!("{name}.{SESSION_EXTENSION}"))
 }
 
-/// Find the single `*.daw` manifest in a project directory.
+/// Find the single manifest in a project directory.
+///
+/// `.session` wins when a directory somehow has both — that is the
+/// spelling a save writes, so it is the newer of the two by construction.
 fn find_manifest(dir: &Path) -> DawResult<PathBuf> {
     if !dir.is_dir() {
         return Err(DawError::NotAProject {
@@ -367,19 +417,29 @@ fn find_manifest(dir: &Path) -> DawResult<PathBuf> {
             reason: "not a directory".to_string(),
         });
     }
-    let mut found = Vec::new();
+    let mut found: Vec<(usize, PathBuf)> = Vec::new();
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) == Some(DAW_EXTENSION) {
-            found.push(path);
+        let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else {
+            continue;
+        };
+        if let Some(rank) = PROJECT_EXTENSIONS
+            .iter()
+            .position(|known| *known == extension)
+        {
+            found.push((rank, path));
         }
     }
+    found.sort_by_key(|(rank, _)| *rank);
+    let best = found.first().map(|(rank, _)| *rank);
+    found.retain(|(rank, _)| Some(*rank) == best);
+
     match found.len() {
-        1 => Ok(found.remove(0)),
+        1 => Ok(found.remove(0).1),
         0 => Err(DawError::NotAProject {
             path: dir.display().to_string(),
-            reason: format!("no *.{DAW_EXTENSION} manifest"),
+            reason: format!("no *.{SESSION_EXTENSION} manifest"),
         }),
         count => Err(DawError::NotAProject {
             path: dir.display().to_string(),
@@ -424,7 +484,44 @@ mod tests {
             })
             .collect();
         entries.sort();
-        assert_eq!(entries, vec!["Tiny.daw".to_string(), "objects".to_string()]);
+        assert_eq!(
+            entries,
+            vec!["Tiny.session".to_string(), "objects".to_string()]
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_project_saved_under_the_old_extension_still_opens_and_is_renamed() {
+        // `.daw` was the extension before `.session`. The bytes never
+        // changed, so an older project must open as it is — and saving it
+        // must leave one manifest behind, not two.
+        let dir = scratch_dir();
+        let (mut project, _) = DawProject::import_rpp(TINY, "Tiny").expect("import");
+        project.save(&dir).expect("save");
+
+        std::fs::rename(dir.join("Tiny.session"), dir.join("Tiny.daw")).expect("rename");
+        let mut reopened = DawProject::load(&dir).expect("an older project still opens");
+        assert_eq!(reopened.document().tracks.len(), 1);
+
+        reopened.save(&dir).expect("save");
+        let mut entries: Vec<String> = std::fs::read_dir(&dir)
+            .expect("read")
+            .map(|entry| {
+                entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        entries.sort();
+        assert_eq!(
+            entries,
+            vec!["Tiny.session".to_string(), "objects".to_string()],
+            "saving must retire the old manifest rather than keep both"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

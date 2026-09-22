@@ -223,6 +223,7 @@ fn push_track(doc: &mut DawDocument, name: &str) -> EntityId {
         fx_chain: None,
         input_fx_chain: None,
         comping: daw_proto::track::LaneComping::default(),
+        receives: Vec::new(),
     });
     id
 }
