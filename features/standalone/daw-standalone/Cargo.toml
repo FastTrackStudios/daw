@@ -105,7 +105,9 @@ tempfile = { workspace = true }
 # Resident source decoding (fts-sample/symphonium) without cpal.
 # WASM-compatible — the decoder is pure Rust and doesn't touch the audio
 # device. `budget` bounds the decoded-bytes accounting (see materialize).
-decode = ["fts-sample/load", "fts-sample/decode-compressed", "fts-sample/budget"]
+# `rtrb` because the renderer's live-input and live-MIDI rings are built
+# natively whenever it is — a native-only target dep, so a no-op on wasm.
+decode = ["fts-sample/load", "fts-sample/decode-compressed", "fts-sample/budget", "dep:rtrb"]
 # Full audio engine = decode + cpal output stream. Native-only audio
 # output (cpal+wasm-bindgen on WASM, but cpal pulls JS bindings).
 # `daw-audio-io` + `rtrb` are native-only (`cfg(not(wasm32))` target
