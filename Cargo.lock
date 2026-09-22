@@ -3345,11 +3345,13 @@ dependencies = [
  "base64 0.22.1",
  "criterion",
  "daw-proto",
+ "fts-sample",
  "libc",
  "nom 8.0.0",
  "rayon",
  "serde",
  "thiserror 2.0.20",
+ "tracing",
 ]
 
 [[package]]

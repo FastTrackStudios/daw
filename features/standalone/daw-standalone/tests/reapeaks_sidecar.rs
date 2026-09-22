@@ -1,7 +1,8 @@
-//! Source-level `.reapeaks` sidecar persistence (the `reapeaks` feature):
-//! take peaks for on-disk PCM media fold from a REAPER-compatible
-//! sidecar next to the file, the first scan writes that sidecar, and a
-//! stale sidecar (wrong mtime / wrong length) is recomputed.
+//! Source-level peak-cache persistence (the `reapeaks` feature): take
+//! peaks for on-disk PCM media fold from a REAPER-compatible cache, a
+//! `.reapeaks` REAPER itself left beside the media is honoured, the
+//! first scan writes a `.sessionpeaks` in `Peaks/`, and a stale cache
+//! (wrong stamp / wrong length) is recomputed.
 
 #![cfg(all(feature = "reapeaks", feature = "decode", not(target_arch = "wasm32")))]
 
@@ -11,7 +12,7 @@ use daw_proto::midi::Midi;
 use daw_proto::project::ProjectContext;
 use daw_proto::{ItemRef, Peaks, ProjectInfo, TakeRef, Takes, TrackRef, Tracks};
 use daw_standalone::audio_engine::materialize::materialize_audio_streaming;
-use daw_standalone::reapeaks::ReaPeaks;
+use daw_standalone::reapeaks::{stamp, ReaPeaks};
 use daw_standalone::sync::Standalone;
 
 const RATE: u32 = 48_000;
@@ -43,18 +44,28 @@ fn write_sine_wav(path: &Path) {
     std::fs::write(path, data).unwrap();
 }
 
+/// REAPER's own placement, beside the media — what this test seeds, to
+/// prove a cache REAPER wrote is read rather than rebuilt.
 fn sidecar_path(media: &Path) -> PathBuf {
     PathBuf::from(format!("{}.reapeaks", media.display()))
 }
 
-fn media_mtime_secs(media: &Path) -> u64 {
-    std::fs::metadata(media)
-        .unwrap()
+/// Where a scan writes: `Peaks/<name>.sessionpeaks` beside the media.
+fn cache_path(media: &Path) -> PathBuf {
+    dawfile_reaper::sessionpeaks::cache_path(media).unwrap()
+}
+
+/// The size-and-mtime stamp REAPER records, which is what the sidecar
+/// is validated against.
+fn media_stamp(media: &Path) -> u64 {
+    let meta = std::fs::metadata(media).unwrap();
+    let mtime = meta
         .modified()
         .unwrap()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
-        .as_secs()
+        .as_secs();
+    stamp(meta.len(), mtime)
 }
 
 /// A Standalone with one audio take materialized (streamed, mmap'd)
@@ -104,9 +115,9 @@ fn fresh_dir(name: &str) -> PathBuf {
 
 /// A valid sidecar whose peaks are a constant `level` — deliberately
 /// unlike the real audio, so serving it is distinguishable from a scan.
-fn constant_sidecar(level: f32, mtime: u64) -> ReaPeaks {
+fn constant_sidecar(level: f32, stamp: u64) -> ReaPeaks {
     let mut pk = ReaPeaks::compute(1, RATE, FRAMES, |_, _| level);
-    pk.source_mtime = mtime;
+    pk.source_stamp = stamp;
     pk
 }
 
@@ -142,12 +153,12 @@ fn first_scan_writes_a_sidecar_matching_the_pcm() {
         );
     }
 
-    // The scan persisted a valid REAPER-format sidecar next to the media.
-    let side = sidecar_path(&media);
-    let pk = ReaPeaks::read(&side).expect("sidecar written and parses");
+    // The scan persisted a valid REAPER-format cache in `Peaks/`.
+    let side = cache_path(&media);
+    let pk = ReaPeaks::read(&side).expect("cache written and parses");
     assert_eq!(pk.channels, 1);
     assert_eq!(pk.samplerate, RATE);
-    assert_eq!(pk.source_mtime, media_mtime_secs(&media));
+    assert_eq!(pk.source_stamp, media_stamp(&media));
     assert_eq!(pk.levels[0].samples_per_peak as usize, FINE);
     assert_eq!(pk.levels[0].count, FRAMES.div_ceil(FINE));
 }
@@ -160,7 +171,7 @@ fn valid_sidecar_serves_peaks_without_scanning_pcm() {
     // Pre-seed a VALID sidecar carrying constant 0.25 peaks — nothing
     // like the 0.9 sine on disk. If peaks come back 0.25, they were
     // folded from the sidecar, not scanned from PCM.
-    constant_sidecar(0.25, media_mtime_secs(&media))
+    constant_sidecar(0.25, media_stamp(&media))
         .write(sidecar_path(&media))
         .unwrap();
 
@@ -175,11 +186,11 @@ fn valid_sidecar_serves_peaks_without_scanning_pcm() {
 
 #[test]
 fn stale_sidecar_is_recomputed() {
-    // Wrong mtime.
+    // Wrong stamp.
     let dir = fresh_dir("stale-mtime");
     let media = dir.join("tone.wav");
     write_sine_wav(&media);
-    constant_sidecar(0.25, media_mtime_secs(&media) + 999)
+    constant_sidecar(0.25, media_stamp(&media) + 999)
         .write(sidecar_path(&media))
         .unwrap();
 
@@ -188,23 +199,23 @@ fn stale_sidecar_is_recomputed() {
     let max = data.peaks.chunks(2).map(|p| p[1]).fold(0.0f64, f64::max);
     assert!(max > 0.8, "stale sidecar must be ignored; got max {max}");
     // ... and rewritten with the real stamp + real audio.
-    let pk = ReaPeaks::read(sidecar_path(&media)).unwrap();
-    assert_eq!(pk.source_mtime, media_mtime_secs(&media));
+    let pk = ReaPeaks::read(cache_path(&media)).unwrap();
+    assert_eq!(pk.source_stamp, media_stamp(&media));
     let (pmax, _) = pk.levels[0].pair(1, 0, 40);
     assert!(pmax > 0.8, "recomputed sidecar carries real peaks: {pmax}");
 
-    // Wrong length (right mtime): also recomputed.
+    // Wrong length (right stamp): also recomputed.
     let dir = fresh_dir("stale-len");
     let media = dir.join("tone.wav");
     write_sine_wav(&media);
     let mut short = ReaPeaks::compute(1, RATE, FRAMES / 2, |_, _| 0.25);
-    short.source_mtime = media_mtime_secs(&media);
+    short.source_stamp = media_stamp(&media);
     short.write(sidecar_path(&media)).unwrap();
 
     let (daw, _guid, item) = daw_with_media("stale-len", &media);
     let data = daw.take_peaks(ProjectContext::Current, item, TakeRef::Active, 480);
     let max = data.peaks.chunks(2).map(|p| p[1]).fold(0.0f64, f64::max);
     assert!(max > 0.8, "wrong-length sidecar must be ignored; got {max}");
-    let pk = ReaPeaks::read(sidecar_path(&media)).unwrap();
+    let pk = ReaPeaks::read(cache_path(&media)).unwrap();
     assert_eq!(pk.levels[0].count, FRAMES.div_ceil(FINE));
 }

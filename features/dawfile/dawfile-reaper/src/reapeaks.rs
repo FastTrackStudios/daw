@@ -13,25 +13,197 @@
 //! nch         u8       channel count
 //! nlevels     u8       mipmap level count (REAPER writes 3)
 //! samplerate  u32      source sample rate
-//! src_mtime   u64      source-file timestamp (cache invalidation)
+//! src_stamp   u64      source size (high 32) | mtime in unix secs (low 32)
 //! levels      nlevels × { samples_per_peak: u32, peak_count: u32 }
 //! data        per level, peak_count × nch × { max: i16, min: i16 }
 //! ```
 //!
-//! REAPER's stock levels are 160 / 2400 / 48000 samples-per-peak. Each peak
-//! is the (max, min) sample pair over its window — waveforms are asymmetric,
-//! so both bounds matter. To render at a given zoom, pick the finest level
-//! whose `samples_per_peak` ≤ samples-per-pixel (mip-mapping), then aggregate
-//! the covered peaks per pixel column.
+//! REAPER's ladder is **relative to the sample rate**: the finest level is
+//! `samplerate / 300` samples per peak (160 at 48 kHz, 147 at 44.1 kHz),
+//! then ×15 and ×20 — `147 / 2205 / 44100` for a 44.1 kHz stem, as the
+//! sessions in `sessions/Always On Time/Media/peaks` are written. A
+//! hard-coded 160 reads fine (the level table is explicit) but *writes*
+//! a file REAPER will not recognize as its own, so [`fine_spp`] is the
+//! one place that number comes from.
+//!
+//! Each peak is the (max, min) sample pair over its window — waveforms are
+//! asymmetric, so both bounds matter. To render at a given zoom, pick the
+//! finest level whose `samples_per_peak` ≤ samples-per-pixel (mip-mapping),
+//! then aggregate the covered peaks per pixel column.
 
 use std::io::Read;
 use std::path::Path;
+
+/// REAPER's finest level covers `samplerate / 300` samples — 160 at
+/// 48 kHz, 147 at 44.1 kHz, 320 at 96 kHz.
+///
+/// A rate of 0 (a source that would not say) falls back to 160 so the
+/// ladder is still a ladder.
+#[must_use]
+pub fn fine_spp(samplerate: u32) -> usize {
+    if samplerate == 0 {
+        160
+    } else {
+        (samplerate as usize / 300).max(1)
+    }
+}
+
+/// REAPER's 8-byte source stamp: size in the high 32 bits, mtime in
+/// unix seconds in the low 32. Both are truncated to 32 bits, exactly as
+/// REAPER truncates them — a file over 4 GiB wraps, and so does its
+/// cache, which is REAPER's behaviour and not a bug to fix here.
+#[must_use]
+pub fn stamp(size_bytes: u64, mtime_secs: u64) -> u64 {
+    ((size_bytes & 0xFFFF_FFFF) << 32) | (mtime_secs & 0xFFFF_FFFF)
+}
+
+/// A sample as the file stores it: signed 16-bit, full scale at ±1.
+fn quantize(v: f32) -> i16 {
+    (v.clamp(-1.0, 1.0) * 32767.0) as i16
+}
+
+/// One coarser level, folded from `src` by `factor`.
+fn fold(src: &PeakLevel, nch: usize, factor: usize) -> PeakLevel {
+    let count = src.count.div_ceil(factor);
+    let mut data: Vec<i16> = Vec::with_capacity(count * nch * 2);
+    for p in 0..count {
+        let a = p * factor;
+        let b = (a + factor).min(src.count);
+        for ch in 0..nch {
+            let (mut max, mut min) = (i16::MIN, i16::MAX);
+            for s in a..b {
+                let i = (s * nch + ch) * 2;
+                max = max.max(src.data[i]);
+                min = min.min(src.data[i + 1]);
+            }
+            if max < min {
+                max = 0;
+                min = 0;
+            }
+            data.push(max);
+            data.push(min);
+        }
+    }
+    PeakLevel {
+        samples_per_peak: src.samples_per_peak * factor as u32,
+        count,
+        data,
+    }
+}
+
+/// The finest mipmap level, built a block at a time.
+///
+/// [`ReaPeaks::compute`] wants random access into the source, which a
+/// memory-mapped WAV gives and a compressed stream does not: an Ogg
+/// proxy is decoded forward, window by window, and seeking backwards to
+/// re-read a frame costs a page re-decode. This accumulates the same
+/// `(max, min)` per [`fine_spp`] frames from whatever arrives next, so
+/// both paths write the same file.
+///
+/// Allocation-free per block after the first: the running window is two
+/// floats a channel.
+#[derive(Clone, Debug)]
+pub struct PeaksBuilder {
+    channels: usize,
+    samplerate: u32,
+    /// Source frames behind one peak — [`fine_spp`] of the rate.
+    per: usize,
+    /// The window in progress, per channel.
+    max: Vec<f32>,
+    min: Vec<f32>,
+    /// Frames into the window in progress.
+    filled: usize,
+    /// Channel the next sample belongs to — carried across calls, so a
+    /// block may end mid-frame.
+    ch: usize,
+    /// Closed windows, in file order.
+    data: Vec<i16>,
+    count: usize,
+}
+
+impl PeaksBuilder {
+    /// An empty builder for a source of `channels` at `samplerate`.
+    pub fn new(channels: usize, samplerate: u32) -> Self {
+        let nch = channels.max(1);
+        Self {
+            channels: nch,
+            samplerate,
+            per: fine_spp(samplerate),
+            max: vec![f32::MIN; nch],
+            min: vec![f32::MAX; nch],
+            filled: 0,
+            ch: 0,
+            data: Vec::new(),
+            count: 0,
+        }
+    }
+
+    /// Frames summarized so far — closed windows plus the one in
+    /// progress.
+    pub fn frames(&self) -> u64 {
+        self.count as u64 * self.per as u64 + self.filled as u64
+    }
+
+    /// Fold in the next interleaved block. A block need not be a whole
+    /// number of frames or windows; whatever is left over stays in the
+    /// running window for the next call.
+    pub fn push_interleaved(&mut self, samples: &[f32]) {
+        for &v in samples {
+            self.max[self.ch] = self.max[self.ch].max(v);
+            self.min[self.ch] = self.min[self.ch].min(v);
+            self.ch += 1;
+            if self.ch == self.channels {
+                self.ch = 0;
+                self.filled += 1;
+                if self.filled == self.per {
+                    self.close();
+                }
+            }
+        }
+    }
+
+    /// Close the window in progress into the level.
+    fn close(&mut self) {
+        for ch in 0..self.channels {
+            let (max, min) = if self.max[ch] < self.min[ch] {
+                (0.0, 0.0)
+            } else {
+                (self.max[ch], self.min[ch])
+            };
+            self.data.push(quantize(max));
+            self.data.push(quantize(min));
+            self.max[ch] = f32::MIN;
+            self.min[ch] = f32::MAX;
+        }
+        self.filled = 0;
+        self.count += 1;
+    }
+
+    /// The finished three-level mipmap. A partly filled last window is
+    /// closed as it stands — the same rounding [`ReaPeaks::compute`]
+    /// does with `ceil(frames / fine_spp)`.
+    pub fn finish(mut self) -> ReaPeaks {
+        if self.filled > 0 {
+            self.close();
+        }
+        ReaPeaks::from_fine(
+            self.channels,
+            self.samplerate,
+            PeakLevel {
+                samples_per_peak: self.per as u32,
+                count: self.count,
+                data: self.data,
+            },
+        )
+    }
+}
 
 /// One mipmap level: `(max, min)` peak pairs per channel, channel-interleaved
 /// per peak (`ch0 max, ch0 min, ch1 max, ch1 min, …`).
 #[derive(Clone, Debug)]
 pub struct PeakLevel {
-    /// Source samples summarized per peak (REAPER: 160 / 2400 / 48000).
+    /// Source samples summarized per peak (REAPER: `sr/300`, ×15, ×20 —
+    /// 160 / 2400 / 48000 at 48 kHz, 147 / 2205 / 44100 at 44.1 kHz).
     pub samples_per_peak: u32,
     /// Peak count (per channel).
     pub count: usize,
@@ -54,8 +226,18 @@ impl PeakLevel {
 pub struct ReaPeaks {
     pub channels: usize,
     pub samplerate: u32,
-    /// Source-file timestamp recorded by REAPER (cache invalidation).
-    pub source_mtime: u64,
+    /// REAPER's source stamp, raw: the media file's **size in bytes** in
+    /// the high 32 bits, its **mtime in unix seconds** in the low 32.
+    ///
+    /// Decoded with [`Self::source_size`] / [`Self::source_mtime_secs`],
+    /// built with [`stamp`]. It was read as a bare timestamp until the
+    /// real sessions were checked: every file in
+    /// `sessions/Always On Time/Media/peaks` carries
+    /// `0x06A039AA_67AA831E`, whose halves are exactly the stem's 111 MB
+    /// size and its mtime. A cache written with a bare timestamp is one
+    /// REAPER rebuilds on sight, and a REAPER cache read as one looks
+    /// permanently stale — which is why both halves matter.
+    pub source_stamp: u64,
     /// Mipmap levels, finest first (as stored).
     pub levels: Vec<PeakLevel>,
 }
@@ -98,7 +280,7 @@ impl ReaPeaks {
         let nch = b[4] as usize;
         let nlevels = b[5] as usize;
         let samplerate = u32::from_le_bytes(b[6..10].try_into().unwrap());
-        let source_mtime = u64::from_le_bytes(b[10..18].try_into().unwrap());
+        let source_stamp = u64::from_le_bytes(b[10..18].try_into().unwrap());
 
         let table_end = 18 + nlevels * 8;
         need(table_end)?;
@@ -124,7 +306,7 @@ impl ReaPeaks {
         Ok(Self {
             channels: nch,
             samplerate,
-            source_mtime,
+            source_stamp,
             levels,
         })
     }
@@ -139,14 +321,13 @@ impl ReaPeaks {
         frames: usize,
         read: impl Fn(usize, usize) -> f32,
     ) -> Self {
-        const FINE: usize = 160;
         let nch = channels.max(1);
-        let count = frames.div_ceil(FINE);
+        let per = fine_spp(samplerate);
+        let count = frames.div_ceil(per);
         let mut data: Vec<i16> = Vec::with_capacity(count * nch * 2);
-        let q = |v: f32| -> i16 { (v.clamp(-1.0, 1.0) * 32767.0) as i16 };
         for p in 0..count {
-            let a = p * FINE;
-            let b = (a + FINE).min(frames);
+            let a = p * per;
+            let b = (a + per).min(frames);
             for ch in 0..nch {
                 let (mut max, mut min) = (f32::MIN, f32::MAX);
                 for f in a..b {
@@ -158,50 +339,36 @@ impl ReaPeaks {
                     max = 0.0;
                     min = 0.0;
                 }
-                data.push(q(max));
-                data.push(q(min));
+                data.push(quantize(max));
+                data.push(quantize(min));
             }
         }
-        let fine = PeakLevel {
-            samples_per_peak: FINE as u32,
-            count,
-            data,
-        };
-        // Fold coarser levels from the finest (2400 = 15×160,
-        // 48000 = 20×2400).
-        let fold = |src: &PeakLevel, factor: usize| -> PeakLevel {
-            let count = src.count.div_ceil(factor);
-            let mut data: Vec<i16> = Vec::with_capacity(count * nch * 2);
-            for p in 0..count {
-                let a = p * factor;
-                let b = (a + factor).min(src.count);
-                for ch in 0..nch {
-                    let (mut max, mut min) = (i16::MIN, i16::MAX);
-                    for s in a..b {
-                        let i = (s * nch + ch) * 2;
-                        max = max.max(src.data[i]);
-                        min = min.min(src.data[i + 1]);
-                    }
-                    if max < min {
-                        max = 0;
-                        min = 0;
-                    }
-                    data.push(max);
-                    data.push(min);
-                }
-            }
+        Self::from_fine(
+            nch,
+            samplerate,
             PeakLevel {
-                samples_per_peak: src.samples_per_peak * factor as u32,
+                samples_per_peak: per as u32,
                 count,
                 data,
-            }
-        };
-        let mid = fold(&fine, 15);
-        let coarse = fold(&mid, 20);
+            },
+        )
+    }
+
+    /// The three-level mipmap around an already-built finest level —
+    /// REAPER's stock ladder, the coarser two folded from the finest
+    /// (2400 = 15×160, 48000 = 20×2400) so the source is read once.
+    ///
+    /// Split out of [`Self::compute`] so a source that can only be read
+    /// *forward* — a decoded Ogg proxy — can build the fine level with
+    /// [`PeaksBuilder`] and still land on the same file.
+    pub fn from_fine(channels: usize, samplerate: u32, fine: PeakLevel) -> Self {
+        let nch = channels.max(1);
+        let mid = fold(&fine, nch, 15);
+        let coarse = fold(&mid, nch, 20);
         Self {
             channels: nch,
             samplerate,
-            source_mtime: 0,
+            source_stamp: 0,
             levels: vec![fine, mid, coarse],
         }
     }
@@ -213,7 +380,7 @@ impl ReaPeaks {
         out.push(self.channels as u8);
         out.push(self.levels.len() as u8);
         out.extend_from_slice(&self.samplerate.to_le_bytes());
-        out.extend_from_slice(&self.source_mtime.to_le_bytes());
+        out.extend_from_slice(&self.source_stamp.to_le_bytes());
         for l in &self.levels {
             out.extend_from_slice(&l.samples_per_peak.to_le_bytes());
             out.extend_from_slice(&(l.count as u32).to_le_bytes());
@@ -229,6 +396,19 @@ impl ReaPeaks {
     /// Write a `.reapeaks` cache file (best effort for read-only media).
     pub fn write(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
         std::fs::write(path, self.to_bytes())
+    }
+
+    /// The source size the stamp records, in bytes (truncated to 32
+    /// bits by the format).
+    #[must_use]
+    pub fn source_size(&self) -> u64 {
+        self.source_stamp >> 32
+    }
+
+    /// The source mtime the stamp records, in unix seconds.
+    #[must_use]
+    pub fn source_mtime_secs(&self) -> u64 {
+        self.source_stamp & 0xFFFF_FFFF
     }
 
     /// Source length in samples (from the finest level).
@@ -334,7 +514,7 @@ mod tests {
         let p = ReaPeaks::parse(&sample()).unwrap();
         assert_eq!(p.channels, 1);
         assert_eq!(p.samplerate, 48000);
-        assert_eq!(p.source_mtime, 7);
+        assert_eq!(p.source_stamp, 7);
         assert_eq!(p.levels.len(), 2);
         assert_eq!(p.levels[0].samples_per_peak, 160);
         assert_eq!(p.levels[0].count, 4);
@@ -400,6 +580,57 @@ mod tests {
             checked += 1;
         }
         assert!(checked > 0);
+    }
+
+    /// A forward-only build has to land on the same bytes as a
+    /// random-access one, or a proxy-built cache and a WAV-built cache
+    /// would draw different waveforms for the same audio.
+    #[test]
+    fn streaming_builder_matches_compute() {
+        let frames = 50_000usize;
+        let nch = 2usize;
+        let sample = |f: usize, ch: usize| ((f % 997) as f32 / 997.0 - 0.5) * (1.0 + ch as f32);
+        let direct = ReaPeaks::compute(nch, 48_000, frames, sample);
+
+        let mut builder = PeaksBuilder::new(nch, 48_000);
+        // Deliberately ragged blocks: not a multiple of 160. (Blocks that
+        // split a frame are `a_block_may_end_mid_frame`.)
+        let mut f = 0;
+        while f < frames {
+            let n = (frames - f).min(if f % 3 == 0 { 373 } else { 1024 });
+            let mut block = Vec::with_capacity(n * nch);
+            for i in f..f + n {
+                for ch in 0..nch {
+                    block.push(sample(i, ch));
+                }
+            }
+            builder.push_interleaved(&block);
+            f += n;
+        }
+        assert_eq!(builder.frames(), frames as u64);
+        let streamed = builder.finish();
+        assert_eq!(streamed.to_bytes(), direct.to_bytes());
+    }
+
+    #[test]
+    fn a_block_may_end_mid_frame() {
+        let frames = 10_000usize;
+        let nch = 3usize;
+        let sample = |f: usize, ch: usize| ((f % 211) as f32 / 211.0 - 0.5) * (1.0 + ch as f32);
+        let direct = ReaPeaks::compute(nch, 48_000, frames, sample);
+
+        let interleaved: Vec<f32> = (0..frames)
+            .flat_map(|f| (0..nch).map(move |ch| sample(f, ch)))
+            .collect();
+        let mut builder = PeaksBuilder::new(nch, 48_000);
+        // 7 and 11 samples: neither divides by three channels.
+        for (i, block) in interleaved.chunks(7).enumerate() {
+            for part in block.chunks(if i % 2 == 0 { 7 } else { 11 }) {
+                builder.push_interleaved(part);
+            }
+        }
+        assert_eq!(builder.frames(), frames as u64);
+        assert_eq!(builder.finish().to_bytes(), direct.to_bytes());
     }
 
     #[test]

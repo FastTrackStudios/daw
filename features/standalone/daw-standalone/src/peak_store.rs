@@ -1,69 +1,59 @@
-//! Persistent source-level waveform peaks — REAPER `.reapeaks` sidecars.
+//! Persistent source-level waveform peaks — the `.sessionpeaks` cache.
 //!
 //! Take-level peaks depend on placement, play rate and stretch markers,
 //! which is why [`crate::peak`]'s in-memory cache is revision-keyed. The
 //! *expensive* part, though, is scanning the source PCM — and that is a
 //! property of the media file alone. So the disk artifact lives at the
-//! SOURCE level: a REAPER-compatible `.reapeaks` mipmap next to each
-//! on-disk media file (`<mediafile>.reapeaks`, REAPER's own naming), so
-//! REAPER and FTS share sidecars where projects overlap.
+//! SOURCE level, in REAPER's own format, so REAPER and FTS share caches
+//! where projects overlap.
 //!
-//! Flow: the first peaks request for a source loads a valid sidecar, or
-//! scans the PCM once, writes the sidecar, and keeps the parsed mipmap in
-//! a process-global map (keyed by media path, revalidated by mtime).
-//! Cold starts after that fold coarse-zoom peaks from the sidecar instead
+//! Where it sits is [`dawfile_reaper::sessionpeaks`]'s business: reads
+//! try `Media/Peaks/<name>.sessionpeaks`, then REAPER's
+//! `Media/peaks/<name>.reapeaks`, then `<name>.reapeaks` beside the
+//! media; writes go to the first. A session `session peaks` has already
+//! built, or REAPER has already scanned, costs this nothing.
+//!
+//! Flow: the first peaks request for a source loads a valid cache, or
+//! scans the PCM once, writes the cache, and keeps the parsed mipmap in
+//! a process-global map (keyed by media path, revalidated by stamp).
+//! Cold starts after that fold coarse-zoom peaks from the cache instead
 //! of rescanning gigabytes of PCM. Fine zooms (below the finest mipmap
-//! ratio, 160 samples/peak) still read PCM — the mipmap can't resolve
-//! them.
+//! ratio — `sr/300`, 160 samples/peak at 48 kHz) still read PCM: the
+//! mipmap can't resolve them.
 //!
 //! Validation matches REAPER's model: the sidecar stores the source
-//! file's mtime (seconds), and we additionally require the channel
-//! count, sample rate and length (within one fine peak window) to match
-//! the opened source. Anything stale is recomputed and rewritten.
+//! file's size and mtime packed into one u64
+//! ([`dawfile_reaper::reapeaks::stamp`]), and we additionally require
+//! the channel count, sample rate and length (within one fine peak
+//! window) to match the opened source. Anything stale is recomputed and
+//! rewritten. Writing the same stamp REAPER writes is what keeps the
+//! sidecars mutually usable — a bare timestamp there is a file REAPER
+//! rebuilds the moment it opens the project.
 //!
 //! In-memory sources ([`AudioSource::Memory`], compressed decodes) get no
-//! sidecar — their `min_max_block` is a RAM walk, cheap enough to redo.
+//! cache — their `min_max_block` is a RAM walk, cheap enough to redo.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use dawfile_reaper::reapeaks::ReaPeaks;
+use dawfile_reaper::sessionpeaks;
 
 use crate::audio_engine::AudioSource;
 
-/// The sidecar path for a media file: REAPER's naming — the full file
-/// name (extension included) plus `.reapeaks`, next to the media.
-pub(crate) fn sidecar_path(media: &Path) -> PathBuf {
-    let mut os = media.as_os_str().to_owned();
-    os.push(".reapeaks");
-    PathBuf::from(os)
-}
-
-/// Media-file mtime in whole seconds since the epoch — the stamp the
-/// sidecar records for invalidation.
-fn media_mtime_secs(media: &Path) -> Option<u64> {
-    std::fs::metadata(media)
-        .ok()?
-        .modified()
-        .ok()?
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .map(|d| d.as_secs())
-}
-
-/// A sidecar is valid for `source` iff its recorded mtime matches the
+/// A cache is valid for `source` iff its recorded stamp matches the
 /// media file and its shape matches the opened audio: same channels,
 /// same rate, and the finest level covers the source length (peak count
 /// is `ceil(frames / spp)`, so the covered length may exceed the frame
 /// count by at most one window).
-fn is_valid(pk: &ReaPeaks, source: &AudioSource, media_mtime: u64) -> bool {
+fn is_valid(pk: &ReaPeaks, source: &AudioSource, media_stamp: u64) -> bool {
     let Some(fine) = pk.levels.first() else {
         return false;
     };
     let frames = source.frame_count() as u64;
     let spp = fine.samples_per_peak.max(1) as u64;
-    pk.source_mtime == media_mtime
+    pk.source_stamp == media_stamp
         && pk.channels == source.channels().max(1) as usize
         && pk.samplerate == source.sample_rate()
         && fine.count as u64 == frames.div_ceil(spp)
@@ -83,20 +73,20 @@ fn store() -> &'static Mutex<Store> {
 /// valid sidecar, else one PCM scan + sidecar write. `None` when the
 /// media file doesn't exist (nothing to stamp the cache against).
 pub(crate) fn get_or_build(media: &Path, source: &AudioSource) -> Option<Arc<ReaPeaks>> {
-    let mtime = media_mtime_secs(media)?;
+    let stamp = sessionpeaks::media_stamp(media)?;
     if let Ok(map) = store().lock()
-        && let Some((stamp, pk)) = map.get(media)
-        && *stamp == mtime
+        && let Some((cached, pk)) = map.get(media)
+        && *cached == stamp
     {
         return Some(pk.clone());
     }
 
-    let side = sidecar_path(media);
-    let pk = match ReaPeaks::read(&side) {
-        Ok(pk) if is_valid(&pk, source, mtime) => pk,
-        _ => {
-            // Absent or stale: one scan of the source PCM, stamped with
-            // the media mtime. The write is best-effort — a read-only
+    let found = sessionpeaks::read_any(media).filter(|(_, pk)| is_valid(pk, source, stamp));
+    let pk = match found {
+        Some((_, pk)) => pk,
+        None => {
+            // Absent or stale: one scan of the source PCM, carrying the
+            // media's stamp. The write is best-effort — a read-only
             // media directory just means the next cold start rescans.
             let mut pk = ReaPeaks::compute(
                 source.channels().max(1) as usize,
@@ -104,12 +94,12 @@ pub(crate) fn get_or_build(media: &Path, source: &AudioSource) -> Option<Arc<Rea
                 source.frame_count(),
                 |frame, ch| source.channel_interp(frame, frame, 0.0, ch),
             );
-            pk.source_mtime = mtime;
-            if let Err(err) = pk.write(&side) {
+            pk.source_stamp = stamp;
+            if let Err(err) = sessionpeaks::write(media, &pk) {
                 tracing::warn!(
-                    peaks.sidecar = %side.display(),
+                    peaks.media = %media.display(),
                     peaks.write_error = %err,
-                    "reapeaks sidecar write failed; peaks stay in-memory only"
+                    "sessionpeaks write failed; peaks stay in-memory only"
                 );
             }
             pk
@@ -117,7 +107,7 @@ pub(crate) fn get_or_build(media: &Path, source: &AudioSource) -> Option<Arc<Rea
     };
     let pk = Arc::new(pk);
     if let Ok(mut map) = store().lock() {
-        map.insert(media.to_path_buf(), (mtime, pk.clone()));
+        map.insert(media.to_path_buf(), (stamp, pk.clone()));
     }
     Some(pk)
 }
