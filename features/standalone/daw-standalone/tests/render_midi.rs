@@ -70,7 +70,8 @@ fn midi_item_drives_vst3i_during_render() {
         MidiNoteCreate::new(64, 100, 0.0, 2.0), // E4
         MidiNoteCreate::new(67, 100, 0.0, 2.0), // G4
     ];
-    let added = Midi::add_notes(&daw, take_loc, notes);
+    // Quarter notes, start and length — standalone's own units.
+    let added = Midi::add_notes_ppq(&daw, take_loc, notes);
     assert_eq!(added.len(), 5, "all notes should be inserted");
 
     // Render ~46 ms at 48k. Project defaults to 120 BPM, so 1 second
