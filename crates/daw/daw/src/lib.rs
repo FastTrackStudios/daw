@@ -146,8 +146,11 @@ pub fn init_from_parts(daw: rpc::Daw, runtime: std::sync::Arc<tokio::runtime::Ru
 /// engine calls this after building its in-process `daw-control` client.
 #[cfg(target_arch = "wasm32")]
 pub fn init_from_parts(daw: rpc::Daw) -> bool {
-    // The facade owns the handle (daw-control's global singleton is
-    // native-only); `daw::get()` reads it back out of WASM_DAW.
+    // daw-control's own global too (its wasm build keeps one per thread),
+    // so code that reaches the DAW as `rpc::Daw::try_get()` — the panels,
+    // the studio's project read-back — finds the same handle the facade
+    // hands out. `daw::get()` reads it back out of WASM_DAW.
+    let _ = rpc::Daw::init(daw.caller().clone());
     WASM_DAW.set(WasmDaw(daw)).is_ok()
 }
 
