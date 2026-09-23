@@ -41,3 +41,20 @@ preparing a multitrack, the guide — is in `session/docs/studio-handoff.md`.
   engine) is proven at the backend level only — needs signal's rig on it.
 - The duplex/IOProc path does not yet join the device's audio workgroup
   (only matters once DSP runs on worker threads).
+
+## Continued 2026-09-22 (evening)
+
+The work moved to the session app; its handoff is
+`session/docs/handoff-live-session.md` (sibling checkout). What landed
+here, on `tag-section`, local only:
+
+- `dawfile-reaper::sessionpeaks` — the `.sessionpeaks` waveform cache
+  (REAPER's `.reapeaks` bytes, in `Media/Peaks/`); daw-standalone's peak
+  store reads and writes through it.
+- `daw_standalone::session_file` (feature `session-file`, facade
+  `standalone-session-file`) — a live project saved as `.session` and
+  loaded back; built-in FX restored by name (`FxFactory::provides`).
+- `project_loader::anchor_media` — each project's media anchored to its
+  own (absolute) folder, for an engine holding a setlist.
+- `decode` pulls `rtrb`; an empty marker GUID is written `""` so a region's
+  lane survives the round trip.
