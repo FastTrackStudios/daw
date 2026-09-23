@@ -713,25 +713,36 @@ impl Chord {
                 break;
             }
 
+            // An addition may be parenthesised, as lead sheets write it:
+            // `5(add4)` is `5add4`.
+            let paren = usize::from(tokens[consumed].token_type == TokenType::LParen);
+
             // Check for "add"
-            if consumed + 2 < tokens.len()
-                && let TokenType::Letter('a') = tokens[consumed].token_type
-                && let TokenType::Letter('d') = tokens[consumed + 1].token_type
-                && let TokenType::Letter('d') = tokens[consumed + 2].token_type
+            if consumed + paren + 2 < tokens.len()
+                && let TokenType::Letter('a') = tokens[consumed + paren].token_type
+                && let TokenType::Letter('d') = tokens[consumed + paren + 1].token_type
+                && let TokenType::Letter('d') = tokens[consumed + paren + 2].token_type
             {
-                consumed += 3; // "add"
+                let start = consumed;
+                consumed += paren + 3; // "(add" or "add"
 
                 // Parse the degree number
                 if consumed < tokens.len()
                     && let TokenType::Number(n) = &tokens[consumed].token_type
                     && let Some(degree) = ChordDegree::from_number(n.parse().ok().unwrap_or(0))
                 {
-                    additions.push(degree);
                     consumed += 1;
-                    continue;
+                    let closed = paren == 0
+                        || (consumed < tokens.len() && tokens[consumed].token_type == TokenType::RParen);
+                    if closed {
+                        consumed += paren;
+                        additions.push(degree);
+                        continue;
+                    }
                 }
-                // "add" found but no valid number, back up and stop
-                consumed -= 3;
+                // "add" found but no valid number (or an unclosed paren):
+                // back up and stop
+                consumed = start;
                 break;
             }
 
@@ -1414,6 +1425,9 @@ mod tests {
             assert_eq!(chord.additions, vec![ChordDegree::Second], "{written}");
             assert_eq!(chord.to_string(), shown, "{written}");
         }
+        // An added 4th keeps its spelling too, with or without parentheses.
+        assert_eq!(parse_chord("5add4").to_string(), "5add4");
+        assert_eq!(parse_chord("5(add4)").to_string(), "5add4");
         // Not on a seventh or a sus2, which already says what it is.
         assert!(parse_chord("4sus2").additions.is_empty());
         assert!(parse_chord("G7").additions.is_empty());

@@ -144,19 +144,14 @@ impl Chord {
             desc.push_str(&alteration.to_string());
         }
 
-        // Additions (with special handling for 6 and 6/9)
-        // An added 2nd stays add2, as charts write it (`42`, `G2`); an added
-        // 4th uses the extended add11.
+        // Additions (with special handling for 6 and 6/9), spelled as
+        // written: an added 2nd is add2 (`42`, `G2`) and an added 4th add4
+        // (`5(add4)`), the way worship charts write them — not the
+        // respelled add9 / add11.
         let is_sixth_chord = self.additions.contains(&ChordDegree::Sixth) && self.family.is_none();
         let is_six_nine_chord = is_sixth_chord && self.additions.contains(&ChordDegree::Ninth);
 
-        // Helper to convert degree to preferred addition notation
-        let addition_value = |degree: &ChordDegree| -> u8 {
-            match degree {
-                ChordDegree::Fourth => 11, // add11 instead of add4
-                _ => degree.value(),
-            }
-        };
+        let addition_value = |degree: &ChordDegree| -> u8 { degree.value() };
 
         if is_six_nine_chord {
             desc.push_str("6/9");
