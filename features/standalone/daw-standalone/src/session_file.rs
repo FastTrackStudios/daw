@@ -448,6 +448,18 @@ fn rgb_to_native(rgb: u32) -> i32 {
 }
 
 /// A new GUID in REAPER's spelling.
+/// An item label as a `<NOTES>` block, one `|` line a line.
+fn notes_block(label: &str) -> String {
+    let mut block = String::from("<NOTES\n");
+    for line in label.lines() {
+        block.push('|');
+        block.push_str(line);
+        block.push('\n');
+    }
+    block.push('>');
+    block
+}
+
 fn new_guid() -> String {
     format!("{{{}}}", uuid::Uuid::new_v4().to_string().to_uppercase())
 }
@@ -1866,6 +1878,7 @@ impl<'a> Writer<'a> {
                 && v.color == e.color
                 && v.loop_source == e.loop_source
                 && v.fixed_lane == e.fixed_lane
+                && v.label == e.label
         };
         if let (Some(o), Some(v)) = (orig, view.as_ref())
             && item_same(v)
@@ -1957,6 +1970,21 @@ impl<'a> Writer<'a> {
                 self.take(te, prev, k as u32 == active)
             })
             .collect();
+
+        // The label is the item's `<NOTES>` (REAPER's `P_NOTES`), which a
+        // file keeps inside take #0's lines: the chord and key items' names
+        // live here, and without it a saved song's CHORDS lane was blank.
+        for take in &mut ri.takes {
+            take.extra_blocks.retain(|b| !loader::is_notes_block(b));
+        }
+        if let Some(label) = e.label.as_deref().filter(|l| !l.is_empty()) {
+            if ri.takes.is_empty() {
+                ri.takes.push(RppTake::default());
+            }
+            if let Some(t0) = ri.takes.first_mut() {
+                t0.extra_blocks.push(notes_block(label));
+            }
+        }
 
         // Take #0 is written inline on the item — mirror it there.
         if let Some(t0) = ri.takes.first_mut() {

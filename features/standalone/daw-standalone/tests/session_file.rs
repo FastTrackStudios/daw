@@ -783,6 +783,40 @@ fn a_prepared_song_survives_save_and_load() {
     assert!(text.contains("PLAYRATE 1 1 0 -1 0 0.0025"), "{text}");
 }
 
+/// An item's label — the name a chord or key item carries, REAPER's
+/// `P_NOTES` — is kept, on an item with a take and on one without (the
+/// KEY track's empty items). Without it a saved song came back with a
+/// blank CHORDS lane.
+#[test]
+fn item_labels_survive_save_and_load() {
+    const KEY_ITEM: &str = "{0000000A-0000-0000-0000-00000000000A}";
+    let tmp = tempfile::tempdir().unwrap();
+    let song = tmp.path().join("Song");
+    let (daw, _, guid) = open_song(&song);
+    daw.write_project(&guid, |p| {
+        p.items.get_mut(DRUMS_ITEM).unwrap().item.label = Some("4add2".into());
+        let mut key = p.items[DRUMS_ITEM].item.clone();
+        key.guid = KEY_ITEM.into();
+        key.track_guid = KEYS.into();
+        key.label = Some("#D".into());
+        p.items.insert(KEY_ITEM.into(), ItemEntry { item: key });
+        p.items_by_track.entry(KEYS.into()).or_default().push(KEY_ITEM.into());
+        p.takes.remove(KEY_ITEM);
+    })
+    .unwrap();
+
+    let dir = song.join("Song.session");
+    save_session(&daw, &guid, &dir).unwrap();
+    let (fresh, _) = engine();
+    let loaded = load_session(&fresh, "Song", &dir).unwrap();
+    let labels = fresh
+        .read_project(&loaded.project_guid, |p| {
+            [DRUMS_ITEM, KEY_ITEM].map(|g| p.items.get(g).and_then(|e| e.item.label.clone()))
+        })
+        .unwrap();
+    assert_eq!(labels, [Some("4add2".to_owned()), Some("#D".to_owned())]);
+}
+
 /// A project with no file behind it (built in the engine, or opened from
 /// text) is written whole from the engine state, and still comes back.
 #[test]

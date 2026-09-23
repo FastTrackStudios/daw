@@ -524,8 +524,32 @@ pub(crate) fn item_from_rpp(
         None
     };
     item.take_count = ri.takes.len().max(1) as u32;
+    item.label = label_from_rpp(ri);
     // proto `Item` doesn't carry `channel_mode` yet — drop.
     item
+}
+
+/// An item's label: its `<NOTES>` block (REAPER's `P_NOTES`), one `|`
+/// line a line. The parser keeps a nested block it does not model on the
+/// take it was read under, which for an item's own notes is take #0.
+pub(crate) fn label_from_rpp(ri: &dawfile_reaper::types::Item) -> Option<String> {
+    let block = ri
+        .takes
+        .iter()
+        .flat_map(|t| &t.extra_blocks)
+        .find(|b| is_notes_block(b))?;
+    let text = block
+        .lines()
+        .skip(1)
+        .filter_map(|l| l.trim_start().strip_prefix('|'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.is_empty()).then_some(text)
+}
+
+/// Whether a nested block is an item's `<NOTES>`.
+pub(crate) fn is_notes_block(block: &str) -> bool {
+    block.trim_start().starts_with("<NOTES")
 }
 
 /// A take's `SM` lines, sorted by position. The third token is the
