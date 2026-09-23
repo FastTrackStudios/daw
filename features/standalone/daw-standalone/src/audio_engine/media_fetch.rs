@@ -1,0 +1,237 @@
+//! Fetching streamed media in the order it will be heard.
+//!
+//! A take streamed from elsewhere (Task, a peer) plays what has arrived
+//! ([`super::streamed::RemoteOgg`] over a [`SparseBytes`]). What arrives
+//! next is decided here, for every streamed take at once, by one measure:
+//! **how soon it will be heard**. For each take the bytes under
+//! `[playhead, playhead + horizon]` — the item's span mapped through its
+//! source offset and rate to the file's frames, then through its page
+//! index to bytes — that have not arrived, split into bounded requests so
+//! a change of plan (a seek) takes effect within one request; the take's
+//! header first of all, and any range a reader actually hit
+//! ([`SparseBytes::wanted`]) before any plan. The horizon starts at a few
+//! seconds and widens as what is near is in, so every track's next
+//! seconds come before any track's later minutes, and a 30-minute file is
+//! fetched from where it is being played, not from its start.
+//!
+//! [`plan`] is the pure decision; [`drive`] runs it against a
+//! [`RangeFetch`] (the transport: HTTP ranges from Task, a range-read over
+//! iroh from a peer), a few requests in flight, re-planning as bytes land
+//! and the playhead moves.
+
+use std::ops::Range;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use fts_sample::ogg_index::OggIndex;
+use fts_sample::sparse::SparseBytes;
+
+/// A take whose media streams in.
+#[derive(Clone)]
+pub struct StreamedTake {
+    /// What the fetcher asks for (the file, as its source names it).
+    pub path: String,
+    pub bytes: Arc<SparseBytes>,
+    pub index: OggIndex,
+    /// The item's span in the timeline, seconds.
+    pub start: f64,
+    pub end: f64,
+    /// Where in the file the item starts (seconds) and the rate it plays
+    /// the file at.
+    pub source_offset: f64,
+    pub playrate: f64,
+}
+
+impl std::fmt::Debug for StreamedTake {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StreamedTake").field("path", &self.path).field("start", &self.start).finish_non_exhaustive()
+    }
+}
+
+impl StreamedTake {
+    /// The file frame the timeline moment `t` plays.
+    fn frame_at(&self, t: f64) -> u64 {
+        let seconds = ((t - self.start) * self.playrate + self.source_offset).max(0.0);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let frame = (seconds * f64::from(self.index.sample_rate)) as u64;
+        frame.min(self.index.frames)
+    }
+}
+
+/// One range to fetch, and how soon what it holds will be heard (seconds;
+/// below zero: before anything planned — the header, a reader's miss).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Request {
+    pub take: usize,
+    pub range: Range<u64>,
+    pub heard_in: f64,
+}
+
+/// How soon a take's header is needed: before anything.
+const HEADER: f64 = -2.0;
+/// How soon a range a reader hit is needed: before any plan.
+const WANTED: f64 = -1.0;
+/// Frames before a stretch a decoder primes from.
+const PREROLL: u64 = 4096;
+
+/// Everything missing under `[playhead, playhead + horizon]` across
+/// `takes`, the soonest heard first, in requests of at most `max_request`
+/// bytes.
+#[must_use]
+pub fn plan(takes: &[StreamedTake], playhead: f64, horizon: f64, max_request: u64) -> Vec<Request> {
+    let max_request = max_request.max(1);
+    let mut out = Vec::new();
+    let mut push = |take: usize, range: Range<u64>, heard_from: f64, heard_to: f64| {
+        let len = range.end.saturating_sub(range.start).max(1);
+        let mut at = range.start;
+        while at < range.end {
+            let end = at.saturating_add(max_request).min(range.end);
+            #[allow(clippy::cast_precision_loss)]
+            let through = (at - range.start) as f64 / len as f64;
+            out.push(Request { take, range: at..end, heard_in: (heard_to - heard_from).mul_add(through, heard_from) });
+            at = end;
+        }
+    };
+    for (i, take) in takes.iter().enumerate() {
+        for missing in take.bytes.missing(&take.index.header()) {
+            push(i, missing, HEADER, HEADER);
+        }
+        if let Some(wanted) = take.bytes.wanted() {
+            for missing in take.bytes.missing(&wanted) {
+                push(i, missing, WANTED, WANTED);
+            }
+        }
+        let from = playhead.max(take.start);
+        let to = (playhead + horizon).min(take.end);
+        if from >= to {
+            continue;
+        }
+        let bytes = take
+            .index
+            .bytes_for(take.frame_at(from).saturating_sub(PREROLL), take.frame_at(to));
+        let span = bytes.end.saturating_sub(bytes.start).max(1);
+        for missing in take.bytes.missing(&bytes) {
+            // How soon each part is heard: where it sits in the stretch.
+            #[allow(clippy::cast_precision_loss)]
+            let at = |b: u64| (to - from).mul_add((b.saturating_sub(bytes.start)) as f64 / span as f64, from - playhead);
+            let (a, b) = (at(missing.start), at(missing.end));
+            push(i, missing, a, b);
+        }
+    }
+    out.sort_by(|a, b| a.heard_in.total_cmp(&b.heard_in).then(a.take.cmp(&b.take)));
+    out
+}
+
+/// Where a streamed take's bytes come from.
+pub trait RangeFetch: Send + Sync + 'static {
+    /// The bytes `range` of the file `path` names.
+    fn fetch(
+        &self,
+        path: &str,
+        range: Range<u64>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>, String>> + Send>>;
+}
+
+/// How [`drive`] fetches.
+#[derive(Clone, Debug)]
+pub struct FetchConfig {
+    /// Requests in flight at once.
+    pub concurrency: usize,
+    /// The most bytes one request asks for.
+    pub max_request: u64,
+    /// The horizons tried, nearest first: the plan is the nearest that
+    /// still has something missing.
+    pub horizons: Vec<f64>,
+    /// How often to re-plan when nothing has landed (a playhead moving).
+    pub tick: Duration,
+}
+
+impl Default for FetchConfig {
+    fn default() -> Self {
+        Self {
+            concurrency: 4,
+            max_request: 256 * 1024,
+            horizons: vec![3.0, 10.0, 30.0, 120.0, f64::INFINITY],
+            tick: Duration::from_millis(50),
+        }
+    }
+}
+
+/// Fetch `takes`' media in the order it will be heard until everything
+/// has arrived or `stop` is set. `playhead` is read each re-plan. Failed
+/// requests are logged and tried again on a later plan.
+pub async fn drive(
+    takes: Arc<Mutex<Vec<StreamedTake>>>,
+    fetch: Arc<dyn RangeFetch>,
+    playhead: Arc<dyn Fn() -> f64 + Send + Sync>,
+    config: FetchConfig,
+    stop: Arc<AtomicBool>,
+) {
+    use futures::StreamExt as _;
+    type InFlight = std::pin::Pin<Box<dyn std::future::Future<Output = (Request, Result<Vec<u8>, String>)> + Send>>;
+    let mut in_flight: futures::stream::FuturesUnordered<InFlight> = futures::stream::FuturesUnordered::new();
+    let mut flying: Vec<Request> = Vec::new();
+    loop {
+        if stop.load(Ordering::Relaxed) {
+            return;
+        }
+        let snapshot: Vec<StreamedTake> = takes.lock().map(|t| t.clone()).unwrap_or_default();
+        let now = playhead();
+        // The nearest horizon with something still missing.
+        let wanted = config
+            .horizons
+            .iter()
+            .map(|&h| plan(&snapshot, now, h, config.max_request))
+            .find(|p| p.iter().any(|r| !overlaps(&flying, r)))
+            .unwrap_or_default();
+        for request in wanted {
+            if flying.len() >= config.concurrency.max(1) {
+                break;
+            }
+            if overlaps(&flying, &request) {
+                continue;
+            }
+            let Some(take) = snapshot.get(request.take) else { continue };
+            let future = fetch.fetch(&take.path, request.range.clone());
+            let r = request.clone();
+            in_flight.push(Box::pin(async move { (r, future.await) }));
+            flying.push(request);
+        }
+        if flying.is_empty() && snapshot.iter().all(|t| t.bytes.missing(&(0..t.bytes.len())).is_empty()) {
+            return;
+        }
+        // The next landing, or a tick to re-plan for a moving playhead.
+        let landed = if in_flight.is_empty() {
+            architect::platform::sleep(config.tick).await;
+            None
+        } else {
+            let tick = architect::platform::sleep(config.tick);
+            futures::pin_mut!(tick);
+            match futures::future::select(in_flight.next(), tick).await {
+                futures::future::Either::Left((done, _)) => done,
+                futures::future::Either::Right(((), _)) => None,
+            }
+        };
+        if let Some((request, result)) = landed {
+            flying.retain(|f| f != &request);
+            match result {
+                Ok(data) => {
+                    if let Some(take) = snapshot.get(request.take)
+                        && let Err(e) = take.bytes.insert(request.range.start, &data)
+                    {
+                        tracing::warn!(media = %take.path, error = %e, "streamed media could not be stored");
+                    }
+                }
+                Err(e) => {
+                    let path = snapshot.get(request.take).map_or("?", |t| t.path.as_str());
+                    tracing::warn!(media = %path, range = ?request.range, error = %e, "a streamed media range failed; it is asked for again");
+                }
+            }
+        }
+    }
+}
+
+fn overlaps(flying: &[Request], r: &Request) -> bool {
+    flying.iter().any(|f| f.take == r.take && f.range.start < r.range.end && r.range.start < f.range.end)
+}

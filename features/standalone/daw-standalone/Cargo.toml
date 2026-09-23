@@ -31,6 +31,8 @@ daw-transport-sync = { workspace = true }
 # native + wasm. Direct (not `workspace = true`) so `default-features = false`
 # is allowed; native unifies to full via the native target dep below.
 tokio = { version = "1", default-features = false, features = ["sync"] }
+# media_fetch: requests in flight (FuturesUnordered). Wasm-clean.
+futures = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 web-time = "1"
 
@@ -100,7 +102,7 @@ daw-control = { workspace = true }
 eyre = { workspace = true }
 # `streamed_playback` encodes the proxy it streams.
 fts-sample = { workspace = true, features = ["engine-native"] }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 base64 = "0.22"
 dawfile-reaper = { workspace = true }
 tempfile = { workspace = true }

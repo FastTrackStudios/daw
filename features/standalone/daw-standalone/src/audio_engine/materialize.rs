@@ -59,6 +59,11 @@ pub struct PendingMedia {
     /// The item's span in the timeline, seconds.
     pub start: f64,
     pub end: f64,
+    /// Seconds into the source where the item starts, and the rate it
+    /// plays the source at — what maps a moment of the timeline to a
+    /// moment of the file (`source = offset + (t - start) × rate`).
+    pub source_offset: f64,
+    pub playrate: f64,
 }
 
 /// Every take in `project_guid` that plays a file — what materializing the
@@ -84,6 +89,8 @@ pub fn pending_media(daw: &Standalone, project_guid: &str) -> Vec<PendingMedia> 
                         path: path.clone(),
                         start,
                         end,
+                        source_offset: take.start_offset.as_seconds(),
+                        playrate: if take.play_rate > 0.0 { take.play_rate } else { 1.0 },
                     });
                 }
             }

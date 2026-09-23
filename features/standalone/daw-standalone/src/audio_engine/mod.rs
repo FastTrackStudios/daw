@@ -38,6 +38,9 @@ pub mod decoder;
 pub mod duplex_engine;
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub mod materialize;
+/// Fetching streamed media in the order it will be heard.
+#[cfg(feature = "stream-ogg")]
+pub mod media_fetch;
 #[cfg(feature = "audio")]
 mod mixer;
 #[cfg(feature = "clap-host")]
