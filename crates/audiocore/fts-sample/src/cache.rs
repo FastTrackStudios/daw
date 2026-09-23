@@ -3342,7 +3342,28 @@ pub fn write_ogg_proxy(
     }
     flush(&mut planar, &mut encoder)?;
     encoder.finish().map_err(vorb)?;
+    write_ogg_index(dst, u64::from(spec.sample_rate))?;
     Ok(frames)
+}
+
+/// Write the page index beside an Ogg proxy (`Bass.ogg` → `Bass.ogg.idx`):
+/// which bytes hold which second, so a client streaming it from elsewhere
+/// fetches what is in front of the playhead first (see
+/// [`crate::ogg_index`]). `step` is the frames between points — the sample
+/// rate, a point a second.
+///
+/// # Errors
+///
+/// The proxy cannot be read, is not an Ogg stream, or the index cannot be
+/// written.
+#[cfg(feature = "engine-native")]
+pub fn write_ogg_index(ogg: &std::path::Path, step: u64) -> Result<std::path::PathBuf, SamplerError> {
+    let bytes = std::fs::read(ogg)?;
+    let index = crate::ogg_index::OggIndex::build(&bytes, step)
+        .ok_or_else(|| invalid_data(format!("{}: not an Ogg stream", ogg.display())))?;
+    let path = crate::ogg_index::OggIndex::path_for(ogg);
+    std::fs::write(&path, index.to_text())?;
+    Ok(path)
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, SamplerError> {

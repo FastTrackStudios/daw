@@ -61,10 +61,18 @@ pub mod budget;
 pub mod cache;
 #[cfg(feature = "engine-core")]
 pub mod flac_index;
+/// Which bytes of an Ogg proxy hold which second — what streaming it from
+/// elsewhere fetches by.
+#[cfg(feature = "engine-core")]
+pub mod ogg_index;
 /// An Ogg Vorbis stream decoded a window at a time — the session's
 /// proxies, streamed (see the module docs).
 #[cfg(feature = "engine-core")]
 pub mod ogg_stream;
+/// A file that arrives in pieces, readable where it has landed — the
+/// bytes of a proxy streamed from elsewhere.
+#[cfg(feature = "engine-core")]
+pub mod sparse;
 #[cfg(feature = "engine-core")]
 pub mod stream;
 #[cfg(feature = "engine-native")]

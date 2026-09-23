@@ -25,3 +25,12 @@ pub enum SamplerError {
     #[error("spec missing articulation {0:?}")]
     MissingArticulation(String),
 }
+
+impl SamplerError {
+    /// The bytes a stream needs have not arrived yet (a streamed proxy
+    /// read past what was fetched) — not a failure: try again later.
+    #[must_use]
+    pub fn is_not_yet(&self) -> bool {
+        matches!(self, Self::Io(e) if e.kind() == std::io::ErrorKind::WouldBlock)
+    }
+}

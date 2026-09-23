@@ -21,6 +21,34 @@ use symphonia_format_ogg::OggReader;
 
 use crate::SamplerError;
 
+/// A view the Ogg reader must not seek: it would read the file's last page
+/// to learn the length (the index says it) and bisect for a seek (a view
+/// is opened at the page instead) — both reads of bytes that may not be
+/// there.
+struct UnseekableView(crate::sparse::SparseView);
+
+impl std::io::Read for UnseekableView {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.0.read(buf)
+    }
+}
+
+impl std::io::Seek for UnseekableView {
+    fn seek(&mut self, to: std::io::SeekFrom) -> std::io::Result<u64> {
+        std::io::Seek::seek(&mut self.0, to)
+    }
+}
+
+impl symphonia_core::io::MediaSource for UnseekableView {
+    fn is_seekable(&self) -> bool {
+        false
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        None
+    }
+}
+
 /// One Ogg Vorbis stream, positioned somewhere in it.
 pub struct OggStream {
     reader: OggReader,
@@ -36,7 +64,12 @@ pub struct OggStream {
 }
 
 fn io(e: SymphoniaError) -> SamplerError {
-    SamplerError::Io(std::io::Error::other(e.to_string()))
+    match e {
+        // Kept as it is: `WouldBlock` from a streamed proxy means "not
+        // arrived yet" ([`SamplerError::is_not_yet`]), not a broken stream.
+        SymphoniaError::IoError(e) => SamplerError::Io(e),
+        e => SamplerError::Io(std::io::Error::other(e.to_string())),
+    }
 }
 
 impl OggStream {
@@ -67,6 +100,38 @@ impl OggStream {
     pub fn open_file(path: &std::path::Path) -> Result<Self, SamplerError> {
         let file = std::fs::File::open(path).map_err(SamplerError::Io)?;
         Self::from_source(MediaSourceStream::new(Box::new(file), Default::default()))
+    }
+
+    /// Open a stream fetched from elsewhere, ready to decode from `frame`:
+    /// the header pages, then the file from the indexed page before it —
+    /// so opening needs only those bytes (the index says which), and a
+    /// seek is a fresh open, never a bisection through bytes that may not
+    /// have arrived.
+    ///
+    /// # Errors
+    ///
+    /// The header or the page has not arrived yet
+    /// ([`SamplerError::is_not_yet`]), or the stream is not Ogg Vorbis.
+    pub fn open_view(
+        bytes: Arc<crate::sparse::SparseBytes>,
+        index: &crate::ogg_index::OggIndex,
+        frame: u64,
+    ) -> Result<Self, SamplerError> {
+        // A fresh decoder spends its first packet priming the overlap, so
+        // start early and drop what lies before `frame` as it decodes.
+        const PREROLL: u64 = 4096;
+        let target = frame.saturating_sub(PREROLL);
+        let from = index
+            .points
+            .iter()
+            .rev()
+            .find(|p| p.frames <= target)
+            .map_or(index.audio_start, |p| p.offset);
+        let view = UnseekableView(crate::sparse::SparseView::new(bytes, index.header(), from));
+        let mut stream = Self::from_source(MediaSourceStream::new(Box::new(view), Default::default()))?;
+        stream.frames = index.frames;
+        stream.skip_to = frame.min(index.frames);
+        Ok(stream)
     }
 
     fn from_source(source: MediaSourceStream) -> Result<Self, SamplerError> {
@@ -218,6 +283,57 @@ mod tests {
             first.get_or_insert(at);
         }
         (first.unwrap_or(0), out)
+    }
+
+    /// A proxy fetched from elsewhere: with only its header and the bytes
+    /// the index names for a stretch, that stretch decodes as a straight
+    /// decode does — and a read past what arrived is "not yet", not an
+    /// error.
+    #[test]
+    fn a_stretch_decodes_from_only_its_own_bytes() {
+        let bytes = proxy(44_100 * 20);
+        let mut whole = OggStream::open(Arc::clone(&bytes)).expect("open");
+        let (_, all) = decode_all(&mut whole);
+        let index = crate::ogg_index::OggIndex::build(&bytes, 44_100).expect("index");
+
+        let target: u64 = 44_100 * 12 + 777;
+        let want = 8192u64;
+        let sparse = crate::sparse::SparseBytes::in_memory(bytes.len() as u64);
+        let header = index.header();
+        sparse.insert(header.start, &bytes[header.start as usize..header.end as usize]).unwrap();
+        let range = index.bytes_for(target.saturating_sub(4096), target + want);
+        sparse.insert(range.start, &bytes[range.start as usize..range.end as usize]).unwrap();
+        assert!(
+            range.start > index.audio_start && range.end < bytes.len() as u64,
+            "a stretch, not the file: {range:?} of {}",
+            bytes.len()
+        );
+
+        let mut stream = OggStream::open_view(Arc::clone(&sparse), &index, target).expect("open at the stretch");
+        let mut out = Vec::new();
+        let (at, _) = stream.decode(&mut out).expect("decode").expect("audio");
+        assert_eq!(at, target, "the first frame out is the one asked for");
+        while out.len() < want as usize * 2 {
+            stream.decode(&mut out).expect("decode").expect("more");
+        }
+        let base = target as usize * 2;
+        let worst = out[..want as usize * 2]
+            .iter()
+            .zip(&all[base..base + want as usize * 2])
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(worst < 0.02, "matches the straight decode: {worst}");
+
+        // Past what arrived: not yet.
+        let err = loop {
+            match stream.decode(&mut out) {
+                Ok(Some(_)) => continue,
+                Ok(None) => panic!("the stream cannot end before its bytes arrive"),
+                Err(e) => break e,
+            }
+        };
+        assert!(err.is_not_yet(), "{err}");
+        assert!(sparse.wanted().is_some(), "the fetcher is told what to bring");
     }
 
     #[test]
