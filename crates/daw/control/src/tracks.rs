@@ -160,6 +160,17 @@ impl Tracks {
         Ok(())
     }
 
+    /// Move one track so it ends up at `index` (0-based, project order),
+    /// leaving the selection alone. Folder depths are not touched — see
+    /// `daw_proto::Tracks::move_to`.
+    pub async fn move_to(&self, track: TrackRef, index: u32) -> Result<()> {
+        self.clients
+            .track
+            .move_to(self.context(), track, index)
+            .await??;
+        Ok(())
+    }
+
     /// Move all currently selected tracks to `index`.
     pub async fn reorder_selected(
         &self,
@@ -198,6 +209,29 @@ impl Tracks {
             .clients
             .track
             .add(self.context(), name.to_string(), at_index)
+            .await??;
+        Ok(TrackHandle::new(
+            guid,
+            self.project_id.clone(),
+            self.clients.clone(),
+        ))
+    }
+
+    /// [`Tracks::add`], but the track takes `guid` instead of a fresh one
+    /// — how a peer re-creates a track another engine made. A `guid` the
+    /// project already has is an error (`DawError::AlreadyExists`). The
+    /// handle carries the guid as the backend stored it (verbatim on the
+    /// standalone engine; REAPER's own spelling there).
+    pub async fn add_with_guid(
+        &self,
+        guid: &str,
+        name: &str,
+        at_index: Option<u32>,
+    ) -> Result<TrackHandle> {
+        let guid = self
+            .clients
+            .track
+            .add_with_guid(self.context(), guid.to_string(), name.to_string(), at_index)
             .await??;
         Ok(TrackHandle::new(
             guid,
@@ -672,6 +706,18 @@ impl TrackHandle {
         self.clients
             .track
             .set_folder_depth(self.context(), self.track_ref(), folder_depth)
+            .await??;
+        Ok(())
+    }
+
+    /// Move this track so it ends up at `index` (0-based, project order),
+    /// leaving the selection alone. Its folder depth is not touched — set
+    /// it with [`TrackHandle::set_folder_depth`] if the move should change
+    /// folder membership.
+    pub async fn move_to(&self, index: u32) -> Result<()> {
+        self.clients
+            .track
+            .move_to(self.context(), self.track_ref(), index)
             .await??;
         Ok(())
     }

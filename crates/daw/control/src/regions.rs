@@ -92,6 +92,24 @@ impl Regions {
         Ok(id)
     }
 
+    /// [`Regions::add`], but the region carries `guid` instead of one the
+    /// backend makes up — how a peer re-creates a region another engine
+    /// made. A `guid` a marker or region of the project already has is an
+    /// error (`DawError::AlreadyExists`); REAPER answers `NotSupported`.
+    pub async fn add_with_guid(&self, guid: &str, start: f64, end: f64, name: &str) -> Result<u32> {
+        let id = self
+            .clients
+            .region
+            .add_with_guid(
+                self.context(),
+                guid.to_string(),
+                daw_proto::TimeRange::from_seconds(start, end),
+                name.to_string(),
+            )
+            .await??;
+        Ok(id)
+    }
+
     /// Remove a region by ID
     pub async fn remove(&self, id: u32) -> Result<()> {
         self.clients.region.remove(self.context(), id).await??;

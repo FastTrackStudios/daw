@@ -447,7 +447,6 @@ fn rgb_to_native(rgb: u32) -> i32 {
     (r | (g << 8) | (b << 16) | 0x0100_0000) as i32
 }
 
-/// A new GUID in REAPER's spelling.
 /// An item label as a `<NOTES>` block, one `|` line a line.
 fn notes_block(label: &str) -> String {
     let mut block = String::from("<NOTES\n");
@@ -460,8 +459,9 @@ fn notes_block(label: &str) -> String {
     block
 }
 
+/// A new GUID in REAPER's spelling.
 fn new_guid() -> String {
-    format!("{{{}}}", uuid::Uuid::new_v4().to_string().to_uppercase())
+    crate::new_braced_guid()
 }
 
 fn automation_mode_to_rpp(mode: PAutomationMode) -> RAutomationMode {

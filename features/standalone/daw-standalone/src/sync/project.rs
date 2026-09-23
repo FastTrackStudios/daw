@@ -577,3 +577,11 @@ pub(crate) fn default_lane(
         .find(|(_, lane)| lane.flags & flag != 0)
         .map(|(i, _)| *i)
 }
+
+/// Whether a marker or region of `p` already carries `guid`. Markers and
+/// regions are one list in the project file, matched by GUID on save, so
+/// they share one namespace here too.
+pub(crate) fn marker_or_region_guid_taken(p: &super::daw::ProjectState, guid: &str) -> bool {
+    p.markers.values().any(|m| m.guid.as_deref() == Some(guid))
+        || p.regions.values().any(|r| r.guid.as_deref() == Some(guid))
+}

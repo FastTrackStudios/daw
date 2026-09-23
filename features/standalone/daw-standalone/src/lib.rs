@@ -118,6 +118,29 @@ pub use sync::Standalone;
 #[cfg(feature = "reapeaks")]
 pub use dawfile_reaper::reapeaks;
 
+/// Check a GUID handed to a create-with-guid call (`add_with_guid`,
+/// `add_item_with_guid`).
+///
+/// The engine keeps it verbatim, and a `.session` save writes it as a
+/// bare token (`TRACKID`, `IGUID`, a `MARKER` line's GUID field), so it
+/// must be non-empty and free of whitespace and quotes to come back from
+/// a load unchanged.
+pub(crate) fn check_new_guid(kind: &str, guid: &str) -> daw_proto::DawResult<()> {
+    if guid.is_empty() || guid.chars().any(|c| c.is_whitespace() || c == '"') {
+        return Err(daw_proto::DawError::operation_failed(format!(
+            "{kind} guid {guid:?} is empty or has whitespace or quotes"
+        )));
+    }
+    Ok(())
+}
+
+/// A fresh GUID in REAPER's spelling, `{UPPERCASE-UUID}` — what a marker
+/// or region gets when it is created without one, and what the
+/// `.session` writer mints for one that has none.
+pub(crate) fn new_braced_guid() -> String {
+    format!("{{{}}}", uuid::Uuid::new_v4().to_string().to_uppercase())
+}
+
 /// A colour as the service surface receives it, as this backend stores it
 /// (`0xRRGGBB`, `None` = default).
 ///

@@ -40,6 +40,37 @@ pub fn get_track_guid(low: &ReaperLow, track: MediaTrack) -> String {
     super::buffer::string_from_buffer(&buf)
 }
 
+/// Set a track's GUID (`GUID`, `{XXXXXXXX-...}` spelling). Returns
+/// whether REAPER accepted it.
+pub fn set_track_guid(low: &ReaperLow, track: MediaTrack, guid: &std::ffi::CStr) -> bool {
+    let mut buf = guid.to_bytes_with_nul().to_vec();
+    // SAFETY: the buffer is NUL-terminated and outlives the call; with
+    // `setNewValue = true` REAPER only reads it.
+    unsafe {
+        low.GetSetMediaTrackInfo_String(
+            track.as_ptr(),
+            c"GUID".as_ptr(),
+            buf.as_mut_ptr() as *mut i8,
+            true,
+        )
+    }
+}
+
+/// Set an item's GUID (`GUID`, `{XXXXXXXX-...}` spelling). Returns
+/// whether REAPER accepted it.
+pub fn set_item_guid(low: &ReaperLow, item: MediaItem, guid: &std::ffi::CStr) -> bool {
+    let mut buf = guid.to_bytes_with_nul().to_vec();
+    // SAFETY: as `set_track_guid`.
+    unsafe {
+        low.GetSetMediaItemInfo_String(
+            item.as_ptr(),
+            c"GUID".as_ptr(),
+            buf.as_mut_ptr() as *mut i8,
+            true,
+        )
+    }
+}
+
 /// Check if an item is selected.
 pub fn is_item_selected(low: &ReaperLow, item: MediaItem) -> bool {
     unsafe { low.IsMediaItemSelected(item.as_ptr()) }

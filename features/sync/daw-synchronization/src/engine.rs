@@ -616,6 +616,7 @@ pub fn is_event_suppressed(suppression: &SuppressionSet, event: &SyncEvent) -> b
                 }
                 TakeEvent::VolumeChanged { item_guid, .. } => (item_guid.as_str(), "take_volume"),
                 TakeEvent::SourceChanged { item_guid, .. } => (item_guid.as_str(), "take_source"),
+                TakeEvent::Changed { item_guid, .. } => (item_guid.as_str(), "take_changed"),
             };
             suppression.is_suppressed(&SuppressionKey::item(item_guid, field))
         }
@@ -632,6 +633,7 @@ pub fn is_event_suppressed(suppression: &SuppressionSet, event: &SyncEvent) -> b
                 ItemEvent::ActiveTakeChanged { item_guid, .. } => {
                     (item_guid.as_str(), "active_take")
                 }
+                ItemEvent::Changed { item_guid, .. } => (item_guid.as_str(), "changed"),
             };
             suppression.is_suppressed(&SuppressionKey::item(guid, field))
         }

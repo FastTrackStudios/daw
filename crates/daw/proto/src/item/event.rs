@@ -65,6 +65,17 @@ pub enum ItemEvent {
         old_take_index: u32,
         new_take_index: u32,
     },
+    /// Some other property of the item changed — fades, snap offset,
+    /// colour, lock, label, lane, group, loop/stretch/beat-attach mode,
+    /// or several at once. Carries no values: re-read the item
+    /// (`Items::get_item`) for its current state. The variants above
+    /// still fire for the properties they name; this one covers the
+    /// rest, so a subscriber that re-reads on any item event misses
+    /// nothing.
+    Changed {
+        project_guid: String,
+        item_guid: String,
+    },
 }
 
 /// Events related to take changes
@@ -118,4 +129,78 @@ pub enum TakeEvent {
         take_guid: String,
         source_path: Option<String>,
     },
+    /// Some other property of the take changed — colour, start offset,
+    /// preserve-pitch, or its take markers. Carries no values: re-read the
+    /// take (`Takes::get_take`, and `Takes::get_take_markers` for the
+    /// markers). The variants above still fire for the properties they
+    /// name.
+    Changed {
+        project_guid: String,
+        item_guid: String,
+        take_guid: String,
+    },
+}
+
+impl ItemEvent {
+    /// The project the event is about.
+    pub fn project_guid(&self) -> &str {
+        match self {
+            Self::Created { project_guid, .. }
+            | Self::Deleted { project_guid, .. }
+            | Self::PositionChanged { project_guid, .. }
+            | Self::LengthChanged { project_guid, .. }
+            | Self::MovedToTrack { project_guid, .. }
+            | Self::MuteChanged { project_guid, .. }
+            | Self::SelectionChanged { project_guid, .. }
+            | Self::VolumeChanged { project_guid, .. }
+            | Self::ActiveTakeChanged { project_guid, .. }
+            | Self::Changed { project_guid, .. } => project_guid,
+        }
+    }
+
+    /// The item the event is about.
+    pub fn item_guid(&self) -> &str {
+        match self {
+            Self::Created { item, .. } => &item.guid,
+            Self::Deleted { item_guid, .. }
+            | Self::PositionChanged { item_guid, .. }
+            | Self::LengthChanged { item_guid, .. }
+            | Self::MovedToTrack { item_guid, .. }
+            | Self::MuteChanged { item_guid, .. }
+            | Self::SelectionChanged { item_guid, .. }
+            | Self::VolumeChanged { item_guid, .. }
+            | Self::ActiveTakeChanged { item_guid, .. }
+            | Self::Changed { item_guid, .. } => item_guid,
+        }
+    }
+}
+
+impl TakeEvent {
+    /// The project the event is about.
+    pub fn project_guid(&self) -> &str {
+        match self {
+            Self::Created { project_guid, .. }
+            | Self::Deleted { project_guid, .. }
+            | Self::NameChanged { project_guid, .. }
+            | Self::PitchChanged { project_guid, .. }
+            | Self::PlayRateChanged { project_guid, .. }
+            | Self::VolumeChanged { project_guid, .. }
+            | Self::SourceChanged { project_guid, .. }
+            | Self::Changed { project_guid, .. } => project_guid,
+        }
+    }
+
+    /// The item whose take the event is about.
+    pub fn item_guid(&self) -> &str {
+        match self {
+            Self::Created { item_guid, .. }
+            | Self::Deleted { item_guid, .. }
+            | Self::NameChanged { item_guid, .. }
+            | Self::PitchChanged { item_guid, .. }
+            | Self::PlayRateChanged { item_guid, .. }
+            | Self::VolumeChanged { item_guid, .. }
+            | Self::SourceChanged { item_guid, .. }
+            | Self::Changed { item_guid, .. } => item_guid,
+        }
+    }
 }

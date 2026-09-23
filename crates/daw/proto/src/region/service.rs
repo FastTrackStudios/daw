@@ -13,7 +13,7 @@
 use super::Region;
 use super::event::RegionStreamEvent;
 use crate::batch::ProjectArg;
-use crate::{DawResult, ProjectContext};
+use crate::{DawResult, ProjectContext, TimeRange};
 use facet::Facet;
 
 /// Lane placement request — kept here so retired batch ops can still
@@ -41,6 +41,24 @@ pub trait Regions {
     /// Insert a region spanning `[start, end]` seconds with the given
     /// name. Returns the DAW-assigned id.
     fn add(&self, project: ProjectContext, start: f64, end: f64, name: &str) -> DawResult<u32>;
+
+    /// [`Regions::add`], but the region carries `guid` (its
+    /// [`Region::guid`]) instead of one the backend makes up — how a
+    /// peer re-creates a region another engine made. `range` is the
+    /// span `add` takes as `start`/`end` (bundled: the RPC surface
+    /// allows four parameters). Returns the DAW-assigned id.
+    ///
+    /// A `guid` a marker or region of the project already has is
+    /// [`DawError::AlreadyExists`](crate::DawError::AlreadyExists).
+    /// REAPER cannot set a region's GUID through its API, so the REAPER
+    /// backend answers `NotSupported`.
+    fn add_with_guid(
+        &self,
+        project: ProjectContext,
+        guid: &str,
+        range: TimeRange,
+        name: &str,
+    ) -> DawResult<u32>;
 
     /// Remove the region with the given id.
     fn remove(&self, project: ProjectContext, id: u32) -> DawResult<()>;

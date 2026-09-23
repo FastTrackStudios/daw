@@ -508,6 +508,25 @@ fn record_input_to_raw(input: RecordInput) -> i32 {
 
 // ── Tracks impl ────────────────────────────────────────────────────────
 
+/// A caller's GUID as REAPER spells it, `{UPPERCASE-UUID}`, and its
+/// value for comparing against REAPER's own. REAPER GUIDs are UUIDs, so
+/// anything that does not parse as one (braced or not, any case) is
+/// refused rather than handed to REAPER to mangle.
+pub(crate) fn reaper_guid(kind: &str, guid: &str) -> DawResult<(uuid::Uuid, std::ffi::CString)> {
+    let value = uuid::Uuid::try_parse(guid).map_err(|e| {
+        DawError::operation_failed(format!("{kind} guid {guid:?} is not a UUID: {e}"))
+    })?;
+    let spelled = format!("{{{}}}", value.hyphenated().to_string().to_uppercase());
+    let spelled = std::ffi::CString::new(spelled)
+        .map_err(|e| DawError::internal(format!("guid with a NUL: {e}")))?;
+    Ok((value, spelled))
+}
+
+/// The UUID a REAPER GUID string names, braced or not.
+pub(crate) fn guid_value(guid: &str) -> Option<uuid::Uuid> {
+    uuid::Uuid::try_parse(guid).ok()
+}
+
 fn not_found_proj() -> DawError {
     DawError::not_found("Project", "context")
 }
@@ -1057,6 +1076,102 @@ impl Tracks for crate::Reaper {
             .map_err(|e| DawError::operation_failed(format!("insert_track_at failed: {e:?}")))?;
         new_track.set_name(name);
         Ok(new_track.guid().to_string_without_braces())
+    }
+
+    fn add_with_guid(
+        &self,
+        project: ProjectContext,
+        guid: &str,
+        name: &str,
+        at_index: Option<u32>,
+    ) -> DawResult<String> {
+        let proj = resolve_project(&project).ok_or_else(not_found_proj)?;
+        let (wanted, spelled) = reaper_guid("Track", guid)?;
+        if proj
+            .tracks()
+            .any(|t| guid_value(&t.guid().to_string_without_braces()) == Some(wanted))
+        {
+            return Err(DawError::already_exists("Track", guid));
+        }
+        let index = at_index.unwrap_or_else(|| proj.track_count());
+        let new_track = proj
+            .insert_track_at(index)
+            .map_err(|e| DawError::operation_failed(format!("insert_track_at failed: {e:?}")))?;
+        let raw = new_track
+            .raw()
+            .map_err(|e| DawError::operation_failed(format!("new track invalid: {e:?}")))?;
+        let low = ReaperHigh::get().medium_reaper().low();
+        crate::safe_wrappers::item::set_track_guid(low, raw, &spelled);
+        // Read back rather than trust the setter: a track REAPER did not
+        // re-key must not be left behind under a guid the caller never
+        // asked for.
+        let stored = crate::safe_wrappers::item::get_track_guid(low, raw);
+        if guid_value(&stored) != Some(wanted) {
+            proj.remove_track(&new_track);
+            return Err(DawError::operation_failed(format!(
+                "REAPER did not take track GUID {guid}"
+            )));
+        }
+        new_track.set_name(name);
+        // Unbraced, as `add` returns it and `resolve_track` compares it.
+        Ok(stored
+            .trim_start_matches('{')
+            .trim_end_matches('}')
+            .to_string())
+    }
+
+    fn move_to(&self, project: ProjectContext, track: TrackRef, index: u32) -> DawResult<()> {
+        let proj = resolve_project(&project).ok_or_else(not_found_proj)?;
+        // `ReorderSelectedTracks` has no project argument: it moves the
+        // current tab's selection.
+        if proj != ReaperHigh::get().current_project() {
+            return Err(DawError::not_supported(
+                "Tracks::move_to reorders the current project tab only",
+            ));
+        }
+        let t = resolve_track(&proj, &track).ok_or_else(not_found_track)?;
+        let count = proj.track_count();
+        if index >= count {
+            return Err(DawError::out_of_range(
+                index,
+                count.saturating_sub(1),
+                "Tracks::move_to",
+            ));
+        }
+        let from = t.index().ok_or_else(not_found_track)?;
+        if from == index {
+            return Ok(());
+        }
+        // REAPER's index is "before this track", counted with the moving
+        // track still in place — one past the target when moving down.
+        let before = if index > from { index + 1 } else { index };
+
+        // Reordering works on the selection, so borrow it and give it
+        // back: a move is not a selection change.
+        let selection: Vec<(reaper_high::Track, bool)> = proj
+            .tracks()
+            .map(|t| {
+                let selected = t.is_selected();
+                (t, selected)
+            })
+            .collect();
+        t.select_exclusively();
+        let result = ReaperHigh::get()
+            .medium_reaper()
+            .reorder_selected_tracks(before, ReorderTracksBehavior::Normal)
+            .map_err(|err| DawError::operation_failed(format!("move track failed: {err}")));
+        for (t, selected) in &selection {
+            if *selected {
+                t.select();
+            } else {
+                t.unselect();
+            }
+        }
+        result?;
+        ReaperHigh::get()
+            .medium_reaper()
+            .track_list_adjust_windows_minor();
+        Ok(())
     }
 
     fn remove(&self, project: ProjectContext, track: TrackRef) -> DawResult<()> {

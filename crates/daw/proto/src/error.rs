@@ -30,6 +30,9 @@ use facet::Facet;
 ///
 /// - **Internal**: Catch-all for unexpected failures.
 ///
+/// - **AlreadyExists**: A create-with-identity call named an id (a GUID)
+///   the project already holds. Creation never silently duplicates one.
+///
 /// # Usage
 ///
 /// ```rust
@@ -66,6 +69,12 @@ pub enum DawError {
 
     /// Catch-all for unexpected failures
     Internal(String),
+
+    /// A create call named an id (a GUID) that the project already holds.
+    ///
+    /// Last in the enum so the wire discriminants of the variants before
+    /// it do not move.
+    AlreadyExists(String),
 }
 
 impl DawError {
@@ -106,6 +115,11 @@ impl DawError {
     pub fn internal(msg: impl Into<String>) -> Self {
         Self::Internal(msg.into())
     }
+
+    /// An object with this id already exists
+    pub fn already_exists(object_type: &str, id: &str) -> Self {
+        Self::AlreadyExists(format!("{} already exists: {}", object_type, id))
+    }
 }
 
 impl std::fmt::Display for DawError {
@@ -126,6 +140,7 @@ impl std::fmt::Display for DawError {
             Self::NotSupported(msg) => write!(f, "Not supported: {}", msg),
             Self::MainThreadUnavailable => write!(f, "Main thread bridge not available"),
             Self::Internal(msg) => write!(f, "Internal error: {}", msg),
+            Self::AlreadyExists(msg) => write!(f, "Already exists: {}", msg),
         }
     }
 }

@@ -800,7 +800,10 @@ fn item_labels_survive_save_and_load() {
         key.track_guid = KEYS.into();
         key.label = Some("#D".into());
         p.items.insert(KEY_ITEM.into(), ItemEntry { item: key });
-        p.items_by_track.entry(KEYS.into()).or_default().push(KEY_ITEM.into());
+        p.items_by_track
+            .entry(KEYS.into())
+            .or_default()
+            .push(KEY_ITEM.into());
         p.takes.remove(KEY_ITEM);
     })
     .unwrap();
@@ -815,6 +818,121 @@ fn item_labels_survive_save_and_load() {
         })
         .unwrap();
     assert_eq!(labels, [Some("4add2".to_owned()), Some("#D".to_owned())]);
+}
+
+/// Tracks, items, markers and regions made with a caller's GUID (a peer
+/// re-creating what another engine made) come back from a `.session` save
+/// under exactly that GUID, whatever its spelling — the shared session keys
+/// them by it, so a load that re-spelled one would orphan it.
+#[test]
+fn guids_given_at_creation_survive_save_and_load() {
+    use daw_proto::{ItemSpan, Items, Markers, Regions, TimeRange, TrackRef, Tracks};
+    const T_BRACED: &str = "{D0000000-0000-4000-8000-000000000001}";
+    const T_BARE: &str = "d0000000-0000-4000-8000-000000000002";
+    const I_BRACED: &str = "{E0000000-0000-4000-8000-000000000001}";
+    const I_BARE: &str = "e0000000-0000-4000-8000-000000000002";
+    const M_GUID: &str = "{F0000000-0000-4000-8000-000000000001}";
+    const R_GUID: &str = "f0000000-0000-4000-8000-000000000002";
+
+    let check = |daw: &Standalone, guid: &str| {
+        let ctx = ProjectContext::Project(guid.to_string());
+        let span = |p: f64| {
+            ItemSpan::new(
+                PositionInSeconds::from_seconds(p),
+                Duration::from_seconds(1.0),
+            )
+        };
+        Tracks::add_with_guid(daw, ctx.clone(), T_BRACED, "Peer A", None).unwrap();
+        Tracks::add_with_guid(daw, ctx.clone(), T_BARE, "Peer B", Some(0)).unwrap();
+        Items::add_item_with_guid(
+            daw,
+            ctx.clone(),
+            TrackRef::Guid(T_BRACED.into()),
+            I_BRACED,
+            span(1.0),
+        )
+        .unwrap();
+        Items::add_item_with_guid(
+            daw,
+            ctx.clone(),
+            TrackRef::Guid(T_BARE.into()),
+            I_BARE,
+            span(2.0),
+        )
+        .unwrap();
+        Markers::add_with_guid(daw, ctx.clone(), M_GUID, 3.0, "Peer marker").unwrap();
+        Regions::add_with_guid(
+            daw,
+            ctx.clone(),
+            R_GUID,
+            TimeRange::from_seconds(4.0, 6.0),
+            "Peer region",
+        )
+        .unwrap();
+        let marker_guid_before = Markers::add(daw, ctx.clone(), 7.0, "Local").unwrap();
+        let local_marker = Markers::get(daw, ctx.clone(), marker_guid_before)
+            .unwrap()
+            .guid
+            .unwrap();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("Song.session");
+        save_session(daw, guid, &dir).unwrap();
+        let (fresh, _) = engine();
+        let back = load_session(&fresh, "Song", &dir).unwrap();
+        let ctx = ProjectContext::Project(back.project_guid.clone());
+
+        let tracks: Vec<_> = Tracks::all(&fresh, ctx.clone())
+            .into_iter()
+            .map(|t| (t.guid, t.name))
+            .collect();
+        assert!(
+            tracks.contains(&(T_BRACED.into(), "Peer A".into())),
+            "{tracks:?}"
+        );
+        assert!(
+            tracks.contains(&(T_BARE.into(), "Peer B".into())),
+            "{tracks:?}"
+        );
+        assert_eq!(tracks[0].0, T_BARE, "at_index survives too");
+        for (item, track) in [(I_BRACED, T_BRACED), (I_BARE, T_BARE)] {
+            let got = Items::get_item(&fresh, ctx.clone(), daw_proto::ItemRef::Guid(item.into()))
+                .unwrap_or_else(|| panic!("item {item} lost its guid"));
+            assert_eq!(got.track_guid, track);
+        }
+        let markers: Vec<_> = Markers::all(&fresh, ctx.clone())
+            .into_iter()
+            .filter_map(|m| m.guid.map(|g| (g, m.name)))
+            .collect();
+        assert!(
+            markers.contains(&(M_GUID.into(), "Peer marker".into())),
+            "{markers:?}"
+        );
+        assert!(
+            markers.contains(&(local_marker, "Local".into())),
+            "{markers:?}"
+        );
+        let regions: Vec<_> = Regions::all(&fresh, ctx)
+            .into_iter()
+            .filter_map(|r| r.guid.map(|g| (g, r.name)))
+            .collect();
+        assert!(
+            regions.contains(&(R_GUID.into(), "Peer region".into())),
+            "{regions:?}"
+        );
+    };
+
+    // A song opened from its file, and a project built in the engine.
+    let tmp = tempfile::tempdir().unwrap();
+    let (daw, _, guid) = open_song(&tmp.path().join("Song"));
+    check(&daw, &guid);
+    let (daw, _) = engine();
+    let guid = daw.seed_project(daw_proto::ProjectInfo {
+        guid: "built-in-engine".into(),
+        name: "Song".into(),
+        path: String::new(),
+    });
+    check(&daw, &guid);
 }
 
 /// A project with no file behind it (built in the engine, or opened from
