@@ -244,15 +244,10 @@ mod tests {
         assert!(cell.load().is_none());
     }
 
-    // Ignored: tears on arm64 (a few runs in a hundred; so did the
-    // SnapshotCell this crate had before moving to the core's). The
-    // core's seqlock orders its fields with Release/Acquire on `seq`
-    // alone, which does not stop the Relaxed field stores/loads from
-    // moving across the seq accesses; it needs `fence(Release)` after the
-    // odd `seq` store and `fence(Acquire)` before the re-read. The fix
-    // belongs in daw-transport-sync's snapshot.rs.
+    // Tore on arm64 (a few runs in a hundred) until the core's seqlock
+    // gained its fences: fence(Release) after the odd `seq` store,
+    // fence(Acquire) before the re-read.
     #[test]
-    #[ignore = "SnapshotCell seqlock lacks fences on weak memory (fix in daw-transport-sync)"]
     fn seqlock_under_contention() {
         let cell = Arc::new(SnapshotCell::new());
         let writer_cell = cell.clone();

@@ -259,3 +259,39 @@ fn a_leader_that_stops_stops_the_follower() {
     assert_eq!(follow.tick(&follower, &stopped, 0.0, 1_000.0), Correction::Stop { position: 42.0 });
     assert!(!follower.state.borrow().playing);
 }
+
+/// The audio thread writes while another reads: every snapshot read is
+/// one the writer wrote whole (the seqlock's fences hold on arm64 too).
+#[test]
+fn a_snapshot_is_never_read_torn() {
+    use std::sync::Arc;
+    let cell = Arc::new(daw_transport_sync::SnapshotCell::new());
+    let writer = {
+        let cell = Arc::clone(&cell);
+        std::thread::spawn(move || {
+            for i in 0..200_000u64 {
+                let x = i as f64;
+                cell.store(&AudioSnapshot {
+                    sequence: i,
+                    host_micros: x * 1000.0,
+                    playhead_seconds: x * 0.01,
+                    playrate: 1.0 + x,
+                    buffer_len: u32::try_from(i % 4096).unwrap(),
+                    ..AudioSnapshot::default()
+                });
+            }
+        })
+    };
+    let mut reads = 0;
+    while !writer.is_finished() {
+        if let Some(s) = cell.load() {
+            let x = s.sequence as f64;
+            assert_eq!(s.host_micros, x * 1000.0, "torn: {s:?}");
+            assert_eq!(s.playhead_seconds, x * 0.01, "torn: {s:?}");
+            assert_eq!(s.playrate, 1.0 + x, "torn: {s:?}");
+            reads += 1;
+        }
+    }
+    writer.join().unwrap();
+    assert!(reads > 0);
+}

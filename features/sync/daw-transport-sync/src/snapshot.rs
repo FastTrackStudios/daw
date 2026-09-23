@@ -7,7 +7,7 @@
 //! odd or changed sequence reads again. The writer never waits and never
 //! allocates — safe on a real-time thread.
 
-use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering, fence};
 
 /// A project, as the backend identifies it for sync. `[0; 16]` is "the
 /// current project" for a backend that only ever syncs one.
@@ -115,7 +115,11 @@ impl SnapshotCell {
     #[inline]
     pub fn store(&self, snap: &AudioSnapshot) {
         let start = self.seq.load(Ordering::Relaxed).wrapping_add(1);
-        self.seq.store(start, Ordering::Release);
+        self.seq.store(start, Ordering::Relaxed);
+        // The odd sequence must be visible before any field changes: a
+        // release fence orders it ahead of the relaxed stores below (a
+        // release STORE would only order what came before it).
+        fence(Ordering::Release);
         self.sequence.store(snap.sequence, Ordering::Relaxed);
         let (hi, lo) = split(snap.project_id);
         self.project_hi.store(hi, Ordering::Relaxed);
@@ -155,7 +159,11 @@ impl SnapshotCell {
                 buffer_len: self.buffer_len.load(Ordering::Relaxed),
                 is_playing: self.is_playing.load(Ordering::Relaxed) != 0,
             };
-            if self.seq.load(Ordering::Acquire) == s1 {
+            // Every field read must happen before the sequence is read
+            // again: an acquire fence orders the relaxed loads above ahead
+            // of it (an acquire LOAD would only order what comes after).
+            fence(Ordering::Acquire);
+            if self.seq.load(Ordering::Relaxed) == s1 {
                 return Some(snap);
             }
         }
