@@ -175,6 +175,10 @@ pub fn load_rpp_text(
 ///
 /// Returns how many take paths were anchored.
 pub fn anchor_media(daw: &Standalone, project_guid: &str, dir: &std::path::Path) -> usize {
+    // Absolute, whatever it was given: a folder named relative to the
+    // working directory (`../sessions/Song`) would anchor nothing, and a
+    // save would write those paths out as if they were the project's own.
+    let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
     daw.with_project_mut(project_guid, |p| {
         let mut anchored = 0;
         for list in p.takes.values_mut() {
@@ -1617,5 +1621,22 @@ mod anchor_tests {
         assert_eq!(path(&one.project_guid).as_deref(), Some("/set/One/Media/Click.wav"));
         assert_eq!(path(&two.project_guid).as_deref(), Some("/set/Two/Media/Click.wav"));
         assert_eq!(anchor_media(&daw, &one.project_guid, std::path::Path::new("/elsewhere")), 0);
+    }
+
+    /// A folder given relative to the working directory still anchors to
+    /// an absolute path.
+    #[test]
+    fn a_relative_folder_anchors_absolutely() {
+        let daw = Standalone::new();
+        let song = load_rpp_text(&daw, "One", "../set/One/One.RPP", PROJECT).unwrap();
+        anchor_media(&daw, &song.project_guid, std::path::Path::new("../set/One"));
+        let path = daw
+            .read_project(&song.project_guid, |p| {
+                p.takes.values().flat_map(|l| l.takes.iter()).find_map(|t| t.source_file_path.clone())
+            })
+            .flatten()
+            .expect("a path");
+        assert!(std::path::Path::new(&path).is_absolute(), "{path}");
+        assert!(path.ends_with("set/One/Media/Click.wav"), "{path}");
     }
 }
