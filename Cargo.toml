@@ -87,6 +87,7 @@ members = [
     "features/standalone/daw-standalone",
     "features/surfaces/daw-csi",
     "features/sync/daw-audio-sync",
+    "features/sync/daw-transport-sync",
     "features/sync/daw-link",
     "features/sync/daw-network",
     "features/sync/daw-synchronization",
@@ -188,6 +189,7 @@ daw-synchronization = { path = "features/sync/daw-synchronization" }
 daw-link = { path = "features/sync/daw-link" }
 daw-network = { path = "features/sync/daw-network" }
 daw-audio-sync = { path = "features/sync/daw-audio-sync" }
+daw-transport-sync = { path = "features/sync/daw-transport-sync" }
 dawfile-aaf = { path = "features/dawfile/dawfile-aaf" }
 dawfile-ableton = { path = "features/dawfile/dawfile-ableton" }
 dawfile-dawproject = { path = "features/dawfile/dawfile-dawproject" }
