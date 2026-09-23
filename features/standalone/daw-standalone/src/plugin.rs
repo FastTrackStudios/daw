@@ -133,6 +133,21 @@ pub trait FxFactory: Send + Sync {
     /// re-`prepare`d at the stream's real rate by the renderer).
     /// `None` if the name isn't one of this factory's built-ins.
     fn create(&self, name_or_ident: &str, sample_rate: f64) -> Option<Box<dyn PluginInstance>>;
+
+    /// Whether `name_or_ident` is one of this factory's built-ins —
+    /// without instantiating it.
+    ///
+    /// The project loader asks this before it goes looking for a plugin
+    /// bundle on disk (which a built-in never has), so an FX a saved
+    /// project names by its factory name comes back through
+    /// [`create`](Self::create). The default matches the
+    /// [`installed`](Self::installed) catalog by name or ident; a factory
+    /// that recognises more spellings than it lists overrides it.
+    fn provides(&self, name_or_ident: &str) -> bool {
+        self.installed()
+            .iter()
+            .any(|fx| fx.name == name_or_ident || fx.ident == name_or_ident)
+    }
 }
 
 /// A boxed, format-neutral plugin instance.
