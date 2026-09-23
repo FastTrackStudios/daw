@@ -346,6 +346,10 @@ impl RenderScratch {
 /// rebuild on change" model — and the per-block working buffers are
 /// recycled. A throwaway renderer still works, it just re-snapshots
 /// and re-allocates every call.
+/// How many times the renderer retries the plugin-instance lock before
+/// rendering a block without its FX stage — on the order of 10–50 µs.
+const PLUGIN_LOCK_SPINS: usize = 2_000;
+
 pub struct ProjectRenderer {
     daw: Standalone,
     project_guid: String,
@@ -614,11 +618,26 @@ impl ProjectRenderer {
         // next to the click of an underrun. The next block takes the lock
         // normally. `poisoned` still recovers, same as before — a
         // control-thread panic must not cascade into the callback.
-        let mut plugins = match self.daw.plugin_instances.try_lock() {
-            Ok(guard) => Some(guard),
-            Err(std::sync::TryLockError::Poisoned(p)) => Some(p.into_inner()),
-            Err(std::sync::TryLockError::WouldBlock) => None,
-        };
+        //
+        // Before giving up, spin briefly: a control thread's hold is a batch
+        // of map inserts (`with_plugin_instances`), a few microseconds, and
+        // for an amp chain "dry for one block" is not inaudible — it is the
+        // raw DI at full level. Bounded, never parked: a hold that outlasts
+        // the spin still costs one dry block, not an underrun.
+        let mut plugins = None;
+        for _ in 0..PLUGIN_LOCK_SPINS {
+            match self.daw.plugin_instances.try_lock() {
+                Ok(guard) => {
+                    plugins = Some(guard);
+                    break;
+                }
+                Err(std::sync::TryLockError::Poisoned(p)) => {
+                    plugins = Some(p.into_inner());
+                    break;
+                }
+                Err(std::sync::TryLockError::WouldBlock) => std::hint::spin_loop(),
+            }
+        }
 
         // 2–4) Per-track processing in topo order over the routing
         // graph (children before folder parents, senders before their

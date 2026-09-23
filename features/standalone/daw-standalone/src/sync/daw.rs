@@ -1158,6 +1158,27 @@ impl Standalone {
         plugins.get_mut(fx_guid).map(|p| f(p.as_mut()))
     }
 
+    /// Run `f` against every live FX instance at once, under one hold of the
+    /// `plugin_instances` lock — the lock the renderer takes per block.
+    ///
+    /// For a change that must land between two blocks as a whole: swapping a
+    /// whole chain one `insert_plugin_instance` at a time is a lock window per
+    /// slot, and a block rendered between two of them plays half of one chain
+    /// and half of the other. Keep `f` short — no allocation-heavy work, no
+    /// dropping instances (return them and drop them after).
+    pub fn with_plugin_instances<R>(
+        &self,
+        f: impl FnOnce(
+            &mut std::collections::HashMap<String, Box<dyn crate::plugin::PluginInstance>>,
+        ) -> R,
+    ) -> R {
+        let mut plugins = self
+            .plugin_instances
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        f(&mut plugins)
+    }
+
     /// Remove the FX instance backing `fx_guid`, returning it (e.g. to drop off
     /// the audio thread). No-op if absent.
     pub fn remove_plugin_instance(
