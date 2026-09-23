@@ -16,6 +16,7 @@ pub(crate) fn mix_item_into_bus(
     block_start_seconds: f64,
     block_end_seconds: f64,
     output_rate: u32,
+    playrate: f64,
 ) -> bool {
     let item_start = item.position_seconds;
     let item_end = item_start + item.length_seconds;
@@ -62,7 +63,7 @@ pub(crate) fn mix_item_into_bus(
     // A streamed source decodes where it is read: say so once a block.
     let mut told = !matches!(audio, AudioSource::Streamed(_));
     for frame in 0..bus.frames {
-        let block_time = block_start_seconds + (frame as f64 / output_rate_f);
+        let block_time = block_start_seconds + (frame as f64 * playrate / output_rate_f);
         if block_time < item_start || block_time >= item_end {
             continue;
         }

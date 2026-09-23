@@ -23,6 +23,10 @@ daw-proto = { workspace = true }
 architect = { workspace = true, features = ["vox", "local", "platform"] }
 vox = { workspace = true }
 tracing = { workspace = true }
+# Multi-machine transport sync: the per-buffer snapshot cell, the buffer
+# DLL, and the `TransportBackend` this engine implements
+# (`transport_sync::SyncBackend`). Dependency-free, wasm-clean.
+daw-transport-sync = { workspace = true }
 # `sync`-only tokio (wasm-clean: no net/mio) for `tokio::sync::RwLock` etc.,
 # native + wasm. Direct (not `workspace = true`) so `default-features = false`
 # is allowed; native unifies to full via the native target dep below.

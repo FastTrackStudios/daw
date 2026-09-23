@@ -48,6 +48,11 @@ pub struct AuxClock {
     pub sample_rate: f64,
     /// Interleaved channel count of the buffer handed to the hook.
     pub channels: usize,
+    /// Transport varispeed: timeline seconds per output second (1.0 =
+    /// nominal; drift correction moves it by fractions of a percent).
+    /// Frame `i` of the block is at `pos_seconds + i * playrate /
+    /// sample_rate`.
+    pub playrate: f64,
 }
 
 /// The post-render hook. `buf` is the INTERLEAVED f32 output block

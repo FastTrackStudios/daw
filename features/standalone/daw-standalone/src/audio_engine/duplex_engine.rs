@@ -6,7 +6,9 @@
 //! [`AudioEngine`](super::AudioEngine) for live-input work.
 //!
 //! The callback pushes the block's hardware input into the renderer's live-input
-//! ring and immediately calls [`ProjectRenderer::render_block`], which drains it
+//! ring and immediately renders the block
+//! ([`ProjectRenderer::render_plan`] — varispeed and scheduled locates from
+//! [`TransportShared::begin_block`]), which drains it
 //! the same block — so the ring carries exactly one block and adds **zero**
 //! latency (it exists only because the renderer's input path is ring-shaped).
 //! The renderer — FX chains, plugins, routing, metering — is reused unchanged.
@@ -166,10 +168,19 @@ impl DuplexAudioEngine {
                 .or(prefs.input_name())
                 .map(str::to_string),
         };
+        // When each buffer really starts, in the sync clock (a DLL over
+        // callback entry times) — stamps every buffer's sync snapshot.
+        let mut stamps = daw_transport_sync::BufferClock::default();
         let backend = Backend::start(
             cfg,
             Box::new(move |b: &mut ProcessBlock| {
+                let entry_micros = crate::transport_sync::now_micros();
                 let frames = b.frames;
+                // Open the buffer: stamp it, land a scheduled locate that
+                // falls in it, commit the playhead, publish the sync
+                // snapshot.
+                let stamp = stamps.tick(entry_micros, frames as u32, f64::from(sample_rate));
+                let plan = sh.begin_block(frames as u32, stamp, stamps.period_micros());
                 // Push this block's hardware input, interleaved [f0c0,f0c1,…], so
                 // the renderer's stage-0 de-interleave matches the cpal path.
                 for f in 0..frames {
@@ -179,8 +190,9 @@ impl DuplexAudioEngine {
                     }
                 }
                 // Render this block (drains exactly what we just pushed).
-                let start = sh.playhead_samples().0.max(0) as u64;
-                let block = r.render_block(start, frames);
+                // Stopped runs still render (live input + FX), at the
+                // frozen playhead.
+                let block = r.render_plan(&plan, true);
                 let outs = b.outputs.len();
                 let (vol, self_mix) = ph.levels();
                 for f in 0..frames {
@@ -203,7 +215,7 @@ impl DuplexAudioEngine {
                         }
                     }
                 }
-                sh.advance(frames as u32);
+                // (The playhead was committed by `begin_block`.)
             }),
         )?;
         let stats = backend.stats();

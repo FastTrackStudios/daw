@@ -414,9 +414,11 @@ impl WebRenderer {
                 self.pending_seek.set(None);
             }
         }
-        let start = shared.playhead_samples().0.max(0) as u64;
+        // Varispeed: the timeline from the fractional playhead at the
+        // transport rate — `advance` below moves it on by exactly that.
+        let start = shared.playhead_samples_f64().max(0.0);
         let block = ProjectRenderer::new(&self.daw, &self.current(), self.sample_rate)
-            .render_block(start, frames);
+            .render_block_varispeed(start, frames, shared.playrate());
         for i in 0..frames {
             out_left[i] = block.samples[i * 2];
             out_right[i] = block.samples[i * 2 + 1];

@@ -67,22 +67,25 @@ impl TransportBundle {
         let task_shared = shared.clone();
         let task_enabled = soft_clock_enabled.clone();
         let soft_clock = spawn(async move {
-            // web_time::Instant is the cross-platform Instant — works
-            // in browser via wasm-bindgen, std::time::Instant on native.
-            let mut last = web_time::Instant::now();
+            // The sync clock (native: daw-transport-sync's; web: the
+            // browser's) — each tick is one "buffer" spanning
+            // [last, now), stamped with its start so sync snapshots and
+            // scheduled locates work with no device too.
+            let mut last = crate::transport_sync::now_micros();
             loop {
                 platform::sleep(SOFT_TICK).await;
-                let now = web_time::Instant::now();
-                let dt = now.duration_since(last);
+                let now = crate::transport_sync::now_micros();
+                let dt_micros = now - last;
+                let stamp = last;
                 last = now;
 
                 if !task_enabled.load(Ordering::Relaxed) {
                     continue;
                 }
                 let sr = task_shared.sample_rate() as f64;
-                let frames = (dt.as_secs_f64() * sr).round() as i64;
+                let frames = (dt_micros * 1e-6 * sr).round() as i64;
                 if frames > 0 && frames <= u32::MAX as i64 {
-                    task_shared.advance(frames as u32);
+                    task_shared.begin_block(frames as u32, stamp, dt_micros);
                 }
             }
         });

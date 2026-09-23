@@ -726,7 +726,8 @@ impl AudioEngine {
                             renderer: &ProjectRenderer,
                             buf: &mut [f32],
                             playing: bool,
-                            pos_seconds: f64| {
+                            pos_seconds: f64,
+                            playrate: f64| {
             let Ok(mut slot) = aux.try_lock() else { return };
             let Some(hook) = slot.as_mut() else { return };
             let (pos_beats, tempo_bpm, time_sig_num, time_sig_den) =
@@ -740,20 +741,32 @@ impl AudioEngine {
                 time_sig_den,
                 sample_rate: sample_rate as f64,
                 channels,
+                playrate,
             };
             hook(buf, &clock);
         };
         #[cfg(not(target_arch = "wasm32"))]
         let stats_on_error = stats.clone();
+        // When each buffer really starts, in the sync clock: a DLL over
+        // callback entry times (scheduler jitter filtered out). Owned by
+        // the callback; stamps every buffer's sync snapshot.
+        let mut stamps = daw_transport_sync::BufferClock::default();
         let stream = device
             .build_output_stream(
                 *config,
                 move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+                    let entry_micros = crate::transport_sync::now_micros();
                     let num_samples = data.len();
                     if channels == 0 || num_samples == 0 {
                         return;
                     }
                     let num_frames = num_samples / channels;
+                    // Open the buffer: stamp it, land a scheduled locate
+                    // that falls in it, commit the playhead, publish the
+                    // sync snapshot. The plan says what to render.
+                    let stamp =
+                        stamps.tick(entry_micros, num_frames as u32, f64::from(sample_rate));
+                    let plan = shared.begin_block(num_frames as u32, stamp, stamps.period_micros());
                     #[cfg(not(target_arch = "wasm32"))]
                     let t0 = std::time::Instant::now();
                     #[cfg(not(target_arch = "wasm32"))]
@@ -763,9 +776,13 @@ impl AudioEngine {
                             .block_frames
                             .store(num_frames as u32, AtomicOrdering::Relaxed);
                     }
-                    let playing = shared.play_state().is_advancing();
-                    let start = shared.playhead_samples().0.max(0) as u64;
-                    let pos_seconds = start as f64 / sample_rate as f64;
+                    let playing = plan.any_playing();
+                    // One clock per block for the aux hook: the run that
+                    // plays (a locate landing mid-buffer: the new one).
+                    let clock_run = plan.last_playing().unwrap_or(plan.first());
+                    let pos_seconds =
+                        clock_run.start_at_frame_zero().max(0.0) / f64::from(sample_rate);
+                    let playrate = clock_run.rate;
                     // Oversized blocks bypass the staging buffer (and the
                     // aux hook) rather than allocate on the audio thread.
                     let use_stage = num_samples <= stage.len();
@@ -784,7 +801,7 @@ impl AudioEngine {
                             stage.fill(0.0);
                             // Stopped: zeroed block, hook flushes tails
                             // (count-in / section cues) onto the guide pair.
-                            run_aux(&aux, &renderer, stage, false, pos_seconds);
+                            run_aux(&aux, &renderer, stage, false, pos_seconds, playrate);
                             // Sum the guide into the headphone-check bus even
                             // while stopped, and honor the main mute.
                             routing::finish_routing(
@@ -807,8 +824,9 @@ impl AudioEngine {
                     // Render. The renderer briefly acquires the project
                     // Mutex (revision check; full re-walk only after an
                     // edit). Future work: lock-free RCU snapshot so the
-                    // callback never blocks.
-                    let block = renderer.render_block(start, num_frames);
+                    // callback never blocks. Varispeed + a landing locate
+                    // are in the plan.
+                    let block = renderer.render_plan(&plan, false);
 
                     // Interleave the stereo block (handle channel-count
                     // mismatch by duplicating or summing), staging as f32
@@ -820,7 +838,7 @@ impl AudioEngine {
                         // block first); the aux hook then adds the guide onto
                         // the guide pair.
                         routing::stage_main(stage, channels, num_frames, &block.samples, snap);
-                        run_aux(&aux, &renderer, stage, true, pos_seconds);
+                        run_aux(&aux, &renderer, stage, true, pos_seconds, playrate);
                         // Headphone-check sum (main + guide) + main mute.
                         routing::finish_routing(stage, channels, num_frames, snap);
                         for (out, &v) in data.iter_mut().zip(stage.iter()) {
@@ -849,7 +867,7 @@ impl AudioEngine {
                         }
                     }
 
-                    shared.advance(num_frames as u32);
+                    // (The playhead was committed by `begin_block`.)
                     #[cfg(not(target_arch = "wasm32"))]
                     stats.record_render_at(t0.elapsed().as_nanos() as u64, sample_rate);
                 },

@@ -103,6 +103,9 @@ mod toolbar;
 mod track;
 mod transport;
 pub mod transport_engine;
+/// The engine as a multi-machine transport-sync backend
+/// ([`transport_sync::SyncBackend`], via [`Standalone::sync_backend`]).
+pub mod transport_sync;
 mod ui;
 mod window_geometry;
 mod window_manager;

@@ -6,18 +6,20 @@ use super::snapshot::TrackSnapshot;
 /// events whose timestamps fall inside `[start_seconds, end_seconds)`.
 /// Returns events sorted by sample offset — VST3's `IEventList`
 /// (and most CLAP hosts) want note events monotonically ordered.
+/// `frames_per_second` is output frames per timeline second — the
+/// sample rate over the transport's varispeed rate.
 pub(crate) fn collect_midi_events(
     track: &TrackSnapshot,
     start_seconds: f64,
     end_seconds: f64,
-    sample_rate: u32,
+    frames_per_second: f64,
     frames: usize,
 ) -> Vec<crate::plugin::PluginMidiEvent> {
     use daw_proto::live_midi::{Channel, KeyNumber, MidiEvent, Velocity};
 
     let mut out: Vec<crate::plugin::PluginMidiEvent> = Vec::new();
     let to_sample = |t_seconds: f64| -> u32 {
-        let frame = ((t_seconds - start_seconds) * sample_rate as f64).floor() as i64;
+        let frame = ((t_seconds - start_seconds) * frames_per_second).floor() as i64;
         frame.clamp(0, (frames as i64).saturating_sub(1)) as u32
     };
     for item in &track.items {
@@ -86,12 +88,12 @@ pub(crate) fn collect_note_expressions(
     track: &TrackSnapshot,
     start_seconds: f64,
     end_seconds: f64,
-    sample_rate: u32,
+    frames_per_second: f64,
     frames: usize,
 ) -> Vec<crate::plugin::PluginNoteExpression> {
     let mut out: Vec<crate::plugin::PluginNoteExpression> = Vec::new();
     let to_sample = |t_seconds: f64| -> u32 {
-        let frame = ((t_seconds - start_seconds) * sample_rate as f64).floor() as i64;
+        let frame = ((t_seconds - start_seconds) * frames_per_second).floor() as i64;
         frame.clamp(0, (frames as i64).saturating_sub(1)) as u32
     };
     for item in &track.items {
