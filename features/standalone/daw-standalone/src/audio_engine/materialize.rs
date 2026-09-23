@@ -46,12 +46,68 @@ where
     materialize_audio_streaming(daw, project_guid, resolve, |_| None)
 }
 
+/// One take's media, not necessarily loaded yet: which take, its file,
+/// and where its item sits in the timeline — so a loader can fetch and
+/// open media in the order it will be heard (nearest the playhead first).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingMedia {
+    pub take_guid: String,
+    pub item_guid: String,
+    pub track_guid: String,
+    /// The take's source file, as the project names it.
+    pub path: String,
+    /// The item's span in the timeline, seconds.
+    pub start: f64,
+    pub end: f64,
+}
+
+/// Every take in `project_guid` that plays a file — what materializing the
+/// project loads, take by take.
+#[must_use]
+pub fn pending_media(daw: &Standalone, project_guid: &str) -> Vec<PendingMedia> {
+    daw.with_project(project_guid, |p| {
+        let mut out = Vec::new();
+        for (item_guid, take_list) in &p.takes {
+            let span = p.items.get(item_guid).map(|entry| {
+                let start = entry.item.position.as_seconds();
+                (entry.item.track_guid.clone(), start, start + entry.item.length.as_seconds())
+            });
+            for take in &take_list.takes {
+                if let Some(path) = &take.source_file_path
+                    && !path.is_empty()
+                {
+                    let (track_guid, start, end) = span.clone().unwrap_or_default();
+                    out.push(PendingMedia {
+                        take_guid: take.guid.clone(),
+                        item_guid: item_guid.clone(),
+                        track_guid,
+                        path: path.clone(),
+                        start,
+                        end,
+                    });
+                }
+            }
+        }
+        out
+    })
+    .unwrap_or_default()
+}
+
+/// Whether a take's media is loaded (it has a source to play).
+#[must_use]
+pub fn is_loaded(daw: &Standalone, project_guid: &str, take_guid: &str) -> bool {
+    daw.with_project(project_guid, |p| p.audio_sources.contains_key(take_guid)).unwrap_or(false)
+}
+
 /// [`materialize_audio`] with a streaming fast path: when `resolve_path`
 /// returns an on-disk file, uncompressed PCM is **memory-mapped instead of
 /// decoded** — REAPER's model. Opening parses the header only, so a
 /// multi-gigabyte session "materializes" in milliseconds with flat RAM;
 /// the OS page cache streams samples during playback. Compressed formats
 /// (and non-file sources) fall back to the byte resolver + full decode.
+///
+/// Every take through [`materialize_take`]: the one way a take's media is
+/// loaded, all at once here, one at a time by a progressive loader.
 pub fn materialize_audio_streaming<F, P>(
     daw: &Standalone,
     project_guid: &str,
@@ -62,102 +118,14 @@ where
     F: FnMut(&str) -> Result<Vec<u8>, String>,
     P: FnMut(&str) -> Option<std::path::PathBuf>,
 {
-    #[cfg(target_arch = "wasm32")]
-    let _ = &mut resolve_path;
     let mut report = MaterializeReport::default();
-
-    // Snapshot the list of (take_guid, source_path) outside the
-    // project lock so the resolver doesn't run while we're holding
-    // it. The resolver may do filesystem / network I/O.
-    let pending: Vec<(String, String)> = daw
-        .with_project(project_guid, |p| {
-            let mut out = Vec::new();
-            for take_list in p.takes.values() {
-                for take in &take_list.takes {
-                    if let Some(path) = &take.source_file_path
-                        && !path.is_empty()
-                    {
-                        out.push((take.guid.clone(), path.clone()));
-                    }
-                }
-            }
-            out
-        })
-        .unwrap_or_default();
-
-    for (take_guid, path) in pending {
-        // A proxy on disk streams from the file itself: nothing held in
-        // memory but the few seconds decoded around the playhead.
-        #[cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
-        if let Some(disk_path) = resolve_path(&path)
-            && disk_path.extension().is_some_and(|e| e.eq_ignore_ascii_case("ogg"))
-        {
-            match fts_sample::ogg_stream::OggStream::open_file(&disk_path) {
-                Ok(stream) => {
-                    stream_ogg(daw, project_guid, &take_guid, stream);
-                    report.loaded += 1;
-                }
-                Err(e) => report.failed.push((take_guid, format!("ogg stream for {path}: {e}"))),
-            }
-            continue;
+    // The list is taken outside the project lock, so the resolver never
+    // runs while holding it (it may do filesystem / network I/O).
+    for pending in pending_media(daw, project_guid) {
+        match materialize_take(daw, project_guid, &pending.take_guid, &pending.path, &mut resolve, &mut resolve_path) {
+            Ok(()) => report.loaded += 1,
+            Err(e) => report.failed.push((pending.take_guid, e)),
         }
-        // Streaming fast path: mmap uncompressed PCM straight from disk.
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(disk_path) = resolve_path(&path) {
-            // Open errors mean "not a plain RIFF/PCM file" — fall through
-            // to decode.
-            if let Ok(pcm) = super::source::PcmFile::open(&disk_path) {
-                let _ = daw.with_project_mut(project_guid, |p| {
-                    p.audio_sources
-                        .insert(take_guid.clone(), Arc::new(AudioSource::PcmFile(pcm)));
-                });
-                report.loaded += 1;
-                continue;
-            }
-        }
-        let bytes = match resolve(&path) {
-            Ok(b) => b,
-            Err(e) => {
-                report.failed.push((take_guid, e));
-                continue;
-            }
-        };
-        // What the bytes ARE, before what the path says: a resolver may
-        // hand back a stand-in (the proxy `Proxies/Bass.ogg` for a
-        // `Bass.wav` that was never fetched), and decoding Ogg as WAV
-        // fails every time.
-        let ext = sniff_extension(&bytes)
-            .map_or_else(|| path.rsplit('.').next().unwrap_or("").to_ascii_lowercase(), str::to_owned);
-        // An Ogg stand-in (a proxy) streams around the playhead rather than
-        // decoding whole: resident, a setlist's proxies were 17 GB.
-        #[cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
-        if ext == "ogg" {
-            let bytes: Arc<[u8]> = bytes.into();
-            match fts_sample::ogg_stream::OggStream::open(bytes) {
-                Ok(stream) => {
-                    stream_ogg(daw, project_guid, &take_guid, stream);
-                    report.loaded += 1;
-                }
-                Err(e) => report.failed.push((take_guid, format!("ogg stream for {path}: {e}"))),
-            }
-            continue;
-        }
-        // Resident decode: the whole file lands in RAM, charged against the
-        // process-wide preload budget inside `DecodedAudio::charged` (over
-        // budget still loads — playback must not silently fail). FUTURE
-        // SEAM: compressed timeline streaming (a butler thread over
-        // fts-sample's stream layer) replaces this eager decode.
-        let decoded = match decode_audio_with_extension(&bytes, &ext) {
-            Some(d) => d,
-            None => {
-                report
-                    .failed
-                    .push((take_guid, format!("decode failed for {path}")));
-                continue;
-            }
-        };
-        attach_audio_source(daw, project_guid, &take_guid, decoded);
-        report.loaded += 1;
     }
 
     // Count takes that legitimately had no source.
@@ -177,6 +145,96 @@ where
     });
 
     report
+}
+
+/// Load one take's media: `path` (as the project names it) resolved to a
+/// file or to bytes, then streamed, memory-mapped or decoded as its format
+/// asks. The take plays from the next block.
+///
+/// # Errors
+///
+/// The resolver could not find the file, or it did not open / decode.
+pub fn materialize_take<F, P>(
+    daw: &Standalone,
+    project_guid: &str,
+    take_guid: &str,
+    path: &str,
+    resolve: &mut F,
+    resolve_path: &mut P,
+) -> Result<(), String>
+where
+    F: FnMut(&str) -> Result<Vec<u8>, String>,
+    P: FnMut(&str) -> Option<std::path::PathBuf>,
+{
+    #[cfg(target_arch = "wasm32")]
+    let _ = &mut *resolve_path;
+    // A proxy on disk streams from the file itself: nothing held in
+    // memory but the few seconds decoded around the playhead.
+    #[cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
+    if let Some(disk_path) = resolve_path(path)
+        && disk_path.extension().is_some_and(|e| e.eq_ignore_ascii_case("ogg"))
+    {
+        let stream = fts_sample::ogg_stream::OggStream::open_file(&disk_path)
+            .map_err(|e| format!("ogg stream for {path}: {e}"))?;
+        stream_ogg(daw, project_guid, take_guid, stream);
+        return Ok(());
+    }
+    // Streaming fast path: mmap uncompressed PCM straight from disk.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(disk_path) = resolve_path(path) {
+        // Open errors mean "not a plain RIFF/PCM file" — fall through
+        // to decode.
+        if let Ok(pcm) = super::source::PcmFile::open(&disk_path) {
+            let _ = daw.with_project_mut(project_guid, |p| {
+                p.audio_sources
+                    .insert(take_guid.to_owned(), Arc::new(AudioSource::PcmFile(pcm)));
+            });
+            return Ok(());
+        }
+    }
+    let bytes = resolve(path)?;
+    // What the bytes ARE, before what the path says: a resolver may
+    // hand back a stand-in (the proxy `Proxies/Bass.ogg` for a
+    // `Bass.wav` that was never fetched), and decoding Ogg as WAV
+    // fails every time.
+    let ext = sniff_extension(&bytes)
+        .map_or_else(|| path.rsplit('.').next().unwrap_or("").to_ascii_lowercase(), str::to_owned);
+    // An Ogg stand-in (a proxy) streams around the playhead rather than
+    // decoding whole: resident, a setlist's proxies were 17 GB.
+    #[cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
+    if ext == "ogg" {
+        let bytes: Arc<[u8]> = bytes.into();
+        let stream = fts_sample::ogg_stream::OggStream::open(bytes)
+            .map_err(|e| format!("ogg stream for {path}: {e}"))?;
+        stream_ogg(daw, project_guid, take_guid, stream);
+        return Ok(());
+    }
+    // Resident decode: the whole file lands in RAM, charged against the
+    // process-wide preload budget inside `DecodedAudio::charged` (over
+    // budget still loads — playback must not silently fail). FUTURE
+    // SEAM: compressed timeline streaming (a butler thread over
+    // fts-sample's stream layer) replaces this eager decode.
+    let decoded = decode_audio_with_extension(&bytes, &ext).ok_or_else(|| format!("decode failed for {path}"))?;
+    attach_audio_source(daw, project_guid, take_guid, decoded);
+    Ok(())
+}
+
+/// [`materialize_take`] through the project Media Bay's resolver — what a
+/// progressive loader calls per take.
+///
+/// # Errors
+///
+/// As [`materialize_take`].
+pub fn materialize_take_via_bay(daw: &Standalone, project_guid: &str, take_guid: &str, path: &str) -> Result<(), String> {
+    let bay = daw.media_bay();
+    materialize_take(
+        daw,
+        project_guid,
+        take_guid,
+        path,
+        &mut |p: &str| bay.resolve_file(p),
+        &mut |p: &str| bay.resolve_file_path(p),
+    )
 }
 
 /// Attach decoded audio for a specific take, bypassing the resolver
