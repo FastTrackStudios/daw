@@ -348,3 +348,64 @@ mod tests {
         assert_eq!(s.sample(frames as usize, 0), 0.0, "past the end");
     }
 }
+
+/// The native driver for [`StreamFeeder`]s: one thread pumping every
+/// streamed take a bounded amount at a time, round robin, resting when
+/// all are caught up.
+///
+/// A browser pumps from its render loop; a desktop has none to borrow,
+/// and a proxy decoded whole instead is ~115 MB of float per stem — a
+/// setlist of them was 17 GB. Takes join with [`butler_adopt`] and stay
+/// for the life of the process; their decoded window is evicted as the
+/// playhead moves, so what a take holds is its compressed bytes plus
+/// about [`AHEAD`] chunks.
+#[cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
+pub mod butler {
+    use super::StreamFeeder;
+    use fts_sample::ogg_stream::OggStream;
+    use std::sync::{Mutex, OnceLock};
+
+    type Feeders = Mutex<Vec<StreamFeeder<OggStream>>>;
+
+    fn feeders() -> &'static Feeders {
+        static FEEDERS: OnceLock<Feeders> = OnceLock::new();
+        FEEDERS.get_or_init(|| {
+            std::thread::Builder::new()
+                .name("stream-butler".into())
+                .spawn(run)
+                .ok();
+            Mutex::new(Vec::new())
+        })
+    }
+
+    /// Hand a streamed take to the butler.
+    pub fn adopt(feeder: StreamFeeder<OggStream>) {
+        if let Ok(mut all) = feeders().lock() {
+            all.push(feeder);
+        }
+    }
+
+    fn run() {
+        loop {
+            let busy = feeders()
+                .lock()
+                .map(|mut all| {
+                    let mut busy = false;
+                    for feeder in all.iter_mut() {
+                        // ~0.1 s of audio per take per turn: enough to stay
+                        // ahead of playback, small enough that one take's
+                        // catch-up never starves the rest.
+                        busy |= feeder.pump(4_096);
+                    }
+                    busy
+                })
+                .unwrap_or(false);
+            if !busy {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+    }
+}
+
+#[cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
+pub use butler::adopt as butler_adopt;

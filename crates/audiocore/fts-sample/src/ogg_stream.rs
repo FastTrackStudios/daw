@@ -5,9 +5,9 @@
 //! Bass.ogg`, see `cache::write_ogg_proxy`): seven minutes of 21 stems is
 //! 3 GB as f32, so nothing decodes a proxy whole. The compressed bytes are
 //! held (a few MB a stem); the player keeps a few seconds decoded around
-//! the playhead and asks this for more as it moves. Pure Rust (symphonia)
-//! and no I/O — the bytes come from wherever the caller fetched them — so
-//! it runs the same in a browser as natively.
+//! the playhead and asks this for more as it moves. Pure Rust (symphonia):
+//! from bytes the caller fetched ([`OggStream::open`], the browser), or
+//! read from a file as it goes ([`OggStream::open_file`], natively).
 
 use std::sync::Arc;
 
@@ -46,7 +46,30 @@ impl OggStream {
     ///
     /// Not an Ogg Vorbis stream.
     pub fn open(bytes: Arc<[u8]>) -> Result<Self, SamplerError> {
-        let source = MediaSourceStream::new(Box::new(std::io::Cursor::new(bytes)), Default::default());
+        Self::from_source(MediaSourceStream::new(
+            Box::new(std::io::Cursor::new(bytes)),
+            Default::default(),
+        ))
+    }
+
+    /// Open a stream straight from a file, positioned at frame 0.
+    ///
+    /// Nothing is read into memory up front: the reader seeks in the file
+    /// and pulls the pages it decodes, and the OS page cache does the
+    /// rest — the proxy counterpart of a memory-mapped WAV. A setlist's
+    /// proxies held as bytes were most of a gigabyte for no reason; they
+    /// were on disk already.
+    ///
+    /// # Errors
+    ///
+    /// The file cannot be opened, or is not an Ogg Vorbis stream.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn open_file(path: &std::path::Path) -> Result<Self, SamplerError> {
+        let file = std::fs::File::open(path).map_err(SamplerError::Io)?;
+        Self::from_source(MediaSourceStream::new(Box::new(file), Default::default()))
+    }
+
+    fn from_source(source: MediaSourceStream) -> Result<Self, SamplerError> {
         let reader = OggReader::try_new(source, &FormatOptions::default()).map_err(io)?;
         let track = reader
             .default_track()

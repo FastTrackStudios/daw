@@ -86,6 +86,21 @@ where
         .unwrap_or_default();
 
     for (take_guid, path) in pending {
+        // A proxy on disk streams from the file itself: nothing held in
+        // memory but the few seconds decoded around the playhead.
+        #[cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
+        if let Some(disk_path) = resolve_path(&path)
+            && disk_path.extension().is_some_and(|e| e.eq_ignore_ascii_case("ogg"))
+        {
+            match fts_sample::ogg_stream::OggStream::open_file(&disk_path) {
+                Ok(stream) => {
+                    stream_ogg(daw, project_guid, &take_guid, stream);
+                    report.loaded += 1;
+                }
+                Err(e) => report.failed.push((take_guid, format!("ogg stream for {path}: {e}"))),
+            }
+            continue;
+        }
         // Streaming fast path: mmap uncompressed PCM straight from disk.
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(disk_path) = resolve_path(&path) {
@@ -107,7 +122,26 @@ where
                 continue;
             }
         };
-        let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+        // What the bytes ARE, before what the path says: a resolver may
+        // hand back a stand-in (the proxy `Proxies/Bass.ogg` for a
+        // `Bass.wav` that was never fetched), and decoding Ogg as WAV
+        // fails every time.
+        let ext = sniff_extension(&bytes)
+            .map_or_else(|| path.rsplit('.').next().unwrap_or("").to_ascii_lowercase(), str::to_owned);
+        // An Ogg stand-in (a proxy) streams around the playhead rather than
+        // decoding whole: resident, a setlist's proxies were 17 GB.
+        #[cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
+        if ext == "ogg" {
+            let bytes: Arc<[u8]> = bytes.into();
+            match fts_sample::ogg_stream::OggStream::open(bytes) {
+                Ok(stream) => {
+                    stream_ogg(daw, project_guid, &take_guid, stream);
+                    report.loaded += 1;
+                }
+                Err(e) => report.failed.push((take_guid, format!("ogg stream for {path}: {e}"))),
+            }
+            continue;
+        }
         // Resident decode: the whole file lands in RAM, charged against the
         // process-wide preload budget inside `DecodedAudio::charged` (over
         // budget still loads — playback must not silently fail). FUTURE
@@ -184,6 +218,37 @@ pub fn detach_audio_source(daw: &Standalone, project_guid: &str, take_guid: &str
 /// explicitly — the bay handles WASM vs native indirection.
 ///
 /// Returns `Err` if no bay resolver is installed.
+/// Attach an Ogg stream to a take as a [`super::streamed::Streamed`]
+/// source, fed around the playhead by the native butler.
+#[cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
+fn stream_ogg(
+    daw: &Standalone,
+    project_guid: &str,
+    take_guid: &str,
+    stream: fts_sample::ogg_stream::OggStream,
+) {
+    use super::streamed::{StreamFeeder, Streamed};
+    let streamed = Streamed::new(stream.channels(), stream.sample_rate(), stream.frames());
+    let _ = daw.with_project_mut(project_guid, |p| {
+        p.audio_sources
+            .insert(take_guid.to_owned(), Arc::new(AudioSource::Streamed(streamed.clone())));
+    });
+    super::streamed::butler_adopt(StreamFeeder::new(streamed, stream));
+}
+
+/// The container a file's first bytes announce, when they announce one.
+fn sniff_extension(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"OggS") {
+        Some("ogg")
+    } else if bytes.starts_with(b"fLaC") {
+        Some("flac")
+    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WAVE") {
+        Some("wav")
+    } else {
+        None
+    }
+}
+
 pub fn materialize_via_bay(
     daw: &Standalone,
     project_guid: &str,
