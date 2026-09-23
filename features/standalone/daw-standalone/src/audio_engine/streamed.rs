@@ -124,32 +124,115 @@ impl Streamed {
     }
 }
 
+/// Why a decoder could not go on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecodeError {
+    /// The bytes it needs have not arrived yet (a proxy streamed from
+    /// elsewhere): the take is silent there for now, and tries again.
+    NotYet,
+    /// The stream is broken.
+    Failed(String),
+}
+
+impl std::fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotYet => f.write_str("not arrived yet"),
+            Self::Failed(why) => f.write_str(why),
+        }
+    }
+}
+
+#[cfg(feature = "stream-ogg")]
+impl From<fts_sample::SamplerError> for DecodeError {
+    fn from(e: fts_sample::SamplerError) -> Self {
+        if e.is_not_yet() { Self::NotYet } else { Self::Failed(e.to_string()) }
+    }
+}
+
 /// Where a feeder decodes from: anything that seeks to a frame and then
-/// decodes forward. `fts_sample::ogg_stream::OggStream` is the one.
+/// decodes forward. `fts_sample::ogg_stream::OggStream` is the one for a
+/// proxy on disk; [`RemoteOgg`] for one streamed from elsewhere.
 pub trait Decode {
     /// Position so the next [`Decode::decode`] starts at `frame`.
     ///
     /// # Errors
     ///
-    /// The stream could not be read there.
-    fn seek(&mut self, frame: u64) -> Result<(), String>;
+    /// The stream could not be read there (or not yet).
+    fn seek(&mut self, frame: u64) -> Result<(), DecodeError>;
     /// Decode onward, appending interleaved audio to `out`; the frame it
     /// starts at and its length, or `None` at the end.
     ///
     /// # Errors
     ///
-    /// The stream is corrupt.
-    fn decode(&mut self, out: &mut Vec<f32>) -> Result<Option<(u64, usize)>, String>;
+    /// The stream is corrupt, or its next bytes have not arrived.
+    fn decode(&mut self, out: &mut Vec<f32>) -> Result<Option<(u64, usize)>, DecodeError>;
+}
+
+impl<D: Decode + ?Sized> Decode for Box<D> {
+    fn seek(&mut self, frame: u64) -> Result<(), DecodeError> {
+        (**self).seek(frame)
+    }
+
+    fn decode(&mut self, out: &mut Vec<f32>) -> Result<Option<(u64, usize)>, DecodeError> {
+        (**self).decode(out)
+    }
 }
 
 #[cfg(feature = "stream-ogg")]
 impl Decode for fts_sample::ogg_stream::OggStream {
-    fn seek(&mut self, frame: u64) -> Result<(), String> {
-        fts_sample::ogg_stream::OggStream::seek(self, frame).map_err(|e| e.to_string())
+    fn seek(&mut self, frame: u64) -> Result<(), DecodeError> {
+        Ok(fts_sample::ogg_stream::OggStream::seek(self, frame)?)
     }
 
-    fn decode(&mut self, out: &mut Vec<f32>) -> Result<Option<(u64, usize)>, String> {
-        fts_sample::ogg_stream::OggStream::decode(self, out).map_err(|e| e.to_string())
+    fn decode(&mut self, out: &mut Vec<f32>) -> Result<Option<(u64, usize)>, DecodeError> {
+        Ok(fts_sample::ogg_stream::OggStream::decode(self, out)?)
+    }
+}
+
+/// A proxy streamed from elsewhere (Task, a peer): its bytes as they
+/// arrive ([`fts_sample::sparse::SparseBytes`]) and its page index. Every
+/// seek is a fresh open at the indexed page before the frame
+/// ([`fts_sample::ogg_stream::OggStream::open_view`]), so a seek needs only
+/// the bytes in front of it.
+#[cfg(feature = "stream-ogg")]
+pub struct RemoteOgg {
+    bytes: Arc<fts_sample::sparse::SparseBytes>,
+    index: fts_sample::ogg_index::OggIndex,
+    stream: Option<fts_sample::ogg_stream::OggStream>,
+}
+
+#[cfg(feature = "stream-ogg")]
+impl RemoteOgg {
+    #[must_use]
+    pub const fn new(bytes: Arc<fts_sample::sparse::SparseBytes>, index: fts_sample::ogg_index::OggIndex) -> Self {
+        Self { bytes, index, stream: None }
+    }
+}
+
+#[cfg(feature = "stream-ogg")]
+impl Decode for RemoteOgg {
+    fn seek(&mut self, frame: u64) -> Result<(), DecodeError> {
+        self.stream = None;
+        self.stream = Some(fts_sample::ogg_stream::OggStream::open_view(
+            Arc::clone(&self.bytes),
+            &self.index,
+            frame,
+        )?);
+        Ok(())
+    }
+
+    fn decode(&mut self, out: &mut Vec<f32>) -> Result<Option<(u64, usize)>, DecodeError> {
+        let Some(stream) = self.stream.as_mut() else { return Err(DecodeError::NotYet) };
+        match stream.decode(out) {
+            Ok(done) => Ok(done),
+            Err(e) => {
+                // A read that stopped part way leaves the reader mid-page:
+                // the next try opens afresh.
+                self.stream = None;
+                Err(e.into())
+            }
+        }
     }
 }
 
@@ -167,6 +250,18 @@ pub struct StreamFeeder<D> {
 /// How far ahead of the playhead to keep decoded, and how far behind.
 const AHEAD: usize = 24; // ~9 s at 44.1 kHz
 const BEHIND: usize = 2;
+/// Gaps tried in one pump when their bytes have not arrived.
+const MAX_GAPS_TRIED: usize = 4;
+
+/// What one fill did.
+enum Filled {
+    /// Decoded something.
+    Some,
+    /// The gap's bytes have not arrived.
+    NotYet,
+    /// Nothing to do, or the stream failed.
+    Nothing,
+}
 
 impl<D: Decode> StreamFeeder<D> {
     #[must_use]
@@ -185,6 +280,21 @@ impl<D: Decode> StreamFeeder<D> {
         &self.source
     }
 
+    /// The same feeder over a boxed decoder (what the butler holds).
+    #[must_use]
+    pub fn boxed(self) -> StreamFeeder<Box<dyn Decode + Send>>
+    where
+        D: Send + 'static,
+    {
+        StreamFeeder {
+            source: self.source,
+            decoder: Box::new(self.decoder),
+            at: self.at,
+            pending: self.pending,
+            failed: self.failed,
+        }
+    }
+
     /// Decode toward the playhead: the first chunk it needs that is not
     /// resident, then onward. Stops after about `budget` frames of work.
     /// Returns whether anything was decoded — `false` means caught up.
@@ -196,19 +306,52 @@ impl<D: Decode> StreamFeeder<D> {
         let here = usize::try_from(self.source.wanted()).unwrap_or(usize::MAX) / CHUNK;
         let window = here.saturating_sub(BEHIND)..(here + AHEAD).min(count);
         self.source.evict(window.start..window.end);
-        let Some(next) = window.clone().find(|i| !self.source.resident(*i)) else {
-            return false;
+        // After a jump (the playhead's own chunk is not there), decode from
+        // just behind it on in one pass — one seek. Otherwise what will be
+        // heard first first: from the playhead on, then behind. Either way
+        // a gap whose bytes have not arrived (a proxy streamed from
+        // elsewhere) is passed over for the next, so what has arrived
+        // still decodes.
+        let jumped = !self.source.resident(here);
+        let order: Vec<usize> = if jumped {
+            window.clone().collect()
+        } else {
+            (here.max(window.start)..window.end).chain(window.start..here.min(window.end)).collect()
         };
+        let gaps: Vec<usize> = order.into_iter().filter(|i| !self.source.resident(*i)).collect();
+        for next in gaps.into_iter().take(MAX_GAPS_TRIED) {
+            match self.fill(next, &window, budget) {
+                Filled::Some => return true,
+                Filled::NotYet => continue,
+                Filled::Nothing => return false,
+            }
+        }
+        false
+    }
+
+    /// Decode chunk `next` (and on while in the window), about `budget`
+    /// frames of work.
+    fn fill(&mut self, next: usize, window: &std::ops::Range<usize>, budget: usize) -> Filled {
+        let window = window.clone();
         let ch = usize::from(self.source.channels());
         let want_frame = (next * CHUNK) as u64;
         // Carry on from where the decoder is if it is part way through the
         // chunk needed; otherwise seek there, dropping what was half built.
         let pending_end = (self.pending.0 * CHUNK + self.pending.1.len() / ch) as u64;
         if self.pending.0 != next || self.at != Some(pending_end) {
-            if let Err(e) = self.decoder.seek(want_frame) {
-                tracing::warn!(error = %e, frame = want_frame, "stream seek failed");
-                self.failed = true;
-                return false;
+            match self.decoder.seek(want_frame) {
+                Ok(()) => {}
+                // Not arrived yet: silent here for now; the next pump tries
+                // again (the fetcher has been told what is wanted).
+                Err(DecodeError::NotYet) => {
+                    self.at = None;
+                    return Filled::NotYet;
+                }
+                Err(DecodeError::Failed(e)) => {
+                    tracing::warn!(error = %e, frame = want_frame, "stream seek failed");
+                    self.failed = true;
+                    return Filled::Nothing;
+                }
             }
             self.at = Some(want_frame);
             self.pending = (next, Vec::with_capacity(CHUNK * ch));
@@ -225,12 +368,19 @@ impl<D: Decode> StreamFeeder<D> {
                     // The end: whatever is pending is the last chunk.
                     self.flush_pending(ch, true);
                     self.at = None;
-                    return self.pending.1.len() != before || done > 0;
+                    return if self.pending.1.len() != before || done > 0 { Filled::Some } else { Filled::Nothing };
                 }
-                Err(e) => {
+                Err(DecodeError::NotYet) => {
+                    // What was half built is dropped; the next pump seeks to
+                    // the chunk again once more has arrived.
+                    self.at = None;
+                    self.pending.1.clear();
+                    return if done > 0 { Filled::Some } else { Filled::NotYet };
+                }
+                Err(DecodeError::Failed(e)) => {
                     tracing::warn!(error = %e, "stream decode failed");
                     self.failed = true;
-                    return done > 0;
+                    return if done > 0 { Filled::Some } else { Filled::Nothing };
                 }
             }
             self.flush_pending(ch, false);
@@ -241,7 +391,7 @@ impl<D: Decode> StreamFeeder<D> {
                 break;
             }
         }
-        true
+        Filled::Some
     }
 
     /// Move every whole chunk out of `pending` into the source (and the
@@ -271,13 +421,13 @@ mod tests {
     }
 
     impl Decode for Ramp {
-        fn seek(&mut self, frame: u64) -> Result<(), String> {
+        fn seek(&mut self, frame: u64) -> Result<(), DecodeError> {
             self.at = frame;
             self.seeks += 1;
             Ok(())
         }
 
-        fn decode(&mut self, out: &mut Vec<f32>) -> Result<Option<(u64, usize)>, String> {
+        fn decode(&mut self, out: &mut Vec<f32>) -> Result<Option<(u64, usize)>, DecodeError> {
             if self.at >= self.frames {
                 return Ok(None);
             }
@@ -361,11 +511,11 @@ mod tests {
 /// about [`AHEAD`] chunks.
 #[cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
 pub mod butler {
-    use super::StreamFeeder;
-    use fts_sample::ogg_stream::OggStream;
+    use super::{Decode, StreamFeeder};
     use std::sync::{Mutex, OnceLock};
 
-    type Feeders = Mutex<Vec<StreamFeeder<OggStream>>>;
+    /// Any decoder: a proxy on disk, one streamed from elsewhere.
+    type Feeders = Mutex<Vec<StreamFeeder<Box<dyn Decode + Send>>>>;
 
     fn feeders() -> &'static Feeders {
         static FEEDERS: OnceLock<Feeders> = OnceLock::new();
@@ -379,7 +529,8 @@ pub mod butler {
     }
 
     /// Hand a streamed take to the butler.
-    pub fn adopt(feeder: StreamFeeder<OggStream>) {
+    pub fn adopt<D: Decode + Send + 'static>(feeder: StreamFeeder<D>) {
+        let feeder = feeder.boxed();
         if let Ok(mut all) = feeders().lock() {
             all.push(feeder);
         }

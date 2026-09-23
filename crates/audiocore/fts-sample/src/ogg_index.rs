@@ -37,6 +37,10 @@ pub struct OggIndex {
     pub frames: u64,
     /// Where the audio starts: everything before is the header pages.
     pub audio_start: u64,
+    /// Channels and sample rate, from the Vorbis identification header —
+    /// so a player can set a streamed take up from the index alone.
+    pub channels: u16,
+    pub sample_rate: u32,
     /// Indexed pages, ascending (about one a second, and the last page).
     pub points: Vec<PagePoint>,
 }
@@ -55,6 +59,20 @@ fn page_at(bytes: &[u8], at: usize) -> Option<(i64, usize)> {
     Some((granule, 27usize.checked_add(segments)?.checked_add(body)?))
 }
 
+/// Channels and sample rate, if the page at `at` opens with the Vorbis
+/// identification header (`\x01vorbis`, version, channels, rate).
+fn vorbis_ident(bytes: &[u8], at: usize) -> Option<(u16, u32)> {
+    let segments = usize::from(*bytes.get(at.checked_add(26)?)?);
+    let body = at.checked_add(27)?.checked_add(segments)?;
+    let packet = bytes.get(body..body.checked_add(16)?)?;
+    if packet.get(..7)? != b"\x01vorbis" {
+        return None;
+    }
+    let channels = u16::from(*packet.get(11)?);
+    let rate = u32::from_le_bytes(packet.get(12..16)?.try_into().ok()?);
+    Some((channels, rate))
+}
+
 fn u64_of(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
 }
@@ -71,7 +89,11 @@ impl OggIndex {
         let mut points: Vec<PagePoint> = Vec::new();
         let mut last = None;
         let mut next_mark = 0u64;
+        let mut ident: Option<(u16, u32)> = None;
         while let Some((granule, len)) = page_at(bytes, at) {
+            if ident.is_none() {
+                ident = vorbis_ident(bytes, at);
+            }
             // Header pages carry granule 0; the first page with audio
             // completes frames.
             if granule > 0 {
@@ -93,7 +115,15 @@ impl OggIndex {
         if points.last() != Some(&last) {
             points.push(last);
         }
-        Some(Self { len: u64_of(at.min(bytes.len())), frames: last.frames, audio_start: audio_start?, points })
+        let (channels, sample_rate) = ident.unwrap_or((0, 0));
+        Some(Self {
+            len: u64_of(at.min(bytes.len())),
+            frames: last.frames,
+            audio_start: audio_start?,
+            channels,
+            sample_rate,
+            points,
+        })
     }
 
     /// The header pages every reader needs first.
@@ -123,7 +153,10 @@ impl OggIndex {
     /// point — small, and readable by eye.
     #[must_use]
     pub fn to_text(&self) -> String {
-        let mut out = format!("ogg-index 1 {} {} {}\n", self.len, self.frames, self.audio_start);
+        let mut out = format!(
+            "ogg-index 2 {} {} {} {} {}\n",
+            self.len, self.frames, self.audio_start, self.channels, self.sample_rate
+        );
         for p in &self.points {
             out.push_str(&format!("{} {} {}\n", p.frames, p.offset, p.end));
         }
@@ -135,12 +168,14 @@ impl OggIndex {
     pub fn from_text(text: &str) -> Option<Self> {
         let mut lines = text.lines();
         let mut head = lines.next()?.split_whitespace();
-        if head.next()? != "ogg-index" || head.next()? != "1" {
+        if head.next()? != "ogg-index" || head.next()? != "2" {
             return None;
         }
         let len = head.next()?.parse().ok()?;
         let frames = head.next()?.parse().ok()?;
         let audio_start = head.next()?.parse().ok()?;
+        let channels = head.next()?.parse().ok()?;
+        let sample_rate = head.next()?.parse().ok()?;
         let points = lines
             .filter(|l| !l.trim().is_empty())
             .map(|l| {
@@ -152,7 +187,7 @@ impl OggIndex {
                 })
             })
             .collect::<Option<Vec<_>>>()?;
-        Some(Self { len, frames, audio_start, points })
+        Some(Self { len, frames, audio_start, channels, sample_rate, points })
     }
 
     /// Where a proxy's index lives: beside it, `.idx` appended.

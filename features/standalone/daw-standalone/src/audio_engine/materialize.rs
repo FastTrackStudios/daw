@@ -294,6 +294,27 @@ fn stream_ogg(
     super::streamed::butler_adopt(StreamFeeder::new(streamed, stream));
 }
 
+/// Attach a proxy streamed from elsewhere (Task, a peer) to a take: its
+/// bytes as they arrive and its page index. The take plays what has
+/// arrived and is silent where it has not; the reader records what it
+/// wanted (`SparseBytes::wanted`) for the fetcher.
+#[cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
+pub fn stream_remote_ogg(
+    daw: &Standalone,
+    project_guid: &str,
+    take_guid: &str,
+    bytes: Arc<fts_sample::sparse::SparseBytes>,
+    index: fts_sample::ogg_index::OggIndex,
+) {
+    use super::streamed::{RemoteOgg, StreamFeeder, Streamed};
+    let streamed = Streamed::new(index.channels, index.sample_rate, index.frames);
+    let _ = daw.with_project_mut(project_guid, |p| {
+        p.audio_sources
+            .insert(take_guid.to_owned(), Arc::new(AudioSource::Streamed(streamed.clone())));
+    });
+    super::streamed::butler_adopt(StreamFeeder::new(streamed, RemoteOgg::new(bytes, index)));
+}
+
 /// The container a file's first bytes announce, when they announce one.
 fn sniff_extension(bytes: &[u8]) -> Option<&'static str> {
     if bytes.starts_with(b"OggS") {

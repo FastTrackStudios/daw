@@ -295,6 +295,7 @@ mod tests {
         let mut whole = OggStream::open(Arc::clone(&bytes)).expect("open");
         let (_, all) = decode_all(&mut whole);
         let index = crate::ogg_index::OggIndex::build(&bytes, 44_100).expect("index");
+        assert_eq!((index.channels, index.sample_rate), (2, 44_100), "set up from the index alone");
 
         let target: u64 = 44_100 * 12 + 777;
         let want = 8192u64;
