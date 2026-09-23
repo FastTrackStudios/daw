@@ -68,6 +68,9 @@ pub(crate) struct LiveInput {
     /// Count of blocks where the ring couldn't supply a full block
     /// (input not keeping up) — the shortfall is zero-filled.
     pub(crate) underruns: u64,
+    /// Count of blocks where a backlog past one spare block was dropped
+    /// to keep the input → output latency at the buffer size.
+    pub(crate) resyncs: u64,
 }
 
 /// Mix the live hardware input into per-track buses (render stage 0).
@@ -101,6 +104,19 @@ pub(crate) fn mix_live_input_into_buses(
     let want = frames * channels;
     if live.scratch.len() < want {
         live.scratch.resize(want, 0.0);
+    }
+    // Latency guard: the ring is drained one block per output callback, so
+    // anything queued beyond that — input started before output, an output
+    // stall, two device clocks drifting — would otherwise stay queued (and
+    // audible as delay) for the life of the stream. Keep at most one spare
+    // block for callback jitter and drop the oldest frames past it.
+    let backlog = live.cons.slots();
+    if backlog > want * 2 {
+        let skip = (backlog - want * 2) / channels * channels;
+        if let Ok(chunk) = live.cons.read_chunk(skip) {
+            chunk.commit_all();
+            live.resyncs = live.resyncs.wrapping_add(1);
+        }
     }
     // Drain interleaved input frames from the ring; zero-fill shortfall.
     let avail = live.cons.slots();
@@ -385,6 +401,7 @@ impl ProjectRenderer {
                 channels,
                 scratch: Vec::new(),
                 underruns: 0,
+                resyncs: 0,
             });
         }
     }
@@ -1109,6 +1126,7 @@ mod live_input_tests {
             channels,
             scratch: Vec::new(),
             underruns: 0,
+            resyncs: 0,
         }
     }
 
@@ -1177,6 +1195,39 @@ mod live_input_tests {
         );
         assert!(buses[0].samples.iter().all(|s| *s == 0.0));
         assert!(!dirty[0]);
+    }
+
+    #[test]
+    fn backlog_past_one_spare_block_is_dropped() {
+        // Five blocks queued (a stall's worth): the render must play the
+        // second-newest block and leave one spare, not the oldest — the
+        // oldest would keep the input four blocks late forever.
+        let frames = 4;
+        let channels = 2;
+        let (mut prod, cons) = rtrb::RingBuffer::<f32>::new(5 * frames * channels);
+        for f in 0..5 * frames {
+            for _ in 0..channels {
+                let _ = prod.push(f as f32);
+            }
+        }
+        let mut live = LiveInput {
+            cons,
+            channels,
+            scratch: Vec::new(),
+            underruns: 0,
+            resyncs: 0,
+        };
+        let mut buses = vec![StereoBuffer::zeroed(frames, 48_000)];
+        let mut dirty = vec![false; 1];
+
+        mix_live_input_into_buses(&mut live, &[Some(0)], |_| true, &mut buses, &mut dirty, frames);
+
+        for f in 0..frames {
+            assert_eq!(buses[0].samples[f * 2], (3 * frames + f) as f32);
+        }
+        assert_eq!(live.cons.slots(), frames * channels);
+        assert_eq!(live.resyncs, 1);
+        assert_eq!(live.underruns, 0);
     }
 
     #[test]
