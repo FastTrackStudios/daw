@@ -73,8 +73,18 @@ use reaper_medium::{
 /// instances' `time_precise` clocks.
 #[inline]
 pub(crate) fn reaper_clock_micros(reaper: &MediumReaper<RealTimeAudioThreadScope>) -> f64 {
+    clock_micros(reaper.low())
+}
+
+/// REAPER's sync clock now, microseconds, from any thread — the clock
+/// every snapshot's `host_micros` is in (see `reaper_clock_micros`).
+/// What a remote follower pings to learn its offset to this REAPER.
+#[inline]
+pub fn clock_micros(low: &reaper_low::Reaper) -> f64 {
     // Only exposed at the low binding level (medium hasn't wrapped it).
-    reaper.low().time_precise() * 1_000_000.0
+    // `time_precise` reads a monotonic OS clock; it is callable from any
+    // thread (the audio hook calls it on the real-time thread).
+    low.time_precise() * 1_000_000.0
 }
 
 /// The play rate to publish with a snapshot.

@@ -631,6 +631,16 @@ pub struct Standalone {
     pub(crate) meter_events: architect::PubSub<daw_proto::MeterFrame>,
     /// Whether the meter pump has been spawned (once per process).
     pub(crate) meter_pump_started: Arc<std::sync::atomic::AtomicBool>,
+    /// Stamped-position stream hub (`TransportSyncStreamSource`). A
+    /// pump (spawned lazily by the first subscription) reads every
+    /// project transport's per-buffer sync snapshot and publishes the
+    /// ones a follower needs — every change, and a keepalive between;
+    /// the architect `#[subscribe] fn positions` stream layer fans them
+    /// out. Subscribers filter by `project_guid`.
+    pub(crate) sync_positions: architect::PubSub<daw_proto::StampedPosition>,
+    /// Whether the sync-position pump has been spawned (once per
+    /// backend).
+    pub(crate) sync_pump_started: Arc<std::sync::atomic::AtomicBool>,
     /// Producer end of the live / programmatic MIDI ring. Installed by
     /// `AudioEngine::with_project_prefs` (the consumer goes to the
     /// renderer via `set_live_midi`). `push_note_on`/`_off`/`_cc` push
@@ -679,6 +689,8 @@ impl Standalone {
             meters: Arc::new(Mutex::new(crate::metering::Meters::empty())),
             meter_events: architect::PubSub::sliding(64),
             meter_pump_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sync_positions: architect::PubSub::sliding(64),
+            sync_pump_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             #[cfg(feature = "audio")]
             live_midi_tx: Arc::new(Mutex::new(None)),
             #[cfg(all(target_arch = "wasm32", any(feature = "decode", feature = "audio")))]

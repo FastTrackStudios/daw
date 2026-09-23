@@ -88,6 +88,7 @@ pub mod tempo_map;
 pub mod toolbar;
 pub mod track;
 pub mod transport;
+pub mod transport_sync;
 pub mod ui;
 pub mod window_geometry;
 pub mod window_manager;

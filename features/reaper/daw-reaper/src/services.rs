@@ -34,7 +34,7 @@ use daw_proto::{
     action_registry, audio_engine, automation, batch, dawfile_service, diagnostics, event_bus,
     ext_state, fx, fx_chains, fx_params, health, input, item, live_midi, marker, midi, peak,
     plugin_loader, project, region, resource, routing, screenset, take, tempo_map, toolbar, track,
-    transport, window_geometry, window_manager,
+    transport, transport_sync, window_geometry, window_manager,
 };
 
 use crate::Reaper;
@@ -77,6 +77,7 @@ impl Services for Reaper {
             batch::Service,
             diagnostics::Service,
             peak::Service,
+            transport_sync::Service,
             // `#[subscribe]` stream siblings — served from the central
             // event hub's PubSub hubs (see `event_hub.rs` + each
             // domain's StreamSource impl). The event-bus base service
@@ -88,6 +89,7 @@ impl Services for Reaper {
             tempo_map::StreamService,
             event_bus::StreamService,
             peak::StreamService,
+            transport_sync::StreamService,
         ]
     }
 }

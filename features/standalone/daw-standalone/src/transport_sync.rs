@@ -15,10 +15,18 @@
 //! callback and the duplex callback (stamps filtered by a
 //! [`daw_transport_sync::BufferClock`] over callback entry times), and
 //! the soft clock when no device runs (stamped with its own tick times).
+//!
+//! The same transports are served to remote followers through the
+//! `daw_proto::TransportSync` service: `clock_now` reads [`now_micros`],
+//! `snapshot` / the `positions` stream carry each project's snapshots
+//! stamped with its GUID.
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
-use daw_transport_sync::{AudioSnapshot, ProjectId, TransportBackend};
+use daw_proto::{ProjectContext, StampedPosition};
+use daw_transport_sync::{AudioSnapshot, ProjectId, PublishGate, TransportBackend};
 
 use crate::sync::Standalone;
 use crate::transport_engine::{ScheduledLocate, TransportShared};
@@ -153,6 +161,95 @@ impl Standalone {
             bundle.shared.clone(),
             project_id_of(project_guid),
         ))
+    }
+}
+
+// ── The `TransportSync` service ─────────────────────────────────────
+//
+// A remote follower's view of these transports: the sync clock to ping
+// (`now_micros`, the clock every snapshot is stamped in) and the
+// snapshots themselves, stamped with their project's GUID.
+
+impl daw_proto::TransportSync for Standalone {
+    async fn clock_now(&self) -> f64 {
+        now_micros()
+    }
+
+    fn snapshot(&self, project: ProjectContext) -> Option<StampedPosition> {
+        let guid = match project {
+            ProjectContext::Project(guid) => guid,
+            ProjectContext::Current => self.state.lock().ok()?.current_project_guid.clone()?,
+        };
+        let backend = self.sync_backend(&guid)?;
+        backend
+            .snapshot()
+            .map(|snap| StampedPosition::from_snapshot(guid, &snap))
+    }
+}
+
+// Positions stream from the hub fed by the sync-position pump, spawned
+// lazily on the first subscription (`positions_hub` is called from the
+// stream host's async attach path, like `meters_hub`).
+impl daw_proto::TransportSyncStreamSource for Standalone {
+    fn positions_hub(&self) -> &architect::PubSub<StampedPosition> {
+        self.spawn_sync_position_pump();
+        &self.sync_positions
+    }
+}
+
+/// How often the pump looks at the snapshots while anyone subscribes:
+/// a change reaches subscribers within this (plus the wire).
+const PUMP_TICK: Duration = Duration::from_millis(5);
+
+/// How often the pump checks for a first subscriber while there is none.
+const PUMP_IDLE: Duration = Duration::from_millis(50);
+
+impl Standalone {
+    /// Spawn the sync-position pump (once per backend): every
+    /// [`PUMP_TICK`] while the hub has subscribers, read each project
+    /// transport's latest snapshot (lock-free) and publish it when its
+    /// project's [`PublishGate`] says a follower needs it — on every
+    /// change, and at least every ~20 ms. Does nothing but check the
+    /// subscriber count while nobody listens.
+    pub(crate) fn spawn_sync_position_pump(&self) {
+        use std::sync::atomic::Ordering;
+        if self.sync_pump_started.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let this = self.clone();
+        architect::platform::spawn(async move {
+            let mut gates: HashMap<String, PublishGate> = HashMap::new();
+            loop {
+                if this.sync_positions.subscriber_count() == 0 {
+                    // A subscriber that arrives hears every project at
+                    // once, not after its next change.
+                    gates.clear();
+                    architect::platform::sleep(PUMP_IDLE).await;
+                    continue;
+                }
+                let engines: Vec<(String, Arc<TransportShared>)> = this
+                    .transport_engines
+                    .lock()
+                    .map(|engines| {
+                        engines
+                            .iter()
+                            .map(|(guid, bundle)| (guid.clone(), bundle.shared.clone()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                gates.retain(|guid, _| engines.iter().any(|(g, _)| g == guid));
+                for (guid, shared) in engines {
+                    let Some(snap) = shared.sync_snapshot() else {
+                        continue;
+                    };
+                    if gates.entry(guid.clone()).or_default().offer(&snap) {
+                        this.sync_positions
+                            .publish(StampedPosition::from_snapshot(guid, &snap));
+                    }
+                }
+                architect::platform::sleep(PUMP_TICK).await;
+            }
+        });
     }
 }
 

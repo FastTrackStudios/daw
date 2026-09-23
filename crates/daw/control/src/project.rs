@@ -82,6 +82,13 @@ impl Project {
         Transport::new(self.guid.clone(), self.clients.clone())
     }
 
+    /// Transport sync for this project: the server's sync clock, its
+    /// stamped positions, and a [`TransportLeader`](crate::TransportLeader)
+    /// to keep a local backend in step with it.
+    pub fn transport_sync(&self) -> crate::ProjectTransportSync {
+        crate::ProjectTransportSync::new(self.guid.clone(), self.clients.clone())
+    }
+
     /// Get markers accessor for this project
     ///
     /// Returns a handle to query and manipulate markers in this project.

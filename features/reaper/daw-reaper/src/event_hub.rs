@@ -19,6 +19,7 @@
 use std::sync::OnceLock;
 
 use daw_proto::MeterFrame;
+use daw_proto::StampedPosition;
 use daw_proto::event_bus::DawEvent;
 use daw_proto::marker::MarkerStreamEvent;
 use daw_proto::project::ProjectStreamEvent;
@@ -87,6 +88,11 @@ pub struct DawEventHub {
     /// Cross-domain bus — every domain's publish also lands here,
     /// wrapped in [`DawEvent`]. Subscribers filter client-side.
     bus_hub: architect::PubSub<DawEvent>,
+    /// Stamped-position hub (`TransportSyncStreamSource`). Fed by the
+    /// sync-position pump in [`crate::transport_sync`] from
+    /// daw-audio-sync's per-buffer snapshots. Continuous — NOT bridged
+    /// onto the cross-domain bus.
+    sync_positions_hub: architect::PubSub<StampedPosition>,
 }
 
 impl DawEventHub {
@@ -106,6 +112,7 @@ impl DawEventHub {
             transport_hub: architect::PubSub::sliding(CONTINUOUS_BUFFER),
             meters_hub: architect::PubSub::sliding(CONTINUOUS_BUFFER),
             bus_hub: architect::PubSub::sliding(OCCASIONAL_BUFFER),
+            sync_positions_hub: architect::PubSub::sliding(64),
         }
     }
 
@@ -137,6 +144,10 @@ impl DawEventHub {
 
     pub fn meters_hub(&self) -> &architect::PubSub<MeterFrame> {
         &self.meters_hub
+    }
+
+    pub fn sync_positions_hub(&self) -> &architect::PubSub<StampedPosition> {
+        &self.sync_positions_hub
     }
 
     // ── Meters ───────────────────────────────────────────────────

@@ -26,6 +26,8 @@
 //! - [`drift`] — the controller: given this engine's snapshot and the
 //!   leader's position (both in one clock), a [`Correction`] — nudge the
 //!   rate a fraction of a percent, jump when too far out, or leave it.
+//! - [`gate`] — which snapshots a carrier should send: every change, and
+//!   a keepalive between ([`PublishGate`]).
 //! - [`backend`] — what a DAW implements to be kept in step
 //!   ([`TransportBackend`]), and [`Follower`], which drives one.
 //!
@@ -46,6 +48,7 @@ pub mod buffer_clock;
 pub mod clock;
 pub mod drift;
 pub mod estimate;
+pub mod gate;
 pub mod position;
 pub mod snapshot;
 
@@ -53,5 +56,6 @@ pub use backend::{Follower, TransportBackend};
 pub use buffer_clock::BufferClock;
 pub use drift::{Correction, DriftConfig, DriftController};
 pub use estimate::{ClockEstimator, RollingWindow};
+pub use gate::PublishGate;
 pub use position::Position;
 pub use snapshot::{AudioSnapshot, ProjectId, SnapshotCell};
