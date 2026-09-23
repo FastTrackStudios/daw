@@ -594,9 +594,30 @@ pub(crate) fn decode_midi_source(
     let mut next_note_idx: u32 = 0;
     let to_ppq = |t: u64| (t as f64) / tpq;
 
-    for ev in &midi.events {
-        tick = tick.saturating_add(ev.delta_ticks as u64);
-        let bytes = ev.bytes.as_slice();
+    // Deltas count from the previous event of EITHER kind: an `<X>` block
+    // (text, notation, …) between two `E` lines carries part of the time
+    // between them. Summing the `E` deltas alone put every event after
+    // one early by its delta.
+    use dawfile_reaper::types::item::MidiSourceEvent;
+    let stream: Vec<(u32, Option<&[u8]>)> = if midi.event_stream.is_empty() {
+        midi.events
+            .iter()
+            .map(|e| (e.delta_ticks, Some(e.bytes.as_slice())))
+            .collect()
+    } else {
+        midi.event_stream
+            .iter()
+            .map(|ev| match ev {
+                MidiSourceEvent::Midi(e) => (e.delta_ticks, Some(e.bytes.as_slice())),
+                MidiSourceEvent::Extended(x) => (x.delta_ticks(), None),
+            })
+            .collect()
+    };
+    for (delta, bytes) in stream {
+        tick = tick.saturating_add(delta as u64);
+        let Some(bytes) = bytes else {
+            continue;
+        };
         let Some(&status) = bytes.first() else {
             continue;
         };
