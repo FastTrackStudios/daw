@@ -43,6 +43,10 @@ mod automation;
 mod automation_touch;
 #[cfg(feature = "rpp-save")]
 pub mod save;
+/// Save / load a live project as a `.session` (FastTrackStudio's native
+/// project format). Native-only: pulls the `.rpp` parser and the format.
+#[cfg(feature = "session-file")]
+pub mod session_file;
 mod stretch_marker;
 #[cfg(any(feature = "audio", feature = "decode"))]
 mod take_reader;
