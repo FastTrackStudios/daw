@@ -1,36 +1,37 @@
-//! Drift correction — closes the loop on Phase B/C observation by
-//! actuating REAPER's playrate when local position diverges from the
-//! elected leader's projected position.
+//! Drift correction — the REAPER actuator for the core's
+//! [`daw_transport_sync::DriftController`]: when the local playhead
+//! diverges from the elected leader's, nudge REAPER's playrate.
 //!
 //! # Control loop
 //!
 //! Runs as a tokio task at `CORRECTION_HZ` (~20Hz). Each tick:
 //!
 //! 1. Snapshot local position from the [`SnapshotCell`].
-//! 2. Snapshot peer table from `PeerTable`; elect the lowest-UUID
-//!    peer that's actively playing as leader. If we are the leader,
-//!    no correction needed — just hold rate at 1.0.
-//! 3. Project the leader's playhead into our clock domain using
-//!    `RemotePosition::project_playhead` + the per-peer offset.
-//! 4. drift_seconds = local_playhead − leader_projected_playhead
-//! 5. If |drift| < deadband, target rate = 1.0 (let the natural clock
-//!    take over). Otherwise compute a proportional correction:
+//! 2. Snapshot the peer table; elect the lowest-UUID peer that's
+//!    actively playing as leader. If we are the leader (or the local
+//!    transport is stopped), hold rate at 1.0 and forget the
+//!    controller's state.
+//! 3. Bring the leader's latest position frame into our clock — the
+//!    core [`Position`] shifted by the peer's clock offset — and hand it,
+//!    with our snapshot, to the core controller. The control law is the
+//!    core's: proportional-integral on the playhead gap, a deadband of a
+//!    couple of samples, the rate clamped to ±`max_rate_deviation` around
+//!    the leader's.
+//! 4. Hand the controller's rate to the host-supplied actuator when it
+//!    differs from the last one applied. The actuator is responsible for
+//!    getting onto REAPER's main thread (via `TaskSupport` typically) and
+//!    calling `CSurf_OnPlayRateChange(new_rate)`.
 //!
-//!    ```text
-//!    rate_delta = -drift_seconds / convergence_time_seconds
-//!    rate       = clamp(1.0 + rate_delta, 1 − MAX_DEV, 1 + MAX_DEV)
-//!    ```
+//! # Rate only — no locate, no start/stop
 //!
-//!    Negative gain means: if we're AHEAD (drift > 0), we slow down
-//!    (rate < 1.0). Convergence time controls aggressiveness — set
-//!    so a millisecond of drift takes a second to bleed off (rate
-//!    deviates by ~0.1%, well below audible threshold for most
-//!    content).
-//!
-//! 6. Hand the new rate to the host-supplied actuator. The actuator
-//!    is responsible for getting onto REAPER's main thread (via
-//!    `TaskSupport` typically) and calling
-//!    `CSurf_OnPlayRateChange(new_rate)`.
+//! The core controller can also ask for a scheduled locate (gap past its
+//! threshold), a start, or a stop. REAPER's actuator here only moves the
+//! rate, so this adapter configures the controller rate-only: the locate
+//! threshold is infinite (every gap is closed by rate, however long that
+//! takes at ±1% — the behaviour this corrector always had), and the
+//! controller is only consulted while both sides play, so it never asks
+//! to start or stop. Should a locate or stop come back anyway, it is
+//! logged at debug and the rate is held.
 //!
 //! # Why proportional + deadband instead of bang-bang
 //!
@@ -40,53 +41,80 @@
 //! sample-accurate sync, we need sub-percent corrections so the
 //! pitch shift is below ~5 cents (imperceptible). Proportional with
 //! ±1% cap fits that constraint and lets us land within a few
-//! samples of the leader in steady state.
+//! samples of the leader in steady state; the integral term learns the
+//! two sound cards' constant crystal mismatch so no standing gap is left.
 
 use core::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use daw_transport_sync::{Correction, DriftController, Position};
 use tokio::task::JoinHandle;
 use tracing::{debug, trace};
 
-use crate::SnapshotCell;
-use crate::clock_sync::{ClockSync, PeerId};
+use crate::clock_sync::{ClockSync, PeerId, PeerInfo};
+use crate::{AudioSnapshot, SnapshotCell};
 
 /// How often the corrector runs. 20Hz matches the position-broadcast
 /// rate so we always have a fresh leader sample to compare against.
 const CORRECTION_HZ: u64 = 20;
 
-/// Default control parameters. Tuned for sample-accurate convergence
-/// without audible pitch artifacts.
+/// A rate within this of the last one applied is not re-sent to REAPER.
+const RATE_EPSILON: f64 = 1e-7;
+
+/// Control parameters. Tuned for sample-accurate convergence without
+/// audible pitch artifacts. Mapped onto the core's
+/// [`daw_transport_sync::DriftConfig`] by [`Self::controller_config`].
 #[derive(Clone, Copy, Debug)]
 pub struct DriftConfig {
-    /// Drift below this (in seconds) is ignored — return to rate 1.0
-    /// and let the audio engine's natural clock take over. Below the
-    /// deadband, sample-rate drift between machines is the dominant
-    /// noise source; correction would just chase noise.
+    /// Drift below this (in seconds) gets no proportional correction —
+    /// below the deadband, sample-rate drift between machines is the
+    /// dominant noise source; correction would just chase noise.
     pub deadband_seconds: f64,
     /// Target convergence time. Larger = smoother, less audible
     /// pitch wobble, but slower correction. 1.0s is a good default
     /// for live playback where peers should sound aligned but the
     /// listener can't hear sub-percent rate changes.
     pub convergence_seconds: f64,
-    /// Maximum deviation from rate 1.0 in either direction. 0.01 =
-    /// ±1% (≈ ±17 cents at worst). Anything larger risks audible
-    /// pitch shift on sustained content.
+    /// Maximum deviation from the leader's rate in either direction.
+    /// 0.01 = ±1% (≈ ±17 cents at worst). Anything larger risks
+    /// audible pitch shift on sustained content.
     pub max_rate_deviation: f64,
-    /// Per-peer minimum age — drop position frames older than this
-    /// from consideration. Avoids correcting against stale data
-    /// after a network hiccup or peer disconnect.
+    /// How long the integral term takes to learn a standing crystal
+    /// mismatch (seconds; 0 turns it off → proportional only).
+    pub integral_seconds: f64,
+    /// Drop position frames older than this from consideration. Avoids
+    /// correcting against stale data after a network hiccup or peer
+    /// disconnect.
     pub max_position_age: Duration,
 }
 
 impl Default for DriftConfig {
     fn default() -> Self {
+        let core = daw_transport_sync::DriftConfig::default();
         Self {
-            deadband_seconds: 50e-6, // 50µs = ~2 samples at 48kHz
-            convergence_seconds: 1.0,
-            max_rate_deviation: 0.01,
+            deadband_seconds: core.deadband_seconds, // 50µs ≈ 2 samples at 48kHz
+            convergence_seconds: core.convergence_seconds,
+            max_rate_deviation: core.max_rate_deviation,
+            integral_seconds: core.integral_seconds,
             max_position_age: Duration::from_millis(500),
+        }
+    }
+}
+
+impl DriftConfig {
+    /// The core controller's configuration for REAPER's rate-only
+    /// actuator: no locate (infinite threshold), so every gap is closed
+    /// by rate.
+    pub fn controller_config(&self) -> daw_transport_sync::DriftConfig {
+        daw_transport_sync::DriftConfig {
+            deadband_seconds: self.deadband_seconds,
+            convergence_seconds: self.convergence_seconds,
+            max_rate_deviation: self.max_rate_deviation,
+            integral_seconds: self.integral_seconds,
+            locate_threshold_seconds: f64::INFINITY,
+            max_position_age_micros: self.max_position_age.as_secs_f64() * 1e6,
+            ..daw_transport_sync::DriftConfig::default()
         }
     }
 }
@@ -105,6 +133,108 @@ pub struct DriftDecision {
     /// Rate we asked the actuator to apply. `1.0` when no
     /// correction is in flight.
     pub target_rate: f64,
+}
+
+/// The corrector's state between ticks: the core controller, whom it is
+/// following, and the rate REAPER was last told. Pure — the tokio loop
+/// feeds it and runs the actuator.
+struct RateFollower {
+    controller: DriftController,
+    local_peer_id: PeerId,
+    max_position_age: Duration,
+    leader: Option<PeerId>,
+    applied_rate: f64,
+}
+
+impl RateFollower {
+    fn new(config: DriftConfig, local_peer_id: PeerId) -> Self {
+        Self {
+            controller: DriftController::new(config.controller_config()),
+            local_peer_id,
+            max_position_age: config.max_position_age,
+            leader: None,
+            applied_rate: 1.0,
+        }
+    }
+
+    /// One tick. Returns the decision (for diagnostics) and the rate to
+    /// hand the actuator, if it changed.
+    fn decide(
+        &mut self,
+        sequence: u64,
+        local: &AudioSnapshot,
+        peers: &[PeerInfo],
+    ) -> (DriftDecision, Option<f64>) {
+        let leader = if local.is_playing {
+            elect_leader(peers, self.local_peer_id, self.max_position_age)
+        } else {
+            // Stopped: reset so a stale correction is not inherited on
+            // the next play.
+            None
+        };
+        let Some((leader, position)) = leader.and_then(|l| {
+            let position = l.positions.iter().find(|p| p.is_playing).copied()?;
+            Some((l, position))
+        }) else {
+            // We lead (or nobody plays): nominal rate, nothing learned.
+            self.controller.reset();
+            self.leader = None;
+            let actuate = self.apply(1.0);
+            let decision = DriftDecision {
+                sequence,
+                leader: None,
+                drift_seconds: None,
+                target_rate: 1.0,
+            };
+            return (decision, actuate);
+        };
+
+        if self.leader != Some(leader.id) {
+            // A new leader: what was learned about the old one's crystal
+            // does not hold.
+            self.controller.reset();
+            self.leader = Some(leader.id);
+        }
+
+        // The leader's frame is stamped in its clock; offset_us is
+        // remote − local, so shifting by −offset brings it into ours.
+        let leader_here: Position = position.position().shifted(-(leader.offset_us as f64));
+        match self.controller.step(local, &leader_here, local.host_micros) {
+            Correction::Hold | Correction::Rate(_) => {}
+            other => debug!(
+                correction = ?other,
+                "drift: rate-only actuator — locate/stop not applied, holding rate",
+            ),
+        }
+        let target_rate = self.controller.rate();
+        let actuate = self.apply(target_rate);
+        let drift_seconds = self.controller.last_drift();
+        if actuate.is_some() {
+            trace!(
+                drift_us = drift_seconds.map(|d| (d * 1e6) as i64),
+                target_rate,
+                leader = ?leader.id,
+                "drift correction applied",
+            );
+        }
+        let decision = DriftDecision {
+            sequence,
+            leader: Some(leader.id),
+            drift_seconds,
+            target_rate,
+        };
+        (decision, actuate)
+    }
+
+    /// `Some(rate)` when REAPER has to be told.
+    fn apply(&mut self, rate: f64) -> Option<f64> {
+        if (rate - self.applied_rate).abs() > RATE_EPSILON {
+            self.applied_rate = rate;
+            Some(rate)
+        } else {
+            None
+        }
+    }
 }
 
 /// Drift corrector. Holds the spawned task; drop to stop.
@@ -136,11 +266,10 @@ impl DriftCorrector {
     {
         let last_decision_bits = Arc::new(DecisionCell::default());
         let decision_cell = last_decision_bits.clone();
-        let local_peer_id = clock_sync.peer_id;
+        let mut follower = RateFollower::new(config, clock_sync.peer_id);
 
         let task = tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_millis(1000 / CORRECTION_HZ));
-            let mut last_rate = 1.0f64;
             let mut seq = 0u64;
 
             loop {
@@ -148,94 +277,18 @@ impl DriftCorrector {
                 seq = seq.wrapping_add(1);
 
                 let Some(local) = cell.load() else { continue };
-                if !local.is_playing {
-                    // Reset rate when transport stops so we don't
-                    // inherit stale corrections on next play.
-                    if (last_rate - 1.0).abs() > 1e-9 {
-                        actuator(1.0);
-                        last_rate = 1.0;
-                    }
-                    decision_cell.store(DriftDecision {
-                        sequence: seq,
-                        leader: None,
-                        drift_seconds: None,
-                        target_rate: 1.0,
-                    });
-                    continue;
-                }
-
-                let peers = clock_sync.peers.peers_snapshot().await;
-                let Some(leader) = elect_leader(&peers, local_peer_id, config.max_position_age)
-                else {
-                    // We're the leader (or no playing peer) — hold
-                    // rate at 1.0 so we don't accumulate drift from
-                    // a previous correction cycle.
-                    if (last_rate - 1.0).abs() > 1e-9 {
-                        actuator(1.0);
-                        last_rate = 1.0;
-                    }
-                    decision_cell.store(DriftDecision {
-                        sequence: seq,
-                        leader: None,
-                        drift_seconds: None,
-                        target_rate: 1.0,
-                    });
-                    continue;
-                };
-
-                // Use the leader's playing position; the elector
-                // already guaranteed at least one playing entry.
-                // Multi-project drift (one corrector per project)
-                // can be wired by passing a project-id filter into
-                // config; for now we lock to the leader's first
-                // playing project, which matches single-project
-                // behavior.
-                let position = leader
-                    .positions
-                    .iter()
-                    .find(|p| p.is_playing)
-                    .copied()
-                    .expect("elected leader has a playing position");
-                let offset_us = leader.offset_us;
-
-                // Project leader's playhead into OUR clock domain:
-                //   project_playhead(now_in_peer_clock_micros)
-                //   peer_clock_now = local_clock_now + offset_us
-                let now_in_peer_clock = local.host_micros as i64 + offset_us;
-                let leader_projected = position.project_playhead(now_in_peer_clock);
-
-                let drift = local.playhead_seconds - leader_projected;
-
-                let target_rate = if drift.abs() < config.deadband_seconds {
-                    1.0
+                // Only read the peer table when there is something to
+                // follow with.
+                let peers = if local.is_playing {
+                    clock_sync.peers.peers_snapshot().await
                 } else {
-                    let rate_delta = -drift / config.convergence_seconds;
-                    let clamped = rate_delta
-                        .max(-config.max_rate_deviation)
-                        .min(config.max_rate_deviation);
-                    1.0 + clamped
+                    Vec::new()
                 };
-
-                // Only call the actuator when the rate actually
-                // changes (within an epsilon). Avoids spamming
-                // REAPER's main thread with redundant work.
-                if (target_rate - last_rate).abs() > 1e-6 {
-                    actuator(target_rate);
-                    last_rate = target_rate;
-                    trace!(
-                        drift_us = (drift * 1e6) as i64,
-                        target_rate,
-                        leader = ?leader.id,
-                        "drift correction applied",
-                    );
+                let (decision, actuate) = follower.decide(seq, &local, &peers);
+                if let Some(rate) = actuate {
+                    actuator(rate);
                 }
-
-                decision_cell.store(DriftDecision {
-                    sequence: seq,
-                    leader: Some(leader.id),
-                    drift_seconds: Some(drift),
-                    target_rate,
-                });
+                decision_cell.store(decision);
             }
         });
 
@@ -264,12 +317,8 @@ impl Drop for DriftCorrector {
 /// that's currently playing and has a recent enough position frame.
 /// Returns `None` when no other peer qualifies OR when we (the local
 /// peer) win the election — caller treats both as "no correction".
-fn elect_leader(
-    peers: &[crate::clock_sync::PeerInfo],
-    local_peer_id: PeerId,
-    max_age: Duration,
-) -> Option<crate::clock_sync::PeerInfo> {
-    let mut best: Option<&crate::clock_sync::PeerInfo> = None;
+fn elect_leader(peers: &[PeerInfo], local_peer_id: PeerId, max_age: Duration) -> Option<PeerInfo> {
+    let mut best: Option<&PeerInfo> = None;
     let mut best_id: Option<uuid::Uuid> = None;
     for peer in peers {
         // A peer is eligible if it has at least one playing,
@@ -386,17 +435,6 @@ impl DecisionCell {
     }
 }
 
-/// Mark the decision-cell as unused-on-Drop-only to silence the
-/// "field never read" lint when only the spawn caller reads it.
-#[allow(dead_code)]
-fn _force_decision_cell_use(_: &DecisionCell) {}
-
-// Suppress warning about unused `debug` import on builds where
-// tracing macros are stripped.
-fn _force_debug_use() {
-    debug!("noop");
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,6 +484,112 @@ mod tests {
         let peers = vec![make_peer(50, false, 0.0, 0), make_peer(100, true, 1.0, 0)];
         let leader = elect_leader(&peers, me, Duration::from_secs(1)).unwrap();
         assert_eq!(leader.id.0.as_u128(), 100);
+    }
+
+    fn playing_snapshot(host_micros: f64, playhead_seconds: f64) -> AudioSnapshot {
+        AudioSnapshot {
+            sequence: 1,
+            host_micros,
+            playhead_seconds,
+            buffer_len: 256,
+            is_playing: true,
+            ..AudioSnapshot::default()
+        }
+    }
+
+    /// A leader (id 100, lower than ours) whose clock reads `offset_us`
+    /// later than ours, playing from `playhead` at its `host_us`.
+    fn leader_peer(offset_us: i64, playhead: f64, host_us: i64) -> PeerInfo {
+        let mut peer = make_peer(100, true, playhead, host_us);
+        peer.offset_us = offset_us;
+        peer
+    }
+
+    const ME: u128 = 200;
+
+    #[test]
+    fn decisions_match_the_core_controller() {
+        // The adapter's decisions are the core controller's, fed the
+        // leader's frame shifted into our clock: tick by tick, the same
+        // gap and the same rate. Closed loop: our playhead moves at the
+        // rate we last applied, on a device 80ppm fast, starting 3ms
+        // ahead; the leader's clock reads 7ms later than ours.
+        let config = DriftConfig::default();
+        let mut follower = RateFollower::new(config, PeerId(Uuid::from_u128(ME)));
+        let mut core = DriftController::new(config.controller_config());
+        let offset = 7_000i64;
+        let dt = 50_000.0;
+
+        let mut applied = 1.0;
+        let mut local_playhead = 10.003;
+        for tick in 0..400u64 {
+            let t = 5_000_000.0 + tick as f64 * dt;
+            // The leader's fresh frame (20Hz), stamped in its clock.
+            let leader_playhead = 10.0 + (t - 5_000_000.0) * 1e-6;
+            let peers = vec![leader_peer(offset, leader_playhead, t as i64 + offset)];
+            let leader_here = peers[0].positions[0].position().shifted(-(offset as f64));
+
+            let local = playing_snapshot(t, local_playhead);
+            let (decision, actuate) = follower.decide(tick, &local, &peers);
+            core.step(&local, &leader_here, t);
+            assert_eq!(decision.leader, Some(PeerId(Uuid::from_u128(100))));
+            assert_eq!(decision.drift_seconds, core.last_drift());
+            assert_eq!(decision.target_rate, core.rate());
+            if let Some(rate) = actuate {
+                applied = rate;
+            }
+            assert!((applied - core.rate()).abs() <= RATE_EPSILON);
+            local_playhead += dt * 1e-6 * applied * (1.0 + 80e-6);
+        }
+        // 20 s in: the gap is closed and the integral has learned this
+        // device runs fast, so it keeps running a touch slow.
+        let drift = core.last_drift().unwrap();
+        assert!(drift.abs() < 100e-6, "drift {drift}");
+        assert!(core.rate() < 1.0);
+        assert!(
+            core.learned_mismatch() < -40e-6,
+            "{}",
+            core.learned_mismatch()
+        );
+    }
+
+    #[test]
+    fn a_large_gap_is_closed_by_rate_not_locate() {
+        // REAPER's actuator is rate-only: a gap far past the core's
+        // default locate threshold is still a clamped rate, as it always
+        // was here.
+        let mut follower = RateFollower::new(DriftConfig::default(), PeerId(Uuid::from_u128(ME)));
+        let peers = vec![leader_peer(0, 10.0, 1_000_000)];
+        let (decision, actuate) = follower.decide(1, &playing_snapshot(1_000_000.0, 10.5), &peers);
+        assert_eq!(actuate, Some(0.99));
+        assert!((decision.drift_seconds.unwrap() - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn stopping_puts_the_rate_back() {
+        let mut follower = RateFollower::new(DriftConfig::default(), PeerId(Uuid::from_u128(ME)));
+        let peers = vec![leader_peer(0, 10.0, 1_000_000)];
+        let (_, actuate) = follower.decide(1, &playing_snapshot(1_000_000.0, 10.01), &peers);
+        assert!(actuate.is_some_and(|r| r < 1.0));
+
+        let mut stopped = playing_snapshot(1_050_000.0, 10.06);
+        stopped.is_playing = false;
+        let (decision, actuate) = follower.decide(2, &stopped, &peers);
+        assert_eq!(actuate, Some(1.0));
+        assert!(decision.leader.is_none() && decision.drift_seconds.is_none());
+        // And nothing more to say while stopped.
+        assert_eq!(follower.decide(3, &stopped, &peers).1, None);
+    }
+
+    #[test]
+    fn leading_holds_nominal_rate() {
+        // Our id is lowest: we lead, whatever the others are doing.
+        let mut follower = RateFollower::new(DriftConfig::default(), PeerId(Uuid::from_u128(1)));
+        let peers = vec![leader_peer(0, 10.0, 1_000_000)];
+        let (decision, actuate) = follower.decide(1, &playing_snapshot(1_000_000.0, 12.0), &peers);
+        assert_eq!(actuate, None);
+        assert!(decision.leader.is_none());
+        assert_eq!(decision.target_rate, 1.0);
     }
 
     #[test]

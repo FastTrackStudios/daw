@@ -17,26 +17,19 @@
 //!
 //! All timestamps are REAPER audio-clock microseconds (`host_micros` from
 //! the latest [`crate::AudioSnapshot`]) so the computed offsets directly
-//! drive sample-position alignment in Phase C. When no snapshot is
-//! available yet (audio engine hasn't started), the protocol falls back
-//! to `Instant`-derived microseconds so peer discovery still works
-//! during start-up.
+//! drive sample-position alignment. When no snapshot is available yet
+//! (audio engine hasn't started), the protocol falls back to the core's
+//! process clock ([`daw_transport_sync::clock`]) so peer discovery still
+//! works during start-up. Wire stamps are whole microseconds (`i64`).
 //!
 //! # Offset & delay math
 //!
-//! Given timestamps from a single round trip:
-//!   t1 — local send
-//!   t2 — peer receive
-//!   t3 — peer send
-//!   t4 — local receive
-//!
-//! ```text
-//! offset = ((t2 - t1) + (t3 - t4)) / 2     // remote clock − local clock
-//! delay  = ((t4 - t1) - (t3 - t2)) / 2     // one-way network delay
-//! ```
-//!
-//! Smoothed via an interquartile-mean rolling window (drops top + bottom
-//! quartile before averaging) to reject scheduler / network jitter.
+//! This module is only the carrier. Each pong's four stamps (`t1` local
+//! send, `t2` peer receive, `t3` peer send, `t4` local receive) go to a
+//! per-peer [`daw_transport_sync::ClockEstimator`], which owns the maths:
+//! NTP offset/delay per exchange, the fastest quarter of the window's
+//! round trips averaged, then smoothed. [`PeerInfo::offset_us`] /
+//! [`PeerInfo::delay_us`] are its answers, rounded.
 
 use core::sync::atomic::{AtomicU64, Ordering};
 use std::collections::HashMap;
@@ -44,6 +37,7 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use daw_transport_sync::{ClockEstimator, Position};
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
@@ -71,7 +65,7 @@ const PING_INTERVAL: Duration = Duration::from_millis(100);
 const POSITION_INTERVAL: Duration = Duration::from_millis(50);
 /// Drop a peer from the table after this long without an announce.
 const PEER_TTL: Duration = Duration::from_secs(5);
-/// Rolling window size for offset / delay smoothing. ~3s @ 10Hz.
+/// Exchanges each peer's [`ClockEstimator`] keeps. ~3s @ 10Hz.
 const SMOOTHING_WINDOW: usize = 32;
 
 /// Stable peer identifier. Random on first start, persists in memory
@@ -137,10 +131,13 @@ enum Message {
 pub struct PeerInfo {
     pub id: PeerId,
     pub addr: SocketAddr,
-    /// Remote clock − local clock, in microseconds. Positive means
-    /// the remote peer's audio clock reads later than ours.
+    /// Remote clock − local clock, in microseconds (the peer's
+    /// [`ClockEstimator`] offset, rounded; 0 before the first exchange).
+    /// Positive means the remote peer's audio clock reads later than ours.
     pub offset_us: i64,
-    /// One-way network delay estimate (microseconds).
+    /// One-way network delay estimate (microseconds): half the
+    /// estimator's typical round trip, rounded; 0 before the first
+    /// exchange.
     pub delay_us: i64,
     /// Last successful round-trip (for staleness checks).
     pub last_rtt_at: Instant,
@@ -178,31 +175,36 @@ pub struct RemotePosition {
 }
 
 impl RemotePosition {
-    /// Extrapolate "where is the peer playing *right now*" by adding
-    /// elapsed local time to their last broadcast position. Doesn't
-    /// account for clock drift between the two machines — Phase B's
-    /// `offset_us` carries that — but does account for the time
-    /// between their broadcast and our query.
-    ///
-    /// `now_local_micros` is the current LOCAL audio host clock; the
-    /// caller is expected to subtract `offset_us` first to project
-    /// into the peer's clock domain.
-    pub fn project_playhead(&self, now_in_peer_clock_micros: i64) -> f64 {
-        if !self.is_playing {
-            return self.playhead_seconds;
+    /// This frame as a core [`Position`], stamped in the PEER's clock.
+    /// Bring it into ours with `.shifted(-offset_us)`.
+    pub fn position(&self) -> Position {
+        Position {
+            host_micros: self.host_micros as f64,
+            playhead_seconds: self.playhead_seconds,
+            playrate: self.playrate,
+            is_playing: self.is_playing,
         }
-        let elapsed_secs = (now_in_peer_clock_micros - self.host_micros) as f64 * 1e-6;
-        self.playhead_seconds + elapsed_secs * self.playrate
+    }
+
+    /// Extrapolate "where is the peer playing *right now*" — exactly
+    /// [`Position::at`] on [`Self::position`]. Doesn't account for clock
+    /// offset between the two machines — [`PeerInfo::offset_us`] carries
+    /// that — but does account for the time between their broadcast and
+    /// our query.
+    ///
+    /// The argument is a time in the PEER's clock: the caller adds
+    /// `offset_us` (remote − local) to the local clock first.
+    pub fn project_playhead(&self, now_in_peer_clock_micros: i64) -> f64 {
+        self.position().at(now_in_peer_clock_micros as f64)
     }
 }
 
-/// Per-peer mutable state held inside the table. Owns the rolling
-/// window of recent offsets / delays.
+/// Per-peer mutable state held inside the table. Owns the core clock
+/// estimator fed by this peer's pongs.
 struct Peer {
     id: PeerId,
     addr: SocketAddr,
-    offset_window: RollingWindow,
-    delay_window: RollingWindow,
+    estimator: ClockEstimator,
     last_rtt_at: Instant,
     last_announce_at: Instant,
     /// Map of project_id → latest position. Vec instead of HashMap
@@ -212,12 +214,45 @@ struct Peer {
 }
 
 impl Peer {
+    fn new(id: PeerId, addr: SocketAddr, now: Instant) -> Self {
+        Self {
+            id,
+            addr,
+            estimator: ClockEstimator::new(SMOOTHING_WINDOW),
+            last_rtt_at: now,
+            last_announce_at: now,
+            positions: Vec::new(),
+        }
+    }
+
+    /// One ping/pong exchange, as the wire carries it (whole µs; `t1`/`t4`
+    /// in our clock, `t2`/`t3` in the peer's).
+    fn record_exchange(&mut self, t1: i64, t2: i64, t3: i64, t4: i64) {
+        self.estimator
+            .record(t1 as f64, t2 as f64, t3 as f64, t4 as f64);
+        self.last_rtt_at = Instant::now();
+    }
+
+    /// Remote − local, µs, as the wire/diagnostics carry it.
+    fn offset_us(&self) -> i64 {
+        self.estimator
+            .offset_micros()
+            .map_or(0, |o| o.round() as i64)
+    }
+
+    /// One-way delay, µs: half the typical round trip.
+    fn delay_us(&self) -> i64 {
+        self.estimator
+            .round_trip_micros()
+            .map_or(0, |rt| (rt / 2.0).round() as i64)
+    }
+
     fn snapshot(&self) -> PeerInfo {
         PeerInfo {
             id: self.id,
             addr: self.addr,
-            offset_us: self.offset_window.average() as i64,
-            delay_us: self.delay_window.average() as i64,
+            offset_us: self.offset_us(),
+            delay_us: self.delay_us(),
             last_rtt_at: self.last_rtt_at,
             last_announce_at: self.last_announce_at,
             positions: self.positions.clone(),
@@ -234,49 +269,6 @@ impl Peer {
         } else {
             self.positions.push(pos);
         }
-    }
-}
-
-/// Fixed-size interquartile-mean window. Same trick as
-/// `daw-link::RollingAverage`: trim the top + bottom quartile before
-/// averaging so a single jittery sample can't swing the estimate.
-struct RollingWindow {
-    values: Vec<f64>,
-    cap: usize,
-    cursor: usize,
-    len: usize,
-}
-
-impl RollingWindow {
-    fn new(cap: usize) -> Self {
-        Self {
-            values: vec![0.0; cap],
-            cap,
-            cursor: 0,
-            len: 0,
-        }
-    }
-
-    fn push(&mut self, v: f64) {
-        self.values[self.cursor] = v;
-        self.cursor = (self.cursor + 1) % self.cap;
-        if self.len < self.cap {
-            self.len += 1;
-        }
-    }
-
-    fn average(&self) -> f64 {
-        if self.len == 0 {
-            return 0.0;
-        }
-        let mut sorted: Vec<f64> = self.values[..self.len].to_vec();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        if self.len < 4 {
-            return sorted.iter().sum::<f64>() / self.len as f64;
-        }
-        let q = self.len / 4;
-        let trimmed = &sorted[q..self.len - q];
-        trimmed.iter().sum::<f64>() / trimmed.len() as f64
     }
 }
 
@@ -314,9 +306,9 @@ pub struct ClockSync {
     /// `seed_peer_sync` can be called from a non-async context
     /// (architect-dispatched main-thread closures).
     pub runtime: tokio::runtime::Handle,
-    /// Most recent local "audio host clock" reading. Updated by the
-    /// announce + ping tasks before sending so the wire timestamps
-    /// reflect a consistent clock view. Microseconds.
+    /// Most recent local "audio host clock" reading, microseconds, as
+    /// `f64` bits. Refreshed every millisecond by the clock sampler so
+    /// the wire timestamps reflect a consistent clock view.
     local_clock: Arc<AtomicU64>,
     /// Audio snapshot source for sample-position broadcasts. None
     /// disables position broadcasting (useful for tests / standalone
@@ -343,15 +335,7 @@ impl ClockSync {
                 p.addr = addr;
                 p.last_announce_at = now;
             })
-            .or_insert_with(|| Peer {
-                id,
-                addr,
-                offset_window: RollingWindow::new(SMOOTHING_WINDOW),
-                delay_window: RollingWindow::new(SMOOTHING_WINDOW),
-                last_rtt_at: now,
-                last_announce_at: now,
-                positions: Vec::new(),
-            });
+            .or_insert_with(|| Peer::new(id, addr, now));
     }
 
     /// Bind to `0.0.0.0:port` + join the multicast group, spawn
@@ -449,20 +433,13 @@ impl ClockSync {
                     p.addr = addr;
                     p.last_announce_at = now;
                 })
-                .or_insert_with(|| Peer {
-                    id,
-                    addr,
-                    offset_window: RollingWindow::new(SMOOTHING_WINDOW),
-                    delay_window: RollingWindow::new(SMOOTHING_WINDOW),
-                    last_rtt_at: now,
-                    last_announce_at: now,
-                    positions: Vec::new(),
-                });
+                .or_insert_with(|| Peer::new(id, addr, now));
         });
     }
 
+    /// The local clock the wire stamps are read from, whole µs.
     pub fn local_clock_micros(&self) -> u64 {
-        self.local_clock.load(Ordering::Relaxed)
+        read_clock(&self.local_clock).max(0.0) as u64
     }
 }
 
@@ -476,12 +453,21 @@ impl Drop for ClockSync {
 
 // ── Background tasks ────────────────────────────────────────────────
 
+/// Read the shared local clock (µs, `f64` bits in an `AtomicU64`).
+fn read_clock(clock: &AtomicU64) -> f64 {
+    f64::from_bits(clock.load(Ordering::Relaxed))
+}
+
+/// The local clock as a wire stamp: whole microseconds.
+fn wire_stamp(clock: &AtomicU64) -> i64 {
+    read_clock(clock).round() as i64
+}
+
 /// Continuously refresh `local_clock` from the audio snapshot (or
-/// fallback to `Instant`). Other tasks read the AtomicU64 — no per-
-/// send lock contention.
+/// fall back to the core's process clock). Other tasks read the
+/// AtomicU64 — no per-send lock contention.
 fn spawn_clock_sampler(out: Arc<AtomicU64>, cell: Option<Arc<SnapshotCell>>) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let start = Instant::now();
         let mut tick = tokio::time::interval(Duration::from_millis(1));
         loop {
             tick.tick().await;
@@ -489,8 +475,8 @@ fn spawn_clock_sampler(out: Arc<AtomicU64>, cell: Option<Arc<SnapshotCell>>) -> 
                 .as_ref()
                 .and_then(|c| c.load())
                 .map(|s| s.host_micros)
-                .unwrap_or_else(|| start.elapsed().as_micros() as u64);
-            out.store(micros, Ordering::Relaxed);
+                .unwrap_or_else(daw_transport_sync::clock::now_micros_f64);
+            out.store(micros.to_bits(), Ordering::Relaxed);
         }
     })
 }
@@ -535,7 +521,7 @@ fn spawn_pinger(
             tick.tick().await;
             let snapshot = peers.peers_snapshot().await;
             for peer in snapshot {
-                let t1 = local_clock.load(Ordering::Relaxed) as i64;
+                let t1 = wire_stamp(&local_clock);
                 let msg = Message::Ping { from: peer_id, t1 };
                 let buf = match bincode::serialize(&msg) {
                     Ok(b) => b,
@@ -586,10 +572,10 @@ fn spawn_position_broadcaster(
                 let msg = Message::Position {
                     from: peer_id,
                     project_id: snap.project_id,
-                    host_micros: snap.host_micros as i64,
+                    host_micros: snap.host_micros.round() as i64,
                     playhead_seconds: snap.playhead_seconds,
                     sample_rate: snap.sample_rate,
-                    playrate: 1.0, // future: read REAPER playrate
+                    playrate: snap.playrate,
                     is_playing: snap.is_playing,
                 };
                 let buf = match bincode::serialize(&msg) {
@@ -646,21 +632,13 @@ fn spawn_receiver(
                             p.last_announce_at = now;
                             p.addr = addr;
                         })
-                        .or_insert_with(|| Peer {
-                            id: from,
-                            addr,
-                            offset_window: RollingWindow::new(SMOOTHING_WINDOW),
-                            delay_window: RollingWindow::new(SMOOTHING_WINDOW),
-                            last_rtt_at: now,
-                            last_announce_at: now,
-                            positions: Vec::new(),
-                        });
+                        .or_insert_with(|| Peer::new(from, addr, now));
                 }
                 Message::Ping { from, t1 } => {
                     if from == peer_id {
                         continue;
                     }
-                    let t2 = local_clock.load(Ordering::Relaxed) as i64;
+                    let t2 = wire_stamp(&local_clock);
                     let t3 = t2; // Inline reply — no perceptible gap.
                     let reply = Message::Pong {
                         from: peer_id,
@@ -709,14 +687,10 @@ fn spawn_receiver(
                     if from == peer_id {
                         continue;
                     }
-                    let t4 = local_clock.load(Ordering::Relaxed) as i64;
-                    let offset = ((t2 - t1) + (t3 - t4)) / 2;
-                    let delay = ((t4 - t1) - (t3 - t2)) / 2;
+                    let t4 = wire_stamp(&local_clock);
                     let mut guard = peers.inner.write().await;
                     if let Some(peer) = guard.get_mut(&from) {
-                        peer.offset_window.push(offset as f64);
-                        peer.delay_window.push(delay as f64);
-                        peer.last_rtt_at = Instant::now();
+                        peer.record_exchange(t1, t2, t3, t4);
                     }
                 }
             }
@@ -728,24 +702,58 @@ fn spawn_receiver(
 mod tests {
     use super::*;
 
-    #[test]
-    fn rolling_window_trims_outliers() {
-        let mut w = RollingWindow::new(8);
-        // Push 8 values: six clustered at 100, two outliers at -1000 / 9000.
-        for v in [100.0, 100.0, 100.0, 100.0, 100.0, 100.0, -1000.0, 9000.0] {
-            w.push(v);
-        }
-        // Trims 2 from each end → 4 left, all 100 → avg 100.
-        assert!((w.average() - 100.0).abs() < 1e-6);
+    fn test_peer() -> Peer {
+        Peer::new(
+            PeerId(Uuid::from_u128(7)),
+            "127.0.0.1:0".parse().unwrap(),
+            Instant::now(),
+        )
+    }
+
+    /// Wire stamps for one exchange against a peer whose clock reads
+    /// `offset` µs later than ours, `out`/`back` µs each way.
+    fn exchange(t1: i64, offset: i64, out: i64, back: i64) -> (i64, i64, i64, i64) {
+        let t2 = t1 + out + offset;
+        let t3 = t2 + 20;
+        let t4 = t3 - offset + back;
+        (t1, t2, t3, t4)
     }
 
     #[test]
-    fn rolling_window_short_window_uses_plain_mean() {
-        let mut w = RollingWindow::new(16);
-        w.push(10.0);
-        w.push(20.0);
-        w.push(30.0);
-        assert!((w.average() - 20.0).abs() < 1e-6);
+    fn peer_estimate_is_the_core_estimator() {
+        // The adapter adds nothing to the maths: feeding a peer's wire
+        // stamps gives exactly what the core estimator says for them.
+        let mut peer = test_peer();
+        let mut core = ClockEstimator::new(SMOOTHING_WINDOW);
+        let mut t1 = 1_000_000;
+        for i in 0..40 {
+            // Mostly symmetric 150µs paths; every fifth exchange meets a
+            // congested outbound path (+3ms one way).
+            let out = if i % 5 == 0 { 3_150 } else { 150 + (i % 3) };
+            let (a, b, c, d) = exchange(t1, 5_000, out, 150);
+            peer.record_exchange(a, b, c, d);
+            core.record(a as f64, b as f64, c as f64, d as f64);
+            t1 += 100_000;
+        }
+        let info = peer.snapshot();
+        assert_eq!(info.offset_us, core.offset_micros().unwrap().round() as i64);
+        assert_eq!(
+            info.delay_us,
+            (core.round_trip_micros().unwrap() / 2.0).round() as i64
+        );
+        // And that answer ignores the congested exchanges: the old
+        // IQM-of-every-offset window would have been pulled toward them.
+        assert!(
+            (info.offset_us - 5_000).abs() <= 2,
+            "offset {}",
+            info.offset_us
+        );
+    }
+
+    #[test]
+    fn peer_before_any_exchange_reports_zero() {
+        let info = test_peer().snapshot();
+        assert_eq!((info.offset_us, info.delay_us), (0, 0));
     }
 
     #[tokio::test]
@@ -783,10 +791,6 @@ mod tests {
                 let pb = b.peers.peers_snapshot().await;
                 let a_peer = pa.iter().find(|p| p.id == b.peer_id).unwrap();
                 let b_peer = pb.iter().find(|p| p.id == a.peer_id).unwrap();
-                eprintln!(
-                    "a→b offset {}µs delay {}µs   b→a offset {}µs delay {}µs",
-                    a_peer.offset_us, a_peer.delay_us, b_peer.offset_us, b_peer.delay_us
-                );
                 // Loopback delay should be sub-ms; offsets should
                 // sum to ~0 (clock symmetry).
                 assert!(
@@ -834,8 +838,9 @@ mod tests {
         cell_a.store(&crate::AudioSnapshot {
             sequence: 1,
             project_id: [0u8; 16],
-            host_micros: 1_000_000,
+            host_micros: 1_000_000.4,
             playhead_seconds: 12.345,
+            playrate: 1.0,
             sample_rate: 48_000.0,
             buffer_len: 256,
             is_playing: true,
@@ -851,10 +856,9 @@ mod tests {
             {
                 assert!(pos.is_playing, "expected is_playing=true");
                 assert_eq!(pos.sample_rate, 48_000.0);
-                eprintln!(
-                    "B observed A's position: playhead={:.6}s sr={} host_us={}",
-                    pos.playhead_seconds, pos.sample_rate, pos.host_micros
-                );
+                assert_eq!(pos.playrate, 1.0);
+                // The snapshot's f64 µs rides the wire as whole µs.
+                assert_eq!(pos.host_micros, 1_000_000);
                 return;
             }
             if std::time::Instant::now() > deadline {
@@ -892,5 +896,28 @@ mod tests {
             ..pos
         };
         assert!((pos_stopped.project_playhead(1_500_000) - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn project_playhead_agrees_with_core_position() {
+        let pos = RemotePosition {
+            project_id: [0u8; 16],
+            host_micros: 2_000_000,
+            playhead_seconds: 3.0,
+            sample_rate: 48_000.0,
+            playrate: 1.001,
+            is_playing: true,
+            received_at: Instant::now(),
+        };
+        // Peer is 40ms ahead of us: shifting the core Position into our
+        // clock and asking it at local time T is the same as asking the
+        // frame at T + offset in the peer's clock.
+        let offset_us = 40_000i64;
+        let local_now = 2_460_000i64;
+        let ours = pos
+            .position()
+            .shifted(-(offset_us as f64))
+            .at(local_now as f64);
+        assert!((pos.project_playhead(local_now + offset_us) - ours).abs() < 1e-12);
     }
 }

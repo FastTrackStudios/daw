@@ -53,8 +53,10 @@ pub struct PeerSummary {
     pub remote_is_playing: bool,
 }
 
-/// Audio-thread snapshot — mirrors `daw_audio_sync::AudioSnapshot` on
-/// the wire so cross-process consumers can observe per-buffer state.
+/// Audio-thread snapshot — mirrors `daw_audio_sync::AudioSnapshot` (the
+/// `daw_transport_sync` core's) on the wire so cross-process consumers can
+/// observe per-buffer state. `host_micros` is rounded to whole µs here;
+/// the snapshot's `playrate` is not carried.
 #[derive(Clone, Copy, Debug, Default, Facet)]
 pub struct AudioSyncSnapshot {
     pub sequence: u64,
