@@ -35,6 +35,14 @@ pub(crate) struct TakeReader {
         not(target_arch = "wasm32")
     ))]
     pub media_path: Option<std::path::PathBuf>,
+    /// The file name the take asks for (`Bass.wav`) — what a stand-in's
+    /// peaks are filed under when the file playing is its proxy.
+    #[cfg(all(
+        feature = "reapeaks",
+        any(feature = "audio", feature = "decode"),
+        not(target_arch = "wasm32")
+    ))]
+    pub original_name: Option<String>,
     /// Parsed source-level peak mipmap (see [`crate::peak_store`]);
     /// populated by [`Self::ensure_reapeaks`], never eagerly — the
     /// audio accessor opens readers too and must stay scan-free.
@@ -103,6 +111,16 @@ impl TakeReader {
                 any(feature = "audio", feature = "decode"),
                 not(target_arch = "wasm32")
             ))]
+            original_name: t
+                .source_file_path
+                .as_deref()
+                .and_then(|p| std::path::Path::new(p).file_name())
+                .map(|n| n.to_string_lossy().into_owned()),
+            #[cfg(all(
+                feature = "reapeaks",
+                any(feature = "audio", feature = "decode"),
+                not(target_arch = "wasm32")
+            ))]
             reapeaks: None,
         })
     }
@@ -161,6 +179,16 @@ impl TakeReader {
     ))]
     pub(crate) fn ensure_reapeaks(&mut self) {
         if self.reapeaks.is_some() {
+            return;
+        }
+        // A proxy streaming in place of its original: the original's
+        // cache, fetched beside it (`Media/Peaks/Bass.wav.sessionpeaks`
+        // for `Media/Proxies/Bass.ogg` standing in for `Media/Bass.wav`).
+        if let (AudioSource::Streamed(_), Some(proxy), Some(original)) =
+            (&*self.source, &self.media_path, &self.original_name)
+            && let Some(media) = proxy.parent().and_then(std::path::Path::parent)
+        {
+            self.reapeaks = crate::peak_store::for_stand_in(&media.join(original), &self.source);
             return;
         }
         if !matches!(*self.source, AudioSource::PcmFile(_)) {

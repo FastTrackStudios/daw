@@ -59,6 +59,39 @@ fn is_valid(pk: &ReaPeaks, source: &AudioSource, media_stamp: u64) -> bool {
         && fine.count as u64 == frames.div_ceil(spp)
 }
 
+/// How far a stand-in's length may differ from its original's, in
+/// frames. An Ogg Vorbis proxy reports up to a block more than the WAV it
+/// was made from — the encoder pads the end of the stream (measured: up
+/// to ~1000 frames on real sessions) — and a different recording is off
+/// by seconds, not by this.
+const STAND_IN_SLACK: u64 = 8_192;
+
+/// The shape half of [`is_valid`], for a stand-in: channels, rate, and
+/// length to within [`STAND_IN_SLACK`].
+fn fits(pk: &ReaPeaks, source: &AudioSource) -> bool {
+    let Some(fine) = pk.levels.first() else {
+        return false;
+    };
+    let frames = source.frame_count() as u64;
+    let spp = fine.samples_per_peak.max(1) as u64;
+    pk.channels == source.channels().max(1) as usize
+        && pk.samplerate == source.sample_rate()
+        && (fine.count as u64).abs_diff(frames.div_ceil(spp)) <= STAND_IN_SLACK.div_ceil(spp) + 1
+}
+
+/// The peaks of an original that is not on disk, for the stand-in
+/// playing in its place (the proxy `Proxies/Bass.ogg` for `Bass.wav`).
+///
+/// The cache was built from the original — `Peaks/Bass.wav.sessionpeaks`,
+/// fetched with the proxies — and describes the same audio. There is no
+/// file to stamp it against, so it is trusted on shape: the stand-in's
+/// channels, rate and length must match. Never built or written here:
+/// scanning a streamed source would decode it whole.
+pub(crate) fn for_stand_in(original: &Path, source: &AudioSource) -> Option<Arc<ReaPeaks>> {
+    let (_, pk) = sessionpeaks::read_any(original).filter(|(_, pk)| fits(pk, source))?;
+    Some(Arc::new(pk))
+}
+
 type Store = HashMap<PathBuf, (u64, Arc<ReaPeaks>)>;
 
 /// Process-global parsed-sidecar map — `Standalone` is a cloneable
