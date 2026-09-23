@@ -161,6 +161,38 @@ pub fn load_rpp_text(
     Ok(summary)
 }
 
+/// Make `project_guid`'s relative take paths absolute against `dir`.
+///
+/// A project file names its media relative to its own folder
+/// (`Media/Bass.wav`), and the media bay resolves through ONE resolver
+/// per engine. An engine holding several projects from different folders
+/// — a setlist, each song in its own folder with its own `Media/Click.wav`
+/// — cannot tell one song's `Media/Click.wav` from another's through a
+/// relative resolver, so each project's references are anchored to its
+/// folder as it loads, before it materializes. A `.session` save writes
+/// paths inside the project's folder back as relative, so nothing about
+/// the saved file changes.
+///
+/// Returns how many take paths were anchored.
+pub fn anchor_media(daw: &Standalone, project_guid: &str, dir: &std::path::Path) -> usize {
+    daw.with_project_mut(project_guid, |p| {
+        let mut anchored = 0;
+        for list in p.takes.values_mut() {
+            for take in &mut list.takes {
+                if let Some(path) = take.source_file_path.as_mut()
+                    && !path.is_empty()
+                    && std::path::Path::new(path.as_str()).is_relative()
+                {
+                    *path = dir.join(path.as_str()).to_string_lossy().into_owned();
+                    anchored += 1;
+                }
+            }
+        }
+        anchored
+    })
+    .unwrap_or(0)
+}
+
 fn populate_tracks(
     daw: &Standalone,
     project_guid: &str,
@@ -1545,4 +1577,45 @@ mod plugin_search_tests {
 /// to the 0-based index REAPER's API — and so this backend — uses.
 pub(crate) fn file_lane_to_api(lane: Option<i32>) -> Option<u32> {
     lane.filter(|l| *l >= 1).map(|l| (l - 1) as u32)
+}
+
+#[cfg(test)]
+mod anchor_tests {
+    use super::{anchor_media, load_rpp_text};
+    use crate::sync::Standalone;
+
+    const PROJECT: &str = r#"<REAPER_PROJECT 0.1 "7.0/test" 0
+  <TRACK {00000000-0000-0000-0000-000000000001}
+    NAME Click
+    <ITEM
+      POSITION 0
+      LENGTH 4
+      IGUID {00000000-0000-0000-0000-00000000000A}
+      <SOURCE WAVE
+        FILE "Media/Click.wav"
+      >
+    >
+  >
+>
+"#;
+
+    /// Two songs with the same relative media name point at their own
+    /// folders once anchored — and an absolute path is left alone.
+    #[test]
+    fn each_project_s_media_is_anchored_to_its_own_folder() {
+        let daw = Standalone::new();
+        let one = load_rpp_text(&daw, "One", "/set/One/One.RPP", PROJECT).unwrap();
+        let two = load_rpp_text(&daw, "Two", "/set/Two/Two.RPP", PROJECT).unwrap();
+        assert_eq!(anchor_media(&daw, &one.project_guid, std::path::Path::new("/set/One")), 1);
+        assert_eq!(anchor_media(&daw, &two.project_guid, std::path::Path::new("/set/Two")), 1);
+        let path = |guid: &str| {
+            daw.read_project(guid, |p| {
+                p.takes.values().flat_map(|l| l.takes.iter()).find_map(|t| t.source_file_path.clone())
+            })
+            .flatten()
+        };
+        assert_eq!(path(&one.project_guid).as_deref(), Some("/set/One/Media/Click.wav"));
+        assert_eq!(path(&two.project_guid).as_deref(), Some("/set/Two/Media/Click.wav"));
+        assert_eq!(anchor_media(&daw, &one.project_guid, std::path::Path::new("/elsewhere")), 0);
+    }
 }
