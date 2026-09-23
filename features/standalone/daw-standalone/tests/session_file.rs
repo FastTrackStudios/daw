@@ -22,7 +22,9 @@ use daw_standalone::plugin::{
     PluginParamInfo,
 };
 use daw_standalone::project_loader::load_rpp_text;
-use daw_standalone::session_file::{load_session, save_session, session_rpp_text};
+use daw_standalone::session_file::{
+    load_session, load_session_history, save_session, save_session_with_history, session_rpp_text,
+};
 use daw_standalone::sync::{FxChainKey, ItemEntry, ProjectState, RulerLane, Standalone, TakeList};
 
 // ────────────────────────────────────────────────────────────────────
@@ -1107,4 +1109,30 @@ fn the_organized_session_survives_save_and_load() {
     let (last, _) = engine();
     let back = load_session(&last, "Always On Time", &third).unwrap();
     assert_same(&edited, &snapshot(&last, &back.project_guid));
+}
+
+/// A session saved with a live CRDT document hands the same history back
+/// on the next open — and a plain save starts it fresh, as before.
+#[test]
+fn a_session_keeps_the_history_it_was_saved_with() {
+    use dawfile_standalone::loro::LoroDoc;
+    let (daw, _) = engine();
+    let loaded = load_rpp_text(&daw, "Song", "", SONG_RPP).unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("Song.session");
+
+    let live = LoroDoc::new();
+    live.get_text("chart").insert(0, "VS 4\n1 4 6m 5\n").unwrap();
+    live.commit();
+    live.get_text("chart").insert(0, "IN 2\n1 5\n").unwrap();
+    live.commit();
+    save_session_with_history(&daw, &loaded.project_guid, &dir, Some(&live)).unwrap();
+
+    let back = load_session_history(&dir).expect("history kept");
+    assert_eq!(back.get_text("chart").to_string(), "IN 2\n1 5\nVS 4\n1 4 6m 5\n");
+    assert_eq!(back.oplog_vv(), live.oplog_vv(), "every edit, not just the text");
+
+    save_session(&daw, &loaded.project_guid, &dir).unwrap();
+    let fresh = load_session_history(&dir).expect("a plain save still writes a log");
+    assert!(fresh.get_text("chart").to_string().is_empty());
 }

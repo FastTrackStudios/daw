@@ -74,6 +74,10 @@
 //! [#174]: https://github.com/FastTrackStudios/FastTrackStudio/issues/174
 //! [#175]: https://github.com/FastTrackStudios/FastTrackStudio/issues/175
 
+/// The CRDT the project history is kept in, for callers that hand one
+/// in ([`project::DawProject::set_history`]).
+pub use loro;
+
 pub mod dawproject;
 pub mod document;
 pub mod edit;

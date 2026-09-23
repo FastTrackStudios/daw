@@ -114,6 +114,25 @@ use crate::sync::{EnvelopeData, EnvelopeKey, FxChainKey, ProjectState, Standalon
 ///
 /// No such project, or the directory could not be written.
 pub fn save_session(daw: &Standalone, project_guid: &str, dir: &Path) -> Result<PathBuf, String> {
+    save_session_with_history(daw, project_guid, dir, None)
+}
+
+/// [`save_session`], storing `history` as the session's CRDT history.
+///
+/// `None` is what [`save_session`] does: the log starts fresh from the
+/// text. `Some` is the caller's live document — every edit anyone made,
+/// which a later open hands back through [`load_session_history`] as long
+/// as nobody has hand-edited the manifest since.
+///
+/// # Errors
+///
+/// As [`save_session`].
+pub fn save_session_with_history(
+    daw: &Standalone,
+    project_guid: &str,
+    dir: &Path,
+    history: Option<&dawfile_standalone::loro::LoroDoc>,
+) -> Result<PathBuf, String> {
     let text = project_rpp_text(daw, project_guid)?;
     let name = session_name(dir);
     let (imported, _report) = DawProject::import_rpp(&text, name.clone())
@@ -129,6 +148,9 @@ pub fn save_session(daw: &Standalone, project_guid: &str, dir: &Path) -> Result<
         }
         Err(_) => imported,
     };
+    if let Some(history) = history {
+        project.set_history(history.clone());
+    }
     retire_other_manifests(dir, &name)?;
     project
         .save(dir)
@@ -144,6 +166,13 @@ pub fn save_session(daw: &Standalone, project_guid: &str, dir: &Path) -> Result<
         "saved session"
     );
     Ok(dir.to_path_buf())
+}
+
+/// The CRDT history a `.session` was saved with, if it is still the
+/// history of what the manifest says (a hand edit since discards it).
+#[must_use]
+pub fn load_session_history(dir: &Path) -> Option<dawfile_standalone::loro::LoroDoc> {
+    DawProject::load(dir).ok()?.history().cloned()
 }
 
 /// The RPP text a `.session` directory exports to — what `load_session`

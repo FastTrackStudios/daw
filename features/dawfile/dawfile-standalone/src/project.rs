@@ -394,6 +394,16 @@ impl DawProject {
     pub fn history(&self) -> Option<&loro::LoroDoc> {
         self.history.as_ref()
     }
+
+    /// Adopt `history` as the project's CRDT history, saved with it on the
+    /// next [`Self::save`].
+    ///
+    /// For a host that keeps the live document itself (the Session app's
+    /// collaboration doc): the log it saves is the one everybody edited,
+    /// not a fresh one started from the text.
+    pub fn set_history(&mut self, history: loro::LoroDoc) {
+        self.history = Some(history);
+    }
 }
 
 /// Where the manifest for a project named `name` lives inside `dir`.
