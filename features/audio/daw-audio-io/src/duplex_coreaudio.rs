@@ -875,7 +875,7 @@ impl DuplexBackend for CoreAudioBackend {
         // force it smaller — the HAL runs at the smallest request).
         let range: ffi::ValueRange = get(device, ffi::DEVICE_BUFFER_FRAME_SIZE_RANGE, ffi::SCOPE_GLOBAL)
             .map_err(fail)?;
-        if let Some((frames, _)) = cfg.latency {
+        if let Some(frames) = cfg.latency.map(|(f, _)| f).or(cfg.buffer) {
             let clamped = (frames as f64).clamp(range.minimum, range.maximum) as u32;
             if clamped != frames {
                 tracing::warn!(

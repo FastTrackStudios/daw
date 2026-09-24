@@ -54,6 +54,11 @@ impl Drop for DuplexAudioEngine {
 pub struct PhonesBus {
     volume: std::sync::atomic::AtomicU32,
     self_mix: std::sync::atomic::AtomicU32,
+    /// Blend the monitor-mix input pair into the phones here. Off when a
+    /// separate headphone-mixer process plays the mix (so it keeps playing
+    /// when this one stops or overruns): the phones then carry only this
+    /// engine's own signal, and the device sums the two processes.
+    blend_mix: std::sync::atomic::AtomicBool,
 }
 
 impl PhonesBus {
@@ -62,6 +67,7 @@ impl PhonesBus {
         static BUS: PhonesBus = PhonesBus {
             volume: std::sync::atomic::AtomicU32::new(0x3f800000), // 1.0
             self_mix: std::sync::atomic::AtomicU32::new(0x3f800000), // 1.0
+            blend_mix: std::sync::atomic::AtomicBool::new(true),
         };
         &BUS
     }
@@ -70,6 +76,16 @@ impl PhonesBus {
         use std::sync::atomic::Ordering::Relaxed;
         self.volume.store(volume.to_bits(), Relaxed);
         self.self_mix.store(self_mix.to_bits(), Relaxed);
+    }
+
+    /// Whether this engine blends the monitor-mix input into the phones
+    /// (see the field).
+    pub fn set_blend_mix(&self, on: bool) {
+        self.blend_mix.store(on, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn blends_mix(&self) -> bool {
+        self.blend_mix.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn levels(&self) -> (f32, f32) {
@@ -166,6 +182,7 @@ impl DuplexAudioEngine {
                 .or(prefs.input_name())
                 .map(str::to_string),
             allow_builtin_mic: prefs.allow_builtin_mic,
+            buffer: None,
         };
         let backend = Backend::start(
             cfg,
@@ -184,6 +201,7 @@ impl DuplexAudioEngine {
                 let block = r.render_block(start, frames);
                 let outs = b.outputs.len();
                 let (vol, self_mix) = ph.levels();
+                let blend = ph.blends_mix();
                 for f in 0..frames {
                     let l = block.samples.get(f * 2).copied().unwrap_or(0.0);
                     let rr = block.samples.get(f * 2 + 1).copied().unwrap_or(0.0);
@@ -194,8 +212,8 @@ impl DuplexAudioEngine {
                         b.outputs[main_r][f] = rr;
                     }
                     if routing && (ph_l != main_l || ph_r != main_r) {
-                        let ext_l = b.inputs.get(mix_l).map(|ch| ch[f]).unwrap_or(0.0);
-                        let ext_r = b.inputs.get(mix_r).map(|ch| ch[f]).unwrap_or(0.0);
+                        let ext = |c: usize| if blend { b.inputs.get(c).map_or(0.0, |ch| ch[f]) } else { 0.0 };
+                        let (ext_l, ext_r) = (ext(mix_l), ext(mix_r));
                         if ph_l < outs {
                             b.outputs[ph_l][f] = (l * self_mix + ext_l) * vol;
                         }

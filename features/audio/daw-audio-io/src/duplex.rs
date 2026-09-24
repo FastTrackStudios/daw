@@ -32,6 +32,10 @@ pub struct DuplexConfig {
     /// Desired block size + rate as `(frames, rate)` → a per-node latency request
     /// (e.g. `(64, 48000)`). `None` lets the graph decide.
     pub latency: Option<(u32, u32)>,
+    /// With `latency` unset: a block size to ask for without touching the
+    /// device's sample rate — for a client that shares a device another
+    /// process owns the rate of (a headphone mixer beside the rig).
+    pub buffer: Option<u32>,
     /// Capture / playback device by name substring (`None` = system
     /// default). Backends without a graph (CoreAudio) open these devices
     /// themselves; graph backends (PipeWire) ignore them — there the
