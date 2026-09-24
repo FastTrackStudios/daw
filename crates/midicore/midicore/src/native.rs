@@ -118,3 +118,22 @@ pub fn init() {
     #[cfg(target_os = "macos")]
     midicore_macos::init();
 }
+
+/// Send `bytes` to every MIDI destination whose name contains `device` —
+/// for lighting a controller's LEDs from the rig's state. Returns how many
+/// it reached (0: not there, or no native output on this platform).
+pub fn send_to(device: &str, bytes: &[u8]) -> usize {
+    #[cfg(target_os = "macos")]
+    {
+        static OUT: std::sync::OnceLock<Option<midicore_macos::CoreMidiOutput>> =
+            std::sync::OnceLock::new();
+        OUT.get_or_init(|| midicore_macos::CoreMidiOutput::open("Signal Out").ok())
+            .as_ref()
+            .map_or(0, |o| o.send_to(device, bytes))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (device, bytes);
+        0
+    }
+}

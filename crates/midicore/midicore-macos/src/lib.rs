@@ -98,6 +98,48 @@ pub fn init() {
     });
 }
 
+/// Sends to CoreMIDI destinations by name — for driving a controller's
+/// LEDs from the rig's state. One client and output port for the process;
+/// the destination is looked up on every send, so a device that drops out
+/// and comes back (a Bluetooth pedal switched off and on) needs no
+/// reconnecting: the next send simply finds it again.
+pub struct CoreMidiOutput {
+    port: coremidi::OutputPort,
+    _client: Client,
+}
+
+impl CoreMidiOutput {
+    /// # Errors
+    /// When CoreMIDI cannot make a client or output port.
+    pub fn open(name: &str) -> Result<Self, BackendError> {
+        init();
+        let client = Client::new(name)
+            .map_err(|s| BackendError(format!("create CoreMIDI client '{name}': OSStatus {s}")))?;
+        let port = client
+            .output_port(name)
+            .map_err(|s| BackendError(format!("create CoreMIDI output port: OSStatus {s}")))?;
+        Ok(Self { port, _client: client })
+    }
+
+    /// Send `bytes` (one or more complete short messages) to every
+    /// destination whose name contains `device` (case-insensitive). Returns
+    /// how many destinations it went to — 0 when the device is not there.
+    pub fn send_to(&self, device: &str, bytes: &[u8]) -> usize {
+        let want = device.to_lowercase();
+        let mut sent = 0;
+        for dest in coremidi::Destinations {
+            let name = dest.display_name().or_else(|| dest.name()).unwrap_or_default();
+            if name.to_lowercase().contains(&want) {
+                let packets = coremidi::PacketBuffer::new(0, bytes);
+                if self.port.send(&dest, &packets).is_ok() {
+                    sent += 1;
+                }
+            }
+        }
+        sent
+    }
+}
+
 /// How often the owning thread re-reads the source list.
 pub const RESCAN: Duration = Duration::from_millis(200);
 
@@ -532,6 +574,28 @@ mod tests {
         init();
         static LOCK: Mutex<()> = Mutex::new(());
         LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Bytes sent to a destination by name arrive: a virtual destination
+    /// stands in for the pedal.
+    #[test]
+    fn an_output_sends_to_a_destination_by_name() {
+        let _serial = coremidi_lock();
+        let name = format!("midicore-test-dest-{}", std::process::id());
+        let (tx, rx) = mpsc::channel();
+        let client = Client::new("midicore-test-receiver").expect("client");
+        let _dest = client
+            .virtual_destination(&name, move |packets: &PacketList| {
+                for p in packets.iter() {
+                    let _ = tx.send(p.data().to_vec());
+                }
+            })
+            .expect("virtual destination");
+        let out = CoreMidiOutput::open("midicore-test-out").expect("output");
+        assert!(within(|| out.send_to(&name, &[0x90, 2, 127]) == 1), "the destination is found");
+        let got = rx.recv_timeout(Duration::from_secs(2)).expect("bytes arrive");
+        assert_eq!(got, vec![0x90, 2, 127]);
+        assert_eq!(out.send_to("no-such-device", &[0x80, 2, 0]), 0);
     }
 
     /// Whether `cond` holds within 3 s — CoreMIDI applies a property change
