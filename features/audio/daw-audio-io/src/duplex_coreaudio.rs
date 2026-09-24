@@ -768,6 +768,8 @@ unsafe extern "C" fn on_property(
             match (*addresses.add(i)).selector {
                 ffi::DEVICE_PROCESSOR_OVERLOAD => {
                     stats.xruns.fetch_add(1, Ordering::Relaxed);
+                    let frames = stats.block_frames.load(Ordering::Relaxed);
+                    stats.drops.push(crate::duplex::DropKind::DeviceOverload, 0, 0, frames);
                 }
                 ffi::DEVICE_IS_ALIVE => {
                     stats.stream_state.store(STATE_ERROR, Ordering::Relaxed);
@@ -813,6 +815,9 @@ unsafe impl Send for CoreAudioBackend {}
 
 impl DuplexBackend for CoreAudioBackend {
     fn start(cfg: DuplexConfig, process: ProcessFn) -> Result<Self, String> {
+        // The drop log's clock starts here, not on the realtime thread's
+        // first drop.
+        let _ = crate::duplex::clock_ns();
         let output = if cfg.outputs > 0 {
             Some(find_device(cfg.output_device.as_deref(), ffi::SCOPE_OUTPUT)?)
         } else {

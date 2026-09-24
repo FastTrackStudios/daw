@@ -55,6 +55,109 @@ pub struct ProcessBlock<'a> {
 /// The `process` closure type: called from the realtime thread every block.
 pub type ProcessFn = Box<dyn FnMut(&mut ProcessBlock) + Send>;
 
+/// How many drop events [`EngineStats`] keeps for a reader to collect.
+pub const DROP_RING: usize = 256;
+
+/// A dropout the engine saw, for a drop log: when, what kind, and how long
+/// the block took against its budget.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DropEvent {
+    /// Its sequence number (monotonic; a gap means the ring overflowed).
+    pub seq: u64,
+    /// [`clock_ns`] when it happened.
+    pub at_ns: u64,
+    /// What happened.
+    pub kind: DropKind,
+    /// The block's render time and its realtime budget, ns (0 for a device
+    /// overload, which the HAL reports without a block).
+    pub render_ns: u64,
+    pub budget_ns: u64,
+    /// The block's frames.
+    pub frames: u32,
+}
+
+/// What kind of drop.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DropKind {
+    /// Our render took longer than the block's duration.
+    OverBudget,
+    /// The device reported a processor overload (CoreAudio) / the graph an
+    /// xrun (PipeWire).
+    DeviceOverload,
+}
+
+/// Nanoseconds on one process-wide monotonic clock — the drop events' time
+/// base, so a reader can line them up with its own events.
+#[must_use]
+pub fn clock_ns() -> u64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
+}
+
+/// A fixed ring of drop events written from the realtime callback (and the
+/// HAL's notification thread) without allocating or locking; a reader
+/// collects what it has not seen by sequence number.
+pub struct DropRing {
+    next: AtomicU64,
+    /// Per slot: seq + 1 (0 = empty), at, render, budget, kind | frames.
+    slots: Box<[[AtomicU64; 5]]>,
+}
+
+impl Default for DropRing {
+    fn default() -> Self {
+        Self {
+            next: AtomicU64::new(0),
+            slots: (0..DROP_RING)
+                .map(|_| std::array::from_fn(|_| AtomicU64::new(0)))
+                .collect(),
+        }
+    }
+}
+
+impl DropRing {
+    /// Record one (realtime-safe).
+    pub fn push(&self, kind: DropKind, render_ns: u64, budget_ns: u64, frames: u32) {
+        let seq = self.next.fetch_add(1, Ordering::Relaxed);
+        let slot = &self.slots[(seq % DROP_RING as u64) as usize];
+        slot[0].store(0, Ordering::Release);
+        slot[1].store(clock_ns(), Ordering::Relaxed);
+        slot[2].store(render_ns, Ordering::Relaxed);
+        slot[3].store(budget_ns, Ordering::Relaxed);
+        let k = match kind {
+            DropKind::OverBudget => 0u64,
+            DropKind::DeviceOverload => 1,
+        };
+        slot[4].store(k << 32 | u64::from(frames), Ordering::Relaxed);
+        slot[0].store(seq + 1, Ordering::Release);
+    }
+
+    /// Every event after `*seen` (a sequence number, 0 to start), oldest
+    /// first; advances `*seen`. Events the ring overwrote before this call
+    /// are skipped — the gap in `seq` says how many.
+    pub fn collect(&self, seen: &mut u64) -> Vec<DropEvent> {
+        let end = self.next.load(Ordering::Acquire);
+        let start = (*seen).max(end.saturating_sub(DROP_RING as u64));
+        let mut out = Vec::new();
+        for seq in start..end {
+            let slot = &self.slots[(seq % DROP_RING as u64) as usize];
+            if slot[0].load(Ordering::Acquire) != seq + 1 {
+                continue;
+            }
+            let kf = slot[4].load(Ordering::Relaxed);
+            out.push(DropEvent {
+                seq,
+                at_ns: slot[1].load(Ordering::Relaxed),
+                render_ns: slot[2].load(Ordering::Relaxed),
+                budget_ns: slot[3].load(Ordering::Relaxed),
+                kind: if kf >> 32 == 1 { DropKind::DeviceOverload } else { DropKind::OverBudget },
+                frames: kf as u32,
+            });
+        }
+        *seen = end;
+        out
+    }
+}
+
 /// Live engine metrics, written from the realtime callback, read by the UI.
 /// These are the numbers the rig meters need — render time (DSP load) and
 /// xruns — measured directly because the duplex callback is *our* code.
@@ -96,6 +199,8 @@ pub struct EngineStats {
     /// `3` = streaming). Written by the backend's state listener; owners
     /// can poll it to detect a dead/errored stream while `calls` stalls.
     pub stream_state: AtomicI32,
+    /// Every drop, timestamped, for a drop log (see [`DropRing`]).
+    pub drops: DropRing,
 }
 
 impl EngineStats {
@@ -128,6 +233,7 @@ impl EngineStats {
             let budget_ns = frames * 1_000_000_000 / rate as u64;
             if ns > budget_ns {
                 self.over_budget.fetch_add(1, Ordering::Relaxed);
+                self.drops.push(DropKind::OverBudget, ns, budget_ns, frames as u32);
             }
         }
     }
@@ -175,3 +281,31 @@ pub trait DuplexBackend: Send + Sized {
 pub use crate::duplex_pw::PipewireBackend as Backend;
 #[cfg(target_os = "macos")]
 pub use crate::duplex_coreaudio::CoreAudioBackend as Backend;
+
+#[cfg(test)]
+mod drop_ring_tests {
+    use super::*;
+
+    /// Events come back in order with their data, a reader sees each once,
+    /// and an overflowed ring keeps the newest.
+    #[test]
+    fn drops_are_collected_once_in_order() {
+        let r = DropRing::default();
+        r.push(DropKind::OverBudget, 3_000_000, 2_666_666, 128);
+        r.push(DropKind::DeviceOverload, 0, 0, 128);
+        let mut seen = 0;
+        let got = r.collect(&mut seen);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].kind, DropKind::OverBudget);
+        assert_eq!(got[0].render_ns, 3_000_000);
+        assert_eq!(got[1].kind, DropKind::DeviceOverload);
+        assert!(got[1].at_ns >= got[0].at_ns);
+        assert!(r.collect(&mut seen).is_empty());
+        for _ in 0..(DROP_RING + 10) {
+            r.push(DropKind::OverBudget, 1, 1, 64);
+        }
+        let got = r.collect(&mut seen);
+        assert_eq!(got.len(), DROP_RING);
+        assert_eq!(got.last().unwrap().seq, (DROP_RING + 11) as u64);
+    }
+}
