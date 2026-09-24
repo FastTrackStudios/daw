@@ -513,7 +513,7 @@ dependencies = [
 [[package]]
 name = "architect"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.7.4-subscribe-intro#523ae7922a711a2bc7e144f7f1a60a5da7bb20d8"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.9.2#00ae5a85978fa083669074fce592d41b65681fb7"
 dependencies = [
  "architect-action-derive",
  "architect-derive",
@@ -522,6 +522,7 @@ dependencies = [
  "async-channel 2.5.0",
  "eyre",
  "facet",
+ "futures",
  "gloo-timers",
  "thiserror 2.0.20",
  "tokio",
@@ -537,7 +538,7 @@ dependencies = [
 [[package]]
 name = "architect-action-derive"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.7.4-subscribe-intro#523ae7922a711a2bc7e144f7f1a60a5da7bb20d8"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.9.2#00ae5a85978fa083669074fce592d41b65681fb7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -547,7 +548,7 @@ dependencies = [
 [[package]]
 name = "architect-derive"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.7.4-subscribe-intro#523ae7922a711a2bc7e144f7f1a60a5da7bb20d8"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.9.2#00ae5a85978fa083669074fce592d41b65681fb7"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -558,7 +559,7 @@ dependencies = [
 [[package]]
 name = "architect-launcher-core"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.7.4-subscribe-intro#523ae7922a711a2bc7e144f7f1a60a5da7bb20d8"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.9.2#00ae5a85978fa083669074fce592d41b65681fb7"
 dependencies = [
  "chrono",
  "facet",
@@ -574,7 +575,7 @@ dependencies = [
 [[package]]
 name = "architect-launcher-providers"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.7.4-subscribe-intro#523ae7922a711a2bc7e144f7f1a60a5da7bb20d8"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.9.2#00ae5a85978fa083669074fce592d41b65681fb7"
 dependencies = [
  "architect-launcher-core",
  "serde",
@@ -586,7 +587,7 @@ dependencies = [
 [[package]]
 name = "architect-launcher-ui"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.7.4-subscribe-intro#523ae7922a711a2bc7e144f7f1a60a5da7bb20d8"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.9.2#00ae5a85978fa083669074fce592d41b65681fb7"
 dependencies = [
  "architect-launcher-core",
  "architect-ui",
@@ -598,7 +599,7 @@ dependencies = [
 [[package]]
 name = "architect-permissions"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.7.4-subscribe-intro#523ae7922a711a2bc7e144f7f1a60a5da7bb20d8"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.9.2#00ae5a85978fa083669074fce592d41b65681fb7"
 dependencies = [
  "serde",
  "serde_json",
@@ -608,7 +609,7 @@ dependencies = [
 [[package]]
 name = "architect-rpc-derive"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.7.4-subscribe-intro#523ae7922a711a2bc7e144f7f1a60a5da7bb20d8"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.9.2#00ae5a85978fa083669074fce592d41b65681fb7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -618,7 +619,7 @@ dependencies = [
 [[package]]
 name = "architect-story-core"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.7.4-subscribe-intro#523ae7922a711a2bc7e144f7f1a60a5da7bb20d8"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.9.2#00ae5a85978fa083669074fce592d41b65681fb7"
 dependencies = [
  "linkme",
 ]
@@ -626,7 +627,7 @@ dependencies = [
 [[package]]
 name = "architect-story-macros"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.7.4-subscribe-intro#523ae7922a711a2bc7e144f7f1a60a5da7bb20d8"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.9.2#00ae5a85978fa083669074fce592d41b65681fb7"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -637,7 +638,7 @@ dependencies = [
 [[package]]
 name = "architect-story-runtime"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.7.4-subscribe-intro#523ae7922a711a2bc7e144f7f1a60a5da7bb20d8"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.9.2#00ae5a85978fa083669074fce592d41b65681fb7"
 dependencies = [
  "architect-story-core",
  "architect-story-macros",
@@ -648,7 +649,7 @@ dependencies = [
 [[package]]
 name = "architect-ui"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.7.4-subscribe-intro#523ae7922a711a2bc7e144f7f1a60a5da7bb20d8"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.9.2#00ae5a85978fa083669074fce592d41b65681fb7"
 dependencies = [
  "architect-story-runtime",
  "chrono",
@@ -2897,6 +2898,7 @@ name = "daw-audio-sync"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "daw-transport-sync",
  "reaper-low",
  "reaper-medium",
  "serde",
@@ -2944,6 +2946,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "daw-proto",
+ "daw-transport-sync",
  "eyre",
  "facet",
  "facet-json",
@@ -3045,6 +3048,7 @@ name = "daw-proto"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "daw-transport-sync",
  "facet",
  "facet-json",
  "futures",
@@ -3066,6 +3070,7 @@ dependencies = [
  "daw-audio-sync",
  "daw-control",
  "daw-proto",
+ "daw-transport-sync",
  "dawfile-aaf",
  "dawfile-ableton",
  "dawfile-dawproject",
@@ -3190,10 +3195,12 @@ dependencies = [
  "daw-control",
  "daw-proto",
  "daw-standalone",
+ "daw-transport-sync",
  "dawfile-reaper",
  "dawfile-standalone",
  "eyre",
  "fts-sample",
+ "futures",
  "gloo-timers",
  "js-sys",
  "libloading 0.8.9",
@@ -3258,6 +3265,13 @@ version = "0.1.0"
 dependencies = [
  "image",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "daw-transport-sync"
+version = "0.1.0"
+dependencies = [
+ "web-time",
 ]
 
 [[package]]
