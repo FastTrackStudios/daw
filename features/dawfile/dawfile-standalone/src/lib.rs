@@ -98,5 +98,7 @@ pub use edit::{DocumentEdit, DocumentQuery};
 pub use error::{DawError, DawResult};
 pub use id::{EntityId, ObjectId};
 pub use objects::ObjectStore;
-pub use project::{DAW_EXTENSION, DawProject, OBJECTS_DIR, PROJECT_EXTENSIONS, SESSION_EXTENSION};
+pub use project::{
+    DAW_EXTENSION, DawProject, OBJECTS_DIR, PROJECT_EXTENSIONS, SESSION_EXTENSION, choose_manifest,
+};
 pub use rpp::{ExportReport, ImportReport};

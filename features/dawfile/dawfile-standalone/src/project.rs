@@ -350,8 +350,18 @@ impl DawProject {
         let dir = dir.as_ref();
         let manifest = find_manifest(dir)?;
         let text = std::fs::read_to_string(&manifest)?;
-        let document = styx::from_text(&text, &manifest.to_string_lossy())?;
         let objects = ObjectStore::read_dir(&dir.join(OBJECTS_DIR))?;
+        Self::from_parts(&text, &manifest.to_string_lossy(), objects)
+    }
+
+    /// Open a project from its parts: the manifest's text (`origin` names
+    /// it in errors) and its objects — a project that arrived from
+    /// somewhere with no disk (a browser, from a share link), opened
+    /// exactly as [`Self::load`] opens one from a directory.
+    pub fn from_parts(text: &str, origin: &str, objects: ObjectStore) -> DawResult<Self> {
+        let manifest = origin;
+        let text = text.to_owned();
+        let document = styx::from_text(&text, manifest)?;
 
         // #155 decision 7: a manifest referencing an unsynced hash must fail
         // loudly rather than open a broken project.
@@ -359,7 +369,7 @@ impl DawProject {
             if !objects.contains(&id) {
                 return Err(DawError::MissingObject {
                     id: id.to_string(),
-                    referenced_as: manifest.to_string_lossy().into_owned(),
+                    referenced_as: manifest.to_owned(),
                 });
             }
         }
@@ -427,34 +437,34 @@ fn find_manifest(dir: &Path) -> DawResult<PathBuf> {
             reason: "not a directory".to_string(),
         });
     }
-    let mut found: Vec<(usize, PathBuf)> = Vec::new();
+    let mut names = Vec::new();
     for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else {
-            continue;
-        };
-        if let Some(rank) = PROJECT_EXTENSIONS
-            .iter()
-            .position(|known| *known == extension)
-        {
-            found.push((rank, path));
-        }
+        names.push(entry?.file_name().to_string_lossy().into_owned());
     }
-    found.sort_by_key(|(rank, _)| *rank);
-    let best = found.first().map(|(rank, _)| *rank);
-    found.retain(|(rank, _)| Some(*rank) == best);
+    choose_manifest(&names)
+        .map(|name| dir.join(name))
+        .map_err(|reason| DawError::NotAProject { path: dir.display().to_string(), reason })
+}
 
-    match found.len() {
-        1 => Ok(found.remove(0).1),
-        0 => Err(DawError::NotAProject {
-            path: dir.display().to_string(),
-            reason: format!("no *.{SESSION_EXTENSION} manifest"),
-        }),
-        count => Err(DawError::NotAProject {
-            path: dir.display().to_string(),
-            reason: format!("{count} manifests; a project directory holds exactly one"),
-        }),
+/// Which of a project directory's file names is its manifest: the one of
+/// the most preferred extension ([`PROJECT_EXTENSIONS`]), of which there
+/// must be exactly one. For a directory that is not on a disk (its files
+/// arrived from a share link) as for one that is.
+///
+/// # Errors
+///
+/// None, or more than one, of the most preferred kind — the reason.
+pub fn choose_manifest(names: &[String]) -> Result<&str, String> {
+    let rank = |name: &str| {
+        let extension = name.rsplit_once('.').map(|(_, e)| e)?;
+        PROJECT_EXTENSIONS.iter().position(|known| *known == extension)
+    };
+    let best = names.iter().filter_map(|n| rank(n)).min();
+    let found: Vec<&str> = names.iter().map(String::as_str).filter(|n| best.is_some() && rank(n) == best).collect();
+    match found.as_slice() {
+        [one] => Ok(one),
+        [] => Err(format!("no *.{SESSION_EXTENSION} manifest")),
+        many => Err(format!("{} manifests; a project directory holds exactly one", many.len())),
     }
 }
 
@@ -590,5 +600,33 @@ mod tests {
             Err(DawError::NotAProject { .. })
         ));
         std::fs::remove_dir_all(&dir).ok();
+    }
+    #[test]
+    fn a_project_opens_from_its_parts_as_from_its_directory() {
+        let dir = std::env::temp_dir().join(format!("dawfile-parts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (mut project, _) = DawProject::import_rpp(TINY, "Tiny").expect("import");
+        project.save(&dir).expect("save");
+        let from_disk = DawProject::load(&dir).expect("load");
+
+        // The same folder, as files that arrived from elsewhere.
+        let mut names = Vec::new();
+        let mut objects = Vec::new();
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            names.push(entry.unwrap().file_name().to_string_lossy().into_owned());
+        }
+        for entry in std::fs::read_dir(dir.join(OBJECTS_DIR)).unwrap() {
+            let entry = entry.unwrap();
+            objects.push((entry.file_name().to_string_lossy().into_owned(), std::fs::read(entry.path()).unwrap()));
+        }
+        let manifest = choose_manifest(&names).expect("one manifest");
+        let text = std::fs::read_to_string(dir.join(manifest)).unwrap();
+        let from_parts =
+            DawProject::from_parts(&text, manifest, ObjectStore::from_named(objects).unwrap()).expect("from parts");
+        assert_eq!(from_parts.to_rpp().unwrap(), from_disk.to_rpp().unwrap());
+
+        // A blob that is not what its name says is refused, as on disk.
+        assert!(ObjectStore::from_named([("sha256-00".to_owned(), b"x".to_vec())]).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
