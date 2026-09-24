@@ -6,6 +6,8 @@
 //! opens the song the one way songs open) and streams the proxies by range
 //! in the order they will be heard.
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod folder;
 mod service;
 mod types;
 

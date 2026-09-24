@@ -1,22 +1,16 @@
 //! `SongFiles` for the standalone engine: the folder a project was opened
 //! from, served to a peer streaming the song in.
 
-use std::path::{Component, Path, PathBuf};
-
-use daw_proto::song_files::{MAX_READ, SongFile};
+use daw_proto::song_files::SongFile;
+#[cfg(not(target_arch = "wasm32"))]
+use daw_proto::song_files::folder;
 use daw_proto::{DawError, DawResult, ProjectContext};
 
 use crate::sync::Standalone;
 
-/// What is never served: the DAW's own backups, and downloads in progress.
-fn skipped(name: &str) -> bool {
-    name.starts_with('.') || name.eq_ignore_ascii_case("Backups") || name.ends_with(".part")
-}
-
 impl Standalone {
-    /// The project's file (a `.RPP` or a `.session` folder) and the song
-    /// folder it sits in.
-    fn song_folder(&self, project: &ProjectContext) -> DawResult<(PathBuf, PathBuf)> {
+    /// The file (a `.RPP` or a `.session` folder) `project` was opened from.
+    fn project_file(&self, project: &ProjectContext) -> DawResult<String> {
         let guid = match project {
             ProjectContext::Project(guid) => guid.clone(),
             ProjectContext::Current => self
@@ -26,101 +20,33 @@ impl Standalone {
                 .and_then(|s| s.current_project_guid.clone())
                 .ok_or_else(|| DawError::NotFound("no current project".into()))?,
         };
-        let path = self
-            .with_project(&guid, |p| p.info.path.clone())
-            .ok()
-            .filter(|p| !p.is_empty())
-            .ok_or_else(|| DawError::NotFound(format!("project {guid} has no file")))?;
-        let file = std::path::absolute(PathBuf::from(&path)).unwrap_or_else(|_| PathBuf::from(&path));
-        let folder = file
-            .parent()
-            .map(Path::to_path_buf)
-            .ok_or_else(|| DawError::NotFound(format!("{path} is in no folder")))?;
-        Ok((file, folder))
+        self.with_project(&guid, |p| p.info.path.clone())
+            .map_err(|_| DawError::NotFound(format!("no project {guid}")))
     }
-}
-
-fn walk(folder: &Path, at: &Path, out: &mut Vec<SongFile>) {
-    let Ok(entries) = std::fs::read_dir(at) else { return };
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if skipped(&name) {
-            continue;
-        }
-        let path = entry.path();
-        let Ok(meta) = entry.metadata() else { continue };
-        if meta.is_dir() {
-            walk(folder, &path, out);
-        } else if let Ok(rel) = path.strip_prefix(folder) {
-            out.push(SongFile { path: relative(rel), size: meta.len() });
-        }
-    }
-}
-
-fn relative(rel: &Path) -> String {
-    rel.components()
-        .filter_map(|c| match c {
-            Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
-/// `rel` inside `folder`, or `None` if it would leave it.
-fn inside(folder: &Path, rel: &str) -> Option<PathBuf> {
-    let rel = Path::new(rel);
-    if rel.components().any(|c| !matches!(c, Component::Normal(_))) {
-        return None;
-    }
-    Some(folder.join(rel))
 }
 
 impl daw_proto::SongFiles for Standalone {
     async fn list(&self, project: ProjectContext) -> DawResult<Vec<SongFile>> {
-        let (file, folder) = self.song_folder(&project)?;
-        let mut files = Vec::new();
-        walk(&folder, &folder, &mut files);
-        files.sort_by(|a, b| a.path.cmp(&b.path));
-        // The project itself first: the path a client opens (a `.session`
-        // is a folder — listed with size 0; its files follow as usual).
-        let project_rel = file.strip_prefix(&folder).map(relative).unwrap_or_default();
-        let project_size = std::fs::metadata(&file).ok().filter(std::fs::Metadata::is_file).map_or(0, |m| m.len());
-        files.retain(|f| f.path != project_rel);
-        files.insert(0, SongFile { path: project_rel, size: project_size });
-        Ok(files)
+        #[cfg(not(target_arch = "wasm32"))]
+        return folder::list(&self.project_file(&project)?);
+        #[cfg(target_arch = "wasm32")]
+        return Err(no_folder(&project));
     }
 
     async fn read(&self, project: ProjectContext, path: String, start: u64, len: u32) -> DawResult<Vec<u8>> {
-        use std::io::{Read, Seek, SeekFrom};
-        let (_, folder) = self.song_folder(&project)?;
-        let file = inside(&folder, &path).ok_or_else(|| DawError::OperationFailed(format!("{path}: outside the song")))?;
-        let mut f = std::fs::File::open(&file).map_err(|e| DawError::NotFound(format!("{path}: {e}")))?;
-        f.seek(SeekFrom::Start(start)).map_err(|e| DawError::OperationFailed(format!("{path}: {e}")))?;
-        let mut out = vec![0u8; usize::try_from(len.min(MAX_READ)).unwrap_or(0)];
-        let mut got = 0usize;
-        while got < out.len() {
-            match f.read(&mut out[got..]) {
-                Ok(0) => break,
-                Ok(n) => got += n,
-                Err(e) => return Err(DawError::OperationFailed(format!("{path}: {e}"))),
-            }
+        #[cfg(not(target_arch = "wasm32"))]
+        return folder::read(&self.project_file(&project)?, &path, start, len);
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (path, start, len);
+            return Err(no_folder(&project));
         }
-        out.truncate(got);
-        Ok(out)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn nothing_outside_the_song_is_served() {
-        let folder = Path::new("/songs/Washed");
-        assert_eq!(inside(folder, "Media/Proxies/Bass.ogg"), Some(folder.join("Media/Proxies/Bass.ogg")));
-        assert_eq!(inside(folder, "../Other/secret"), None);
-        assert_eq!(inside(folder, "/etc/passwd"), None);
-        assert_eq!(inside(folder, "Media/../../x"), None);
-    }
+/// A page has no disk: its songs arrived from elsewhere, and it serves
+/// none on.
+#[cfg(target_arch = "wasm32")]
+fn no_folder(project: &ProjectContext) -> DawError {
+    DawError::NotFound(format!("{project:?}: a browser serves no song folder"))
 }
