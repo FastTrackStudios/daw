@@ -31,16 +31,14 @@ pub(crate) struct TakeReader {
     /// path) points at one — the key for the `.reapeaks` sidecar.
     #[cfg(all(
         feature = "reapeaks",
-        any(feature = "audio", feature = "decode"),
-        not(target_arch = "wasm32")
+        any(feature = "audio", feature = "decode")
     ))]
     pub media_path: Option<std::path::PathBuf>,
     /// The file name the take asks for (`Bass.wav`) — what a stand-in's
     /// peaks are filed under when the file playing is its proxy.
     #[cfg(all(
         feature = "reapeaks",
-        any(feature = "audio", feature = "decode"),
-        not(target_arch = "wasm32")
+        any(feature = "audio", feature = "decode")
     ))]
     pub original_name: Option<String>,
     /// Parsed source-level peak mipmap (see [`crate::peak_store`]);
@@ -48,8 +46,7 @@ pub(crate) struct TakeReader {
     /// audio accessor opens readers too and must stay scan-free.
     #[cfg(all(
         feature = "reapeaks",
-        any(feature = "audio", feature = "decode"),
-        not(target_arch = "wasm32")
+        any(feature = "audio", feature = "decode")
     ))]
     pub reapeaks: Option<std::sync::Arc<dawfile_reaper::reapeaks::ReaPeaks>>,
 }
@@ -83,8 +80,7 @@ impl TakeReader {
             .unwrap_or_default();
         #[cfg(all(
             feature = "reapeaks",
-            any(feature = "audio", feature = "decode"),
-            not(target_arch = "wasm32")
+            any(feature = "audio", feature = "decode")
         ))]
         let media_path = t.source_file_path.as_deref().and_then(|p| {
             // The bay resolver is authoritative (project-relative paths);
@@ -102,14 +98,12 @@ impl TakeReader {
             markers,
             #[cfg(all(
                 feature = "reapeaks",
-                any(feature = "audio", feature = "decode"),
-                not(target_arch = "wasm32")
+                any(feature = "audio", feature = "decode")
             ))]
             media_path,
             #[cfg(all(
                 feature = "reapeaks",
-                any(feature = "audio", feature = "decode"),
-                not(target_arch = "wasm32")
+                any(feature = "audio", feature = "decode")
             ))]
             original_name: t
                 .source_file_path
@@ -118,8 +112,7 @@ impl TakeReader {
                 .map(|n| n.to_string_lossy().into_owned()),
             #[cfg(all(
                 feature = "reapeaks",
-                any(feature = "audio", feature = "decode"),
-                not(target_arch = "wasm32")
+                any(feature = "audio", feature = "decode")
             ))]
             reapeaks: None,
         })
@@ -174,11 +167,18 @@ impl TakeReader {
     /// audio accessor's opens must stay scan-free.
     #[cfg(all(
         feature = "reapeaks",
-        any(feature = "audio", feature = "decode"),
-        not(target_arch = "wasm32")
+        any(feature = "audio", feature = "decode")
     ))]
     pub(crate) fn ensure_reapeaks(&mut self) {
         if self.reapeaks.is_some() {
+            return;
+        }
+        // A streamed source carrying its original's waveform, handed in by
+        // whoever streams it (a browser, which has no disk to look on).
+        if let AudioSource::Streamed(streamed) = &*self.source
+            && let Some(peaks) = streamed.peaks()
+        {
+            self.reapeaks = Some(peaks);
             return;
         }
         // A proxy streaming in place of its original: the original's
@@ -191,18 +191,19 @@ impl TakeReader {
             self.reapeaks = crate::peak_store::for_stand_in(&media.join(original), &self.source);
             return;
         }
-        if !matches!(*self.source, AudioSource::PcmFile(_)) {
-            return;
-        }
-        if let Some(path) = &self.media_path {
+        // An on-disk file: its cache, built once if it has none. (A page
+        // has no disk, and no file sources.)
+        #[cfg(not(target_arch = "wasm32"))]
+        if matches!(*self.source, AudioSource::PcmFile(_))
+            && let Some(path) = &self.media_path
+        {
             self.reapeaks = crate::peak_store::get_or_build(path, &self.source);
         }
     }
 
     #[cfg(not(all(
         feature = "reapeaks",
-        any(feature = "audio", feature = "decode"),
-        not(target_arch = "wasm32")
+        any(feature = "audio", feature = "decode")
     )))]
     pub(crate) fn ensure_reapeaks(&mut self) {}
 
@@ -277,8 +278,7 @@ impl TakeReader {
         // still read the source — the mipmap can't resolve them.
         #[cfg(all(
             feature = "reapeaks",
-            any(feature = "audio", feature = "decode"),
-            not(target_arch = "wasm32")
+            any(feature = "audio", feature = "decode")
         ))]
         if let Some(pk) = &self.reapeaks
             && let Some(fine) = pk.levels.first()

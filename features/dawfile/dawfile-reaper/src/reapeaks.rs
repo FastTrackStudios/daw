@@ -440,6 +440,42 @@ impl ReaPeaks {
             .expect("reapeaks has at least one level")
     }
 
+    /// The same peaks for a view that never draws blocks finer than
+    /// `block` samples: the finest level folded to the coarsest step that
+    /// still fits under `block`, the coarser levels kept, nothing finer.
+    /// A browser keeps this instead of the whole cache — the finest level
+    /// is most of it (a 5-minute stem's 147-sample level is ~700 KB; the
+    /// fold to under 1024 samples is ~100 KB).
+    #[must_use]
+    pub fn coarsened(&self, block: u32) -> Self {
+        let mut levels: Vec<&PeakLevel> = self.levels.iter().collect();
+        levels.sort_by_key(|l| l.samples_per_peak);
+        let Some(fine) = levels.first() else {
+            return self.clone();
+        };
+        let step = (block / fine.samples_per_peak.max(1)).max(1);
+        let spp = fine.samples_per_peak.max(1) * step;
+        let nch = self.channels.max(1);
+        let per = step as usize;
+        let count = fine.count.div_ceil(per);
+        let mut data = Vec::with_capacity(count * nch * 2);
+        for p in 0..count {
+            for c in 0..nch {
+                let (mut max, mut min) = (i16::MIN, i16::MAX);
+                for q in p * per..((p + 1) * per).min(fine.count) {
+                    let i = (q * nch + c) * 2;
+                    max = max.max(fine.data.get(i).copied().unwrap_or(0));
+                    min = min.min(fine.data.get(i + 1).copied().unwrap_or(0));
+                }
+                data.push(max);
+                data.push(min);
+            }
+        }
+        let mut out = vec![PeakLevel { samples_per_peak: spp, count, data }];
+        out.extend(levels.iter().skip(1).filter(|l| l.samples_per_peak > spp).map(|l| (*l).clone()));
+        Self { levels: out, ..self.clone() }
+    }
+
     /// Render `columns` min/max pairs for `channel` over a source time range
     /// (seconds) — one pair per pixel column, REAPER's draw model: pick the
     /// mipmap for the zoom, aggregate every covered peak per column.
@@ -483,6 +519,32 @@ impl ReaPeaks {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn coarsened_keeps_the_extremes_at_a_coarser_step() {
+        // Mono, 10 peaks of 160 samples; a spike in peak 7.
+        let mut data = Vec::new();
+        for p in 0..10i16 {
+            let v = if p == 7 { 30_000 } else { 100 * p };
+            data.push(v);
+            data.push(-v);
+        }
+        let pk = ReaPeaks {
+            levels: vec![
+                PeakLevel { samples_per_peak: 160, count: 10, data },
+                PeakLevel { samples_per_peak: 2400, count: 1, data: vec![30_000, -30_000] },
+            ],
+            ..ReaPeaks::compute(1, 48_000, 1600, |_, _| 0.0)
+        };
+        let small = pk.coarsened(1024);
+        let fine = &small.levels[0];
+        assert_eq!(fine.samples_per_peak, 960, "six peaks folded: the most under 1024");
+        assert_eq!(fine.count, 2);
+        assert_eq!(fine.data, vec![500, -500, 30_000, -30_000], "each fold keeps its extremes");
+        assert_eq!(small.levels.len(), 2, "the coarser level kept");
+        assert_eq!(small.levels[1].samples_per_peak, 2400);
+    }
+
     use super::*;
 
     /// A synthetic two-level mono file.

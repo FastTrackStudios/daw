@@ -34,6 +34,11 @@ struct Inner {
     chunks: RwLock<Vec<Option<Arc<[f32]>>>>,
     /// The frame playback last read from — where to decode next.
     wanted: AtomicU64,
+    /// The waveform of the audio this stands in for, when the holder
+    /// handed it in ([`Streamed::set_peaks`]) — what the arrangement draws
+    /// before (and without) the audio arriving.
+    #[cfg(feature = "reapeaks")]
+    peaks: std::sync::OnceLock<Arc<dawfile_reaper::reapeaks::ReaPeaks>>,
 }
 
 impl Streamed {
@@ -47,6 +52,8 @@ impl Streamed {
                 frames,
                 chunks: RwLock::new(vec![None; count]),
                 wanted: AtomicU64::new(0),
+                #[cfg(feature = "reapeaks")]
+                peaks: std::sync::OnceLock::new(),
             }),
         }
     }
@@ -54,6 +61,20 @@ impl Streamed {
     #[must_use]
     pub fn channels(&self) -> u16 {
         self.inner.channels
+    }
+
+    /// Hand in the waveform of the audio this streams — its original's
+    /// peaks cache, fetched alongside (the first one handed in stays).
+    #[cfg(feature = "reapeaks")]
+    pub fn set_peaks(&self, peaks: Arc<dawfile_reaper::reapeaks::ReaPeaks>) {
+        let _ = self.inner.peaks.set(peaks);
+    }
+
+    /// The waveform handed in, if any.
+    #[cfg(feature = "reapeaks")]
+    #[must_use]
+    pub fn peaks(&self) -> Option<Arc<dawfile_reaper::reapeaks::ReaPeaks>> {
+        self.inner.peaks.get().cloned()
     }
 
     #[must_use]

@@ -113,7 +113,6 @@ impl SparseBytes {
         if end <= offset {
             return Ok(());
         }
-        let take = usize::try_from(end - offset).unwrap_or(0);
         let mut inner = lock(&self.inner);
         match &mut inner.store {
             Store::Memory(blocks) => {
@@ -136,6 +135,7 @@ impl SparseBytes {
             #[cfg(not(target_arch = "wasm32"))]
             Store::File(file) => {
                 file.seek(SeekFrom::Start(offset))?;
+                let take = usize::try_from(end - offset).unwrap_or(0);
                 std::io::Write::write_all(file, data.get(..take).unwrap_or_default())?;
             }
         }

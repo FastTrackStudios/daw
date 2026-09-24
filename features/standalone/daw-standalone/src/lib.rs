@@ -77,8 +77,7 @@ mod peak;
 /// each on-disk media file, shared with REAPER where projects overlap.
 #[cfg(all(
     feature = "reapeaks",
-    any(feature = "audio", feature = "decode"),
-    not(target_arch = "wasm32")
+    any(feature = "audio", feature = "decode")
 ))]
 mod peak_store;
 pub(crate) mod platform;
