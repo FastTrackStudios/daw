@@ -109,3 +109,12 @@ impl MidiInput {
         self.connected().into_iter().map(|p| p.name).collect()
     }
 }
+
+/// Bind the process's CoreMIDI device list to a live run loop — call first
+/// thing in `main`, before anything touches MIDI. On macOS this is what keeps
+/// devices that appear after launch (a pedal switched on) visible at all;
+/// see `midicore_macos::init`. Elsewhere, nothing to do.
+pub fn init() {
+    #[cfg(target_os = "macos")]
+    midicore_macos::init();
+}

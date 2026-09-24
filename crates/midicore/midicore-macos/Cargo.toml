@@ -12,4 +12,6 @@ description = "Native CoreMIDI input backend for midicore — ONE client with ON
 midicore-proto.workspace = true
 # Already in the tree through midir's CoreMIDI backend — same version.
 coremidi = "0.9"
+# The run loop CoreMIDI delivers its setup changes on (see `run`).
+core-foundation = "0.10"
 tracing = { workspace = true }

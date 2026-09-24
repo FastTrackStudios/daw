@@ -19,11 +19,16 @@
 //!
 //! # Hot-plug
 //!
-//! CoreMIDI only delivers its setup-changed notifications to a thread that is
-//! running a CFRunLoop. Rather than keep a run loop alive for that, the owning
-//! thread re-reads the source list every [`RESCAN`] — the same cadence as the
-//! PipeWire backend's reconcile timer. Unlike midir-over-JACK, enumerating
-//! CoreMIDI sources creates nothing, so polling costs no client churn.
+//! CoreMIDI tells a process about devices coming and going through a
+//! CFRunLoop: the client's notification port is serviced there, and until it
+//! is, the process's own view of the source list does not change. The owning
+//! thread therefore *runs* its run loop, in [`RESCAN`] slices, and re-reads
+//! the source list after each — so a pedal switched on after the rig opened
+//! is seen and connected. (It used to sleep instead, and read the same stale
+//! list forever: a device that was not there at launch never arrived.) A
+//! setup change also ends the slice early, so a plug-in is picked up at once.
+//! Unlike midir-over-JACK, enumerating CoreMIDI sources creates nothing, so
+//! re-reading costs no client churn.
 //!
 //! A source that is *offline* counts as absent. A Bluetooth pedal switched
 //! off does not leave the source list — its endpoint stays, under the same
@@ -50,6 +55,48 @@ use midicore_proto::{
     decode_all, BackendError, Direction, InputBackend, InputConfig, MaybeSend, PortId, PortInfo,
     PortSelector, TimedEvent,
 };
+
+/// Make this crate's CoreMIDI home thread the process's first contact with
+/// CoreMIDI. Call it as early as possible — first thing in `main`.
+///
+/// CoreMIDI keeps a process's view of the devices current through the run
+/// loop of the thread that first connected the process to the MIDI server.
+/// When that thread never runs a run loop — any worker that happened to
+/// enumerate ports first — the source list freezes at launch: a pedal
+/// switched on later never appears, in any client, on any thread. The home
+/// thread connects first and then runs its run loop for the life of the
+/// process, so the list stays live whoever asks. Every entry point of this
+/// crate calls it; calling it from `main` also wins against anything else in
+/// the process (midir, say) that might otherwise touch CoreMIDI first.
+pub fn init() {
+    static HOME: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    HOME.get_or_init(|| {
+        let (tx, rx) = mpsc::sync_channel::<()>(1);
+        let spawned = std::thread::Builder::new()
+            .name("midicore-coremidi-home".into())
+            .spawn(move || {
+                // Connecting to the MIDI server: the first CoreMIDI call.
+                let client = Client::new_with_notifications("midicore-home", |_n: &coremidi::Notification| {});
+                let _ = tx.send(());
+                let _client = client;
+                loop {
+                    let result = unsafe {
+                        core_foundation::runloop::CFRunLoop::run_in_mode(
+                            core_foundation::runloop::kCFRunLoopDefaultMode,
+                            Duration::from_secs(60),
+                            false,
+                        )
+                    };
+                    if matches!(result, core_foundation::runloop::CFRunLoopRunResult::Finished) {
+                        std::thread::sleep(RESCAN);
+                    }
+                }
+            });
+        if spawned.is_ok() {
+            let _ = rx.recv_timeout(Duration::from_secs(5));
+        }
+    });
+}
 
 /// How often the owning thread re-reads the source list.
 pub const RESCAN: Duration = Duration::from_millis(200);
@@ -127,6 +174,7 @@ impl InputBackend for CoreMidiInput {
     const NAME: &'static str = "coremidi";
 
     fn sources() -> Vec<PortInfo> {
+        init();
         let mut names: Vec<String> = scan().into_values().collect();
         names.sort();
         names.into_iter().map(|n| source_info(n, false)).collect()
@@ -136,6 +184,7 @@ impl InputBackend for CoreMidiInput {
     where
         F: Fn(TimedEvent) + MaybeSend + 'static,
     {
+        init();
         let sink: Sink = Arc::new(Mutex::new(sink));
         let (tx, rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::sync_channel::<Result<(), BackendError>>(1);
@@ -204,7 +253,16 @@ fn run(
     // NOTE: coremidi 0.9 does not dispose a `Client` on drop, so each open
     // leaves a (cheap, idle) client registered until the process exits. The
     // intended use is one long-lived input per process.
-    let client = match Client::new(&config.name) {
+    // A setup change wakes the loop below early (and, by existing, puts the
+    // notification port on this thread's run loop).
+    let changed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let client = match Client::new_with_notifications(&config.name, {
+        let changed = changed.clone();
+        move |_n: &coremidi::Notification| {
+            changed.store(true, std::sync::atomic::Ordering::Relaxed);
+            core_foundation::runloop::CFRunLoop::get_current().stop();
+        }
+    }) {
         Ok(c) => c,
         Err(status) => {
             let _ = ready.send(Err(BackendError(format!(
@@ -236,15 +294,31 @@ fn run(
     reconcile(&mut state, scan(), &client, &port, &sink, started, connected);
     let _ = ready.send(Ok(()));
 
-    loop {
-        let mut dirty = false;
-        match rx.recv_timeout(RESCAN) {
-            Ok(Cmd::Select(selectors)) => {
-                dirty = state.selectors != selectors;
-                state.selectors = selectors;
+    'outer: loop {
+        // Service CoreMIDI's notifications for a slice (returning early on a
+        // setup change); with nothing scheduled on the run loop, wait the
+        // slice out instead of spinning.
+        let started_slice = Instant::now();
+        let result = unsafe {
+            core_foundation::runloop::CFRunLoop::run_in_mode(
+                core_foundation::runloop::kCFRunLoopDefaultMode,
+                RESCAN,
+                false,
+            )
+        };
+        if matches!(result, core_foundation::runloop::CFRunLoopRunResult::Finished) {
+            std::thread::sleep(RESCAN.saturating_sub(started_slice.elapsed()));
+        }
+        let mut dirty = changed.swap(false, std::sync::atomic::Ordering::Relaxed);
+        loop {
+            match rx.try_recv() {
+                Ok(Cmd::Select(selectors)) => {
+                    dirty |= state.selectors != selectors;
+                    state.selectors = selectors;
+                }
+                Ok(Cmd::Quit) | Err(mpsc::TryRecvError::Disconnected) => break 'outer,
+                Err(mpsc::TryRecvError::Empty) => break,
             }
-            Ok(Cmd::Quit) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
         let now = scan();
         if dirty || now != state.seen {
@@ -455,6 +529,7 @@ mod tests {
     /// time: side by side in one process, one test's endpoints were seen to
     /// vanish from the source list mid-test.
     fn coremidi_lock() -> std::sync::MutexGuard<'static, ()> {
+        init();
         static LOCK: Mutex<()> = Mutex::new(());
         LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
@@ -470,6 +545,44 @@ mod tests {
             std::thread::sleep(RESCAN / 2);
         }
         cond()
+    }
+
+    /// Run as a child process by the next test (`MIDICORE_CHILD_SOURCE`
+    /// set): publish a virtual source from *another process*, for a while.
+    /// A no-op in a normal run.
+    #[test]
+    fn child_publishes_a_source() {
+        let Ok(name) = std::env::var("MIDICORE_CHILD_SOURCE") else {
+            return;
+        };
+        let client = Client::new("midicore-test-child").expect("client");
+        let _source = client.virtual_source(&name).expect("virtual source");
+        std::thread::sleep(Duration::from_secs(4));
+    }
+
+    /// A device that appears after the input opened — a pedal switched on
+    /// once the rig is up — is connected. It lives in another process, as
+    /// hardware does: CoreMIDI only tells a process about devices coming
+    /// and going through a run loop, and a thread that only slept between
+    /// rescans read the same stale source list forever.
+    #[test]
+    fn a_source_appearing_later_in_another_process_is_connected() {
+        let _serial = coremidi_lock();
+        let name = format!("midicore-test-later-{}", std::process::id());
+        let input = CoreMidiInput::open(
+            InputConfig::new("midicore-test").selecting(vec![PortSelector::NameContains(name.clone())]),
+            |_| {},
+        )
+        .expect("CoreMIDI reachable");
+        assert!(input.ports_named().is_empty());
+        let mut child = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args(["tests::child_publishes_a_source", "--exact", "--nocapture"])
+            .env("MIDICORE_CHILD_SOURCE", &name)
+            .spawn()
+            .expect("spawn the child");
+        let seen = within(|| input.ports_named() == vec![name.clone()]);
+        let _ = child.wait();
+        assert!(seen, "a source that appeared later was connected");
     }
 
     impl CoreMidiInput {
