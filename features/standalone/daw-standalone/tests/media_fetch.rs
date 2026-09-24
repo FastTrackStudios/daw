@@ -353,3 +353,26 @@ async fn a_resident_window_holds_only_what_is_near_the_playhead() {
     stop.store(true, std::sync::atomic::Ordering::Relaxed);
     let _ = driver.await;
 }
+
+#[test]
+fn a_take_has_a_moment_once_its_header_and_the_pages_under_it_arrive() {
+    let bytes = proxy(60, 4);
+    let t = take(&bytes, "t", 10.0, 70.0, 0.0);
+    // Where it plays nothing, there is nothing to wait for.
+    assert!(t.has_at(0.0, 2.0) && t.has_at(80.0, 2.0));
+    assert!(!t.has_at(30.0, 2.0), "nothing has arrived");
+    let under = t.index.bytes_for(frames(20.0) - 4096, frames(22.0));
+    let put = |r: Range<u64>| {
+        t.bytes
+            .insert(r.start, &bytes[r.start as usize..r.end as usize])
+            .unwrap();
+    };
+    put(under);
+    assert!(!t.has_at(30.0, 2.0), "the pages, but not the header");
+    put(t.index.header());
+    assert!(t.has_at(30.0, 2.0));
+    assert!(
+        !t.has_at(40.0, 2.0),
+        "a moment whose pages have not arrived"
+    );
+}

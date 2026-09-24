@@ -70,6 +70,21 @@ impl StreamedTake {
         self.needed().iter().all(|r| self.bytes.has(r))
     }
 
+    /// Whether what this take plays over the `ahead` seconds from the
+    /// timeline moment `t` has arrived — true where the take plays nothing
+    /// then. What a holder swapping one stream for another waits on, so
+    /// the swap is not a gap.
+    #[must_use]
+    pub fn has_at(&self, t: f64, ahead: f64) -> bool {
+        let (from, to) = (t.max(self.start), (t + ahead).min(self.end));
+        from >= to
+            || (self.bytes.has(&self.index.header())
+                && self.bytes.has(&self.index.bytes_for(
+                    self.frame_at(from).saturating_sub(PREROLL),
+                    self.frame_at(to),
+                )))
+    }
+
     /// The file frame the timeline moment `t` plays.
     fn frame_at(&self, t: f64) -> u64 {
         let seconds = ((t - self.start) * self.playrate + self.source_offset).max(0.0);
