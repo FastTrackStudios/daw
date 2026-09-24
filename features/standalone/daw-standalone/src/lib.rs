@@ -95,6 +95,8 @@ mod routing_sync;
 pub mod rpp_state;
 mod screenset;
 mod services;
+// A peer streaming the song in: its folder's files by range.
+mod song_files;
 mod shared_state;
 pub mod sync;
 mod take;

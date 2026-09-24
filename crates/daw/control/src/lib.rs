@@ -141,6 +141,7 @@ pub(crate) use daw_proto::TakesClient;
 pub(crate) use daw_proto::TempoMapClient;
 pub(crate) use daw_proto::TracksClient;
 pub(crate) use daw_proto::TransportClient;
+pub(crate) use daw_proto::SongFilesClient;
 pub(crate) use daw_proto::TransportSyncClient;
 pub(crate) use daw_proto::TransportSyncStreamClient;
 pub(crate) use daw_proto::WindowGeometryClient;
@@ -189,6 +190,7 @@ mod tempo_map;
 mod toolbar;
 mod tracks;
 mod transport;
+pub mod song_files;
 pub mod transport_sync;
 mod window_geometry;
 mod window_manager;
@@ -218,6 +220,7 @@ pub use self::tempo_map::TempoMap;
 pub use self::toolbar::Toolbar;
 pub use self::tracks::{TrackHandle, Tracks};
 pub use self::transport::Transport;
+pub use self::song_files::SongFiles;
 pub use self::transport_sync::{ProjectTransportSync, TransportLeader, TransportSync};
 pub use self::window_geometry::WindowGeometry;
 pub use self::window_manager::WindowManager;
@@ -258,6 +261,7 @@ architect::clients! {
         pub(crate) batch: BatchExecutionClient,
         pub(crate) diagnostics: DiagnosticsClient,
         pub(crate) transport_sync: TransportSyncClient,
+        pub(crate) song_files: SongFilesClient,
         // `#[subscribe]` stream siblings — argless subscriptions;
         // filtering happens client-side in the handle wrappers.
         pub(crate) transport_stream: TransportStreamClient,

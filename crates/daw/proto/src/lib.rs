@@ -67,6 +67,7 @@ pub mod tempo_map;
 pub mod toolbar;
 pub mod track;
 pub mod transport;
+pub mod song_files;
 pub mod transport_sync;
 pub mod ui;
 pub mod undo;
@@ -165,6 +166,9 @@ pub use transport::*;
 #[cfg(feature = "vox")]
 pub use transport_sync::{TransportSyncClient, TransportSyncStreamClient, TransportSyncStreamSource};
 pub use transport_sync::{StampedPosition, TransportSync};
+#[cfg(feature = "vox")]
+pub use song_files::SongFilesClient;
+pub use song_files::{SongFile, SongFiles};
 pub use ui::*;
 pub use undo::*;
 pub use window_geometry::*;
