@@ -20,6 +20,17 @@ use std::sync::{Arc, RwLock};
 /// Frames per resident chunk (~0.37 s at 44.1 kHz).
 pub const CHUNK: usize = 16_384;
 
+/// Full scale of a stored sample.
+const I16_SCALE: f32 = 32767.0;
+
+/// A decoded sample, stored.
+#[inline]
+fn to_i16(x: f32) -> i16 {
+    #[allow(clippy::cast_possible_truncation)]
+    let s = (x.clamp(-1.0, 1.0) * I16_SCALE).round() as i16;
+    s
+}
+
 /// A streamed take's audio: its shape, and the chunks resident now.
 #[derive(Clone)]
 pub struct Streamed {
@@ -30,8 +41,12 @@ struct Inner {
     channels: u16,
     sample_rate: u32,
     frames: u64,
-    /// Chunk `i` holds frames `i * CHUNK ..`, interleaved.
-    chunks: RwLock<Vec<Option<Arc<[f32]>>>>,
+    /// Chunk `i` holds frames `i * CHUNK ..`, interleaved, as 16-bit
+    /// samples: half the memory of the decoder's floats, and far finer
+    /// than the lossy proxy they were decoded from (its own noise sits
+    /// well above 16-bit's). A band's worth of decode windows was ~70 MB
+    /// as floats.
+    chunks: RwLock<Vec<Option<Arc<[i16]>>>>,
     /// The frame playback last read from — where to decode next.
     wanted: AtomicU64,
     /// The waveform of the audio this stands in for, when the holder
@@ -108,7 +123,7 @@ impl Streamed {
             .get(frame / CHUNK)
             .and_then(Option::as_ref)
             .and_then(|c| c.get((frame % CHUNK) * ch + channel.min(ch - 1)).copied())
-            .unwrap_or(0.0)
+            .map_or(0.0, |s| f32::from(s) / I16_SCALE)
     }
 
     /// Whether chunk `index` is resident.
@@ -121,7 +136,7 @@ impl Streamed {
             .unwrap_or(false)
     }
 
-    fn put(&self, index: usize, pcm: Arc<[f32]>) {
+    fn put(&self, index: usize, pcm: Arc<[i16]>) {
         if let Ok(mut chunks) = self.inner.chunks.write()
             && let Some(slot) = chunks.get_mut(index)
         {
@@ -437,7 +452,8 @@ impl<D: Decode> StreamFeeder<D> {
         while self.pending.1.len() >= whole || (end && !self.pending.1.is_empty()) {
             let take = self.pending.1.len().min(whole);
             let rest = self.pending.1.split_off(take);
-            let pcm: Arc<[f32]> = std::mem::replace(&mut self.pending.1, rest).into();
+            let floats = std::mem::replace(&mut self.pending.1, rest);
+            let pcm: Arc<[i16]> = floats.iter().map(|&x| to_i16(x)).collect();
             self.source.put(self.pending.0, pcm);
             self.pending.0 += 1;
         }
@@ -448,8 +464,9 @@ impl<D: Decode> StreamFeeder<D> {
 mod tests {
     use super::*;
 
-    /// A decoder over a known signal: frame `i`'s left sample is `i` and
-    /// its right is `-i` (as f32), handed out in odd-sized packets.
+    /// A decoder over a known signal: frame `i`'s left sample is
+    /// [`level`]`(i)` and its right is its negative, handed out in
+    /// odd-sized packets.
     struct Ramp {
         frames: u64,
         at: u64,
@@ -470,12 +487,18 @@ mod tests {
             let start = self.at;
             let n = 1000.min(self.frames - start);
             for i in start..start + n {
-                out.push(i as f32);
-                out.push(-(i as f32));
+                out.push(level(i));
+                out.push(-level(i));
             }
             self.at += n;
             Ok(Some((start, n as usize)))
         }
+    }
+
+    /// Frame `i`'s level: its index (wrapping) in 16-bit steps, so it is
+    /// told apart from its neighbours and survives being stored exactly.
+    fn level(i: u64) -> f32 {
+        (i % 30_000) as f32 / I16_SCALE
     }
 
     fn feeder(frames: u64) -> StreamFeeder<Ramp> {
@@ -500,8 +523,8 @@ mod tests {
         fill(&mut f);
         let s = f.source();
         for frame in [0, 1, CHUNK - 1, CHUNK, CHUNK * 5 + 123, CHUNK * AHEAD - 1] {
-            assert_eq!(s.sample(frame, 0), frame as f32, "left at {frame}");
-            assert_eq!(s.sample(frame, 1), -(frame as f32), "right at {frame}");
+            assert_eq!(s.sample(frame, 0), level(frame as u64), "left at {frame}");
+            assert_eq!(s.sample(frame, 1), -level(frame as u64), "right at {frame}");
         }
         assert!(!s.resident(AHEAD), "nothing past the window");
     }
@@ -516,7 +539,7 @@ mod tests {
         fill(&mut f);
         assert_eq!(f.decoder.seeks, seeks + 1, "one seek for the jump");
         let s = f.source();
-        assert_eq!(s.sample(far as usize, 0), far as f32);
+        assert_eq!(s.sample(far as usize, 0), level(far));
         assert!(!s.resident(0), "the old window is let go");
         // Moving on within the window decodes onward, without a seek.
         f.source().want(far + CHUNK as u64 * 3);
@@ -530,7 +553,7 @@ mod tests {
         let mut f = feeder(frames);
         fill(&mut f);
         let s = f.source();
-        assert_eq!(s.sample(frames as usize - 1, 0), (frames - 1) as f32);
+        assert_eq!(s.sample(frames as usize - 1, 0), level(frames - 1));
         assert_eq!(s.sample(frames as usize, 0), 0.0, "past the end");
     }
 }
