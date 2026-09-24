@@ -9,6 +9,22 @@ use super::{FadeShape, Item, ItemRef};
 use crate::batch::{ProjectArg, TrackArg};
 use crate::primitives::{BeatAttachMode, Duration, PositionInSeconds};
 use crate::{DawResult, ProjectContext, TrackRef};
+use facet::Facet;
+
+/// Where an item sits on its track: the `position`/`length` pair
+/// [`Items::add_item`] takes, bundled for [`Items::add_item_with_guid`]
+/// (the RPC surface allows four parameters after `self`).
+#[derive(Clone, Copy, Debug, PartialEq, Facet)]
+pub struct ItemSpan {
+    pub position: PositionInSeconds,
+    pub length: Duration,
+}
+
+impl ItemSpan {
+    pub fn new(position: PositionInSeconds, length: Duration) -> Self {
+        Self { position, length }
+    }
+}
 
 #[architect::rpc(ops(ProjectContext as ProjectArg, TrackRef as TrackArg))]
 pub trait Items {
@@ -31,6 +47,25 @@ pub trait Items {
         position: PositionInSeconds,
         length: Duration,
     ) -> Option<String>;
+
+    /// [`Items::add_item`], but the item takes `guid` instead of a fresh
+    /// one — how a peer re-creates an item another engine made, so both
+    /// key it the same way. Makes the same kind of item `add_item` does
+    /// (no source: give it one with `Takes::set_source_file`). Returns
+    /// the guid as the backend stores it (the standalone engine keeps
+    /// `guid` verbatim; REAPER normalises it to its own `{UPPERCASE}`
+    /// spelling, `guid` must then parse as a UUID).
+    ///
+    /// A `guid` an item of the project already has is
+    /// [`DawError::AlreadyExists`](crate::DawError::AlreadyExists) —
+    /// never a second item with the same guid.
+    fn add_item_with_guid(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        guid: &str,
+        span: ItemSpan,
+    ) -> DawResult<String>;
 
     fn delete_item(&self, project: ProjectContext, item: ItemRef) -> DawResult<()>;
 

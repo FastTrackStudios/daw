@@ -6,6 +6,7 @@
 //! wheel bindings into a [`KeymapConfig`]. No REAPER-specific overlay,
 //! workflow, or mouse-modifier handling — those stay in reaper-input.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use input::config::KeymapConfig;
@@ -22,28 +23,51 @@ pub fn keymap_from_section_str(styx: &str) -> Result<KeymapConfig, String> {
     Ok(section_to_keymap_config(&section))
 }
 
+/// A profile, loaded: the keymap to run, and the which-key labels the
+/// keymap itself does not keep (see [`crate::bridge::which_key_labels`]).
+#[derive(Debug, Clone, Default)]
+pub struct Profile {
+    pub keymap: KeymapConfig,
+    pub labels: HashMap<Vec<input::KeyChord>, String>,
+}
+
 /// Load a [`KeymapConfig`] from a profile directory.
 ///
 /// `dir` should contain a `profile.styx` naming the section files to load, in
 /// order (later files win on key conflicts). Returns `None` if `profile.styx`
 /// cannot be read or parsed. Unreadable/unparseable section files are skipped.
 pub fn load_profile_keymap(dir: &Path) -> Option<KeymapConfig> {
-    let profile = load_profile(dir)?;
+    load_profile_dir(dir).map(|profile| profile.keymap)
+}
+
+/// [`load_profile_keymap`], with the which-key labels.
+pub fn load_profile_dir(dir: &Path) -> Option<Profile> {
+    load_profile_from(|name| std::fs::read_to_string(dir.join(name)).ok())
+}
+
+/// Load a profile from any source of its files, by file name
+/// (`profile.styx`, then each section it lists): a directory, or the
+/// copy compiled in ([`crate::embedded`]).
+pub fn load_profile_from(read: impl Fn(&str) -> Option<String>) -> Option<Profile> {
+    let profile = facet_styx::from_str::<ProfileConfig>(&read("profile.styx")?).ok()?;
 
     let mut bindings: Vec<KeybindDef> = Vec::new();
     let mut trees: Vec<WhichKeyTreeDef> = Vec::new();
     let mut wheel: Vec<WheelBindDef> = Vec::new();
 
     for filename in &profile.sections {
-        let section_path = dir.join(filename);
-        if let Some(section) = load_section(&section_path) {
+        let section = read(filename).and_then(|s| facet_styx::from_str::<SectionConfig>(&s).ok());
+        if let Some(section) = section {
             bindings.extend(section.bindings().iter().cloned());
             trees.extend(section.which_key().iter().cloned());
             wheel.extend(section.wheel().iter().cloned());
         }
     }
 
-    Some(keymap_config_from_defs(&bindings, &trees, &wheel))
+    Some(Profile {
+        keymap: keymap_config_from_defs(&bindings, &trees, &wheel),
+        labels: crate::bridge::which_key_labels(&trees),
+    })
 }
 
 fn load_profile(dir: &Path) -> Option<ProfileConfig> {
@@ -75,9 +99,4 @@ pub fn list_profiles(root: &Path) -> Vec<(String, ProfileConfig)> {
         .collect();
     profiles.sort_by(|a, b| a.1.name.to_lowercase().cmp(&b.1.name.to_lowercase()));
     profiles
-}
-
-fn load_section(path: &Path) -> Option<SectionConfig> {
-    let contents = std::fs::read_to_string(path).ok()?;
-    facet_styx::from_str::<SectionConfig>(&contents).ok()
 }

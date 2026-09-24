@@ -1,4 +1,4 @@
-//! The document model — what a `.daw` file *is*.
+//! The document model — what a `.session` file *is*.
 //!
 //! The payload types are `daw_proto`'s, deliberately: the standalone format
 //! is the on-disk form of what the `daw` facade already speaks, not a third
@@ -29,7 +29,7 @@ use daw_proto::tempo_map::TempoPoint;
 use daw_proto::track::{LaneComping, Track};
 use facet::Facet;
 
-/// The `.daw` format version. Bumped when the schema changes in a way a
+/// The `.session` format version. Bumped when the schema changes in a way a
 /// previous reader cannot absorb.
 pub const FORMAT_VERSION: u32 = 1;
 
@@ -54,7 +54,7 @@ pub struct DawDocument {
     pub format_version: u32,
     /// The project's own stable id.
     pub id: EntityId,
-    /// Display name. The file is `<name>.daw`, but the name here is
+    /// Display name. The file is `<name>.session`, but the name here is
     /// authoritative — renaming the file does not rename the project.
     pub name: String,
 
@@ -133,6 +133,74 @@ pub struct TrackNode {
     /// getter of its own — see [`daw_proto::track::LaneComping`].
     #[facet(default)]
     pub comping: LaneComping,
+    /// Signal arriving at this track from other tracks.
+    ///
+    /// Receives, not sends, because that is where the fact lives: REAPER
+    /// writes one `AUXRECV` on the **destination**, and a bus fed by
+    /// twelve stems is one list on the bus rather than twelve scattered
+    /// lines. See [`ReceiveNode`] for why the source is an id here and an
+    /// index there.
+    #[facet(default)]
+    pub receives: Vec<ReceiveNode>,
+}
+
+/// One track feeding another — REAPER's `AUXRECV`, addressed by id.
+///
+/// `AUXRECV` names its source by **track index**, which is the single
+/// worst thing in the `.rpp` format for a tool that reorders tracks:
+/// deleting track 3 silently re-points every send above it. The document
+/// therefore stores the source as an [`EntityId`] and the exporter
+/// resolves it back to an index against the track order it is actually
+/// writing.
+#[derive(Clone, Debug, PartialEq, Facet)]
+pub struct ReceiveNode {
+    /// The track the signal comes from.
+    pub source: EntityId,
+    /// Send gain, `1.0` = 0 dB.
+    pub volume: f64,
+    /// Send pan, `-1.0` hard left to `1.0` hard right.
+    pub pan: f64,
+    /// Whether the send is muted.
+    pub muted: bool,
+    /// Whether the send sums to mono.
+    pub mono: bool,
+    /// Whether the send's polarity is flipped.
+    pub phase_inverted: bool,
+    /// Where in the source's chain the signal is tapped: `0` post-fader,
+    /// `1` pre-FX, `3` pre-fader. REAPER's numbering, kept as REAPER's
+    /// numbering rather than renamed into a third vocabulary.
+    pub send_mode: i32,
+    /// Source channel selector, REAPER's packed `AUXRECV` field.
+    pub source_channels: i32,
+    /// Destination channel selector, REAPER's packed `AUXRECV` field.
+    pub dest_channels: i32,
+    /// Pan law, `-1` meaning "the project's".
+    pub pan_law: f64,
+    /// Packed MIDI channel routing, `-1` meaning "no MIDI".
+    pub midi_channels: i32,
+    /// Automation mode, `-1` meaning "the track's".
+    pub automation_mode: i32,
+}
+
+impl ReceiveNode {
+    /// A plain post-fader stereo send at unity, which is what a routing
+    /// pass that only says "feed the bus" means.
+    pub fn new(source: EntityId) -> Self {
+        Self {
+            source,
+            volume: 1.0,
+            pan: 0.0,
+            muted: false,
+            mono: false,
+            phase_inverted: false,
+            send_mode: 0,
+            source_channels: 0,
+            dest_channels: 0,
+            pan_law: -1.0,
+            midi_channels: -1,
+            automation_mode: -1,
+        }
+    }
 }
 
 /// A media item and its takes.
@@ -238,6 +306,16 @@ pub struct Provenance {
     pub source: ObjectId,
     /// Original filename, for messages and for export defaults.
     pub original_name: Option<String>,
+    /// Whether the document has diverged from `source` since it was
+    /// imported.
+    ///
+    /// This is what decides between the two export paths, and it has to
+    /// live **in the file**: an in-memory "modified" flag is cleared by
+    /// saving, so a project edited, saved and reopened would export the
+    /// bytes it was imported from and silently throw the session's work
+    /// away. Persisted here, the fact survives the reopen.
+    #[facet(default)]
+    pub edited: bool,
 }
 
 /// Formats a document can be imported from.
@@ -289,7 +367,21 @@ impl DawDocument {
     /// to find anything (see [`crate::id`]). Calling this after a structural
     /// edit, and on every load, keeps the cache honest.
     pub fn reindex(&mut self) {
+        // Send counts are a cache of the receive lists, which live on the
+        // destination. Derived here so no caller has to keep two numbers in
+        // step by hand.
+        let mut sends: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        for track_node in &self.tracks {
+            for receive in &track_node.receives {
+                *sends
+                    .entry(receive.source.as_str().to_string())
+                    .or_insert(0) += 1;
+            }
+        }
+
         for (track_pos, track_node) in self.tracks.iter_mut().enumerate() {
+            track_node.track.receive_count = track_node.receives.len() as u32;
+            track_node.track.send_count = sends.get(track_node.id.as_str()).copied().unwrap_or(0);
             track_node.track.index = track_pos as u32;
             track_node.track.guid = track_node.id.as_str().to_string();
             track_node.track.parent_guid = track_node
@@ -329,6 +421,67 @@ impl DawDocument {
         }
     }
 
+    /// Re-derive REAPER's folder encoding from the `parent` links.
+    ///
+    /// `parent` is the document's truth; `is_folder` and `folder_depth`
+    /// are the `.rpp` spelling of it — `ISBUS <opens a folder> <levels
+    /// closed after this track>`. Anything that changes the hierarchy has
+    /// to refresh the spelling, or the exported project comes back flat.
+    ///
+    /// Deliberately **not** called from [`reindex`](Self::reindex): a
+    /// document loaded from a file must be left with the encoding its
+    /// source wrote, so an untouched export stays byte-identical even on a
+    /// project REAPER itself spelled oddly. The structural edits in
+    /// [`crate::DocumentEdit`] call it, because they are exactly the
+    /// operations that invalidate it.
+    ///
+    /// Assumes the arrange order is a depth-first walk of the hierarchy,
+    /// which is the only order `.rpp` can express in the first place.
+    pub fn rebuild_folder_encoding(&mut self) {
+        let parents: std::collections::HashMap<String, Option<String>> = self
+            .tracks
+            .iter()
+            .map(|node| {
+                (
+                    node.id.as_str().to_string(),
+                    node.parent.as_ref().map(|p| p.as_str().to_string()),
+                )
+            })
+            .collect();
+
+        // Ancestor count, guarded against a cycle a hand-edited file could
+        // carry: `set_parent` refuses to make one, but nothing stops a text
+        // editor, and an unguarded walk would hang rather than complain.
+        let depth_of = |id: &str| -> i32 {
+            let mut depth = 0;
+            let mut cursor = parents.get(id).cloned().flatten();
+            while let Some(parent) = cursor {
+                depth += 1;
+                if depth > self.tracks.len() as i32 {
+                    break;
+                }
+                cursor = parents.get(&parent).cloned().flatten();
+            }
+            depth
+        };
+
+        let depths: Vec<i32> = self
+            .tracks
+            .iter()
+            .map(|node| depth_of(node.id.as_str()))
+            .collect();
+
+        for position in 0..self.tracks.len() {
+            // The depth change REAPER writes is simply "how much deeper is
+            // the next row" — positive opens a folder, negative closes as
+            // many levels as it is deep. Past the end everything closes.
+            let next = depths.get(position + 1).copied().unwrap_or(0);
+            let change = next - depths[position];
+            self.tracks[position].track.folder_depth = change;
+            self.tracks[position].track.is_folder = change > 0;
+        }
+    }
+
     /// Check the format's structural invariants, returning every violation
     /// rather than the first.
     ///
@@ -364,6 +517,17 @@ impl DawDocument {
                     "track {} names parent {parent}, which is not in the document",
                     track_node.id
                 ));
+            }
+            for receive in &track_node.receives {
+                // A receive from a track that is not here cannot be given a
+                // `AUXRECV` index on export, and silently dropping the send
+                // is how a bus goes quiet without anyone noticing.
+                if !track_ids.contains(receive.source.as_str()) {
+                    problems.push(format!(
+                        "track {} receives from {}, which is not in the document",
+                        track_node.id, receive.source
+                    ));
+                }
             }
 
             for item_node in &track_node.items {

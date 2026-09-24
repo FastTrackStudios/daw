@@ -70,23 +70,18 @@ impl Markers for Standalone {
     }
 
     fn add(&self, project: ProjectContext, position: f64, name: &str) -> DawResult<u32> {
-        let guid = resolve_project(self, &project)
-            .ok_or_else(|| DawError::not_found("Project", "current"))?;
-        let (id, marker) = self.with_project_mut(&guid, |p| {
-            let id = p.next_marker_id;
-            p.next_marker_id += 1;
-            let marker = Marker {
-                id: Some(id),
-                ..Marker::new(
-                    Position::from_time(PositionInSeconds::from_seconds(position)),
-                    name.to_string(),
-                )
-            };
-            p.markers.insert(id, marker.clone());
-            (id, marker)
-        })?;
-        publish_marker_event(self, &guid, MarkerEvent::Added(marker));
-        Ok(id)
+        insert_marker(self, &project, crate::new_braced_guid(), position, name)
+    }
+
+    fn add_with_guid(
+        &self,
+        project: ProjectContext,
+        guid: &str,
+        position: f64,
+        name: &str,
+    ) -> DawResult<u32> {
+        crate::check_new_guid("Marker", guid)?;
+        insert_marker(self, &project, guid.to_string(), position, name)
     }
 
     fn remove(&self, project: ProjectContext, id: u32) -> DawResult<()> {
@@ -140,7 +135,7 @@ impl Markers for Standalone {
                 .markers
                 .get_mut(&id)
                 .ok_or_else(|| DawError::not_found("Marker", &id.to_string()))?;
-            m.color = if color == 0 { None } else { Some(color) };
+            m.color = crate::color_from_service(color);
             Ok::<_, DawError>(m.clone())
         })??;
         publish_marker_event(self, &guid, MarkerEvent::Changed(marker));
@@ -161,6 +156,44 @@ impl Markers for Standalone {
         publish_marker_event(self, &guid, MarkerEvent::Changed(marker));
         Ok(())
     }
+}
+
+/// Make a marker carrying `guid` — the body of both `add` and
+/// `add_with_guid`. A guid any marker or region of the project already
+/// has is refused: the two share one list in the project file, where the
+/// GUID is what a save matches them by.
+fn insert_marker(
+    daw: &Standalone,
+    project: &ProjectContext,
+    guid: String,
+    position: f64,
+    name: &str,
+) -> DawResult<u32> {
+    let project_guid =
+        resolve_project(daw, project).ok_or_else(|| DawError::not_found("Project", "current"))?;
+    let (id, marker) = daw.with_project_mut(&project_guid, |p| {
+        if crate::sync::project::marker_or_region_guid_taken(p, &guid) {
+            return Err(DawError::already_exists("Marker", &guid));
+        }
+        let id = p.next_marker_id;
+        p.next_marker_id += 1;
+        let marker = Marker {
+            id: Some(id),
+            guid: Some(guid),
+            lane: crate::sync::project::default_lane(
+                &p.ruler_lanes,
+                crate::sync::RulerLane::DEFAULT_MARKER,
+            ),
+            ..Marker::new(
+                Position::from_time(PositionInSeconds::from_seconds(position)),
+                name.to_string(),
+            )
+        };
+        p.markers.insert(id, marker.clone());
+        Ok((id, marker))
+    })??;
+    publish_marker_event(daw, &project_guid, MarkerEvent::Added(marker));
+    Ok(id)
 }
 
 /// Map a `ProjectContext` onto a concrete guid the standalone state

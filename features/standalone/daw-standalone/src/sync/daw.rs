@@ -263,12 +263,34 @@ impl Default for TrackExt {
     }
 }
 
+/// One ruler lane (REAPER 7.62+): a named row markers and regions sit on.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RulerLane {
+    pub name: String,
+    /// REAPER's lane flags: [`RulerLane::DEFAULT_REGION`] and
+    /// [`RulerLane::DEFAULT_MARKER`] steer where a fresh region / marker
+    /// lands.
+    pub flags: u32,
+}
+
+impl RulerLane {
+    /// The lane new regions land on.
+    pub const DEFAULT_REGION: u32 = 8;
+    /// The lane new markers land on.
+    pub const DEFAULT_MARKER: u32 = 4;
+}
+
 /// Per-project in-memory state.
 pub struct ProjectState {
     pub info: ProjectInfo,
     pub transport: TransportState,
     pub regions: BTreeMap<u32, Region>,
     pub markers: BTreeMap<u32, Marker>,
+    /// Ruler lanes by **0-based** index — the numbering REAPER's API uses
+    /// for `RULER_LANE_NAME:N` and a marker's `I_LANENUMBER` (the `.rpp`
+    /// file is 1-based; the loader converts). Marker and region `lane`
+    /// fields index this.
+    pub ruler_lanes: BTreeMap<u32, RulerLane>,
     pub tempo_points: Vec<TempoPoint>,
     pub tracks: Vec<Track>,
     /// Per-track extended properties (channel count, record input) keyed
@@ -381,6 +403,7 @@ impl ProjectState {
             transport: TransportState::new(),
             regions: BTreeMap::new(),
             markers: BTreeMap::new(),
+            ruler_lanes: BTreeMap::new(),
             tempo_points: Vec::new(),
             tracks: Vec::new(),
             track_ext: HashMap::new(),
@@ -608,6 +631,16 @@ pub struct Standalone {
     pub(crate) meter_events: architect::PubSub<daw_proto::MeterFrame>,
     /// Whether the meter pump has been spawned (once per process).
     pub(crate) meter_pump_started: Arc<std::sync::atomic::AtomicBool>,
+    /// Stamped-position stream hub (`TransportSyncStreamSource`). A
+    /// pump (spawned lazily by the first subscription) reads every
+    /// project transport's per-buffer sync snapshot and publishes the
+    /// ones a follower needs — every change, and a keepalive between;
+    /// the architect `#[subscribe] fn positions` stream layer fans them
+    /// out. Subscribers filter by `project_guid`.
+    pub(crate) sync_positions: architect::PubSub<daw_proto::StampedPosition>,
+    /// Whether the sync-position pump has been spawned (once per
+    /// backend).
+    pub(crate) sync_pump_started: Arc<std::sync::atomic::AtomicBool>,
     /// Producer end of the live / programmatic MIDI ring. Installed by
     /// `AudioEngine::with_project_prefs` (the consumer goes to the
     /// renderer via `set_live_midi`). `push_note_on`/`_off`/`_cc` push
@@ -656,6 +689,8 @@ impl Standalone {
             meters: Arc::new(Mutex::new(crate::metering::Meters::empty())),
             meter_events: architect::PubSub::sliding(64),
             meter_pump_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sync_positions: architect::PubSub::sliding(64),
+            sync_pump_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             #[cfg(feature = "audio")]
             live_midi_tx: Arc::new(Mutex::new(None)),
             #[cfg(all(target_arch = "wasm32", any(feature = "decode", feature = "audio")))]

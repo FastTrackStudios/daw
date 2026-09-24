@@ -127,17 +127,33 @@ impl ObjectStore {
                 continue;
             }
             let name = entry.file_name().to_string_lossy().to_string();
-            let bytes = std::fs::read(entry.path())?;
-            let actual = ObjectId::of(&bytes);
-            if actual.as_str() != name {
-                return Err(DawError::MissingObject {
-                    id: name,
-                    referenced_as: format!("objects/ — content hashes to {actual} instead"),
-                });
-            }
-            store.blobs.insert(actual, bytes);
+            store.insert_named(&name, std::fs::read(entry.path())?)?;
         }
         Ok(store)
+    }
+
+    /// Objects that arrived by their file names from somewhere other than
+    /// a disk (a share link, a peer) — verified as [`Self::read_dir`] does.
+    pub fn from_named(objects: impl IntoIterator<Item = (String, Vec<u8>)>) -> DawResult<Self> {
+        let mut store = Self::new();
+        for (name, bytes) in objects {
+            store.insert_named(&name, bytes)?;
+        }
+        Ok(store)
+    }
+
+    /// Hold `bytes` found under the object file name `name`, refusing a
+    /// blob whose content does not hash to it.
+    fn insert_named(&mut self, name: &str, bytes: Vec<u8>) -> DawResult<()> {
+        let actual = ObjectId::of(&bytes);
+        if actual.as_str() != name {
+            return Err(DawError::MissingObject {
+                id: name.to_owned(),
+                referenced_as: format!("objects/ — content hashes to {actual} instead"),
+            });
+        }
+        self.blobs.insert(actual, bytes);
+        Ok(())
     }
 }
 

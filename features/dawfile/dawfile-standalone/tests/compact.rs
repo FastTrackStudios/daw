@@ -30,6 +30,7 @@ fn track_with_fx(fx: dawfile_standalone::id::ObjectId) -> dawfile_standalone::do
         fx_chain: Some(fx),
         input_fx_chain: None,
         comping: daw_proto::track::LaneComping::default(),
+        receives: Vec::new(),
     }
 }
 

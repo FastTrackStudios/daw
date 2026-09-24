@@ -21,11 +21,13 @@
 //! See module-level docs in each submodule for the algorithm
 //! references (mostly distilled from Firewheel).
 
+pub mod block;
 pub mod bundle;
 pub mod clock;
 pub mod engine;
 pub mod tempo_map;
 
+pub use block::{BlockPlan, BlockSegment, ScheduledLocate};
 pub use bundle::{TransportBundle, spawn_subscriber_pump};
 pub use clock::{InstantMusical, InstantSamples, InstantSeconds, SampleClock};
 pub use engine::{

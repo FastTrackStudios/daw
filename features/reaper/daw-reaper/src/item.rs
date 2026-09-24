@@ -749,6 +749,51 @@ impl Items for crate::Reaper {
         Some(item_guid_string(Reaper::get().medium_reaper(), item))
     }
 
+    fn add_item_with_guid(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        guid: &str,
+        span: daw_proto::ItemSpan,
+    ) -> daw_proto::DawResult<String> {
+        use crate::track::{guid_value, reaper_guid};
+        use daw_proto::DawError;
+        let (wanted, spelled) = reaper_guid("Item", guid)?;
+        let proj = resolve_project(&project).unwrap_or_else(|| Reaper::get().current_project());
+        let reaper_track = resolve_track(&proj, &track)
+            .ok_or_else(|| DawError::not_found("Track", &format!("{track:?}")))?;
+        let medium = Reaper::get().medium_reaper();
+        let ctx = proj.context();
+        let taken = (0..medium.count_media_items(ctx))
+            .filter_map(|i| medium.get_media_item(ctx, i))
+            .any(|item| guid_value(&item_guid_string(medium, item)) == Some(wanted));
+        if taken {
+            return Err(DawError::already_exists("Item", guid));
+        }
+        let low = medium.low();
+        let track_ptr = reaper_track
+            .raw()
+            .map_err(|e| DawError::operation_failed(format!("track invalid: {e:?}")))?;
+        let start = span.position.as_seconds();
+        let end = start + span.length.as_seconds();
+        let item = crate::safe_wrappers::midi::create_new_midi_item(low, track_ptr, start, end)
+            .ok_or_else(|| DawError::operation_failed("CreateNewMIDIItemInProj failed"))?;
+        item_sw::set_item_guid(low, item, &spelled);
+        // Read back rather than trust the setter: an item REAPER did not
+        // re-key must not be left behind under a guid nobody asked for.
+        let stored = item_guid_string(medium, item);
+        if guid_value(&stored) != Some(wanted) {
+            if let Some(track) = item_sw::get_media_item_track(medium, item) {
+                item_sw::delete_track_media_item(medium, track, item);
+            }
+            return Err(DawError::operation_failed(format!(
+                "REAPER did not take item GUID {guid}"
+            )));
+        }
+        medium.update_timeline();
+        Ok(stored)
+    }
+
     fn delete_item(&self, _project: ProjectContext, item: ItemRef) -> daw_proto::DawResult<()> {
         let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
             .ok_or_else(|| item_not_found(&item))?;

@@ -61,6 +61,18 @@ pub mod budget;
 pub mod cache;
 #[cfg(feature = "engine-core")]
 pub mod flac_index;
+/// Which bytes of an Ogg proxy hold which second — what streaming it from
+/// elsewhere fetches by.
+#[cfg(feature = "engine-core")]
+pub mod ogg_index;
+/// An Ogg Vorbis stream decoded a window at a time — the session's
+/// proxies, streamed (see the module docs).
+#[cfg(feature = "engine-core")]
+pub mod ogg_stream;
+/// A file that arrives in pieces, readable where it has landed — the
+/// bytes of a proxy streamed from elsewhere.
+#[cfg(feature = "engine-core")]
+pub mod sparse;
 #[cfg(feature = "engine-core")]
 pub mod stream;
 #[cfg(feature = "engine-native")]
@@ -78,8 +90,8 @@ pub use probe::{probe, AudioInfo, WavFormat};
 
 #[cfg(feature = "load")]
 pub use load::{
-    decode_bytes, load_audio, load_audio_async, load_mono_f32, load_planar_f32, AudioData,
-    LoadedAudio, ResampleQuality,
+    decode_bytes, decode_bytes_at, load_audio, load_audio_async, load_mono_f32, load_planar_f32,
+    AudioData, LoadedAudio, ResampleQuality,
 };
 #[cfg(feature = "mapped")]
 pub use mapped::{PcmFile, PcmFormat};

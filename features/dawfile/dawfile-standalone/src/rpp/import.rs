@@ -1,9 +1,9 @@
-//! `.rpp` → `.daw`.
+//! `.rpp` → `.session`.
 
 use super::*;
 use crate::document::{
-    DawDocument, EnvelopeNode, ItemNode, MarkerNode, Provenance, SourceFormat, SourceRef, TakeNode,
-    TrackNode,
+    DawDocument, EnvelopeNode, ItemNode, MarkerNode, Provenance, ReceiveNode, SourceFormat,
+    SourceRef, TakeNode, TrackNode,
 };
 use crate::error::{DawError, DawResult};
 use crate::id::EntityId;
@@ -57,7 +57,7 @@ impl ImportReport {
     }
 }
 
-/// Import REAPER project text into a `.daw` document.
+/// Import REAPER project text into a `.session` document.
 ///
 /// The original bytes go into `store` verbatim, and the returned document
 /// points at them through [`Provenance`]. That is what makes the round trip
@@ -77,6 +77,7 @@ pub fn from_rpp(
         format: SourceFormat::Rpp,
         source: store.put(text.as_bytes().to_vec()),
         original_name: Some(name),
+        edited: false,
     });
 
     read_project(&root, &mut document, &mut report, store);
@@ -97,6 +98,10 @@ fn read_project(
     // never by "the track above".
     let mut folder_stack: Vec<EntityId> = Vec::new();
     let mut default_time_signature = TimeSignature::new(4, 4);
+    // `AUXRECV` names its source by track index, and a track can receive
+    // from one that appears later in the file — so the lines are collected
+    // here and resolved to ids once the whole track list is known.
+    let mut pending_receives: Vec<(usize, Vec<Vec<String>>)> = Vec::new();
 
     for child in &root.children {
         match child {
@@ -113,8 +118,8 @@ fn read_project(
                     }
                 }
                 "MARKER" => {
-                    if let Some(marker) = read_marker(node) {
-                        merge_marker(document, marker);
+                    if let Some(marker) = read_marker(&tokens(node)) {
+                        merge_marker(&mut document.markers, marker);
                     }
                 }
                 other => report.note("project", other),
@@ -126,8 +131,11 @@ fn read_project(
                         document.tempo_map = read_tempo_map(chunk, default_time_signature)
                     }
                     "TRACK" => {
-                        let track_node =
+                        let (track_node, receives) =
                             read_track(chunk, &mut folder_stack, report, store, document);
+                        if !receives.is_empty() {
+                            pending_receives.push((document.tracks.len(), receives));
+                        }
                         document.tracks.push(track_node);
                     }
                     other => report.note("project", other),
@@ -135,6 +143,55 @@ fn read_project(
             }
         }
     }
+
+    resolve_receives(document, pending_receives);
+}
+
+/// Turn each `AUXRECV`'s source **index** into the source track's id.
+///
+/// A line naming an index no track occupies is dropped rather than
+/// guessed at: the verbatim source still holds it, and inventing a
+/// destination for a send is worse than not having one.
+fn resolve_receives(document: &mut DawDocument, pending: Vec<(usize, Vec<Vec<String>>)>) {
+    let ids: Vec<EntityId> = document.tracks.iter().map(|node| node.id.clone()).collect();
+    for (position, lines) in pending {
+        let receives: Vec<ReceiveNode> = lines
+            .iter()
+            .filter_map(|tokens| read_receive(tokens, &ids))
+            .collect();
+        if let Some(node) = document.tracks.get_mut(position) {
+            node.receives = receives;
+        }
+    }
+}
+
+/// `AUXRECV <source index> <mode> <volume> <pan> <mute> <mono> <phase>
+/// <source chans> <dest chans> <pan law> <midi chans> <automation mode>`.
+pub(crate) fn read_receive(tokens: &[String], ids: &[EntityId]) -> Option<ReceiveNode> {
+    let number = |index: usize| -> Option<f64> { tokens.get(index)?.parse::<f64>().ok() };
+    let integer = |index: usize| number(index).map(|value| value as i32);
+    let flag = |index: usize| number(index).map(|value| value != 0.0);
+
+    let source_index = number(1)?;
+    if source_index < 0.0 {
+        return None;
+    }
+    let source = ids.get(source_index as usize)?.clone();
+
+    Some(ReceiveNode {
+        source,
+        send_mode: integer(2).unwrap_or(0),
+        volume: number(3).unwrap_or(1.0),
+        pan: number(4).unwrap_or(0.0),
+        muted: flag(5).unwrap_or(false),
+        mono: flag(6).unwrap_or(false),
+        phase_inverted: flag(7).unwrap_or(false),
+        source_channels: integer(8).unwrap_or(0),
+        dest_channels: integer(9).unwrap_or(0),
+        pan_law: number(10).unwrap_or(-1.0),
+        midi_channels: integer(11).unwrap_or(-1),
+        automation_mode: integer(12).unwrap_or(-1),
+    })
 }
 
 /// `MARKER id position name flags color locked ? guid lane`.
@@ -144,16 +201,20 @@ fn read_project(
 /// line sharing the first's id and carrying the end position. Reading field 4
 /// as "is region" happens to work on projects where every region is flagged,
 /// and silently mis-classifies everything else.
-fn read_marker(node: &RNode) -> Option<(i64, MarkerNode)> {
-    let id = param_i64(node, 1)?;
-    let position = param_f64(node, 2)?;
-    let name = param(node, 3).unwrap_or_default();
-    let color = param_i64(node, 5).and_then(|raw| (raw != 0).then_some(raw as u32));
-    let guid = param(node, 8).filter(|token| token.starts_with('{'));
+pub(crate) fn read_marker(tokens: &[String]) -> Option<(i64, MarkerNode)> {
+    let text = |index: usize| tokens.get(index).cloned();
+    let number = |index: usize| text(index).and_then(|token| token.parse::<f64>().ok());
+    let integer = |index: usize| number(index).map(|value| value as i64);
+
+    let id = integer(1)?;
+    let position = number(2)?;
+    let name = text(3).unwrap_or_default();
+    let color = integer(5).and_then(|raw| (raw != 0).then_some(raw as u32));
+    let guid = text(8).filter(|token| token.starts_with('{'));
     // Field 9 is the ruler lane on v7.62+. Older projects put other things
     // here, so anything outside a plausible lane range is left unread rather
     // than turned into a lane the project does not have.
-    let lane = param_i64(node, 9).and_then(|lane| (0..256).contains(&lane).then_some(lane as u32));
+    let lane = integer(9).and_then(|lane| (0..256).contains(&lane).then_some(lane as u32));
 
     let entity_id = guid
         .clone()
@@ -177,10 +238,25 @@ fn read_marker(node: &RNode) -> Option<(i64, MarkerNode)> {
     ))
 }
 
-/// Fold a `MARKER` line into the document, joining a region's two lines.
-fn merge_marker(document: &mut DawDocument, (id, node): (i64, MarkerNode)) {
-    if let Some(existing) = document
-        .markers
+/// Read every `MARKER` line of a project into marker entities.
+///
+/// Shared with the exporter, which uses it to decide whether the lines in
+/// the file already *mean* what the document says — the same rule the lane
+/// and receive patchers follow, and the only way "unchanged" can mean the
+/// same thing on both sides.
+pub(crate) fn read_markers(lines: &[Vec<String>]) -> Vec<MarkerNode> {
+    let mut markers = Vec::new();
+    for line in lines {
+        if let Some(marker) = read_marker(line) {
+            merge_marker(&mut markers, marker);
+        }
+    }
+    markers
+}
+
+/// Fold a `MARKER` line into the list, joining a region's two lines.
+fn merge_marker(markers: &mut Vec<MarkerNode>, (id, node): (i64, MarkerNode)) {
+    if let Some(existing) = markers
         .iter_mut()
         .find(|existing| existing.marker.id == Some(id as u32))
     {
@@ -190,11 +266,21 @@ fn merge_marker(document: &mut DawDocument, (id, node): (i64, MarkerNode)) {
         existing.region_end_seconds = Some(node.marker.position_seconds());
         return;
     }
-    document.markers.push(node);
+    markers.push(node);
+}
+
+/// The time signature the project's `TEMPO` line declares, which is the
+/// one in force until a tempo point changes it.
+pub(crate) fn project_time_signature(root: &RChunk) -> TimeSignature {
+    child_node(root, "TEMPO")
+        .and_then(|node| Some((param_i64(node, 2)?, param_i64(node, 3)?)))
+        .filter(|(numerator, denominator)| *numerator > 0 && *denominator > 0)
+        .map(|(numerator, denominator)| TimeSignature::new(numerator as u32, denominator as u32))
+        .unwrap_or_else(|| TimeSignature::new(4, 4))
 }
 
 /// `<TEMPOENVEX>` `PT position bpm shape [sig] [selected] [...]`.
-fn read_tempo_map(chunk: &RChunk, default_signature: TimeSignature) -> Vec<TempoPoint> {
+pub(crate) fn read_tempo_map(chunk: &RChunk, default_signature: TimeSignature) -> Vec<TempoPoint> {
     let mut points = Vec::new();
     let mut running_signature = default_signature;
 
@@ -255,13 +341,15 @@ fn group_flag_fields(node: &RNode) -> Vec<u32> {
         .collect()
 }
 
+/// One `<TRACK>` chunk, plus its raw `AUXRECV` lines — which cannot be
+/// resolved to ids until every track has been read.
 fn read_track(
     chunk: &RChunk,
     folder_stack: &mut Vec<EntityId>,
     report: &mut ImportReport,
     store: &mut ObjectStore,
     document: &DawDocument,
-) -> TrackNode {
+) -> (TrackNode, Vec<Vec<String>>) {
     // The chunk header carries the GUID on modern projects; `TRACKID` is the
     // fallback, and a derived id the last resort so an ancient project still
     // gets *stable* ids rather than positional ones.
@@ -284,6 +372,7 @@ fn read_track(
     let mut folder_depth_change = 0i64;
     let mut group_flags_low: Vec<u32> = Vec::new();
     let mut group_flags_high: Vec<u32> = Vec::new();
+    let mut receive_lines: Vec<Vec<String>> = Vec::new();
 
     for child in &chunk.children {
         match child {
@@ -341,6 +430,7 @@ fn read_track(
                     lanes.item_lanes = param_i64(node, 1).filter(|&n| n >= 0).map(|n| n as u32)
                 }
                 "LINKEDLANE" => comping_lines.push(tokens(node)),
+                "AUXRECV" => receive_lines.push(tokens(node)),
                 "NCHAN" | "TRACKID" | "BEAT" | "PERF" => {}
                 other => report.note("track", other),
             },
@@ -398,16 +488,21 @@ fn read_track(
         }
     }
 
-    TrackNode {
-        id,
-        track,
-        parent,
-        envelopes,
-        items,
-        fx_chain,
-        input_fx_chain,
-        comping,
-    }
+    (
+        TrackNode {
+            id,
+            track,
+            parent,
+            envelopes,
+            items,
+            fx_chain,
+            input_fx_chain,
+            comping,
+            // Filled in by `resolve_receives` once every track id is known.
+            receives: Vec::new(),
+        },
+        receive_lines,
+    )
 }
 
 /// One `<ITEM>` chunk, including its flat run of takes.
@@ -728,7 +823,7 @@ fn read_envelope(chunk: &RChunk, owner: &EntityId, report: &mut ImportReport) ->
             automation_mode: AutomationMode::TrimRead,
             in_own_lane,
             lane_height,
-            // Automation items are not modelled by the `.daw` document
+            // Automation items are not modelled by the `.session` document
             // yet — the count stays honest at 0 rather than guessing.
             automation_item_count: 0,
             point_count: points.len() as u32,

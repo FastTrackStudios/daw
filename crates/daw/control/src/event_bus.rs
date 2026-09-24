@@ -106,39 +106,9 @@ fn admits(filter: &BusFilter, ev: &DawEvent) -> bool {
         // Never a consumer's business: `subscribe` consumes it.
         DawEvent::Attached => false,
         DawEvent::Project(_) => filter.projects,
-        DawEvent::Item(e) => filter.items && !filter.project_rejects(item_guid(e)),
-        DawEvent::Take(e) => filter.takes && !filter.project_rejects(take_guid(e)),
+        DawEvent::Item(e) => filter.items && !filter.project_rejects(e.project_guid()),
+        DawEvent::Take(e) => filter.takes && !filter.project_rejects(e.project_guid()),
         DawEvent::Routing(e) => filter.routing && !filter.project_rejects(routing_guid(e)),
-    }
-}
-
-/// Extract the project guid an [`ItemEvent`] applies to.
-fn item_guid(e: &daw_proto::item::ItemEvent) -> &str {
-    use daw_proto::item::ItemEvent::*;
-    match e {
-        Created { project_guid, .. }
-        | Deleted { project_guid, .. }
-        | PositionChanged { project_guid, .. }
-        | LengthChanged { project_guid, .. }
-        | MovedToTrack { project_guid, .. }
-        | MuteChanged { project_guid, .. }
-        | SelectionChanged { project_guid, .. }
-        | VolumeChanged { project_guid, .. }
-        | ActiveTakeChanged { project_guid, .. } => project_guid,
-    }
-}
-
-/// Extract the project guid a [`TakeEvent`] applies to.
-fn take_guid(e: &daw_proto::item::TakeEvent) -> &str {
-    use daw_proto::item::TakeEvent::*;
-    match e {
-        Created { project_guid, .. }
-        | Deleted { project_guid, .. }
-        | NameChanged { project_guid, .. }
-        | PitchChanged { project_guid, .. }
-        | PlayRateChanged { project_guid, .. }
-        | VolumeChanged { project_guid, .. }
-        | SourceChanged { project_guid, .. } => project_guid,
     }
 }
 

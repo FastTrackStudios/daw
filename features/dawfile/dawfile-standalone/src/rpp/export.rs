@@ -1,4 +1,4 @@
-//! `.daw` → `.rpp`.
+//! `.session` → `.rpp`.
 //!
 //! Export is a **patch**, not a regeneration. The original project text is
 //! re-parsed and only the values the document actually changed are written
@@ -67,6 +67,12 @@ pub fn to_rpp_patched(
 
     let mut report = ExportReport::default();
     patch_project(&mut root, document, &mut report);
+    // Everything below is project-scoped and has to see the final track
+    // list: `AUXRECV` names its source by position, so a send cannot be
+    // numbered until the adds and removes above have settled.
+    patch_receives(&mut root, document, &mut report);
+    patch_tempo_map(&mut root, document, &mut report);
+    patch_markers(&mut root, document, &mut report);
     sources::write_missing_sources(&mut root, document, store, &mut report)?;
 
     let mut rendered =
@@ -154,6 +160,196 @@ fn patch_project(root: &mut RChunk, document: &DawDocument, report: &mut ExportR
             .insert(insert_at, RNodeTree::Chunk(build_track(track_node)));
         insert_at += 1;
     }
+
+    reorder_tracks(root, document, report);
+}
+
+/// Put the `<TRACK>` chunks into the document's arrange order.
+///
+/// Arrange order is data — it is what the arrange view shows, and on a
+/// `.rpp` it is also what the folder encoding means, since `ISBUS` says
+/// "how much deeper is the next row". A track moved in the editor that
+/// stayed put in the file would export a hierarchy that does not match
+/// the one the document describes.
+///
+/// Only the track chunks move, and only into each other's slots: every
+/// other project-level line stays exactly where it was. A no-op when the
+/// orders already agree, so an unedited export stays byte-identical.
+fn reorder_tracks(root: &mut RChunk, document: &DawDocument, report: &mut ExportReport) {
+    let wanted: Vec<&str> = document
+        .tracks
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect();
+    let rank = |guid: &str| wanted.iter().position(|id| *id == guid);
+
+    // Only chunks the document knows about take part. One it does not
+    // recognise — a track with no readable GUID — keeps its slot rather
+    // than being sorted to an arbitrary end.
+    let slots: Vec<usize> = root
+        .children
+        .iter()
+        .enumerate()
+        .filter(|(_, child)| match child {
+            RNodeTree::Chunk(chunk) if chunk.name().as_deref() == Some("TRACK") => {
+                track_guid(chunk).and_then(|guid| rank(&guid)).is_some()
+            }
+            _ => false,
+        })
+        .map(|(position, _)| position)
+        .collect();
+
+    let current: Vec<usize> = slots
+        .iter()
+        .filter_map(|&position| match &root.children[position] {
+            RNodeTree::Chunk(chunk) => track_guid(chunk).and_then(|guid| rank(&guid)),
+            _ => None,
+        })
+        .collect();
+    if current.windows(2).all(|pair| pair[0] < pair[1]) {
+        return;
+    }
+
+    report.changes.push("track order: rearranged".to_string());
+    let mut taken: Vec<(usize, RNodeTree)> = current
+        .iter()
+        .copied()
+        .zip(
+            slots
+                .iter()
+                .map(|&position| root.children[position].clone()),
+        )
+        .collect();
+    taken.sort_by_key(|(rank, _)| *rank);
+    for (&position, (_, chunk)) in slots.iter().zip(taken) {
+        root.children[position] = chunk;
+    }
+}
+
+// ── routing ────────────────────────────────────────────────────────────
+
+/// Bring every track's `AUXRECV` lines in line with the document.
+///
+/// This is the one place the format's "never reference by position" rule
+/// has to be un-done, because `.rpp` gives no alternative: `AUXRECV` names
+/// its source by **track index**. Resolving ids to indices here — against
+/// the track order actually being written, after adds and removes — is
+/// what keeps a send pointing at the track it was drawn to rather than at
+/// whatever now sits in that row.
+fn patch_receives(root: &mut RChunk, document: &DawDocument, report: &mut ExportReport) {
+    const RECEIVE_KEY: &str = "AUXRECV";
+    // The track order of the file being written, which is what REAPER will
+    // count when it reads the indices back.
+    let order: Vec<String> = root
+        .children
+        .iter()
+        .filter_map(|child| match child {
+            RNodeTree::Chunk(chunk) if chunk.name().as_deref() == Some("TRACK") => {
+                track_guid(chunk)
+            }
+            _ => None,
+        })
+        .collect();
+    let index_of = |guid: &str| order.iter().position(|candidate| candidate == guid);
+
+    for child in &mut root.children {
+        let RNodeTree::Chunk(chunk) = child else {
+            continue;
+        };
+        if chunk.name().as_deref() != Some("TRACK") {
+            continue;
+        }
+        let Some(node) = track_guid(chunk).and_then(|guid| document.track_by_guid(&guid)) else {
+            continue;
+        };
+
+        let wanted: Vec<Vec<String>> = node
+            .receives
+            .iter()
+            .filter_map(|receive| {
+                // A send whose source is not being written has no index to
+                // point at. `check_invariants` calls that out; here the
+                // honest thing is to drop the line rather than aim it at
+                // an unrelated track.
+                let source = index_of(receive.source.as_str())?;
+                Some(vec![
+                    RECEIVE_KEY.to_string(),
+                    source.to_string(),
+                    receive.send_mode.to_string(),
+                    format_f64(receive.volume),
+                    format_f64(receive.pan),
+                    if receive.muted { "1" } else { "0" }.to_string(),
+                    if receive.mono { "1" } else { "0" }.to_string(),
+                    if receive.phase_inverted { "1" } else { "0" }.to_string(),
+                    receive.source_channels.to_string(),
+                    receive.dest_channels.to_string(),
+                    format_f64(receive.pan_law),
+                    receive.midi_channels.to_string(),
+                    receive.automation_mode.to_string(),
+                ])
+            })
+            .collect();
+
+        let is_receive =
+            |child: &RNodeTree| matches!(child, RNodeTree::Node(l) if key(l) == RECEIVE_KEY);
+        let existing: Vec<Vec<String>> = chunk
+            .children
+            .iter()
+            .filter_map(|child| match child {
+                RNodeTree::Node(line) if is_receive(child) => Some(tokens(line)),
+                _ => None,
+            })
+            .collect();
+
+        // Compare by meaning, not by text. REAPER writes fields this
+        // schema does not model — a pan law of `-1:U`, a trailing `''` —
+        // and re-emitting a line that already says the right thing would
+        // silently normalise them away on every save.
+        let order_ids: Vec<crate::id::EntityId> =
+            order.iter().map(crate::id::EntityId::adopt).collect();
+        let decoded: Vec<crate::document::ReceiveNode> = existing
+            .iter()
+            .filter_map(|line| super::import::read_receive(line, &order_ids))
+            .collect();
+        if decoded == node.receives {
+            continue;
+        }
+        if existing == wanted {
+            continue;
+        }
+        report.changes.push(format!(
+            "track {} receives: {} line(s) \u{2192} {} line(s)",
+            node.id,
+            existing.len(),
+            wanted.len()
+        ));
+
+        // REAPER writes the receives last in the track's line run, after
+        // `MAINSEND`, and always before the nested chunks.
+        let insert_at = chunk
+            .children
+            .iter()
+            .position(is_receive)
+            .or_else(|| {
+                chunk
+                    .children
+                    .iter()
+                    .rposition(|child| matches!(child, RNodeTree::Node(l) if key(l) == "MAINSEND"))
+                    .map(|position| position + 1)
+            })
+            .or_else(|| {
+                chunk
+                    .children
+                    .iter()
+                    .position(|child| matches!(child, RNodeTree::Chunk(_)))
+            })
+            .unwrap_or(chunk.children.len());
+        chunk.children.retain(|child| !is_receive(child));
+        for (offset, line) in wanted.iter().enumerate() {
+            let refs: Vec<&str> = line.iter().map(String::as_str).collect();
+            chunk.children.insert(insert_at + offset, node_line(&refs));
+        }
+    }
 }
 
 /// A track chunk's stable id: the header GUID, or `TRACKID` on projects old
@@ -197,6 +393,31 @@ fn patch_track(chunk: &mut RChunk, node: &TrackNode, report: &mut ExportReport) 
                 }
                 "IPHASE" => set_bool(line, 1, track.phase_inverted, &label, "IPHASE", report),
                 "SEL" => set_bool(line, 1, track.selected, &label, "SEL", report),
+                // The folder tree. `parent` is the document's truth and
+                // `ISBUS` is its `.rpp` spelling — without this a track
+                // re-parented in the editor exports back flat, which is
+                // most of what a session's organisation pass does.
+                //
+                // Compared by meaning rather than by token: field 1 is
+                // not a bool. REAPER also writes `2` there (the last
+                // track inside a folder), and rewriting that as `0`
+                // because the document says "not a folder" would be a
+                // silent loss on a file nobody edited.
+                "ISBUS" => {
+                    let folder = param_i64(line, 1) == Some(1);
+                    let depth = param_i64(line, 2).unwrap_or(0) as i32;
+                    if (folder, depth) != (track.is_folder, track.folder_depth) {
+                        set_bool(line, 1, track.is_folder, &label, "ISBUS", report);
+                        set_number(
+                            line,
+                            2,
+                            f64::from(track.folder_depth),
+                            &label,
+                            "ISBUS",
+                            report,
+                        );
+                    }
+                }
                 "PEAKCOL" => {
                     if let Some(color) = track.color {
                         // REAPER writes PEAKCOL as a *signed* 32-bit
@@ -234,6 +455,37 @@ fn patch_track(chunk: &mut RChunk, node: &TrackNode, report: &mut ExportReport) 
     }
     patch_lanes(chunk, node, &label, report);
     patch_group_flags(chunk, node, &label, report);
+    patch_colour(chunk, node, &label, report);
+}
+
+/// Give a track a `PEAKCOL` line when the document coloured a track the
+/// file never coloured.
+///
+/// The in-place case is handled by the `PEAKCOL` arm of [`patch_track`];
+/// this is only the upsert, because a colour set on a track REAPER wrote
+/// without one would otherwise have nowhere to go. REAPER writes the line
+/// straight after `NAME`.
+fn patch_colour(chunk: &mut RChunk, node: &TrackNode, label: &str, report: &mut ExportReport) {
+    let Some(colour) = node.track.color else {
+        return;
+    };
+    if chunk
+        .children
+        .iter()
+        .any(|child| matches!(child, RNodeTree::Node(line) if key(line) == "PEAKCOL"))
+    {
+        return;
+    }
+    report.changes.push(format!("{label} PEAKCOL: added"));
+    let at = chunk
+        .children
+        .iter()
+        .position(|child| matches!(child, RNodeTree::Node(line) if key(line) == "NAME"))
+        .map(|position| position + 1)
+        .unwrap_or(0);
+    chunk
+        .children
+        .insert(at, node_line(&["PEAKCOL", &(colour as i32).to_string()]));
 }
 
 // ── track groups ───────────────────────────────────────────────────────
@@ -1101,6 +1353,330 @@ fn take_runs(chunk: &RChunk) -> Vec<(usize, usize, Option<String>)> {
         runs.push((start, end, guid));
     }
     runs
+}
+
+// ── tempo map ──────────────────────────────────────────────────────────
+
+/// Bring the project's `<TEMPOENVEX>` chunk in line with the document.
+///
+/// The map is a list of points, not a set of addressable entities, so this
+/// follows [`patch_envelope`]'s rule: if the decoded map differs from the
+/// document's, every `PT` line is replaced and everything else in the
+/// chunk (`EGUID`, `ACT`, `VIS`, `DEFSHAPE`) is left exactly where it was.
+/// "Differs" is decided by running the *importer's* decoder over the
+/// chunk, so an unedited export can never churn.
+fn patch_tempo_map(root: &mut RChunk, document: &DawDocument, report: &mut ExportReport) {
+    let signature = super::import::project_time_signature(root);
+    let at = root.children.iter().position(
+        |child| matches!(child, RNodeTree::Chunk(chunk) if chunk.name().as_deref() == Some("TEMPOENVEX")),
+    );
+
+    if let Some(at) = at
+        && let RNodeTree::Chunk(chunk) = &root.children[at]
+        && super::import::read_tempo_map(chunk, signature) == document.tempo_map
+    {
+        return;
+    }
+    if at.is_none() && document.tempo_map.is_empty() {
+        return;
+    }
+
+    report
+        .changes
+        .push(format!("tempo map: {} point(s)", document.tempo_map.len()));
+
+    let points: Vec<RNodeTree> = document
+        .tempo_map
+        .iter()
+        .map(|point| {
+            // Field 4 packs a signature change as `numerator | denominator
+            // << 16`, and 0 means "no change here" — which is how REAPER
+            // tells a tempo-only point from one that also changes the bar.
+            let packed = point
+                .time_signature
+                .map(|signature| {
+                    i64::from(signature.numerator) | (i64::from(signature.denominator) << 16)
+                })
+                .unwrap_or(0);
+            node_line(&[
+                "PT",
+                &format_f64(point.position_seconds()),
+                &format_f64(point.bpm),
+                &point.shape.unwrap_or(0).to_string(),
+                &packed.to_string(),
+                if point.selected.unwrap_or(false) {
+                    "1"
+                } else {
+                    "0"
+                },
+                "0",
+                &format_f64(point.bezier_tension.unwrap_or(0.0)),
+            ])
+        })
+        .collect();
+
+    match at {
+        Some(at) => {
+            let RNodeTree::Chunk(chunk) = &mut root.children[at] else {
+                return;
+            };
+            let insert_at = chunk
+                .children
+                .iter()
+                .position(|child| matches!(child, RNodeTree::Node(l) if key(l) == "PT"))
+                .unwrap_or(chunk.children.len());
+            chunk
+                .children
+                .retain(|child| !matches!(child, RNodeTree::Node(l) if key(l) == "PT"));
+            for (offset, line) in points.into_iter().enumerate() {
+                chunk.children.insert(insert_at + offset, line);
+            }
+        }
+        None => {
+            // REAPER writes `<TEMPOENVEX>` after the master-track lines and
+            // before the markers and tracks, which is what this finds.
+            let mut chunk = RChunk::new(vec![RToken::new("TEMPOENVEX")]);
+            chunk.children.push(node_line(&["ACT", "1", "-1"]));
+            chunk.children.push(node_line(&["VIS", "1", "0", "1"]));
+            chunk.children.push(node_line(&["LANEHEIGHT", "0", "0"]));
+            chunk.children.push(node_line(&["ARM", "0"]));
+            chunk
+                .children
+                .push(node_line(&["DEFSHAPE", "1", "-1", "-1"]));
+            chunk.children.extend(points);
+            let insert_at = first_project_block(root);
+            root.children.insert(insert_at, RNodeTree::Chunk(chunk));
+        }
+    }
+
+    // The `TEMPO` line carries the tempo and signature in force at the
+    // start of the timeline. Left stale, REAPER shows the old tempo in the
+    // transport until the playhead crosses the first point.
+    if let Some(first) = document.tempo_map.first() {
+        let signature = first.time_signature.unwrap_or(signature);
+        for child in &mut root.children {
+            let RNodeTree::Node(line) = child else {
+                continue;
+            };
+            if key(line) != "TEMPO" {
+                continue;
+            }
+            set_number(line, 1, first.bpm, "project", "TEMPO", report);
+            set_number(
+                line,
+                2,
+                f64::from(signature.numerator),
+                "project",
+                "TEMPO",
+                report,
+            );
+            set_number(
+                line,
+                3,
+                f64::from(signature.denominator),
+                "project",
+                "TEMPO",
+                report,
+            );
+        }
+    }
+}
+
+/// Where a project-level block belongs: before the first `MARKER` line or
+/// `<TRACK>` chunk, which is where REAPER writes `<TEMPOENVEX>`.
+fn first_project_block(root: &RChunk) -> usize {
+    root.children
+        .iter()
+        .position(|child| match child {
+            RNodeTree::Node(line) => key(line) == "MARKER",
+            RNodeTree::Chunk(chunk) => {
+                matches!(
+                    chunk.name().as_deref(),
+                    Some("TRACK" | "PROJBAY" | "EXTENSIONS")
+                )
+            }
+        })
+        .unwrap_or(root.children.len())
+}
+
+// ── markers and regions ────────────────────────────────────────────────
+
+/// Bring the project's `MARKER` lines in line with the document.
+///
+/// Markers are entities with ids, so this patches like the track walk does
+/// rather than regenerating: an existing line keeps every field the schema
+/// does not model, a marker the editor deleted loses its line, and a
+/// marker the editor added gets a fresh one. A region is two lines sharing
+/// one numeric id, so growing or losing a `region_end_seconds` adds or
+/// drops the second line.
+fn patch_markers(root: &mut RChunk, document: &DawDocument, report: &mut ExportReport) {
+    let is_marker = |child: &RNodeTree| matches!(child, RNodeTree::Node(l) if key(l) == "MARKER");
+    if document.markers.is_empty() && !root.children.iter().any(is_marker) {
+        return;
+    }
+
+    // The numeric id is REAPER's, not ours: it is how the two halves of a
+    // region find each other on the way back in.
+    let mut next_id = root
+        .children
+        .iter()
+        .filter_map(|child| match child {
+            RNodeTree::Node(line) if is_marker(child) => param_i64(line, 1),
+            _ => None,
+        })
+        .chain(
+            document
+                .markers
+                .iter()
+                .filter_map(|m| m.marker.id.map(i64::from)),
+        )
+        .max()
+        .unwrap_or(0)
+        + 1;
+
+    let existing: Vec<Vec<String>> = root
+        .children
+        .iter()
+        .filter_map(|child| match child {
+            RNodeTree::Node(line) if is_marker(child) => Some(tokens(line)),
+            _ => None,
+        })
+        .collect();
+
+    // Compare by meaning, through the importer's own reader, so an
+    // unedited export never rewrites a marker line.
+    let decoded = super::import::read_markers(&existing);
+    if decoded.len() == document.markers.len()
+        && decoded
+            .iter()
+            .zip(&document.markers)
+            .all(|(have, want)| marker_facts(have) == marker_facts(want))
+    {
+        return;
+    }
+
+    // Each marker keeps the line it already had, with only the modelled
+    // fields written over. REAPER puts things there this schema does not
+    // model — the `R` in field 7, a full-form closing line on some
+    // regions — and regenerating would quietly flatten them.
+    let mut opening: std::collections::HashMap<i64, Vec<String>> = std::collections::HashMap::new();
+    let mut closing: std::collections::HashMap<i64, Vec<String>> = std::collections::HashMap::new();
+    for line in &existing {
+        let Some(numeric) = line.get(1).and_then(|token| token.parse::<i64>().ok()) else {
+            continue;
+        };
+        match opening.entry(numeric) {
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(line.clone());
+            }
+            // A second line with an id already seen is a region's closing
+            // half, which is the only thing `MARKER` repeats an id for.
+            std::collections::hash_map::Entry::Occupied(_) => {
+                closing.entry(numeric).or_insert_with(|| line.clone());
+            }
+        }
+    }
+
+    let mut wanted: Vec<Vec<String>> = Vec::new();
+    for node in &document.markers {
+        let numeric = match node.marker.id {
+            Some(id) => i64::from(id),
+            None => {
+                let id = next_id;
+                next_id += 1;
+                id
+            }
+        };
+        let region = node.region_end_seconds.is_some();
+
+        let mut line = opening.remove(&numeric).unwrap_or_else(|| {
+            vec![
+                "MARKER".to_string(),
+                numeric.to_string(),
+                "0".to_string(),
+                String::new(),
+                "0".to_string(),
+                "0".to_string(),
+                "1".to_string(),
+                "B".to_string(),
+                String::new(),
+                "0".to_string(),
+            ]
+        });
+        line.resize(10.max(line.len()), String::new());
+        line[1] = numeric.to_string();
+        line[2] = format_f64(node.marker.position_seconds());
+        line[3] = node.marker.name.clone();
+        line[4] = if region { "1" } else { "0" }.to_string();
+        line[5] = node.marker.color.unwrap_or(0).to_string();
+        line[8] = node
+            .marker
+            .guid
+            .clone()
+            .unwrap_or_else(|| node.id.to_string());
+        line[9] = node.marker.lane.unwrap_or(0).to_string();
+        wanted.push(line);
+
+        if let Some(end) = node.region_end_seconds {
+            let mut line = closing.remove(&numeric).unwrap_or_else(|| {
+                vec![
+                    "MARKER".to_string(),
+                    numeric.to_string(),
+                    "0".to_string(),
+                    String::new(),
+                    "1".to_string(),
+                ]
+            });
+            line[1] = numeric.to_string();
+            line[2] = format_f64(end);
+            line[4] = "1".to_string();
+            wanted.push(line);
+        }
+    }
+
+    report.changes.push(format!(
+        "markers: {} line(s) \u{2192} {} line(s)",
+        existing.len(),
+        wanted.len()
+    ));
+
+    let insert_at = root
+        .children
+        .iter()
+        .position(is_marker)
+        .unwrap_or_else(|| first_project_block(root));
+    root.children.retain(|child| !is_marker(child));
+    for (offset, line) in wanted.iter().enumerate() {
+        let refs: Vec<&str> = line.iter().map(String::as_str).collect();
+        root.children.insert(insert_at + offset, node_line(&refs));
+    }
+}
+
+/// Everything about a marker the document models, as a comparable tuple.
+///
+/// `MarkerNode` is not `PartialEq` (its payload comes from the facade), so
+/// the comparison is spelled out — and spelling it out is what makes it
+/// obvious which facts a rewrite is allowed to be triggered by.
+type MarkerFacts = (
+    String,
+    Option<u32>,
+    String,
+    String,
+    Option<u32>,
+    Option<u32>,
+    String,
+);
+
+fn marker_facts(node: &crate::document::MarkerNode) -> MarkerFacts {
+    (
+        node.id.to_string(),
+        node.marker.id,
+        format_f64(node.marker.position_seconds()),
+        node.marker.name.clone(),
+        node.marker.color,
+        node.marker.lane,
+        node.region_end_seconds.map(format_f64).unwrap_or_default(),
+    )
 }
 
 // ── chunk builders ─────────────────────────────────────────────────────

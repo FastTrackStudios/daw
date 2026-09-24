@@ -154,6 +154,43 @@ fn fill_route_counts(p: &crate::sync::ProjectState, tracks: &mut [daw_proto::Tra
     }
 }
 
+/// Insert a track named `name` with guid `new_guid` at `at_index`
+/// (`None` = append) — the body of both `add` and `add_with_guid`, so a
+/// track made with a caller's guid is the same track `add` makes and
+/// announces itself the same way. A guid a track already has is refused.
+fn insert_track(
+    daw: &Standalone,
+    project: &ProjectContext,
+    new_guid: String,
+    name: &str,
+    at_index: Option<u32>,
+) -> DawResult<String> {
+    let guid = resolve_project(daw, project).ok_or_else(not_found_proj)?;
+    let events = daw.with_project_mut(&guid, |p| {
+        if p.tracks.iter().any(|t| t.guid == new_guid) {
+            return Err(DawError::already_exists("Track", &new_guid));
+        }
+        let before = p.tracks.clone();
+        let pos = at_index
+            .map(|i| (i as usize).min(p.tracks.len()))
+            .unwrap_or(p.tracks.len());
+        let track = Track {
+            guid: new_guid.clone(),
+            index: pos as u32,
+            name: name.to_string(),
+            ..Default::default()
+        };
+        p.tracks.insert(pos, track);
+        reconcile_track_structure(&mut p.tracks);
+        let added = p.tracks[pos].clone();
+        let mut events = vec![TrackEvent::Added(added)];
+        events.extend(moved_events(&before, &p.tracks));
+        Ok(events)
+    })??;
+    publish_track_events(daw, &guid, events);
+    Ok(new_guid)
+}
+
 fn publish_track_events(daw: &Standalone, project_guid: &str, events: Vec<TrackEvent>) {
     for event in events {
         let event = TrackStreamEvent {
@@ -707,28 +744,40 @@ impl Tracks for Standalone {
     }
 
     fn add(&self, project: ProjectContext, name: &str, at_index: Option<u32>) -> DawResult<String> {
+        insert_track(self, &project, Uuid::new_v4().to_string(), name, at_index)
+    }
+
+    fn add_with_guid(
+        &self,
+        project: ProjectContext,
+        guid: &str,
+        name: &str,
+        at_index: Option<u32>,
+    ) -> DawResult<String> {
+        crate::check_new_guid("Track", guid)?;
+        insert_track(self, &project, guid.to_string(), name, at_index)
+    }
+
+    fn move_to(&self, project: ProjectContext, track: TrackRef, index: u32) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        let (new_guid, events) = self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
+            let from = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let last = p.tracks.len() - 1;
+            if index as usize > last {
+                return Err(DawError::out_of_range(
+                    index,
+                    last as u32,
+                    "Tracks::move_to",
+                ));
+            }
             let before = p.tracks.clone();
-            let new_guid = Uuid::new_v4().to_string();
-            let pos = at_index
-                .map(|i| (i as usize).min(p.tracks.len()))
-                .unwrap_or(p.tracks.len());
-            let track = Track {
-                guid: new_guid.clone(),
-                index: pos as u32,
-                name: name.to_string(),
-                ..Default::default()
-            };
-            p.tracks.insert(pos, track);
+            let moving = p.tracks.remove(from);
+            p.tracks.insert(index as usize, moving);
             reconcile_track_structure(&mut p.tracks);
-            let added = p.tracks[pos].clone();
-            let mut events = vec![TrackEvent::Added(added)];
-            events.extend(moved_events(&before, &p.tracks));
-            (new_guid, events)
-        })?;
+            Ok::<_, DawError>(moved_events(&before, &p.tracks))
+        })??;
         publish_track_events(self, &guid, events);
-        Ok(new_guid)
+        Ok(())
     }
 
     fn remove(&self, project: ProjectContext, track: TrackRef) -> DawResult<()> {
@@ -808,7 +857,7 @@ impl Tracks for Standalone {
         let event = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
             let track_guid = p.tracks[i].guid.clone();
-            let color = if color == 0 { None } else { Some(color) };
+            let color = crate::color_from_service(color);
             p.tracks[i].color = color;
             Ok::<_, DawError>(TrackEvent::ColorChanged {
                 guid: track_guid,

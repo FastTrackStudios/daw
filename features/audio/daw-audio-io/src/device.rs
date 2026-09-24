@@ -198,17 +198,25 @@ const COMMON_RATES: &[u32] = &[
 
 /// Capabilities of the input or output device matching `name` (or the
 /// default device when `None`).
-pub fn device_caps(host: &cpal::Host, name: Option<&str>, input: bool) -> Result<DeviceCaps, String> {
+pub fn device_caps(
+    host: &cpal::Host,
+    name: Option<&str>,
+    input: bool,
+) -> Result<DeviceCaps, String> {
     let device = pick_device(host, name, input)?;
     let (default, ranges) = if input {
         (
             device.default_input_config(),
-            device.supported_input_configs().map(|r| r.collect::<Vec<_>>()),
+            device
+                .supported_input_configs()
+                .map(|r| r.collect::<Vec<_>>()),
         )
     } else {
         (
             device.default_output_config(),
-            device.supported_output_configs().map(|r| r.collect::<Vec<_>>()),
+            device
+                .supported_output_configs()
+                .map(|r| r.collect::<Vec<_>>()),
         )
     };
     let default = default.map_err(|e| format!("device default config: {e}"))?;

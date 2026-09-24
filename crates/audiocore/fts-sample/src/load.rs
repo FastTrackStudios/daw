@@ -61,6 +61,18 @@ pub fn load_planar_f32(
 /// resident path for bytes that never had a stable on-disk home (project
 /// containers, browser uploads); on-disk files use [`load_planar_f32`].
 pub fn decode_bytes(data: &[u8], ext_hint: Option<&str>) -> Result<LoadedAudio, SamplerError> {
+    decode_bytes_at(data, ext_hint, None, ResampleQuality::default())
+}
+
+/// [`decode_bytes`], resampled to `target_sr` at `quality` when one is
+/// given — the in-memory twin of [`load_planar_f32`], for bytes a browser
+/// fetched (a guide library's samples, say).
+pub fn decode_bytes_at(
+    data: &[u8],
+    ext_hint: Option<&str>,
+    target_sr: Option<u32>,
+    quality: ResampleQuality,
+) -> Result<LoadedAudio, SamplerError> {
     let mut hint = symphonium::symphonia::core::probe::Hint::new();
     if let Some(ext) = ext_hint {
         hint.with_extension(ext);
@@ -71,8 +83,8 @@ pub fn decode_bytes(data: &[u8], ext_hint: Option<&str>) -> Result<LoadedAudio, 
         .load_f32_from_source(
             Box::new(cursor),
             Some(hint),
-            None,
-            ResampleQuality::default(),
+            target_sr,
+            quality,
             // No RAM cap here: the caller owns the budget accounting, and a
             // long take must decode rather than error.
             Some(usize::MAX),

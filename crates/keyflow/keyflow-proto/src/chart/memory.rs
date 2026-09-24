@@ -76,6 +76,15 @@ pub struct ChordMemory {
 
     /// Number of sections that have been entered
     section_count: usize,
+
+    /// Whether bare roots recall what their degree last was. On for the
+    /// engine by itself; a chart turns it off unless it asks for it
+    /// (`/CHORD_MEMORY=true`, see [`crate::chart::settings::ChartSetting::ChordMemory`]).
+    enabled: bool,
+
+    /// Explicit metadata assignments (`Cm = Cm7b5`), by family key. They
+    /// are written on purpose, so they hold with memory off too.
+    assignments: HashMap<String, String>,
 }
 
 impl ChordMemory {
@@ -89,7 +98,21 @@ impl ChordMemory {
             is_first_section: true,
             first_section_complete: false,
             section_count: 0,
+            enabled: true,
+            assignments: HashMap::new(),
         }
+    }
+
+    /// Turn recall on or off. Off, a chord is what is written: nothing is
+    /// remembered or recalled but the chart's explicit assignments.
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    /// Whether recall is on.
+    #[must_use]
+    pub fn enabled(&self) -> bool {
+        self.enabled
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -135,6 +158,8 @@ impl ChordMemory {
         // Determine the family from the basic chord
         let family = Self::get_chord_family(basic_chord, &root);
         let family_key = Self::memory_key(&root, family);
+        self.assignments
+            .insert(family_key.clone(), full_chord.to_string());
         self.global_family
             .insert(family_key, full_chord.to_string());
     }
@@ -257,6 +282,17 @@ impl ChordMemory {
         };
         let has_quality = token_chord_part.len() > root.len();
 
+        if !self.enabled && !is_override {
+            return self.process_without_memory(
+                root,
+                token_chord_part,
+                parsed_symbol,
+                &family_key,
+                (is_basic, has_quality),
+                current_key,
+            );
+        }
+
         if is_override {
             // Override with `!` prefix: use parsed quality but DON'T update any memory
             // This bypasses ALL memory including global
@@ -308,6 +344,40 @@ impl ChordMemory {
             self.store_to_family_memory(&family_key, &result);
             self.seen_roots.insert(root_lower);
             result
+        }
+    }
+
+    /// [`Self::process_chord`] with memory off: the same three cases, with
+    /// nothing remembered or recalled. A basic triad is as written; an
+    /// explicit quality is as written; a bare root takes the key's quality
+    /// for its degree. An explicit assignment (`Cm = Cm7b5`) still applies
+    /// to a basic or bare chord — it is written on purpose, not memory.
+    fn process_without_memory(
+        &mut self,
+        root: &str,
+        token_chord_part: &str,
+        parsed_symbol: &str,
+        family_key: &str,
+        (is_basic, has_quality): (bool, bool),
+        current_key: Option<&crate::key::Key>,
+    ) -> String {
+        self.seen_roots.insert(root.to_lowercase());
+        if (is_basic || !has_quality)
+            && let Some(assigned) = self.assignments.get(family_key)
+        {
+            return assigned.clone();
+        }
+        if is_basic {
+            parsed_symbol.to_string()
+        } else if has_quality {
+            // A bare scale degree with an explicit quality (`2maj`) keeps it.
+            if parsed_symbol == root {
+                token_chord_part.to_string()
+            } else {
+                parsed_symbol.to_string()
+            }
+        } else {
+            Self::infer_from_key(root, current_key).unwrap_or_else(|| parsed_symbol.to_string())
         }
     }
 

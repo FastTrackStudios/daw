@@ -194,8 +194,7 @@ impl reaper_medium::OnAudioBuffer for MultiProjectHook {
         }
         self.counter = self.counter.wrapping_add(1);
 
-        let host_secs = self.reaper.low().time_precise();
-        let host_micros = (host_secs * 1_000_000.0) as u64;
+        let host_micros = crate::reaper_clock_micros(&self.reaper);
         let sample_rate = args.srate.get();
         let buffer_len = args.len;
 
@@ -216,6 +215,7 @@ impl reaper_medium::OnAudioBuffer for MultiProjectHook {
                 project_id: id,
                 host_micros,
                 playhead_seconds: pos_value,
+                playrate: crate::PUBLISHED_PLAYRATE,
                 sample_rate,
                 buffer_len,
                 is_playing,

@@ -23,10 +23,16 @@ daw-proto = { workspace = true }
 architect = { workspace = true, features = ["vox", "local", "platform"] }
 vox = { workspace = true }
 tracing = { workspace = true }
+# Multi-machine transport sync: the per-buffer snapshot cell, the buffer
+# DLL, and the `TransportBackend` this engine implements
+# (`transport_sync::SyncBackend`). Dependency-free, wasm-clean.
+daw-transport-sync = { workspace = true }
 # `sync`-only tokio (wasm-clean: no net/mio) for `tokio::sync::RwLock` etc.,
 # native + wasm. Direct (not `workspace = true`) so `default-features = false`
 # is allowed; native unifies to full via the native target dep below.
 tokio = { version = "1", default-features = false, features = ["sync"] }
+# media_fetch: requests in flight (FuturesUnordered). Wasm-clean.
+futures = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 web-time = "1"
 
@@ -94,7 +100,9 @@ daw-standalone = { path = ".", features = ["rpp-project", "bootstrap"] }
 daw-proto = { workspace = true }
 daw-control = { workspace = true }
 eyre = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# `streamed_playback` encodes the proxy it streams.
+fts-sample = { workspace = true, features = ["engine-native"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 base64 = "0.22"
 dawfile-reaper = { workspace = true }
 tempfile = { workspace = true }
@@ -103,7 +111,9 @@ tempfile = { workspace = true }
 # Resident source decoding (fts-sample/symphonium) without cpal.
 # WASM-compatible — the decoder is pure Rust and doesn't touch the audio
 # device. `budget` bounds the decoded-bytes accounting (see materialize).
-decode = ["fts-sample/load", "fts-sample/decode-compressed", "fts-sample/budget"]
+# `rtrb` because the renderer's live-input and live-MIDI rings are built
+# natively whenever it is — a native-only target dep, so a no-op on wasm.
+decode = ["fts-sample/load", "fts-sample/decode-compressed", "fts-sample/budget", "dep:rtrb"]
 # Full audio engine = decode + cpal output stream. Native-only audio
 # output (cpal+wasm-bindgen on WASM, but cpal pulls JS bindings).
 # `daw-audio-io` + `rtrb` are native-only (`cfg(not(wasm32))` target
@@ -124,6 +134,12 @@ rpp-project = ["dep:dawfile-reaper", "dawfile-reaper/parallel"]
 # Save an opened project back to a NEW .rpp beside its original, via
 # dawfile-standalone's patched export (verbatim source + minimal patch).
 rpp-save = ["rpp-project", "dep:dawfile-standalone"]
+# Save a live project as a `.session` directory and open one back
+# (`session_file::{save_session, load_session, session_rpp_text}`): the
+# engine state written as REAPER text over the project's original, through
+# dawfile-standalone's `.session` format. Native-only (rpp-project pulls
+# rayon).
+session-file = ["rpp-project", "dep:dawfile-standalone"]
 # REAPER .reapeaks peak-cache reading (waveform drawing) — much lighter
 # than rpp-project (no parallel parser).
 reapeaks = ["dep:dawfile-reaper"]
@@ -150,6 +166,10 @@ vst3-host = ["audio", "dep:vst3", "dep:libloading"]
 # Browser bindings: a wasm-bindgen wrapper that an AudioWorklet
 # processor can construct + drive. Only meaningful on wasm32.
 web = ["decode", "dep:wasm-bindgen", "dep:js-sys"]
+# Streamed takes decoded from Ogg Vorbis proxies a window at a time
+# (`audio_engine::streamed`) — pure Rust, wasm-clean: how a browser plays
+# a session whose originals it cannot hold.
+stream-ogg = ["decode", "fts-sample/engine-core"]
 
 [[example]]
 name = "meter_probe"

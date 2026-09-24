@@ -25,7 +25,9 @@ fn hex_id(bytes: &[u8; 16]) -> String {
 fn audio_snapshot_to_wire(s: daw_audio_sync::AudioSnapshot) -> AudioSyncSnapshot {
     AudioSyncSnapshot {
         sequence: s.sequence,
-        host_micros: s.host_micros,
+        // The snapshot carries f64 µs (REAPER's time_precise, never
+        // negative); the wire keeps its whole-µs u64.
+        host_micros: s.host_micros.max(0.0).round() as u64,
         playhead_seconds: s.playhead_seconds,
         sample_rate: s.sample_rate,
         buffer_len: s.buffer_len,

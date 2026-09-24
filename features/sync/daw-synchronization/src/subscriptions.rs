@@ -206,8 +206,8 @@ async fn to_sync_domain(daw: &daw::rpc::Daw, ev: &DawEvent) -> Option<(String, S
             };
             (guid, SyncDomain::Transport(snapshot))
         }
-        DawEvent::Item(e) => (item_guid(e).to_string(), SyncDomain::Item(e.clone())),
-        DawEvent::Take(e) => (take_guid(e).to_string(), SyncDomain::Take(e.clone())),
+        DawEvent::Item(e) => (e.project_guid().to_string(), SyncDomain::Item(e.clone())),
+        DawEvent::Take(e) => (e.project_guid().to_string(), SyncDomain::Take(e.clone())),
         DawEvent::Routing(e) => (routing_guid(e).to_string(), SyncDomain::Routing(e.clone())),
         // Not replicated: 30 Hz position firehose, project open/close.
         DawEvent::TransportPosition(_) | DawEvent::Project(_) => return None,
@@ -231,34 +231,6 @@ fn transport_guid(e: &daw::service::TransportEvent) -> &str {
         | TimeSelectionChanged { project_guid, .. }
         | TempoChanged { project_guid, .. }
         | PlayrateChanged { project_guid, .. } => project_guid,
-    }
-}
-
-fn item_guid(e: &daw::service::ItemEvent) -> &str {
-    use daw::service::ItemEvent::*;
-    match e {
-        Created { project_guid, .. }
-        | Deleted { project_guid, .. }
-        | PositionChanged { project_guid, .. }
-        | LengthChanged { project_guid, .. }
-        | MovedToTrack { project_guid, .. }
-        | MuteChanged { project_guid, .. }
-        | SelectionChanged { project_guid, .. }
-        | VolumeChanged { project_guid, .. }
-        | ActiveTakeChanged { project_guid, .. } => project_guid,
-    }
-}
-
-fn take_guid(e: &daw::service::TakeEvent) -> &str {
-    use daw::service::TakeEvent::*;
-    match e {
-        Created { project_guid, .. }
-        | Deleted { project_guid, .. }
-        | NameChanged { project_guid, .. }
-        | PitchChanged { project_guid, .. }
-        | PlayRateChanged { project_guid, .. }
-        | VolumeChanged { project_guid, .. }
-        | SourceChanged { project_guid, .. } => project_guid,
     }
 }
 

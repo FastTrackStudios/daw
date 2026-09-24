@@ -69,6 +69,7 @@ pub mod primitives;
 pub mod reapeaks;
 pub mod rpp_tree;
 pub mod scaffold;
+pub mod sessionpeaks;
 pub mod setlist_rpp;
 pub mod stock_fx;
 pub mod toolbar_config;

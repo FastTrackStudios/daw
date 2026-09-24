@@ -38,6 +38,9 @@ pub mod decoder;
 pub mod duplex_engine;
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub mod materialize;
+/// Fetching streamed media in the order it will be heard.
+#[cfg(feature = "stream-ogg")]
+pub mod media_fetch;
 #[cfg(feature = "audio")]
 mod mixer;
 #[cfg(feature = "clap-host")]
@@ -51,6 +54,8 @@ pub mod render;
 pub mod routing;
 /// Streaming audio sources (mmap PCM + decoded memory) — REAPER's model.
 pub mod source;
+/// Streamed takes: decoded a window at a time around the playhead.
+pub mod streamed;
 #[cfg(feature = "vst3-host")]
 pub mod vst3_host;
 #[cfg(all(target_arch = "wasm32", feature = "web"))]
@@ -64,6 +69,9 @@ pub mod test_tone;
 
 #[cfg(feature = "audio")]
 pub use aux_render::{AuxClock, AuxRenderer};
+/// Realtime metrics both engines report (block size, render time, xruns).
+#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
+pub use daw_audio_io::duplex::EngineStats;
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub use decoder::{DecodedAudio, decode_audio, decode_audio_with_extension};
 #[cfg(all(feature = "audio", any(target_os = "linux", target_os = "macos")))]

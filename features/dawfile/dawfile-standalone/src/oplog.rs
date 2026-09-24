@@ -1,10 +1,10 @@
 //! The loro oplog, persisted (#173).
 //!
-//! `<name>.daw` is the readable source of truth and the project is a
+//! `<name>.session` is the readable source of truth and the project is a
 //! loro CRDT doc in memory. The hole that forces this module: if the
 //! CRDT exists only in memory, every load builds a fresh doc from text
 //! and throws away all causality — so two people who each edit offline
-//! and save their own `.daw` share no history, reconciling them
+//! and save their own `.session` share no history, reconciling them
 //! degrades to text merging, and the CRDT buys nothing the moment it
 //! touches disk.
 //!
@@ -16,7 +16,7 @@
 //! The manifest is hand-editable, and that is a stated requirement. An
 //! oplog built from text that has since been edited by hand is a *stale
 //! log*: replaying it would resurrect the state the human just
-//! overwrote. So the hash of the `.daw` the oplog was built from is
+//! overwrote. So the hash of the `.session` the oplog was built from is
 //! stored beside it, and on load a mismatch **discards the oplog and
 //! starts fresh history from the text**.
 //!

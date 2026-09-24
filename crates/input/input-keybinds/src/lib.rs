@@ -13,10 +13,14 @@
 //! - [`loader`] — parse styx profiles/sections into a `KeymapConfig`.
 
 pub mod bridge;
+pub mod embedded;
 pub mod loader;
 
 pub use bridge::{
     context_to_when_expr, keymap_config_from_defs, parse_reaper_modifier_string,
-    section_to_keymap_config, translate_sequence,
+    section_to_keymap_config, translate_sequence, which_key_labels,
 };
-pub use loader::{keymap_from_section_str, list_profiles, load_profile_keymap};
+pub use loader::{
+    Profile, keymap_from_section_str, list_profiles, load_profile_dir, load_profile_from,
+    load_profile_keymap,
+};

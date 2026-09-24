@@ -104,6 +104,54 @@ fn which_key_trees_to_keymap_entries(trees: &[WhichKeyTreeDef]) -> HashMap<Strin
     entries
 }
 
+/// The labels which-key trees give their prefixes, groups and leaves,
+/// keyed by the key sequence exactly as the keymap binds it.
+///
+/// [`keymap_config_from_defs`] flattens the trees into `sequence →
+/// action` and keeps no names, so a popup walking the processor's trie
+/// has nothing to call each key. This is the same walk (the same
+/// translation, the same case-insensitive variants), keeping the names:
+/// `z` → "Zoom", `z t` → "Toggle tracks/time zoom".
+#[must_use]
+pub fn which_key_labels(trees: &[WhichKeyTreeDef]) -> HashMap<Vec<input::KeyChord>, String> {
+    let mut labels = HashMap::new();
+    let mut put = |seq: &str, label: &str| {
+        if let Ok(chords) = input::parse_key_sequence(seq) {
+            labels.insert(chords, label.to_owned());
+        }
+    };
+    fn walk(
+        put: &mut dyn FnMut(&str, &str),
+        prefix: &str,
+        entries: &[WhichKeyEntryDef],
+        case_insensitive: bool,
+        anchor_mods: &[&str],
+    ) {
+        for entry in entries {
+            for variant in key_variants(&entry.key, case_insensitive, anchor_mods) {
+                let seq = format!("{prefix} {variant}");
+                put(&seq, &entry.label);
+                if let Some(children) = entry.children.as_deref() {
+                    walk(put, &seq, children, case_insensitive, anchor_mods);
+                }
+            }
+        }
+    }
+    for tree in trees {
+        let prefix = translate_sequence(&tree.prefix);
+        let anchor_mods = anchor_modifiers(&prefix);
+        put(&prefix, &tree.label);
+        walk(
+            &mut put,
+            &prefix,
+            &tree.entries,
+            tree.case_insensitive.unwrap_or(false),
+            &anchor_mods,
+        );
+    }
+    labels
+}
+
 /// Recursively flatten which-key entries into space-separated key sequences.
 ///
 /// An entry with children is a branch (recurse); an entry with an `action`

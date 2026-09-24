@@ -105,7 +105,7 @@ where
 /// REAPER native colour (Windows `COLORREF`, `0x..BBGGRR` + the
 /// `0x1000000` custom flag) → the canonical `0xRRGGBB` the daw-proto
 /// types carry.
-fn native_color_to_rgb(c: u32) -> u32 {
+pub(crate) fn native_color_to_rgb(c: u32) -> u32 {
     let r = c & 0xff;
     let g = (c >> 8) & 0xff;
     let b = (c >> 16) & 0xff;
@@ -161,6 +161,42 @@ pub fn load_rpp_text(
     Ok(summary)
 }
 
+/// Make `project_guid`'s relative take paths absolute against `dir`.
+///
+/// A project file names its media relative to its own folder
+/// (`Media/Bass.wav`), and the media bay resolves through ONE resolver
+/// per engine. An engine holding several projects from different folders
+/// — a setlist, each song in its own folder with its own `Media/Click.wav`
+/// — cannot tell one song's `Media/Click.wav` from another's through a
+/// relative resolver, so each project's references are anchored to its
+/// folder as it loads, before it materializes. A `.session` save writes
+/// paths inside the project's folder back as relative, so nothing about
+/// the saved file changes.
+///
+/// Returns how many take paths were anchored.
+pub fn anchor_media(daw: &Standalone, project_guid: &str, dir: &std::path::Path) -> usize {
+    // Absolute, whatever it was given: a folder named relative to the
+    // working directory (`../sessions/Song`) would anchor nothing, and a
+    // save would write those paths out as if they were the project's own.
+    let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
+    daw.with_project_mut(project_guid, |p| {
+        let mut anchored = 0;
+        for list in p.takes.values_mut() {
+            for take in &mut list.takes {
+                if let Some(path) = take.source_file_path.as_mut()
+                    && !path.is_empty()
+                    && std::path::Path::new(path.as_str()).is_relative()
+                {
+                    *path = dir.join(path.as_str()).to_string_lossy().into_owned();
+                    anchored += 1;
+                }
+            }
+        }
+        anchored
+    })
+    .unwrap_or(0)
+}
+
 fn populate_tracks(
     daw: &Standalone,
     project_guid: &str,
@@ -173,17 +209,9 @@ fn populate_tracks(
     let _ = daw.with_project_mut(project_guid, |p| {
         // Default project tempo / time signature from the tempo
         // envelope (or fall back to 120/4-4).
-        if let Some(env) = &project.tempo_envelope {
-            p.transport.tempo = Tempo::from_bpm(env.default_tempo.max(1.0));
-            let (num, denom) = env.default_time_signature;
-            p.transport.time_signature = TimeSignature::new(num.max(1) as u32, denom.max(1) as u32);
-        } else if let Some((bpm, num, denom, _)) = project.properties.tempo {
-            // No tempo envelope: the header `TEMPO <bpm> <num> <denom>`
-            // is the project's one tempo, and everything that converts
-            // time — the grid, the ruler, quantize targets — reads it
-            // from here. r[impl drums.group.tempo]
-            p.transport.tempo = Tempo::from_bpm(bpm.max(1.0));
-            p.transport.time_signature = TimeSignature::new(num.max(1) as u32, denom.max(1) as u32);
+        if let Some((tempo, time_signature)) = transport_tempo_from_rpp(project) {
+            p.transport.tempo = tempo;
+            p.transport.time_signature = time_signature;
         }
 
         // Master section: `MASTER_VOLUME vol pan …` + `MASTERMUTESOLO`.
@@ -199,168 +227,11 @@ fn populate_tracks(
         let widths = mcp_widths(rpp_text);
 
         for (idx, rt) in project.tracks.iter().enumerate() {
-            // Synthesize a GUID — REAPER's track GUIDs aren't always
-            // exposed by dawfile-reaper. Use track_id when available.
-            let guid = rt
-                .track_id
-                .clone()
-                .unwrap_or_else(|| Uuid::new_v4().to_string());
-
-            let (volume, pan) = rt
-                .volpan
-                .as_ref()
-                .map(|v| (v.volume, v.pan))
-                .unwrap_or((1.0, 0.0));
-            let (muted, soloed) = rt
-                .mutesolo
-                .as_ref()
-                .map(|m| {
-                    let solo =
-                        !matches!(m.solo, dawfile_reaper::types::track::TrackSoloState::NoSolo);
-                    (m.mute, solo)
-                })
-                .unwrap_or((false, false));
-            let (folder_depth, is_folder) = rt
-                .folder
-                .as_ref()
-                .map(|f| {
-                    use dawfile_reaper::types::track::FolderState as FS;
-                    let depth = match f.folder_state {
-                        FS::FolderParent => 1,
-                        // ISBUS's second field is the depth DELTA: a
-                        // last-in-folder track can close several
-                        // nested folders at once (`ISBUS 2 -3`).
-                        FS::LastInFolder => f.indentation.min(-1),
-                        // `ISBUS 0 -1`, which is what REAPER actually
-                        // writes for the last track in a folder: the
-                        // first field says "not a folder parent" and
-                        // the second still closes one. Reading only the
-                        // state flag left every folder open, so a
-                        // session's nesting grew by one at each bus and
-                        // never came back down.
-                        _ if f.indentation < 0 => f.indentation,
-                        FS::Regular | FS::Unknown(_) => 0,
-                    };
-                    (depth, depth > 0)
-                })
-                .unwrap_or((0, false));
-
-            // Fixed item lanes (REAPER 7 comping), decoded by the one
-            // decoder every loader shares (`FixedLaneFields::decode`).
-            let dawfile_reaper::types::track::FixedLaneState {
-                lane_count,
-                lane_play_mask,
-                lane_names,
-                lane_display,
-            } = rt.fixed_lane_state();
-
-            let grouping = daw_proto::track::TrackGrouping::from_rpp_fields(
-                rt.group_flags.as_deref().unwrap_or(&[]),
-                rt.group_flags_high.as_deref().unwrap_or(&[]),
-            );
-
-            let track = Track {
-                guid: guid.clone(),
-                // Ours, not REAPER's — see `mcp_widths`.
-                width: widths.get(&guid).copied(),
-                automation_mode: {
-                    use daw_proto::primitives::AutomationMode as P;
-                    use dawfile_reaper::types::track::AutomationMode as R;
-                    match rt.automation_mode {
-                        R::TrimRead => P::TrimRead,
-                        R::Read => P::Read,
-                        R::Touch => P::Touch,
-                        R::Write => P::Write,
-                        R::Latch => P::Latch,
-                        R::Unknown(_) => P::TrimRead,
-                    }
-                },
-                input_monitor: {
-                    use daw_proto::track::InputMonitoringMode as P;
-                    use dawfile_reaper::types::track::MonitorMode as R;
-                    match rt.record.as_ref().map(|r| r.monitor) {
-                        Some(R::On) => P::Normal,
-                        Some(R::Auto) => P::NotWhenPlaying,
-                        _ => P::Off,
-                    }
-                },
-                index: idx as u32,
-                name: rt.name.clone(),
-                color: rt.peak_color.map(|c| native_color_to_rgb(c as u32)),
-                muted,
-                soloed,
-                armed: rt.record.as_ref().map(|r| r.armed).unwrap_or(false),
-                phase_inverted: rt.invert_phase,
-                selected: rt.selected,
-                volume,
-                pan,
-                parent_guid: None, // resolved in a second pass once we
-                // have folder nesting, currently
-                // tracked only via folder_depth
-                folder_depth,
-                is_folder,
-                lane_count,
-                lane_play_mask,
-                lane_names,
-                lane_display,
-                grouping,
-                visible_in_tcp: rt
-                    .show_in_mixer
-                    .as_ref()
-                    .map(|s| s.show_in_track_list)
-                    .unwrap_or(true),
-                visible_in_mixer: rt
-                    .show_in_mixer
-                    .as_ref()
-                    .map(|s| s.show_in_mixer)
-                    .unwrap_or(true),
-                // Filled by `Tracks::all` from the routing maps, which
-                // are the authority — a count stored here would go
-                // stale the first time a send was added.
-                send_count: 0,
-                receive_count: 0,
-                fx_count: 0, // FX not loaded (synthetic standalone)
-                input_fx_count: 0,
-                // The project's own `TRACKHEIGHT`. Absent, or zero —
-                // REAPER's sentinel for automatic — means the panel
-                // picks its own, so it stays `None` rather than becoming
-                // a track nought pixels tall.
-                height: rt
-                    .track_height
-                    .as_ref()
-                    .map(|h| h.height)
-                    .filter(|h| *h > 0)
-                    .map(|h| h as u32),
-                // The project file's own answer, not a default: a track
-                // muted out of the master bus must not read as sending to
-                // it just because nobody asked the routing service.
-                parent_send: rt.master_send.as_ref().map(|m| m.enabled).unwrap_or(true),
-                record_input: rt
-                    .record
-                    .as_ref()
-                    .map_or(daw_proto::track::RecordInput::None, |r| {
-                        record_input_from_rpp(r.input)
-                    }),
-            };
+            let (track, ext) = track_from_rpp(rt, idx, &widths);
+            let guid = track.guid.clone();
+            let lane_count = track.lane_count;
             p.tracks.push(track);
-
-            // Extended (non-proto) fields.
-            let parent_send_enabled = rt.master_send.as_ref().map(|m| m.enabled).unwrap_or(true);
-            p.track_ext.insert(
-                guid.clone(),
-                TrackExt {
-                    num_channels: rt.channel_count.max(1).min(128),
-                    record_input: rt
-                        .record
-                        .as_ref()
-                        .map_or(daw_proto::track::RecordInput::None, |r| {
-                            record_input_from_rpp(r.input)
-                        }),
-                    parent_send_enabled,
-                    tcp_height_pixels: 0,
-                    comping: rt.lane_comping(),
-                },
-            );
+            p.track_ext.insert(guid.clone(), ext);
 
             // Track automation envelopes (VOLENV2 / PANENV2 / …).
             for env in &rt.envelopes {
@@ -372,39 +243,8 @@ fn populate_tracks(
             // Items on this track.
             let track_items = p.items_by_track.entry(guid.clone()).or_default();
             for (item_idx, ri) in rt.items.iter().enumerate() {
-                let item_guid = ri
-                    .item_guid
-                    .clone()
-                    .unwrap_or_else(|| Uuid::new_v4().to_string());
-                let mut item = Item::default();
-                item.guid = item_guid.clone();
-                item.track_guid = guid.clone();
-                item.index = item_idx as u32;
-                item.position = PositionInSeconds::from_seconds(ri.position);
-                item.length = Duration::from_seconds(ri.length);
-                item.snap_offset = Duration::from_seconds(ri.snap_offset);
-                item.muted = ri.mute.as_ref().map(|m| m.muted).unwrap_or(false);
-                item.selected = ri.selected;
-                item.volume = ri.volpan.as_ref().map(|v| v.item_trim).unwrap_or(1.0);
-                if let Some(fi) = &ri.fade_in {
-                    item.fade_in_length = Duration::from_seconds(fi.time);
-                    item.fade_in_shape = fade_curve_to_shape(fi.curve_type);
-                }
-                if let Some(fo) = &ri.fade_out {
-                    item.fade_out_length = Duration::from_seconds(fo.time);
-                    item.fade_out_shape = fade_curve_to_shape(fo.curve_type);
-                }
-                item.color = ri.color.map(|c| native_color_to_rgb(c as u32));
-                item.loop_source = ri.loop_source;
-                // Fixed-lane membership only matters on lane-enabled
-                // tracks (YPOS also appears for free item positioning).
-                item.fixed_lane = if lane_count > 0 {
-                    ri.lane.map(|l| l.max(0) as u32)
-                } else {
-                    None
-                };
-                item.take_count = ri.takes.len().max(1) as u32;
-                // proto `Item` doesn't carry `channel_mode` yet — drop.
+                let item = item_from_rpp(ri, &guid, item_idx, lane_count);
+                let item_guid = item.guid.clone();
 
                 ITEM_COUNTER.fetch_add(1, Ordering::Relaxed);
                 p.items.insert(item_guid.clone(), ItemEntry { item });
@@ -413,22 +253,13 @@ fn populate_tracks(
                 // Takes.
                 let mut takes_out = Vec::with_capacity(ri.takes.len().max(1));
                 for (take_idx, rt_take) in ri.takes.iter().enumerate() {
-                    let take = build_take(&item_guid, take_idx as u32, rt_take, summary);
+                    let take = build_take(&item_guid, take_idx as u32, rt_take);
                     // r[impl drums.open.stretch-markers]
                     // `SM` lines are keyed per take; the third token is the
                     // marker's slope (daw-proto's field of the same name).
                     if !rt_take.stretch_markers.is_empty() {
-                        let mut markers: Vec<daw_proto::StretchMarker> = rt_take
-                            .stretch_markers
-                            .iter()
-                            .map(|sm| daw_proto::StretchMarker {
-                                position: sm.position,
-                                source_position: sm.source_position,
-                                slope: sm.rate.unwrap_or(0.0),
-                            })
-                            .collect();
-                        markers.sort_by(|a, b| a.position.total_cmp(&b.position));
-                        p.stretch_markers.insert(take.guid.clone(), markers);
+                        p.stretch_markers
+                            .insert(take.guid.clone(), stretch_markers_from_rpp(rt_take));
                     }
                     // If this is a MIDI take, decode its event stream
                     // into MidiNote entries on `p.midi_notes`. The
@@ -467,41 +298,8 @@ fn populate_tracks(
                     }
                     takes_out.push(take);
                 }
-                // Which take plays.
-                //
-                // `TAKE SEL` is REAPER's own marker for the active take and
-                // is authoritative when present. The GUID match below is the
-                // older path and only works for an item whose FIRST take is
-                // written inline (so the item carries that take's `GUID`).
-                //
-                // A comped item is not written that way. It opens with
-                // `TAKE NULL` — an empty comp-lane slot, which occupies a
-                // take index exactly as REAPER counts it — so there is no
-                // item-level `GUID` to match, `position` finds nothing, and
-                // the old `unwrap_or(0)` landed on a null slot. The item
-                // then reported an `Empty` active take and every consumer
-                // that keeps only audio dropped it: on a real session
-                // (`set in stone`) the tom trigger tracks composed to 1.3%
-                // non-zero at -66 dBFS while their source files were full
-                // 317s recordings. It presented as "the trigger tracks hold
-                // no audio".
-                //
-                // Falling back to the first take that has a source keeps a
-                // pathological item (nulls only, no SEL) playing something
-                // real rather than silence.
-                let active_idx = ri
-                    .takes
-                    .iter()
-                    .position(|t| t.is_selected)
-                    .or_else(|| {
-                        ri.take_guid.as_ref().and_then(|g| {
-                            ri.takes
-                                .iter()
-                                .position(|t| t.take_guid.as_ref() == Some(g))
-                        })
-                    })
-                    .or_else(|| ri.takes.iter().position(|t| t.source.is_some()))
-                    .unwrap_or(0) as u32;
+                // Which take plays — see `active_take_index`.
+                let active_idx = active_take_index(ri);
                 if !takes_out.is_empty() {
                     p.takes.insert(
                         item_guid.clone(),
@@ -526,15 +324,296 @@ fn populate_tracks(
     let _ = ITEM_COUNTER; // silence unused-warning when this file is the only consumer
 }
 
+/// One `<TRACK>` as this loader reads it: the proto [`Track`] and the
+/// extended fields beside it. Shared with the `.session` writer, which
+/// compares the engine's state against exactly this view of the original
+/// file to decide what it has to write back.
+pub(crate) fn track_from_rpp(
+    rt: &dawfile_reaper::types::Track,
+    idx: usize,
+    widths: &std::collections::HashMap<String, u32>,
+) -> (Track, TrackExt) {
+    // Synthesize a GUID — REAPER's track GUIDs aren't always
+    // exposed by dawfile-reaper. Use track_id when available.
+    let guid = rt
+        .track_id
+        .clone()
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+    let (volume, pan) = rt
+        .volpan
+        .as_ref()
+        .map(|v| (v.volume, v.pan))
+        .unwrap_or((1.0, 0.0));
+    let (muted, soloed) = rt
+        .mutesolo
+        .as_ref()
+        .map(|m| {
+            let solo = !matches!(m.solo, dawfile_reaper::types::track::TrackSoloState::NoSolo);
+            (m.mute, solo)
+        })
+        .unwrap_or((false, false));
+    let (folder_depth, is_folder) = rt
+        .folder
+        .as_ref()
+        .map(|f| {
+            use dawfile_reaper::types::track::FolderState as FS;
+            let depth = match f.folder_state {
+                FS::FolderParent => 1,
+                // ISBUS's second field is the depth DELTA: a
+                // last-in-folder track can close several
+                // nested folders at once (`ISBUS 2 -3`).
+                FS::LastInFolder => f.indentation.min(-1),
+                // `ISBUS 0 -1`, which is what REAPER actually
+                // writes for the last track in a folder: the
+                // first field says "not a folder parent" and
+                // the second still closes one. Reading only the
+                // state flag left every folder open, so a
+                // session's nesting grew by one at each bus and
+                // never came back down.
+                _ if f.indentation < 0 => f.indentation,
+                FS::Regular | FS::Unknown(_) => 0,
+            };
+            (depth, depth > 0)
+        })
+        .unwrap_or((0, false));
+
+    // Fixed item lanes (REAPER 7 comping), decoded by the one
+    // decoder every loader shares (`FixedLaneFields::decode`).
+    let dawfile_reaper::types::track::FixedLaneState {
+        lane_count,
+        lane_play_mask,
+        lane_names,
+        lane_display,
+    } = rt.fixed_lane_state();
+
+    let grouping = daw_proto::track::TrackGrouping::from_rpp_fields(
+        rt.group_flags.as_deref().unwrap_or(&[]),
+        rt.group_flags_high.as_deref().unwrap_or(&[]),
+    );
+
+    let track = Track {
+        guid: guid.clone(),
+        // Ours, not REAPER's — see `mcp_widths`.
+        width: widths.get(&guid).copied(),
+        automation_mode: {
+            use daw_proto::primitives::AutomationMode as P;
+            use dawfile_reaper::types::track::AutomationMode as R;
+            match rt.automation_mode {
+                R::TrimRead => P::TrimRead,
+                R::Read => P::Read,
+                R::Touch => P::Touch,
+                R::Write => P::Write,
+                R::Latch => P::Latch,
+                R::Unknown(_) => P::TrimRead,
+            }
+        },
+        input_monitor: {
+            use daw_proto::track::InputMonitoringMode as P;
+            use dawfile_reaper::types::track::MonitorMode as R;
+            match rt.record.as_ref().map(|r| r.monitor) {
+                Some(R::On) => P::Normal,
+                Some(R::Auto) => P::NotWhenPlaying,
+                _ => P::Off,
+            }
+        },
+        index: idx as u32,
+        name: rt.name.clone(),
+        color: rt.peak_color.map(|c| native_color_to_rgb(c as u32)),
+        muted,
+        soloed,
+        armed: rt.record.as_ref().map(|r| r.armed).unwrap_or(false),
+        phase_inverted: rt.invert_phase,
+        selected: rt.selected,
+        volume,
+        pan,
+        parent_guid: None, // resolved in a second pass once we
+        // have folder nesting, currently
+        // tracked only via folder_depth
+        folder_depth,
+        is_folder,
+        lane_count,
+        lane_play_mask,
+        lane_names,
+        lane_display,
+        grouping,
+        visible_in_tcp: rt
+            .show_in_mixer
+            .as_ref()
+            .map(|s| s.show_in_track_list)
+            .unwrap_or(true),
+        visible_in_mixer: rt
+            .show_in_mixer
+            .as_ref()
+            .map(|s| s.show_in_mixer)
+            .unwrap_or(true),
+        // Filled by `Tracks::all` from the routing maps, which
+        // are the authority — a count stored here would go
+        // stale the first time a send was added.
+        send_count: 0,
+        receive_count: 0,
+        fx_count: 0, // FX not loaded (synthetic standalone)
+        input_fx_count: 0,
+        // The project's own `TRACKHEIGHT`. Absent, or zero —
+        // REAPER's sentinel for automatic — means the panel
+        // picks its own, so it stays `None` rather than becoming
+        // a track nought pixels tall.
+        height: rt
+            .track_height
+            .as_ref()
+            .map(|h| h.height)
+            .filter(|h| *h > 0)
+            .map(|h| h as u32),
+        // The project file's own answer, not a default: a track
+        // muted out of the master bus must not read as sending to
+        // it just because nobody asked the routing service.
+        parent_send: rt.master_send.as_ref().map(|m| m.enabled).unwrap_or(true),
+        record_input: rt
+            .record
+            .as_ref()
+            .map_or(daw_proto::track::RecordInput::None, |r| {
+                record_input_from_rpp(r.input)
+            }),
+    };
+    let ext = TrackExt {
+        num_channels: rt.channel_count.max(1).min(128),
+        record_input: track.record_input,
+        parent_send_enabled: track.parent_send,
+        tcp_height_pixels: 0,
+        comping: rt.lane_comping(),
+    };
+    (track, ext)
+}
+
+/// One `<ITEM>` as this loader reads it (its takes are [`build_take`]'s).
+pub(crate) fn item_from_rpp(
+    ri: &dawfile_reaper::types::Item,
+    track_guid: &str,
+    item_idx: usize,
+    lane_count: u32,
+) -> Item {
+    let item_guid = ri
+        .item_guid
+        .clone()
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let mut item = Item::default();
+    item.guid = item_guid;
+    item.track_guid = track_guid.to_string();
+    item.index = item_idx as u32;
+    item.position = PositionInSeconds::from_seconds(ri.position);
+    item.length = Duration::from_seconds(ri.length);
+    item.snap_offset = Duration::from_seconds(ri.snap_offset);
+    item.muted = ri.mute.as_ref().map(|m| m.muted).unwrap_or(false);
+    item.selected = ri.selected;
+    item.volume = ri.volpan.as_ref().map(|v| v.item_trim).unwrap_or(1.0);
+    if let Some(fi) = &ri.fade_in {
+        item.fade_in_length = Duration::from_seconds(fi.time);
+        item.fade_in_shape = fade_curve_to_shape(fi.curve_type);
+    }
+    if let Some(fo) = &ri.fade_out {
+        item.fade_out_length = Duration::from_seconds(fo.time);
+        item.fade_out_shape = fade_curve_to_shape(fo.curve_type);
+    }
+    item.color = ri.color.map(|c| native_color_to_rgb(c as u32));
+    item.loop_source = ri.loop_source;
+    // Fixed-lane membership only matters on lane-enabled
+    // tracks (YPOS also appears for free item positioning).
+    item.fixed_lane = if lane_count > 0 {
+        ri.lane.map(|l| l.max(0) as u32)
+    } else {
+        None
+    };
+    item.take_count = ri.takes.len().max(1) as u32;
+    item.label = label_from_rpp(ri);
+    // proto `Item` doesn't carry `channel_mode` yet — drop.
+    item
+}
+
+/// An item's label: its `<NOTES>` block (REAPER's `P_NOTES`), one `|`
+/// line a line. The parser keeps a nested block it does not model on the
+/// take it was read under, which for an item's own notes is take #0.
+pub(crate) fn label_from_rpp(ri: &dawfile_reaper::types::Item) -> Option<String> {
+    let block = ri
+        .takes
+        .iter()
+        .flat_map(|t| &t.extra_blocks)
+        .find(|b| is_notes_block(b))?;
+    let text = block
+        .lines()
+        .skip(1)
+        .filter_map(|l| l.trim_start().strip_prefix('|'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.is_empty()).then_some(text)
+}
+
+/// Whether a nested block is an item's `<NOTES>`.
+pub(crate) fn is_notes_block(block: &str) -> bool {
+    block.trim_start().starts_with("<NOTES")
+}
+
+/// A take's `SM` lines, sorted by position. The third token is the
+/// marker's slope (daw-proto's field of the same name).
+pub(crate) fn stretch_markers_from_rpp(rt_take: &RppTake) -> Vec<daw_proto::StretchMarker> {
+    let mut markers: Vec<daw_proto::StretchMarker> = rt_take
+        .stretch_markers
+        .iter()
+        .map(|sm| daw_proto::StretchMarker {
+            position: sm.position,
+            source_position: sm.source_position,
+            slope: sm.rate.unwrap_or(0.0),
+        })
+        .collect();
+    markers.sort_by(|a, b| a.position.total_cmp(&b.position));
+    markers
+}
+
+/// Which take plays.
+///
+/// `TAKE SEL` is REAPER's own marker for the active take and
+/// is authoritative when present. The GUID match below is the
+/// older path and only works for an item whose FIRST take is
+/// written inline (so the item carries that take's `GUID`).
+///
+/// A comped item is not written that way. It opens with
+/// `TAKE NULL` — an empty comp-lane slot, which occupies a
+/// take index exactly as REAPER counts it — so there is no
+/// item-level `GUID` to match, `position` finds nothing, and
+/// the old `unwrap_or(0)` landed on a null slot. The item
+/// then reported an `Empty` active take and every consumer
+/// that keeps only audio dropped it: on a real session
+/// (`set in stone`) the tom trigger tracks composed to 1.3%
+/// non-zero at -66 dBFS while their source files were full
+/// 317s recordings. It presented as "the trigger tracks hold
+/// no audio".
+///
+/// Falling back to the first take that has a source keeps a
+/// pathological item (nulls only, no SEL) playing something
+/// real rather than silence.
+pub(crate) fn active_take_index(ri: &dawfile_reaper::types::Item) -> u32 {
+    ri.takes
+        .iter()
+        .position(|t| t.is_selected)
+        .or_else(|| {
+            ri.take_guid.as_ref().and_then(|g| {
+                ri.takes
+                    .iter()
+                    .position(|t| t.take_guid.as_ref() == Some(g))
+            })
+        })
+        .or_else(|| ri.takes.iter().position(|t| t.source.is_some()))
+        .unwrap_or(0) as u32
+}
+
 /// All MIDI event types decoded from an RPP `MidiSource`.
-struct DecodedMidiSource {
-    notes: Vec<daw_proto::midi::MidiNote>,
-    ccs: Vec<daw_proto::midi::MidiCC>,
-    pitch_bends: Vec<daw_proto::midi::MidiPitchBend>,
-    program_changes: Vec<daw_proto::midi::MidiProgramChange>,
-    sysex: Vec<daw_proto::midi::MidiSysEx>,
-    channel_pressures: Vec<daw_proto::midi::MidiChannelPressure>,
-    poly_pressures: Vec<daw_proto::midi::MidiPolyPressure>,
+pub(crate) struct DecodedMidiSource {
+    pub(crate) notes: Vec<daw_proto::midi::MidiNote>,
+    pub(crate) ccs: Vec<daw_proto::midi::MidiCC>,
+    pub(crate) pitch_bends: Vec<daw_proto::midi::MidiPitchBend>,
+    pub(crate) program_changes: Vec<daw_proto::midi::MidiProgramChange>,
+    pub(crate) sysex: Vec<daw_proto::midi::MidiSysEx>,
+    pub(crate) channel_pressures: Vec<daw_proto::midi::MidiChannelPressure>,
+    pub(crate) poly_pressures: Vec<daw_proto::midi::MidiPolyPressure>,
 }
 
 /// Walk a parsed RPP `MidiSource`, demultiplex the delta-tick event
@@ -553,7 +632,9 @@ struct DecodedMidiSource {
 /// them. SysEx is preserved verbatim including the leading 0xF0 /
 /// trailing 0xF7 framing bytes (REAPER's `E` lines store the raw
 /// MIDI bytes per the spec).
-fn decode_midi_source(midi: &dawfile_reaper::types::item::MidiSource) -> DecodedMidiSource {
+pub(crate) fn decode_midi_source(
+    midi: &dawfile_reaper::types::item::MidiSource,
+) -> DecodedMidiSource {
     use daw_proto::midi::{
         MidiCC, MidiChannelPressure, MidiNote, MidiPitchBend, MidiPolyPressure, MidiProgramChange,
         MidiSysEx,
@@ -573,17 +654,39 @@ fn decode_midi_source(midi: &dawfile_reaper::types::item::MidiSource) -> Decoded
     let mut next_note_idx: u32 = 0;
     let to_ppq = |t: u64| (t as f64) / tpq;
 
-    for ev in &midi.events {
-        tick = tick.saturating_add(ev.delta_ticks as u64);
-        let Some(&status) = ev.bytes.first() else {
+    // Deltas count from the previous event of EITHER kind: an `<X>` block
+    // (text, notation, …) between two `E` lines carries part of the time
+    // between them. Summing the `E` deltas alone put every event after
+    // one early by its delta.
+    use dawfile_reaper::types::item::MidiSourceEvent;
+    let stream: Vec<(u32, Option<&[u8]>)> = if midi.event_stream.is_empty() {
+        midi.events
+            .iter()
+            .map(|e| (e.delta_ticks, Some(e.bytes.as_slice())))
+            .collect()
+    } else {
+        midi.event_stream
+            .iter()
+            .map(|ev| match ev {
+                MidiSourceEvent::Midi(e) => (e.delta_ticks, Some(e.bytes.as_slice())),
+                MidiSourceEvent::Extended(x) => (x.delta_ticks(), None),
+            })
+            .collect()
+    };
+    for (delta, bytes) in stream {
+        tick = tick.saturating_add(delta as u64);
+        let Some(bytes) = bytes else {
+            continue;
+        };
+        let Some(&status) = bytes.first() else {
             continue;
         };
         let typ = status & 0xF0;
         let channel = status & 0x0F;
         match typ {
             0x90 => {
-                let pitch = ev.bytes.get(1).copied().unwrap_or(0) & 0x7F;
-                let velocity = ev.bytes.get(2).copied().unwrap_or(0) & 0x7F;
+                let pitch = bytes.get(1).copied().unwrap_or(0) & 0x7F;
+                let velocity = bytes.get(2).copied().unwrap_or(0) & 0x7F;
                 if velocity == 0 {
                     if let Some((start_tick, vel, idx)) = pending_notes.remove(&(channel, pitch))
                         && let Some(n) = notes.get_mut(idx) {
@@ -607,7 +710,7 @@ fn decode_midi_source(midi: &dawfile_reaper::types::item::MidiSource) -> Decoded
                 }
             }
             0x80 => {
-                let pitch = ev.bytes.get(1).copied().unwrap_or(0) & 0x7F;
+                let pitch = bytes.get(1).copied().unwrap_or(0) & 0x7F;
                 if let Some((start_tick, vel, idx)) = pending_notes.remove(&(channel, pitch))
                     && let Some(n) = notes.get_mut(idx) {
                         n.length_ppq = to_ppq(tick.saturating_sub(start_tick));
@@ -616,8 +719,8 @@ fn decode_midi_source(midi: &dawfile_reaper::types::item::MidiSource) -> Decoded
             }
             0xB0 => {
                 // Control Change.
-                let controller = ev.bytes.get(1).copied().unwrap_or(0) & 0x7F;
-                let value = ev.bytes.get(2).copied().unwrap_or(0) & 0x7F;
+                let controller = bytes.get(1).copied().unwrap_or(0) & 0x7F;
+                let value = bytes.get(2).copied().unwrap_or(0) & 0x7F;
                 let idx = ccs.len() as u32;
                 ccs.push(MidiCC {
                     index: idx,
@@ -630,7 +733,7 @@ fn decode_midi_source(midi: &dawfile_reaper::types::item::MidiSource) -> Decoded
             }
             0xC0 => {
                 // Program Change.
-                let program = ev.bytes.get(1).copied().unwrap_or(0) & 0x7F;
+                let program = bytes.get(1).copied().unwrap_or(0) & 0x7F;
                 let idx = program_changes.len() as u32;
                 program_changes.push(MidiProgramChange {
                     index: idx,
@@ -642,8 +745,8 @@ fn decode_midi_source(midi: &dawfile_reaper::types::item::MidiSource) -> Decoded
             0xE0 => {
                 // Pitch Bend: LSB then MSB, both 7-bit, combine to
                 // a 14-bit unsigned then subtract 8192 for signed.
-                let lsb = ev.bytes.get(1).copied().unwrap_or(0) & 0x7F;
-                let msb = ev.bytes.get(2).copied().unwrap_or(0) & 0x7F;
+                let lsb = bytes.get(1).copied().unwrap_or(0) & 0x7F;
+                let msb = bytes.get(2).copied().unwrap_or(0) & 0x7F;
                 let unsigned = ((msb as u16) << 7) | lsb as u16;
                 let signed = (unsigned as i32 - 8192) as i16;
                 let idx = pitch_bends.len() as u32;
@@ -665,13 +768,13 @@ fn decode_midi_source(midi: &dawfile_reaper::types::item::MidiSource) -> Decoded
                     sysex.push(MidiSysEx {
                         index: idx,
                         position_ppq: to_ppq(tick),
-                        data: ev.bytes.clone(),
+                        data: bytes.to_vec(),
                     });
                 }
             0xA0 => {
                 // Poly Pressure (per-note aftertouch).
-                let note = ev.bytes.get(1).copied().unwrap_or(0) & 0x7F;
-                let pressure = ev.bytes.get(2).copied().unwrap_or(0) & 0x7F;
+                let note = bytes.get(1).copied().unwrap_or(0) & 0x7F;
+                let pressure = bytes.get(2).copied().unwrap_or(0) & 0x7F;
                 let idx = poly_pressures.len() as u32;
                 poly_pressures.push(MidiPolyPressure {
                     index: idx,
@@ -684,7 +787,7 @@ fn decode_midi_source(midi: &dawfile_reaper::types::item::MidiSource) -> Decoded
             }
             0xD0 => {
                 // Channel Pressure (mono aftertouch).
-                let pressure = ev.bytes.get(1).copied().unwrap_or(0) & 0x7F;
+                let pressure = bytes.get(1).copied().unwrap_or(0) & 0x7F;
                 let idx = channel_pressures.len() as u32;
                 channel_pressures.push(MidiChannelPressure {
                     index: idx,
@@ -710,7 +813,7 @@ fn decode_midi_source(midi: &dawfile_reaper::types::item::MidiSource) -> Decoded
     }
 }
 
-fn fade_curve_to_shape(curve: dawfile_reaper::types::item::FadeCurveType) -> FadeShape {
+pub(crate) fn fade_curve_to_shape(curve: dawfile_reaper::types::item::FadeCurveType) -> FadeShape {
     use dawfile_reaper::types::item::FadeCurveType as F;
     match curve {
         F::Linear => FadeShape::Linear,
@@ -724,7 +827,7 @@ fn fade_curve_to_shape(curve: dawfile_reaper::types::item::FadeCurveType) -> Fad
     }
 }
 
-fn build_take(item_guid: &str, index: u32, rt: &RppTake, _summary: &mut LoadedProject) -> Take {
+pub(crate) fn build_take(item_guid: &str, index: u32, rt: &RppTake) -> Take {
     let take_guid = rt
         .take_guid
         .clone()
@@ -797,7 +900,7 @@ fn build_take(item_guid: &str, index: u32, rt: &RppTake, _summary: &mut LoadedPr
     }
 }
 
-fn resolve_folder_parents(tracks: &mut [Track]) {
+pub(crate) fn resolve_folder_parents(tracks: &mut [Track]) {
     // Stack-of-folder-guids walk: when entering a folder we push the
     // track guid onto the stack and mark following tracks until
     // depth decrement.
@@ -831,64 +934,99 @@ fn populate_markers_regions(
         // grouping cannot be labelled. Stored where the `Project`
         // service's ruler-lane accessors already read from, so a loaded
         // project answers them the same way a hand-set one does.
+        // The file numbers lanes from 1 (`RULERLANE 1 8 "SONG"`); the
+        // service surface is REAPER's API, which numbers them from 0.
         for lane in &project.ruler_lanes {
-            if lane.index < 0 || lane.name.is_empty() {
+            let Some(index) = file_lane_to_api(Some(lane.index)) else {
                 continue;
-            }
-            p.project_ext_state.insert(
-                (
-                    "daw-standalone:ruler_lanes".into(),
-                    format!("{}", lane.index),
-                ),
-                lane.name.clone(),
+            };
+            p.ruler_lanes.insert(
+                index,
+                crate::sync::RulerLane {
+                    name: lane.name.clone(),
+                    flags: lane.flags.max(0) as u32,
+                },
             );
         }
         for mr in &project.markers_regions.markers {
             let id = next_id(&mut p.next_marker_id);
-            let m = Marker {
-                id: Some(id),
-                position: daw_proto::Position::from_time(PositionInSeconds::from_seconds(
-                    mr.position,
-                )),
-                name: mr.name.clone(),
-                color: if mr.color == 0 {
-                    None
-                } else {
-                    Some(native_color_to_rgb(mr.color as u32))
-                },
-                guid: if mr.guid.is_empty() {
-                    None
-                } else {
-                    Some(mr.guid.clone())
-                },
-                lane: mr.lane.map(|l| l as u32),
-            };
-            p.markers.insert(id, m);
+            p.markers.insert(id, marker_from_rpp(mr, id));
             summary.marker_count += 1;
         }
         for mr in &project.markers_regions.regions {
             let id = next_id(&mut p.next_region_id);
-            let end = mr.end_position.unwrap_or(mr.position);
-            let r = Region {
-                id: Some(id),
-                time_range: daw_proto::primitives::TimeRange::from_seconds(mr.position, end),
-                name: mr.name.clone(),
-                color: if mr.color == 0 {
-                    None
-                } else {
-                    Some(native_color_to_rgb(mr.color as u32))
-                },
-                guid: if mr.guid.is_empty() {
-                    None
-                } else {
-                    Some(mr.guid.clone())
-                },
-                lane: mr.lane.map(|l| l as u32),
-            };
-            p.regions.insert(id, r);
+            p.regions.insert(id, region_from_rpp(mr, id));
             summary.region_count += 1;
         }
     });
+}
+
+/// The project tempo and time signature this loader sets on the
+/// transport: the tempo envelope's defaults, else the header
+/// `TEMPO <bpm> <num> <denom>` — the project's one tempo, which
+/// everything that converts time (the grid, the ruler, quantize targets)
+/// reads. r[impl drums.group.tempo]
+pub(crate) fn transport_tempo_from_rpp(project: &ReaperProject) -> Option<(Tempo, TimeSignature)> {
+    if let Some(env) = &project.tempo_envelope {
+        let (num, denom) = env.default_time_signature;
+        Some((
+            Tempo::from_bpm(env.default_tempo.max(1.0)),
+            TimeSignature::new(num.max(1) as u32, denom.max(1) as u32),
+        ))
+    } else {
+        project.properties.tempo.map(|(bpm, num, denom, _)| {
+            (
+                Tempo::from_bpm(bpm.max(1.0)),
+                TimeSignature::new(num.max(1) as u32, denom.max(1) as u32),
+            )
+        })
+    }
+}
+
+/// One `PT` line of the tempo envelope. The time signature is encoded
+/// `num | denom << 16`.
+pub(crate) fn tempo_point_from_rpp(
+    pt: &dawfile_reaper::types::time_tempo::TempoTimePoint,
+) -> TempoPoint {
+    let mut tp = TempoPoint::default();
+    tp.position = daw_proto::Position::from_time(PositionInSeconds::from_seconds(pt.position));
+    tp.bpm = pt.tempo.max(1.0);
+    if let Some(enc) = pt.time_signature_encoded {
+        let num = (enc & 0xFFFF).max(1) as u32;
+        let denom = ((enc >> 16) & 0xFFFF).max(1) as u32;
+        tp.time_signature = Some(TimeSignature::new(num, denom));
+    }
+    tp
+}
+
+/// A marker/region colour: `0` is "none", anything else native.
+fn marker_color_from_rpp(color: i32) -> Option<u32> {
+    (color != 0).then(|| native_color_to_rgb(color as u32))
+}
+
+/// One `MARKER` line that is a marker, numbered `id` by this backend.
+pub(crate) fn marker_from_rpp(mr: &dawfile_reaper::types::MarkerRegion, id: u32) -> Marker {
+    Marker {
+        id: Some(id),
+        position: daw_proto::Position::from_time(PositionInSeconds::from_seconds(mr.position)),
+        name: mr.name.clone(),
+        color: marker_color_from_rpp(mr.color),
+        guid: (!mr.guid.is_empty()).then(|| mr.guid.clone()),
+        lane: file_lane_to_api(mr.lane),
+    }
+}
+
+/// One region (a `MARKER` start/end pair), numbered `id` by this backend.
+pub(crate) fn region_from_rpp(mr: &dawfile_reaper::types::MarkerRegion, id: u32) -> Region {
+    let end = mr.end_position.unwrap_or(mr.position);
+    Region {
+        id: Some(id),
+        time_range: daw_proto::primitives::TimeRange::from_seconds(mr.position, end),
+        name: mr.name.clone(),
+        color: marker_color_from_rpp(mr.color),
+        guid: (!mr.guid.is_empty()).then(|| mr.guid.clone()),
+        lane: file_lane_to_api(mr.lane),
+    }
 }
 
 fn next_id(counter: &mut u32) -> u32 {
@@ -908,16 +1046,7 @@ fn populate_tempo(
     };
     let _ = daw.with_project_mut(project_guid, |p| {
         for pt in &env.points {
-            let mut tp = TempoPoint::default();
-            tp.position =
-                daw_proto::Position::from_time(PositionInSeconds::from_seconds(pt.position));
-            tp.bpm = pt.tempo.max(1.0);
-            if let Some(enc) = pt.time_signature_encoded {
-                let num = (enc & 0xFFFF).max(1) as u32;
-                let denom = ((enc >> 16) & 0xFFFF).max(1) as u32;
-                tp.time_signature = Some(TimeSignature::new(num, denom));
-            }
-            p.tempo_points.push(tp);
+            p.tempo_points.push(tempo_point_from_rpp(pt));
             summary.tempo_point_count += 1;
         }
     });
@@ -931,7 +1060,7 @@ fn populate_tempo(
 /// - volume: linear gain, used as-is
 /// - pan: RPP −1…1 (negative = left) → 0…1 (0.5 = centre)
 /// - mute: RPP >0.5 = PLAY → ours >0.5 = MUTED (inverted)
-fn convert_track_envelope(
+pub(crate) fn convert_track_envelope(
     env: &dawfile_reaper::types::envelope::Envelope,
 ) -> Option<(crate::sync::EnvelopeKey, crate::sync::EnvelopeData)> {
     use daw_proto::automation::{EnvelopeShape, EnvelopeType};
@@ -1027,11 +1156,7 @@ fn populate_routing(
                 route.pan = recv.pan;
                 route.muted = recv.mute;
                 route.phase_inverted = recv.invert_polarity;
-                route.send_mode = match recv.mode {
-                    1 => daw_proto::routing::SendMode::PreFx,
-                    3 => daw_proto::routing::SendMode::PostFx, // pre-fader
-                    _ => daw_proto::routing::SendMode::PostFader,
-                };
+                route.send_mode = send_mode_from_rpp(recv.mode);
                 let sends = p.sends.entry(src_guid).or_default();
                 route.index = sends.len() as u32;
                 sends.push(route);
@@ -1064,6 +1189,15 @@ fn populate_routing(
             }
         }
     });
+}
+
+/// `AUXRECV` field 2 in the backend's terms.
+pub(crate) fn send_mode_from_rpp(mode: i32) -> daw_proto::routing::SendMode {
+    match mode {
+        1 => daw_proto::routing::SendMode::PreFx,
+        3 => daw_proto::routing::SendMode::PostFx, // pre-fader
+        _ => daw_proto::routing::SendMode::PostFader,
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -1126,6 +1260,21 @@ fn apply_fx_node(
     use dawfile_reaper::types::fx_chain::{FxChainNode, PluginType};
     match node {
         FxChainNode::Plugin(p) => {
+            // A built-in FX of the injected factory (the guide's click,
+            // count and voice instruments, …) has no bundle on disk for
+            // the search below to find: ask the factory first. The
+            // `.session` writer stores one as a CLAP node whose plugin id
+            // (`file`) is the factory's name — see
+            // `session_file::builtin_fx_node`.
+            if let Some(name) = builtin_fx_name(daw, p) {
+                match daw_proto::fx::Effects::add(daw, ctx.clone(), chain_ctx.clone(), &name) {
+                    Some(fx_guid) => apply_fx_flags(daw, ctx, &chain_ctx, &fx_guid, p),
+                    None => summary
+                        .warnings
+                        .push(format!("FX add failed: built-in '{name}'")),
+                }
+                return;
+            }
             // Skip plugin formats we don't host yet (or never will,
             // like Video). JS would need a JSFX engine.
             match p.plugin_type {
@@ -1179,30 +1328,7 @@ fn apply_fx_node(
                         .push(format!("FX state decode failed for '{}': {e}", p.name)),
                 }
             }
-            // REAPER bypass = `enabled=false`. Effects::add starts
-            // enabled so only call when we need to flip it off.
-            if p.bypassed {
-                let _ = daw_proto::fx::Effects::set_enabled(
-                    daw,
-                    ctx.clone(),
-                    daw_proto::fx::FxTarget {
-                        context: chain_ctx.clone(),
-                        fx: daw_proto::fx::FxRef::Guid(fx_guid.clone()),
-                    },
-                    false,
-                );
-            }
-            if p.offline {
-                let _ = daw_proto::fx::Effects::set_offline(
-                    daw,
-                    ctx.clone(),
-                    daw_proto::fx::FxTarget {
-                        context: chain_ctx.clone(),
-                        fx: daw_proto::fx::FxRef::Guid(fx_guid.clone()),
-                    },
-                    true,
-                );
-            }
+            apply_fx_flags(daw, ctx, &chain_ctx, &fx_guid, p);
         }
         FxChainNode::Container(c) => {
             // REAPER 7 FX containers. The proto layer doesn't have a
@@ -1217,6 +1343,42 @@ fn apply_fx_node(
                 apply_fx_node(daw, ctx, chain_ctx.clone(), child, summary);
             }
         }
+    }
+}
+
+/// The factory name of a built-in FX node, when the injected
+/// [`FxFactory`](crate::plugin::FxFactory) provides one: the plugin id
+/// (`file`) first — what the `.session` writer stores — then the display
+/// name.
+fn builtin_fx_name(
+    daw: &Standalone,
+    p: &dawfile_reaper::types::fx_chain::FxPlugin,
+) -> Option<String> {
+    let factory = daw.fx_factory()?;
+    [p.file.as_str(), p.name.as_str()]
+        .into_iter()
+        .find(|name| !name.is_empty() && factory.provides(name))
+        .map(str::to_string)
+}
+
+/// REAPER's `BYPASS <bypassed> <offline>` on a freshly added FX.
+/// `Effects::add` starts enabled and online, so only a flip is written.
+fn apply_fx_flags(
+    daw: &Standalone,
+    ctx: &daw_proto::project::ProjectContext,
+    chain_ctx: &daw_proto::fx::FxChainContext,
+    fx_guid: &str,
+    p: &dawfile_reaper::types::fx_chain::FxPlugin,
+) {
+    let target = || daw_proto::fx::FxTarget {
+        context: chain_ctx.clone(),
+        fx: daw_proto::fx::FxRef::Guid(fx_guid.to_string()),
+    };
+    if p.bypassed {
+        let _ = daw_proto::fx::Effects::set_enabled(daw, ctx.clone(), target(), false);
+    }
+    if p.offline {
+        let _ = daw_proto::fx::Effects::set_offline(daw, ctx.clone(), target(), true);
     }
 }
 
@@ -1345,7 +1507,7 @@ fn find_plugin_in(
 /// not carry `<EXTSTATE>` and growing it one for a single key would be
 /// a larger change than the feature. Anything unrecognised is ignored:
 /// an extension block is by definition full of other people's data.
-fn mcp_widths(rpp_text: &str) -> std::collections::HashMap<String, u32> {
+pub(crate) fn mcp_widths(rpp_text: &str) -> std::collections::HashMap<String, u32> {
     let mut widths = std::collections::HashMap::new();
     let mut in_ext = false;
     let mut in_ours = false;
@@ -1393,7 +1555,7 @@ fn mcp_widths(rpp_text: &str) -> std::collections::HashMap<String, u32> {
 /// The standalone loader used to report `None` for every track whatever
 /// the file said, so a strip's input field read "No input" on a track
 /// that was plainly recording something.
-fn record_input_from_rpp(raw: i32) -> daw_proto::track::RecordInput {
+pub(crate) fn record_input_from_rpp(raw: i32) -> daw_proto::track::RecordInput {
     use daw_proto::track::RecordInput;
 
     if raw < 0 {
@@ -1436,5 +1598,90 @@ mod plugin_search_tests {
         assert_eq!(hit, nested.join("UAD API 2500.vst3"));
         assert!(find_plugin_in(root.path(), "UAD API 2500.vst3", 1).is_none());
         assert!(find_plugin_in(root.path(), "Hidden.vst3", 3).is_none());
+    }
+}
+
+/// A lane number as the `.rpp` writes it (1-based; 0 or absent = no lane)
+/// to the 0-based index REAPER's API — and so this backend — uses.
+pub(crate) fn file_lane_to_api(lane: Option<i32>) -> Option<u32> {
+    lane.filter(|l| *l >= 1).map(|l| (l - 1) as u32)
+}
+
+#[cfg(test)]
+mod anchor_tests {
+    use super::{anchor_media, load_rpp_text};
+    use crate::sync::Standalone;
+
+    const PROJECT: &str = r#"<REAPER_PROJECT 0.1 "7.0/test" 0
+  <TRACK {00000000-0000-0000-0000-000000000001}
+    NAME Click
+    <ITEM
+      POSITION 0
+      LENGTH 4
+      IGUID {00000000-0000-0000-0000-00000000000A}
+      <SOURCE WAVE
+        FILE "Media/Click.wav"
+      >
+    >
+  >
+>
+"#;
+
+    /// Two songs with the same relative media name point at their own
+    /// folders once anchored — and an absolute path is left alone.
+    #[test]
+    fn each_project_s_media_is_anchored_to_its_own_folder() {
+        let daw = Standalone::new();
+        let one = load_rpp_text(&daw, "One", "/set/One/One.RPP", PROJECT).unwrap();
+        let two = load_rpp_text(&daw, "Two", "/set/Two/Two.RPP", PROJECT).unwrap();
+        assert_eq!(
+            anchor_media(&daw, &one.project_guid, std::path::Path::new("/set/One")),
+            1
+        );
+        assert_eq!(
+            anchor_media(&daw, &two.project_guid, std::path::Path::new("/set/Two")),
+            1
+        );
+        let path = |guid: &str| {
+            daw.read_project(guid, |p| {
+                p.takes
+                    .values()
+                    .flat_map(|l| l.takes.iter())
+                    .find_map(|t| t.source_file_path.clone())
+            })
+            .flatten()
+        };
+        assert_eq!(
+            path(&one.project_guid).as_deref(),
+            Some("/set/One/Media/Click.wav")
+        );
+        assert_eq!(
+            path(&two.project_guid).as_deref(),
+            Some("/set/Two/Media/Click.wav")
+        );
+        assert_eq!(
+            anchor_media(&daw, &one.project_guid, std::path::Path::new("/elsewhere")),
+            0
+        );
+    }
+
+    /// A folder given relative to the working directory still anchors to
+    /// an absolute path.
+    #[test]
+    fn a_relative_folder_anchors_absolutely() {
+        let daw = Standalone::new();
+        let song = load_rpp_text(&daw, "One", "../set/One/One.RPP", PROJECT).unwrap();
+        anchor_media(&daw, &song.project_guid, std::path::Path::new("../set/One"));
+        let path = daw
+            .read_project(&song.project_guid, |p| {
+                p.takes
+                    .values()
+                    .flat_map(|l| l.takes.iter())
+                    .find_map(|t| t.source_file_path.clone())
+            })
+            .flatten()
+            .expect("a path");
+        assert!(std::path::Path::new(&path).is_absolute(), "{path}");
+        assert!(path.ends_with("set/One/Media/Click.wav"), "{path}");
     }
 }

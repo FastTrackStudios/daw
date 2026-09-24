@@ -20,6 +20,7 @@ fn track(name: &str, fx: Option<ObjectId>) -> TrackNode {
         fx_chain: fx,
         input_fx_chain: None,
         comping: daw_proto::track::LaneComping::default(),
+        receives: Vec::new(),
     }
 }
 

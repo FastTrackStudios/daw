@@ -18,6 +18,14 @@ pub use music_catalog::sections::SectionColorSet as SectionColors;
 // Re-export the UI palettes from music-catalog
 pub use music_catalog::sections::ui_palettes as palettes;
 
+/// Tag's colour set, built from the catalog's `TAG` (purple-300) the way
+/// the UI palettes build theirs.
+const TAG: SectionColors = SectionColors::new(
+    color_palette::palette::purple::S300,
+    color_palette::palette::purple::S100,
+    color_palette::palette::purple::S800,
+);
+
 /// Get semantic colors for a section type.
 ///
 /// Uses the canonical palettes from [`music_catalog`] to ensure consistency
@@ -56,6 +64,10 @@ pub fn colors_for_section_type(section_type: &SectionType) -> SectionColors {
 
         // Turnaround - a short transitional instrumental link (reads like a vamp).
         SectionType::Turnaround => VAMP,
+
+        // Tag - the catalog's TAG colour (purple-300, a lighter bridge);
+        // the UI palettes have no tag set of their own yet.
+        SectionType::Tag => TAG,
 
         // Utility sections - neutral colors
         SectionType::CountIn | SectionType::Opening | SectionType::End => SLATE,

@@ -122,6 +122,20 @@ impl Regions for crate::Reaper {
         Ok(id)
     }
 
+    fn add_with_guid(
+        &self,
+        _project: ProjectContext,
+        _guid: &str,
+        _range: daw_proto::TimeRange,
+        _name: &str,
+    ) -> DawResult<u32> {
+        // `MARKER_GUID:X` is read-only in `GetSetProjectInfo_String`, and
+        // no other API call takes a region GUID: REAPER mints its own.
+        Err(DawError::not_supported(
+            "REAPER cannot set a region's GUID through its API",
+        ))
+    }
+
     fn remove(&self, project: ProjectContext, id: u32) -> DawResult<()> {
         let ctx = resolve_project_context(&project);
         let low = ReaperHigh::get().medium_reaper().low();
