@@ -190,6 +190,39 @@ pub struct FetchConfig {
     pub horizons: Vec<f64>,
     /// How often to re-plan when nothing has landed (a playhead moving).
     pub tick: Duration,
+    /// Hold only a window of each take in memory (a browser); `None`
+    /// fetches everything and keeps it (natively, where it is on disk).
+    pub resident: Option<Resident>,
+}
+
+/// The stretch of each take held in memory, around the playhead. The rest
+/// is let go ([`SparseBytes::keep_only`]) and fetched again when it comes
+/// near — from wherever the fetcher gets it (a local cache first, ideally).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Resident {
+    /// Seconds kept behind the playhead.
+    pub behind: f64,
+    /// Seconds fetched and kept in front of it: the furthest horizon.
+    pub ahead: f64,
+}
+
+impl Resident {
+    /// A browser's: 30 s in front, 5 s behind — a few MB for a whole band.
+    pub const BROWSER: Self = Self { behind: 5.0, ahead: 30.0 };
+}
+
+impl StreamedTake {
+    /// The bytes to hold for the window `window` around `playhead`: the
+    /// header, and the pages under the part of the take inside it.
+    fn window(&self, playhead: f64, window: Resident) -> Vec<Range<u64>> {
+        let from = (playhead - window.behind).max(self.start);
+        let to = (playhead + window.ahead).min(self.end);
+        let mut keep = vec![self.index.header()];
+        if from < to {
+            keep.push(self.index.bytes_for(self.frame_at(from).saturating_sub(PREROLL), self.frame_at(to)));
+        }
+        keep
+    }
 }
 
 impl Default for FetchConfig {
@@ -199,13 +232,16 @@ impl Default for FetchConfig {
             max_request: 256 * 1024,
             horizons: vec![3.0, 10.0, 30.0, 120.0, f64::INFINITY],
             tick: Duration::from_millis(50),
+            resident: None,
         }
     }
 }
 
 /// Fetch `takes`' media in the order it will be heard until everything
 /// has arrived or `stop` is set. `playhead` is read each re-plan. Failed
-/// requests are logged and tried again on a later plan.
+/// requests are logged and tried again on a later plan. With a
+/// [`Resident`] window it holds only that window of each take, and follows
+/// the playhead until `stop`.
 pub async fn drive(
     takes: Arc<Mutex<Vec<StreamedTake>>>,
     fetch: Arc<dyn RangeFetch>,
@@ -226,11 +262,19 @@ pub async fn drive(
         }
         let snapshot: Vec<StreamedTake> = takes.lock().map(|t| t.clone()).unwrap_or_default();
         let now = playhead();
-        // The nearest horizon with something still missing.
+        if let Some(window) = config.resident {
+            for take in &snapshot {
+                take.bytes.keep_only(&take.window(now, window));
+            }
+        }
+        let reach = config.resident.map_or(f64::INFINITY, |w| w.ahead);
+        // The nearest horizon with something still missing — never past
+        // the window, when there is one.
         let wanted = config
             .horizons
             .iter()
-            .map(|&h| plan(&snapshot, now, h, config.max_request))
+            .map(|&h| h.min(reach))
+            .map(|h| plan(&snapshot, now, h, config.max_request))
             .find(|p| p.iter().any(|r| !overlaps(&flying, r)))
             .unwrap_or_default();
         for request in wanted {
@@ -246,7 +290,7 @@ pub async fn drive(
             in_flight.push(Box::pin(async move { (r, future.await) }));
             flying.push(request);
         }
-        if flying.is_empty() && snapshot.iter().all(StreamedTake::complete) {
+        if config.resident.is_none() && flying.is_empty() && snapshot.iter().all(StreamedTake::complete) {
             return;
         }
         // The next landing, or a tick to re-plan for a moving playhead.

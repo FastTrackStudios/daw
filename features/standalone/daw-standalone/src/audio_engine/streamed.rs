@@ -245,10 +245,14 @@ pub struct StreamFeeder<D> {
     /// Decoded audio not yet a whole chunk, starting at chunk `pending.0`.
     pending: (usize, Vec<f32>),
     failed: bool,
+    /// Chunks kept decoded ahead of the playhead ([`AHEAD`] unless set).
+    ahead: usize,
 }
 
 /// How far ahead of the playhead to keep decoded, and how far behind.
-const AHEAD: usize = 24; // ~9 s at 44.1 kHz
+/// Decoded stereo is ~128 KB a chunk, so a take holds ~3.4 MB — fine on a
+/// desktop; a browser keeps less ([`StreamFeeder::with_ahead`]).
+pub const AHEAD: usize = 24; // ~9 s at 44.1 kHz
 const BEHIND: usize = 2;
 /// Gaps tried in one pump when their bytes have not arrived.
 const MAX_GAPS_TRIED: usize = 4;
@@ -272,7 +276,17 @@ impl<D: Decode> StreamFeeder<D> {
             at: Some(0),
             pending: (0, Vec::new()),
             failed: false,
+            ahead: AHEAD,
         }
+    }
+
+    /// Keep `chunks` decoded ahead of the playhead instead of [`AHEAD`] —
+    /// less for a holder that must stay small and decodes often (a
+    /// browser's page, every few milliseconds).
+    #[must_use]
+    pub fn with_ahead(mut self, chunks: usize) -> Self {
+        self.ahead = chunks.max(2);
+        self
     }
 
     #[must_use]
@@ -292,6 +306,7 @@ impl<D: Decode> StreamFeeder<D> {
             at: self.at,
             pending: self.pending,
             failed: self.failed,
+            ahead: self.ahead,
         }
     }
 
@@ -304,7 +319,7 @@ impl<D: Decode> StreamFeeder<D> {
         }
         let count = self.source.chunk_count();
         let here = usize::try_from(self.source.wanted()).unwrap_or(usize::MAX) / CHUNK;
-        let window = here.saturating_sub(BEHIND)..(here + AHEAD).min(count);
+        let window = here.saturating_sub(BEHIND)..(here + self.ahead).min(count);
         self.source.evict(window.start..window.end);
         // After a jump (the playhead's own chunk is not there), decode from
         // just behind it on in one pass — one seek. Otherwise what will be

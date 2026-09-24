@@ -201,3 +201,41 @@ async fn what_is_behind_the_playhead_comes_last_and_the_fetch_finishes() {
     let in_flight = FetchConfig::default().concurrency;
     assert!(first_behind + in_flight > last_ahead, "behind at {first_behind}, ahead until {last_ahead}");
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_resident_window_holds_only_what_is_near_the_playhead() {
+    use daw_standalone::audio_engine::media_fetch::Resident;
+    let files: Vec<(String, Arc<[u8]>)> = (0..2).map(|i| (format!("w{i}"), proxy(120, 30 + i))).collect();
+    let takes: Vec<StreamedTake> = files.iter().map(|(p, b)| take(b, p, 0.0, 120.0, 0.0)).collect();
+    let shared = Arc::new(Mutex::new(takes));
+    let playhead = Arc::new(Mutex::new(10.0f64));
+    let link = Arc::new(SlowLink { files: files.clone(), bytes_per_second: 4_000_000.0, landed: Arc::new(Mutex::new(Vec::new())) });
+    let stop = Arc::new(AtomicBool::new(false));
+    let window = Resident { behind: 5.0, ahead: 20.0 };
+    let config = FetchConfig { max_request: 32 * 1024, resident: Some(window), ..FetchConfig::default() };
+    let at = Arc::clone(&playhead);
+    let driver = tokio::spawn(drive(Arc::clone(&shared), link, Arc::new(move || *at.lock().unwrap()), config, Arc::clone(&stop)));
+
+    let settle = || async {
+        for _ in 0..200 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    };
+    settle().await;
+    let held = |t: &StreamedTake, a: f64, b: f64| t.bytes.has(&t.index.bytes_for(frames(a), frames(b)));
+    for t in shared.lock().unwrap().iter() {
+        assert!(held(t, 10.0, 29.0), "{}: the window is here", t.path);
+        assert!(!held(t, 60.0, 61.0), "{}: nothing far ahead is fetched", t.path);
+        assert!(t.bytes.resident() < t.bytes.len() / 3, "{}: {} of {} held", t.path, t.bytes.resident(), t.bytes.len());
+    }
+
+    // The playhead moves on: what it left is let go, what it nears arrives.
+    *playhead.lock().unwrap() = 80.0;
+    settle().await;
+    for t in shared.lock().unwrap().iter() {
+        assert!(held(t, 80.0, 99.0), "{}: the new window is here", t.path);
+        assert!(!held(t, 10.0, 20.0), "{}: the old one is let go", t.path);
+    }
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _ = driver.await;
+}
