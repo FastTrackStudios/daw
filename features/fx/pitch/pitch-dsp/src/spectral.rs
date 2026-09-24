@@ -63,6 +63,14 @@ pub struct SpectralShifter {
     /// Restart the phase rotation of regions that jump in energy (keeps pick
     /// attacks sharp).
     pub transient_reset: bool,
+    /// Line broadening (Hz, FWHM; 0 = off). Each region's phase takes a
+    /// random walk, turning every shifted partial into a narrow Lorentzian
+    /// band this wide — no pitch drift, no periodic modulation. Inside a
+    /// reverb loop it keeps a pure line from parking on one sharp tank mode
+    /// (whose gain can sit far above the tank's average) and lets the loop
+    /// see the average gain its stability bound assumes. A few Hz reads as
+    /// a faint ensemble; the grain shifters it replaces smeared ±20–40 Hz.
+    pub line_width_hz: f64,
 
     plans: Vec<Plan>,
     plan_idx: usize,
@@ -93,6 +101,7 @@ pub struct SpectralShifter {
     theta_prev: Vec<f64>,
     theta_cur: Vec<f64>,
     peaks: Vec<usize>,
+    rng: u64,
 
     ola: Vec<f64>,
     out_block: Vec<f64>,
@@ -124,6 +133,7 @@ impl SpectralShifter {
             fft_size: 4096,
             overlap: 8,
             transient_reset: true,
+            line_width_hz: 0.0,
             plans,
             plan_idx: 0,
             n: 4096,
@@ -145,6 +155,7 @@ impl SpectralShifter {
             theta_prev: vec![0.0; bins],
             theta_cur: vec![0.0; bins],
             peaks: Vec::with_capacity(bins),
+            rng: 0x9E37_79B9_7F4A_7C15,
             ola: vec![0.0; MAX_FFT],
             out_block: vec![0.0; MAX_FFT],
             out_idx: 0,
@@ -190,6 +201,7 @@ impl SpectralShifter {
         self.prev_pow.fill(0.0);
         self.prev_spec.fill(Complex::new(0.0, 0.0));
         self.theta_prev.fill(0.0);
+        self.rng = 0x9E37_79B9_7F4A_7C15;
         self.in_pos = 0;
         self.hop_count = 0;
         self.out_idx = 0;
@@ -225,6 +237,12 @@ impl SpectralShifter {
         let hop = self.hop;
         let bins = self.bins;
         let alpha = self.speed.clamp(0.25, 4.0);
+        // Phase random-walk step for the requested line width: a walk with
+        // per-hop variance σ² gives a Lorentzian of FWHM σ²/(2π·T_hop).
+        let hop_s = hop as f64 / self.sample_rate;
+        let jitter = (self.line_width_hz.max(0.0) * 2.0 * PI * hop_s).sqrt();
+        // Uniform on ±√3·σ has variance σ².
+        let jitter_span = jitter * 3f64.sqrt();
 
         // ── analysis ──
         for i in 0..n {
@@ -252,7 +270,7 @@ impl SpectralShifter {
 
         if max_pow > 1e-18 {
             // Unity: pass the frame through untouched (exact reconstruction).
-            let unity = (alpha - 1.0).abs() < 1e-9;
+            let unity = (alpha - 1.0).abs() < 1e-9 && self.line_width_hz <= 0.0;
 
             // ── peaks: larger than the four nearest neighbours ──
             self.peaks.clear();
@@ -323,7 +341,7 @@ impl SpectralShifter {
                 }
                 let onset = self.transient_reset && e_now > 4.0 * e_prev + 1e-18;
 
-                let theta = if unity {
+                let mut theta = if unity {
                     0.0
                 } else if onset {
                     0.0
@@ -331,6 +349,13 @@ impl SpectralShifter {
                     let omega = f_bins * 2.0 * PI / n as f64; // rad / sample
                     princarg(self.theta_prev[k] + (alpha - 1.0) * omega * hop as f64)
                 };
+                if jitter_span > 0.0 {
+                    self.rng ^= self.rng << 13;
+                    self.rng ^= self.rng >> 7;
+                    self.rng ^= self.rng << 17;
+                    let u = (self.rng >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0;
+                    theta = princarg(theta + u * jitter_span);
+                }
                 for j in lo..=hi {
                     self.theta_cur[j] = theta;
                 }
@@ -452,6 +477,25 @@ mod tests {
             let db = 20.0 * (rms_out / rms_in).log10();
             assert!(db.abs() < 0.5, "speed {speed}: gain {db:.2} dB");
         }
+    }
+
+    #[test]
+    fn line_broadening_keeps_level_and_centre() {
+        let run = |width: f64| -> (f64, f64) {
+            let mut s = make(2.0, 2048);
+            s.line_width_hz = width;
+            let x: Vec<f64> = (0..144000).map(|i| (2.0 * PI * 440.0 * i as f64 / SR).sin() * 0.5).collect();
+            let y: Vec<f64> = x.iter().map(|&v| s.tick(v)).collect();
+            let tail = &y[48000..];
+            let rms = (tail.iter().map(|v| v * v).sum::<f64>() / tail.len() as f64).sqrt();
+            // share of the power within ±1 Hz of the exact octave
+            let on = goertzel(tail, 880.0);
+            (20.0 * (rms / (0.5 / 2f64.sqrt())).log10(), on / (rms * rms))
+        };
+        let (g0, c0) = run(0.0);
+        let (g6, c6) = run(6.0);
+        assert!(g0.abs() < 0.5 && g6.abs() < 1.5, "levels {g0:.2} / {g6:.2} dB");
+        assert!(c6 < 0.5 * c0, "a 6 Hz line should spread off the exact bin: {c6:.3} vs {c0:.3}");
     }
 
     #[test]
