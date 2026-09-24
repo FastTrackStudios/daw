@@ -637,12 +637,12 @@ libc = "0.2"
 #   / collection-proto  → apps/site (the fasttrackstudio.app website)
 #   collection-proto     → apps/fasttrackstudio (optional, `session` feature)
 #   attachments-proto    → features/song (optional, `attachments` feature)
-editor = { git = "https://github.com/FastTrackStudios/task", branch = "session-share-cli" }
-editor-keyflow = { git = "https://github.com/FastTrackStudios/task", branch = "session-share-cli" }
-editor-keyflow-lang = { git = "https://github.com/FastTrackStudios/task", branch = "session-share-cli" }
-view-knowledge-graph = { git = "https://github.com/FastTrackStudios/task", branch = "session-share-cli" }
-collection-proto = { git = "https://github.com/FastTrackStudios/task", branch = "session-share-cli", default-features = false }
-attachments-proto = { git = "https://github.com/FastTrackStudios/task", branch = "session-share-cli" }
+editor = { git = "https://github.com/FastTrackStudios/task", branch = "main" }
+editor-keyflow = { git = "https://github.com/FastTrackStudios/task", branch = "main" }
+editor-keyflow-lang = { git = "https://github.com/FastTrackStudios/task", branch = "main" }
+view-knowledge-graph = { git = "https://github.com/FastTrackStudios/task", branch = "main" }
+collection-proto = { git = "https://github.com/FastTrackStudios/task", branch = "main", default-features = false }
+attachments-proto = { git = "https://github.com/FastTrackStudios/task", branch = "main" }
 
 # Task's externals not already pinned above (root pins win everywhere
 # a key already existed — dioxus, serde, tokio, facet/vox rc.5 fleet,
