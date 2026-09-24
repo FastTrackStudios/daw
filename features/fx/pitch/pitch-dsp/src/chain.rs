@@ -13,6 +13,7 @@ use crate::granular::GranularShifter;
 use crate::pll::{PllOctave, PllTracker, SubWaveform};
 use crate::pog::{OctaveShift, PolyOctave};
 use crate::psola::PsolaShifter;
+use crate::spectral::SpectralShifter;
 #[cfg(feature = "rubberband")]
 use crate::rubberband::RubberbandShifter;
 use crate::wsola::WsolaShifter;
@@ -46,6 +47,10 @@ pub enum Algorithm {
     /// Polyphonic Octave Generator — ERB filter bank phase scaling (EHX POG style).
     /// 0 sample latency, polyphonic, octave shifts only (±12, ±24 semitones).
     PolyOctave,
+    /// Phase-locked phase vocoder (Laroche–Dolson peak shifting).
+    /// Polyphonic, no grain warble, arbitrary ratio. Latency 2048 samples
+    /// (42.7 ms @ 48 kHz); `live` = 1024 (21.3 ms).
+    Spectral,
 }
 
 /// Convert semitones to pitch ratio: `2^(semitones / 12)`.
@@ -94,6 +99,7 @@ pub struct PitchChain {
     rubberband: RubberbandShifter,
     allpass: AllpassShifter,
     pog: PolyOctave,
+    spectral: SpectralShifter,
 
     /// Track previous live state to detect changes and reinitialise.
     prev_live: bool,
@@ -120,6 +126,7 @@ impl PitchChain {
             rubberband: RubberbandShifter::new(),
             allpass: AllpassShifter::new(),
             pog: PolyOctave::new(),
+            spectral: SpectralShifter::new(),
             prev_live: false,
             sample_rate: 48000.0,
         }
@@ -139,6 +146,7 @@ impl PitchChain {
             Algorithm::Rubberband => self.wsola.latency(),
             Algorithm::Allpass => self.allpass.latency(),
             Algorithm::PolyOctave => self.pog.latency(),
+            Algorithm::Spectral => self.spectral.latency(),
         }
     }
 
@@ -174,8 +182,12 @@ impl PitchChain {
             // Allpass: no live mode toggle (not supported).
             // self.allpass.live = self.live;
 
+            // Spectral: 1024-sample frames live, 2048 otherwise.
+            self.spectral.fft_size = if self.live { 1024 } else { 2048 };
+
             // Re-initialise engines with new settings.
             let sr = self.sample_rate;
+            self.spectral.update(sr);
             self.psola.update(sr);
             self.wsola.update(sr);
             #[cfg(feature = "rubberband")]
@@ -243,6 +255,10 @@ impl PitchChain {
         self.allpass.speed = ratio;
         self.allpass.mix = self.mix;
 
+        // Spectral: arbitrary ratio.
+        self.spectral.speed = ratio;
+        self.spectral.mix = self.mix;
+
         // PolyOctave: snap semitones to nearest octave.
         self.pog.shift = OctaveShift::from_semitones(self.semitones);
         self.pog.mix = self.mix;
@@ -266,6 +282,7 @@ impl Processor for PitchChain {
         self.rubberband.reset();
         self.allpass.reset();
         self.pog.reset();
+        self.spectral.reset();
     }
 
     fn update(&mut self, config: AudioConfig) {
@@ -279,6 +296,8 @@ impl Processor for PitchChain {
         self.rubberband.update(config.sample_rate);
         self.allpass.update(config.sample_rate);
         self.pog.update(config.sample_rate);
+        self.spectral.fft_size = if self.live { 1024 } else { 2048 };
+        self.spectral.update(config.sample_rate);
     }
 
     fn process(&mut self, left: &mut [f64], right: &mut [f64]) {
@@ -334,6 +353,11 @@ impl Processor for PitchChain {
                     *s = self.pog.tick(*s);
                 }
             }
+            Algorithm::Spectral => {
+                for s in left.iter_mut() {
+                    *s = self.spectral.tick(*s);
+                }
+            }
         }
 
         // Copy mono result to right channel.
@@ -352,6 +376,7 @@ mod tests {
             Algorithm::Wsola,
             Algorithm::Allpass,
             Algorithm::PolyOctave,
+            Algorithm::Spectral,
         ];
         if cfg!(feature = "rubberband") {
             v.push(Algorithm::Rubberband);

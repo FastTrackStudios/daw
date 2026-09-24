@@ -23,7 +23,7 @@ const BLOCK_SIZE: usize = 512;
 const WARMUP_BLOCKS: usize = 10;
 const DURATION_S: f64 = 2.0;
 
-const ALL_ALGORITHMS: [Algorithm; 7] = [
+const ALL_ALGORITHMS: [Algorithm; 8] = [
     Algorithm::FreqDivider,
     Algorithm::Pll,
     Algorithm::Granular,
@@ -31,6 +31,7 @@ const ALL_ALGORITHMS: [Algorithm; 7] = [
     Algorithm::Wsola,
     Algorithm::Rubberband,
     Algorithm::Allpass,
+    Algorithm::Spectral,
 ];
 
 const OUTPUT_DIR: &str = "target/pitch-comparison";
@@ -296,6 +297,7 @@ fn algo_name(algo: Algorithm) -> &'static str {
         Algorithm::Rubberband => "rubberband",
         Algorithm::Allpass => "allpass",
         Algorithm::PolyOctave => "polyoctave",
+        Algorithm::Spectral => "spectral",
     }
 }
 

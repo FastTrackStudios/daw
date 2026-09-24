@@ -9798,6 +9798,7 @@ dependencies = [
  "audiocore-dsp",
  "criterion",
  "hound",
+ "realfft",
  "rustfft",
  "serde",
 ]
