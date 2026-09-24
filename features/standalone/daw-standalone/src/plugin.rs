@@ -388,7 +388,9 @@ static RENDER_CYCLE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64
 /// takes the place of the count note under it.
 #[must_use]
 pub fn render_frame() -> Option<u64> {
-    RENDER_FRAME.with(std::cell::Cell::get).map(|(_, frame)| frame)
+    RENDER_FRAME
+        .with(std::cell::Cell::get)
+        .map(|(_, frame)| frame)
 }
 
 /// Which render pass this is — a number no other block shares. Plugins
@@ -397,7 +399,9 @@ pub fn render_frame() -> Option<u64> {
 /// loop pass and after a seek back.
 #[must_use]
 pub fn render_cycle() -> Option<u64> {
-    RENDER_FRAME.with(std::cell::Cell::get).map(|(cycle, _)| cycle)
+    RENDER_FRAME
+        .with(std::cell::Cell::get)
+        .map(|(cycle, _)| cycle)
 }
 
 /// Publishes [`render_frame`] for the life of the guard.

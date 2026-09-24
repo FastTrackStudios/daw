@@ -216,10 +216,8 @@ pub fn build_from_ogg(bytes: std::sync::Arc<[u8]>) -> Result<ReaPeaks, BuildErro
     use fts_sample::ogg_stream::OggStream;
 
     let mut stream = OggStream::open(bytes).map_err(|e| BuildError::Decode(e.to_string()))?;
-    let mut builder = crate::reapeaks::PeaksBuilder::new(
-        usize::from(stream.channels()),
-        stream.sample_rate(),
-    );
+    let mut builder =
+        crate::reapeaks::PeaksBuilder::new(usize::from(stream.channels()), stream.sample_rate());
     let mut block: Vec<f32> = Vec::new();
     loop {
         block.clear();
@@ -325,8 +323,14 @@ mod tests {
             cache_path(Path::new("/s/Media/Bass.ogg")),
             Some(PathBuf::from("/s/Media/Peaks/Bass.ogg.sessionpeaks"))
         );
-        assert_eq!(cache_path(Path::new("/s/Media/Peaks/Bass.wav.sessionpeaks")), None);
-        assert_eq!(cache_path(Path::new("/s/Media/peaks/Bass.wav.reapeaks")), None);
+        assert_eq!(
+            cache_path(Path::new("/s/Media/Peaks/Bass.wav.sessionpeaks")),
+            None
+        );
+        assert_eq!(
+            cache_path(Path::new("/s/Media/peaks/Bass.wav.reapeaks")),
+            None
+        );
     }
 
     #[test]
@@ -369,7 +373,10 @@ mod tests {
         let mut checked = 0;
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav")) {
+            if !path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("wav"))
+            {
                 continue;
             }
             let Some((found, peaks)) = read_any(&path) else {
@@ -389,7 +396,12 @@ mod tests {
             assert!(peaks.length_seconds() > 1.0);
             // REAPER's stamp is this media file's size and mtime — the
             // test that proves the header field is what it claims.
-            assert_eq!(Some(peaks.source_stamp), media_stamp(&path), "{}", path.display());
+            assert_eq!(
+                Some(peaks.source_stamp),
+                media_stamp(&path),
+                "{}",
+                path.display()
+            );
             assert!(is_current(&peaks, &path));
             let columns = peaks.columns(0, 0.0, peaks.length_seconds(), 512);
             assert_eq!(columns.len(), 512);
@@ -447,7 +459,11 @@ mod tests {
         });
         peaks.source_stamp = media_stamp(&media).expect("stamp");
         let at = write(&media, &peaks).expect("write");
-        assert!(at.ends_with("Media/Peaks/Bass.wav.sessionpeaks"), "{}", at.display());
+        assert!(
+            at.ends_with("Media/Peaks/Bass.wav.sessionpeaks"),
+            "{}",
+            at.display()
+        );
         assert!(!at.with_extension("sessionpeaks.partial").exists());
 
         let (found, back) = read_any(&media).expect("read back");

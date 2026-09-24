@@ -15,5 +15,11 @@ pub trait SongFiles {
 
     /// `len` bytes (at most [`super::MAX_READ`]) of `path` from `start`;
     /// fewer at the end of the file.
-    async fn read(&self, project: ProjectContext, path: String, start: u64, len: u32) -> DawResult<Vec<u8>>;
+    async fn read(
+        &self,
+        project: ProjectContext,
+        path: String,
+        start: u64,
+        len: u32,
+    ) -> DawResult<Vec<u8>>;
 }

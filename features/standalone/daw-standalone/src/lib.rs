@@ -75,10 +75,7 @@ mod midi;
 mod peak;
 /// Persistent source-level peaks: REAPER `.reapeaks` sidecars next to
 /// each on-disk media file, shared with REAPER where projects overlap.
-#[cfg(all(
-    feature = "reapeaks",
-    any(feature = "audio", feature = "decode")
-))]
+#[cfg(all(feature = "reapeaks", any(feature = "audio", feature = "decode")))]
 mod peak_store;
 pub(crate) mod platform;
 pub mod plugin;
@@ -95,8 +92,8 @@ pub mod rpp_state;
 mod screenset;
 mod services;
 // A peer streaming the song in: its folder's files by range.
-mod song_files;
 mod shared_state;
+mod song_files;
 pub mod sync;
 mod take;
 mod tempo_map;

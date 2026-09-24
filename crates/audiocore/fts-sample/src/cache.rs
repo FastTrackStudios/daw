@@ -3281,11 +3281,14 @@ pub fn write_ogg_proxy(
     let spec = reader.spec();
     let channels = usize::from(spec.channels.max(1));
     let channels_nz = NonZeroU8::new(u8::try_from(spec.channels).map_err(|_| {
-        invalid_data(format!("vorbis: unsupported channel count {}", spec.channels))
+        invalid_data(format!(
+            "vorbis: unsupported channel count {}",
+            spec.channels
+        ))
     })?)
     .ok_or_else(|| invalid_data("vorbis: zero channels"))?;
-    let rate_nz =
-        NonZeroU32::new(spec.sample_rate).ok_or_else(|| invalid_data("vorbis: zero sample rate"))?;
+    let rate_nz = NonZeroU32::new(spec.sample_rate)
+        .ok_or_else(|| invalid_data("vorbis: zero sample rate"))?;
 
     let out = std::fs::File::create(dst)?;
     let mut encoder = VorbisEncoderBuilder::new(rate_nz, channels_nz, std::io::BufWriter::new(out))
@@ -3303,7 +3306,7 @@ pub fn write_ogg_proxy(
     let mut planar: Vec<Vec<f32>> = vec![Vec::with_capacity(BLOCK); channels];
     let mut frames = 0u64;
     let flush = |planar: &mut Vec<Vec<f32>>,
-                     encoder: &mut vorbis_rs::VorbisEncoder<_>|
+                 encoder: &mut vorbis_rs::VorbisEncoder<_>|
      -> Result<(), SamplerError> {
         if !planar[0].is_empty() {
             encoder.encode_audio_block(&*planar).map_err(vorb)?;
@@ -3357,7 +3360,10 @@ pub fn write_ogg_proxy(
 /// The proxy cannot be read, is not an Ogg stream, or the index cannot be
 /// written.
 #[cfg(feature = "engine-native")]
-pub fn write_ogg_index(ogg: &std::path::Path, step: u64) -> Result<std::path::PathBuf, SamplerError> {
+pub fn write_ogg_index(
+    ogg: &std::path::Path,
+    step: u64,
+) -> Result<std::path::PathBuf, SamplerError> {
     let bytes = std::fs::read(ogg)?;
     let index = crate::ogg_index::OggIndex::build(&bytes, step)
         .ok_or_else(|| invalid_data(format!("{}: not an Ogg stream", ogg.display())))?;
@@ -3632,7 +3638,10 @@ mod tests {
         assert_eq!(written, frames as u64);
 
         let ogg = std::fs::read(&dst).expect("read proxy");
-        assert!(ogg.len() < frames * 2 * 3 / 4, "a proxy is smaller than its stem");
+        assert!(
+            ogg.len() < frames * 2 * 3 / 4,
+            "a proxy is smaller than its stem"
+        );
         let decoded = load_ogg_vorbis_bytes(&ogg).expect("decode");
         let decoded = decoded.to_f32();
         assert!(
@@ -3641,7 +3650,11 @@ mod tests {
             decoded.len() / 2
         );
         let worst = (4096..frames - 4096)
-            .map(|i| (decoded[i * 2] - tone(i)).abs().max((decoded[i * 2 + 1] + tone(i)).abs()))
+            .map(|i| {
+                (decoded[i * 2] - tone(i))
+                    .abs()
+                    .max((decoded[i * 2 + 1] + tone(i)).abs())
+            })
             .fold(0.0f32, f32::max);
         assert!(worst < 0.05, "the tone survives, both channels: {worst}");
         let _ = std::fs::remove_dir_all(&dir);

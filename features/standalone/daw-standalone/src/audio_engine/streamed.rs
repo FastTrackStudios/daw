@@ -118,7 +118,11 @@ impl Streamed {
     #[must_use]
     pub fn sample(&self, frame: usize, channel: usize) -> f32 {
         let ch = usize::from(self.inner.channels);
-        let chunks = self.inner.chunks.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let chunks = self
+            .inner
+            .chunks
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         chunks
             .get(frame / CHUNK)
             .and_then(Option::as_ref)
@@ -182,7 +186,11 @@ impl std::fmt::Display for DecodeError {
 #[cfg(feature = "stream-ogg")]
 impl From<fts_sample::SamplerError> for DecodeError {
     fn from(e: fts_sample::SamplerError) -> Self {
-        if e.is_not_yet() { Self::NotYet } else { Self::Failed(e.to_string()) }
+        if e.is_not_yet() {
+            Self::NotYet
+        } else {
+            Self::Failed(e.to_string())
+        }
     }
 }
 
@@ -241,8 +249,15 @@ pub struct RemoteOgg {
 #[cfg(feature = "stream-ogg")]
 impl RemoteOgg {
     #[must_use]
-    pub const fn new(bytes: Arc<fts_sample::sparse::SparseBytes>, index: fts_sample::ogg_index::OggIndex) -> Self {
-        Self { bytes, index, stream: None }
+    pub const fn new(
+        bytes: Arc<fts_sample::sparse::SparseBytes>,
+        index: fts_sample::ogg_index::OggIndex,
+    ) -> Self {
+        Self {
+            bytes,
+            index,
+            stream: None,
+        }
     }
 }
 
@@ -259,7 +274,9 @@ impl Decode for RemoteOgg {
     }
 
     fn decode(&mut self, out: &mut Vec<f32>) -> Result<Option<(u64, usize)>, DecodeError> {
-        let Some(stream) = self.stream.as_mut() else { return Err(DecodeError::NotYet) };
+        let Some(stream) = self.stream.as_mut() else {
+            return Err(DecodeError::NotYet);
+        };
         match stream.decode(out) {
             Ok(done) => Ok(done),
             Err(e) => {
@@ -367,9 +384,14 @@ impl<D: Decode> StreamFeeder<D> {
         let order: Vec<usize> = if jumped {
             window.clone().collect()
         } else {
-            (here.max(window.start)..window.end).chain(window.start..here.min(window.end)).collect()
+            (here.max(window.start)..window.end)
+                .chain(window.start..here.min(window.end))
+                .collect()
         };
-        let gaps: Vec<usize> = order.into_iter().filter(|i| !self.source.resident(*i)).collect();
+        let gaps: Vec<usize> = order
+            .into_iter()
+            .filter(|i| !self.source.resident(*i))
+            .collect();
         for next in gaps.into_iter().take(MAX_GAPS_TRIED) {
             match self.fill(next, &window, budget) {
                 Filled::Some => return true,
@@ -419,19 +441,31 @@ impl<D: Decode> StreamFeeder<D> {
                     // The end: whatever is pending is the last chunk.
                     self.flush_pending(ch, true);
                     self.at = None;
-                    return if self.pending.1.len() != before || done > 0 { Filled::Some } else { Filled::Nothing };
+                    return if self.pending.1.len() != before || done > 0 {
+                        Filled::Some
+                    } else {
+                        Filled::Nothing
+                    };
                 }
                 Err(DecodeError::NotYet) => {
                     // What was half built is dropped; the next pump seeks to
                     // the chunk again once more has arrived.
                     self.at = None;
                     self.pending.1.clear();
-                    return if done > 0 { Filled::Some } else { Filled::NotYet };
+                    return if done > 0 {
+                        Filled::Some
+                    } else {
+                        Filled::NotYet
+                    };
                 }
                 Err(DecodeError::Failed(e)) => {
                     tracing::warn!(error = %e, "stream decode failed");
                     self.failed = true;
-                    return if done > 0 { Filled::Some } else { Filled::Nothing };
+                    return if done > 0 {
+                        Filled::Some
+                    } else {
+                        Filled::Nothing
+                    };
                 }
             }
             self.flush_pending(ch, false);
@@ -519,7 +553,11 @@ mod tests {
     #[test]
     fn the_window_ahead_of_the_playhead_fills_and_reads_true() {
         let mut f = feeder(CHUNK as u64 * 100);
-        assert_eq!(f.source().sample(10, 0), 0.0, "nothing resident yet: silence");
+        assert_eq!(
+            f.source().sample(10, 0),
+            0.0,
+            "nothing resident yet: silence"
+        );
         fill(&mut f);
         let s = f.source();
         for frame in [0, 1, CHUNK - 1, CHUNK, CHUNK * 5 + 123, CHUNK * AHEAD - 1] {

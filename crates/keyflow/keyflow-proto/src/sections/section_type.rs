@@ -24,7 +24,7 @@ pub enum SectionType {
     Breakdown, // Breakdown section
     Vamp,    // Vamp section (repeated section for improvisation/transitions)
     Refrain, // Refrain section (recurring hook, common in worship charts)
-    Tag, // Tag — a short repeat of a closing line, often several in a row (worship charts)
+    Tag,     // Tag — a short repeat of a closing line, often several in a row (worship charts)
     Turnaround, // Turnaround — short instrumental link/transition back into a section
     Pre(Box<SectionType>), // Pre-Chorus, Pre-Verse, etc.
     Post(Box<SectionType>), // Post-Chorus, Post-Verse, etc.

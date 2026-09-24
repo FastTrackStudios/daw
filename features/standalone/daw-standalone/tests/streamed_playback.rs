@@ -49,10 +49,19 @@ fn project(bytes: Arc<[u8]>) -> (Standalone, String, StreamFeeder<OggStream>) {
     });
     let ctx = ProjectContext::Project(guid.clone());
     let track = Tracks::add(&daw, ctx.clone(), "Stem", None).expect("track");
-    let loc = Midi::create_midi_item(&daw, ctx.clone(), TrackRef::Guid(track), 0.0, SECONDS as f64)
-        .expect("item");
-    let ItemRef::Guid(item) = &loc.item else { panic!() };
-    let take = daw_proto::Takes::get_active_take(&daw, ctx, ItemRef::Guid(item.clone())).expect("take");
+    let loc = Midi::create_midi_item(
+        &daw,
+        ctx.clone(),
+        TrackRef::Guid(track),
+        0.0,
+        SECONDS as f64,
+    )
+    .expect("item");
+    let ItemRef::Guid(item) = &loc.item else {
+        panic!()
+    };
+    let take =
+        daw_proto::Takes::get_active_take(&daw, ctx, ItemRef::Guid(item.clone())).expect("take");
     daw.write_project(&guid, |p| {
         for list in p.takes.values_mut() {
             for t in &mut list.takes {
@@ -66,7 +75,12 @@ fn project(bytes: Arc<[u8]>) -> (Standalone, String, StreamFeeder<OggStream>) {
     });
     let stream = OggStream::open(bytes).expect("open");
     let streamed = Streamed::new(stream.channels(), stream.sample_rate(), stream.frames());
-    attach_source(&daw, &guid, &take.guid, AudioSource::Streamed(streamed.clone()));
+    attach_source(
+        &daw,
+        &guid,
+        &take.guid,
+        AudioSource::Streamed(streamed.clone()),
+    );
     (daw, guid, StreamFeeder::new(streamed, stream))
 }
 
@@ -101,7 +115,11 @@ fn mismatch(got: &[f32], want: &[f32]) -> f32 {
     let dot: f32 = got.iter().zip(want).map(|(a, b)| a * b).sum();
     let norm: f32 = want.iter().map(|b| b * b).sum();
     let gain = dot / norm.max(f32::EPSILON);
-    let err: f32 = got.iter().zip(want).map(|(a, b)| (a - b * gain).powi(2)).sum();
+    let err: f32 = got
+        .iter()
+        .zip(want)
+        .map(|(a, b)| (a - b * gain).powi(2))
+        .sum();
     assert!(gain > 0.3, "the take is audible: gain {gain}");
     (err / norm.max(f32::EPSILON)).sqrt()
 }
@@ -128,9 +146,19 @@ fn a_streamed_take_plays_the_proxy_through_the_renderer() {
         first.samples.iter().all(|s| *s == 0.0),
         "not resident yet: silence, not the wrong audio"
     );
-    let got = play(&renderer, &mut feeder, at + BLOCK as u64, RATE as usize / BLOCK);
+    let got = play(
+        &renderer,
+        &mut feeder,
+        at + BLOCK as u64,
+        RATE as usize / BLOCK,
+    );
     let from = (at as usize + BLOCK) * 2;
-    let straight: Vec<f32> = want[from..].iter().step_by(2).take(got.len()).copied().collect();
+    let straight: Vec<f32> = want[from..]
+        .iter()
+        .step_by(2)
+        .take(got.len())
+        .copied()
+        .collect();
     let off = mismatch(&got, &straight);
     assert!(off < 0.01, "after the jump it is the proxy's 25 s: {off}");
 }

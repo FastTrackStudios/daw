@@ -69,15 +69,15 @@ pub mod test_tone;
 
 #[cfg(feature = "audio")]
 pub use aux_render::{AuxClock, AuxRenderer};
+/// Realtime metrics both engines report (block size, render time, xruns).
+#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
+pub use daw_audio_io::duplex::EngineStats;
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub use decoder::{DecodedAudio, decode_audio, decode_audio_with_extension};
 #[cfg(all(feature = "audio", any(target_os = "linux", target_os = "macos")))]
 pub use duplex_engine::{DuplexAudioEngine, PhonesBus};
 #[cfg(feature = "audio")]
 pub use mixer::{AudioEngine, TrackHandle};
-/// Realtime metrics both engines report (block size, render time, xruns).
-#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
-pub use daw_audio_io::duplex::EngineStats;
 #[cfg(feature = "audio")]
 pub use routing::{MixerRouting, RoutingSnapshot};
 pub use source::AudioSource;

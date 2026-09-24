@@ -443,7 +443,10 @@ fn find_manifest(dir: &Path) -> DawResult<PathBuf> {
     }
     choose_manifest(&names)
         .map(|name| dir.join(name))
-        .map_err(|reason| DawError::NotAProject { path: dir.display().to_string(), reason })
+        .map_err(|reason| DawError::NotAProject {
+            path: dir.display().to_string(),
+            reason,
+        })
 }
 
 /// Which of a project directory's file names is its manifest: the one of
@@ -457,14 +460,23 @@ fn find_manifest(dir: &Path) -> DawResult<PathBuf> {
 pub fn choose_manifest(names: &[String]) -> Result<&str, String> {
     let rank = |name: &str| {
         let extension = name.rsplit_once('.').map(|(_, e)| e)?;
-        PROJECT_EXTENSIONS.iter().position(|known| *known == extension)
+        PROJECT_EXTENSIONS
+            .iter()
+            .position(|known| *known == extension)
     };
     let best = names.iter().filter_map(|n| rank(n)).min();
-    let found: Vec<&str> = names.iter().map(String::as_str).filter(|n| best.is_some() && rank(n) == best).collect();
+    let found: Vec<&str> = names
+        .iter()
+        .map(String::as_str)
+        .filter(|n| best.is_some() && rank(n) == best)
+        .collect();
     match found.as_slice() {
         [one] => Ok(one),
         [] => Err(format!("no *.{SESSION_EXTENSION} manifest")),
-        many => Err(format!("{} manifests; a project directory holds exactly one", many.len())),
+        many => Err(format!(
+            "{} manifests; a project directory holds exactly one",
+            many.len()
+        )),
     }
 }
 
@@ -617,12 +629,16 @@ mod tests {
         }
         for entry in std::fs::read_dir(dir.join(OBJECTS_DIR)).unwrap() {
             let entry = entry.unwrap();
-            objects.push((entry.file_name().to_string_lossy().into_owned(), std::fs::read(entry.path()).unwrap()));
+            objects.push((
+                entry.file_name().to_string_lossy().into_owned(),
+                std::fs::read(entry.path()).unwrap(),
+            ));
         }
         let manifest = choose_manifest(&names).expect("one manifest");
         let text = std::fs::read_to_string(dir.join(manifest)).unwrap();
         let from_parts =
-            DawProject::from_parts(&text, manifest, ObjectStore::from_named(objects).unwrap()).expect("from parts");
+            DawProject::from_parts(&text, manifest, ObjectStore::from_named(objects).unwrap())
+                .expect("from parts");
         assert_eq!(from_parts.to_rpp().unwrap(), from_disk.to_rpp().unwrap());
 
         // A blob that is not what its name says is refused, as on disk.

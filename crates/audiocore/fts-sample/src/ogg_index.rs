@@ -99,7 +99,11 @@ impl OggIndex {
             if granule > 0 {
                 let frames = u64::try_from(granule).unwrap_or(0);
                 audio_start.get_or_insert(u64_of(at));
-                let point = PagePoint { offset: u64_of(at), end: u64_of(at.saturating_add(len)), frames };
+                let point = PagePoint {
+                    offset: u64_of(at),
+                    end: u64_of(at.saturating_add(len)),
+                    frames,
+                };
                 if frames >= next_mark {
                     points.push(point);
                     next_mark = frames.saturating_add(step.max(1));
@@ -145,7 +149,11 @@ impl OggIndex {
             .rev()
             .find(|p| p.frames <= from)
             .map_or(self.audio_start, |p| p.offset);
-        let end = self.points.iter().find(|p| p.frames >= to).map_or(self.len, |p| p.end);
+        let end = self
+            .points
+            .iter()
+            .find(|p| p.frames >= to)
+            .map_or(self.len, |p| p.end);
         start..end.max(start)
     }
 
@@ -187,7 +195,14 @@ impl OggIndex {
                 })
             })
             .collect::<Option<Vec<_>>>()?;
-        Some(Self { len, frames, audio_start, channels, sample_rate, points })
+        Some(Self {
+            len,
+            frames,
+            audio_start,
+            channels,
+            sample_rate,
+            points,
+        })
     }
 
     /// Where a proxy's index lives: beside it, `.idx` appended.
@@ -207,7 +222,11 @@ pub fn estimate_bytes(len: u64, frames: u64, from: u64, to: u64, margin: f64) ->
     if frames == 0 {
         return 0..len;
     }
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     let at = |f: u64, pad: f64| -> u64 {
         let x = (f as f64 / frames as f64 + pad).clamp(0.0, 1.0);
         (x * len as f64) as u64
@@ -236,7 +255,10 @@ mod tests {
             page(&mut out, 0);
         }
         for p in 1..=audio_pages {
-            page(&mut out, i64::try_from(u64::try_from(p).unwrap_or(0) * per_page).unwrap_or(0));
+            page(
+                &mut out,
+                i64::try_from(u64::try_from(p).unwrap_or(0) * per_page).unwrap_or(0),
+            );
         }
         out
     }
@@ -249,7 +271,11 @@ mod tests {
         assert_eq!(index.frames, 480_000);
         assert_eq!(index.len, bytes.len() as u64);
         assert_eq!(index.audio_start, 3 * 228);
-        assert!((10..=12).contains(&index.points.len()), "{} points", index.points.len());
+        assert!(
+            (10..=12).contains(&index.points.len()),
+            "{} points",
+            index.points.len()
+        );
         assert_eq!(index.points.last().unwrap().frames, 480_000);
     }
 
@@ -263,9 +289,15 @@ mod tests {
         let range = index.bytes_for(240_000, 288_000);
         let first_needed = index.audio_start + 50 * page; // the page completing 5 s + 4800
         let last_needed = index.audio_start + 60 * page; // the page completing 6 s
-        assert!(range.start <= first_needed && range.end >= last_needed, "{range:?}");
+        assert!(
+            range.start <= first_needed && range.end >= last_needed,
+            "{range:?}"
+        );
         // And not the whole file.
-        assert!(range.end - range.start < bytes.len() as u64 / 4, "{range:?}");
+        assert!(
+            range.end - range.start < bytes.len() as u64 / 4,
+            "{range:?}"
+        );
     }
 
     #[test]

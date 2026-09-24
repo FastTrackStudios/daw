@@ -51,7 +51,10 @@ pub struct SparseBytes {
 
 impl std::fmt::Debug for SparseBytes {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SparseBytes").field("len", &self.len).field("have", &self.have()).finish()
+        f.debug_struct("SparseBytes")
+            .field("len", &self.len)
+            .field("have", &self.have())
+            .finish()
     }
 }
 
@@ -65,7 +68,11 @@ impl SparseBytes {
     pub fn in_memory(len: u64) -> Arc<Self> {
         Arc::new(Self {
             len,
-            inner: Mutex::new(Inner { store: Store::Memory(HashMap::new()), have: Vec::new(), wanted: None }),
+            inner: Mutex::new(Inner {
+                store: Store::Memory(HashMap::new()),
+                have: Vec::new(),
+                wanted: None,
+            }),
         })
     }
 
@@ -83,11 +90,20 @@ impl SparseBytes {
     /// The file cannot be created.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn on_disk(len: u64, path: &std::path::Path) -> std::io::Result<Arc<Self>> {
-        let file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(path)?;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)?;
         file.set_len(len)?;
         Ok(Arc::new(Self {
             len,
-            inner: Mutex::new(Inner { store: Store::File(file), have: Vec::new(), wanted: None }),
+            inner: Mutex::new(Inner {
+                store: Store::File(file),
+                have: Vec::new(),
+                wanted: None,
+            }),
         }))
     }
 
@@ -109,7 +125,9 @@ impl SparseBytes {
     ///
     /// Writing to the on-disk store failed.
     pub fn insert(&self, offset: u64, data: &[u8]) -> std::io::Result<()> {
-        let end = offset.saturating_add(u64::try_from(data.len()).unwrap_or(u64::MAX)).min(self.len);
+        let end = offset
+            .saturating_add(u64::try_from(data.len()).unwrap_or(u64::MAX))
+            .min(self.len);
         if end <= offset {
             return Ok(());
         }
@@ -122,11 +140,14 @@ impl SparseBytes {
                     let span = self.block_span(index);
                     let upto = span.end.min(end);
                     let block = blocks.entry(index).or_insert_with(|| {
-                        vec![0; usize::try_from(span.end - span.start).unwrap_or(0)].into_boxed_slice()
+                        vec![0; usize::try_from(span.end - span.start).unwrap_or(0)]
+                            .into_boxed_slice()
                     });
                     let (from, to) = (to_usize(at - span.start), to_usize(upto - span.start));
                     let (src_from, src_to) = (to_usize(at - offset), to_usize(upto - offset));
-                    if let (Some(dst), Some(src)) = (block.get_mut(from..to), data.get(src_from..src_to)) {
+                    if let (Some(dst), Some(src)) =
+                        (block.get_mut(from..to), data.get(src_from..src_to))
+                    {
                         dst.copy_from_slice(src);
                     }
                     at = upto;
@@ -140,7 +161,11 @@ impl SparseBytes {
             }
         }
         add_range(&mut inner.have, offset..end);
-        if inner.wanted.as_ref().is_some_and(|w| covered(&inner.have, w)) {
+        if inner
+            .wanted
+            .as_ref()
+            .is_some_and(|w| covered(&inner.have, w))
+        {
             inner.wanted = None;
         }
         Ok(())
@@ -155,7 +180,10 @@ impl SparseBytes {
     /// Whether all of `range` has arrived.
     #[must_use]
     pub fn has(&self, range: &Range<u64>) -> bool {
-        covered(&lock(&self.inner).have, &(range.start..range.end.min(self.len)))
+        covered(
+            &lock(&self.inner).have,
+            &(range.start..range.end.min(self.len)),
+        )
     }
 
     /// What of `range` has not arrived yet.
@@ -165,7 +193,11 @@ impl SparseBytes {
         let inner = lock(&self.inner);
         let mut out = Vec::new();
         let mut at = range.start;
-        for have in inner.have.iter().filter(|h| h.end > range.start && h.start < range.end) {
+        for have in inner
+            .have
+            .iter()
+            .filter(|h| h.end > range.start && h.start < range.end)
+        {
             if have.start > at {
                 out.push(at..have.start);
             }
@@ -191,12 +223,22 @@ impl SparseBytes {
             return Ok(Some(0));
         }
         let mut inner = lock(&self.inner);
-        let Some(have) = inner.have.iter().find(|h| h.start <= offset && offset < h.end).cloned() else {
-            let want = offset..offset.saturating_add(u64::try_from(buf.len()).unwrap_or(0)).min(self.len);
+        let Some(have) = inner
+            .have
+            .iter()
+            .find(|h| h.start <= offset && offset < h.end)
+            .cloned()
+        else {
+            let want = offset
+                ..offset
+                    .saturating_add(u64::try_from(buf.len()).unwrap_or(0))
+                    .min(self.len);
             inner.wanted = Some(want);
             return Ok(None);
         };
-        let n = usize::try_from((have.end - offset).min(u64::try_from(buf.len()).unwrap_or(u64::MAX))).unwrap_or(0);
+        let n =
+            usize::try_from((have.end - offset).min(u64::try_from(buf.len()).unwrap_or(u64::MAX)))
+                .unwrap_or(0);
         match &mut inner.store {
             Store::Memory(blocks) => {
                 let end = offset + u64::try_from(n).unwrap_or(0);
@@ -207,9 +249,10 @@ impl SparseBytes {
                     let upto = span.end.min(end);
                     let (from, to) = (to_usize(at - span.start), to_usize(upto - span.start));
                     let (dst_from, dst_to) = (to_usize(at - offset), to_usize(upto - offset));
-                    if let (Some(src), Some(dst)) =
-                        (blocks.get(&index).and_then(|b| b.get(from..to)), buf.get_mut(dst_from..dst_to))
-                    {
+                    if let (Some(src), Some(dst)) = (
+                        blocks.get(&index).and_then(|b| b.get(from..to)),
+                        buf.get_mut(dst_from..dst_to),
+                    ) {
                         dst.copy_from_slice(src);
                     }
                     at = upto;
@@ -232,10 +275,13 @@ impl SparseBytes {
     /// nothing is let go: a file costs no memory.
     pub fn keep_only(&self, keep: &[Range<u64>]) {
         let mut inner = lock(&self.inner);
-        let Store::Memory(blocks) = &mut inner.store else { return };
+        let Store::Memory(blocks) = &mut inner.store else {
+            return;
+        };
         blocks.retain(|index, _| {
             let span = self.block_span(*index);
-            keep.iter().any(|k| k.start < span.end && span.start < k.end)
+            keep.iter()
+                .any(|k| k.start < span.end && span.start < k.end)
         });
         let mut kept: Vec<u64> = blocks.keys().copied().collect();
         kept.sort_unstable();
@@ -262,7 +308,10 @@ impl SparseBytes {
     #[must_use]
     pub fn resident(&self) -> u64 {
         match &lock(&self.inner).store {
-            Store::Memory(blocks) => blocks.values().map(|b| u64::try_from(b.len()).unwrap_or(0)).sum(),
+            Store::Memory(blocks) => blocks
+                .values()
+                .map(|b| u64::try_from(b.len()).unwrap_or(0))
+                .sum(),
             #[cfg(not(target_arch = "wasm32"))]
             Store::File(_) => 0,
         }
@@ -274,7 +323,10 @@ fn to_usize(n: u64) -> usize {
 }
 
 fn covered(have: &[Range<u64>], range: &Range<u64>) -> bool {
-    range.is_empty() || have.iter().any(|h| h.start <= range.start && range.end <= h.end)
+    range.is_empty()
+        || have
+            .iter()
+            .any(|h| h.start <= range.start && range.end <= h.end)
 }
 
 /// Add `r` to a sorted, disjoint set, merging what it touches.
@@ -305,13 +357,23 @@ impl SparseView {
     /// The header (`header`, bytes of the file) then the file from `from`.
     #[must_use]
     pub fn new(bytes: Arc<SparseBytes>, header: Range<u64>, from: u64) -> Self {
-        Self { bytes, header, from, pos: 0 }
+        Self {
+            bytes,
+            header,
+            from,
+            pos: 0,
+        }
     }
 
     /// The whole file, from its start.
     #[must_use]
     pub fn whole(bytes: Arc<SparseBytes>) -> Self {
-        Self { bytes, header: 0..0, from: 0, pos: 0 }
+        Self {
+            bytes,
+            header: 0..0,
+            from: 0,
+            pos: 0,
+        }
     }
 
     fn header_len(&self) -> u64 {
@@ -325,7 +387,11 @@ impl SparseView {
     /// Where view position `pos` is in the file.
     fn file_offset(&self, pos: u64) -> u64 {
         let h = self.header_len();
-        if pos < h { self.header.start + pos } else { self.from + (pos - h) }
+        if pos < h {
+            self.header.start + pos
+        } else {
+            self.from + (pos - h)
+        }
     }
 }
 
@@ -337,12 +403,18 @@ impl Read for SparseView {
         let room = if self.pos < h { h - self.pos } else { u64::MAX };
         let n = usize::try_from(room).unwrap_or(usize::MAX).min(buf.len());
         let offset = self.file_offset(self.pos);
-        match self.bytes.read_at(offset, buf.get_mut(..n).unwrap_or_default())? {
+        match self
+            .bytes
+            .read_at(offset, buf.get_mut(..n).unwrap_or_default())?
+        {
             Some(got) => {
                 self.pos += u64::try_from(got).unwrap_or(0);
                 Ok(got)
             }
-            None => Err(std::io::Error::new(std::io::ErrorKind::WouldBlock, "not arrived yet")),
+            None => Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "not arrived yet",
+            )),
         }
     }
 }
@@ -381,7 +453,11 @@ mod tests {
         let mut view = SparseView::whole(Arc::clone(&bytes));
         view.seek(SeekFrom::Start(12)).unwrap();
         let mut buf = [0u8; 50];
-        assert_eq!(view.read(&mut buf).unwrap(), 18, "up to the end of what arrived");
+        assert_eq!(
+            view.read(&mut buf).unwrap(),
+            18,
+            "up to the end of what arrived"
+        );
         let e = view.read(&mut buf).unwrap_err();
         assert_eq!(e.kind(), std::io::ErrorKind::WouldBlock);
         assert_eq!(bytes.wanted(), Some(30..80));
@@ -409,9 +485,20 @@ mod tests {
         assert_eq!(bytes.resident(), 0, "nothing allocated up front");
         let data: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
         // Across block edges, in two pieces.
-        bytes.insert(BLOCK - 10, &data[(BLOCK - 10) as usize..(3 * BLOCK + 5) as usize]).unwrap();
-        bytes.insert(9 * BLOCK, &data[(9 * BLOCK) as usize..]).unwrap();
-        assert_eq!(bytes.resident(), 4 * BLOCK + (BLOCK + 100), "only the blocks touched");
+        bytes
+            .insert(
+                BLOCK - 10,
+                &data[(BLOCK - 10) as usize..(3 * BLOCK + 5) as usize],
+            )
+            .unwrap();
+        bytes
+            .insert(9 * BLOCK, &data[(9 * BLOCK) as usize..])
+            .unwrap();
+        assert_eq!(
+            bytes.resident(),
+            4 * BLOCK + (BLOCK + 100),
+            "only the blocks touched"
+        );
         let mut view = SparseView::whole(Arc::clone(&bytes));
         view.seek(SeekFrom::Start(BLOCK - 10)).unwrap();
         let mut got = vec![0u8; (2 * BLOCK + 15) as usize];
@@ -423,9 +510,14 @@ mod tests {
         assert_eq!(bytes.resident(), BLOCK + 100);
         assert_eq!(bytes.have(), vec![9 * BLOCK..len]);
         view.seek(SeekFrom::Start(BLOCK)).unwrap();
-        assert_eq!(view.read(&mut got).unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+        assert_eq!(
+            view.read(&mut got).unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
         // And it comes back the way it came.
-        bytes.insert(BLOCK, &data[BLOCK as usize..(2 * BLOCK) as usize]).unwrap();
+        bytes
+            .insert(BLOCK, &data[BLOCK as usize..(2 * BLOCK) as usize])
+            .unwrap();
         view.seek(SeekFrom::Start(BLOCK)).unwrap();
         let mut again = vec![0u8; BLOCK as usize];
         view.read_exact(&mut again).unwrap();

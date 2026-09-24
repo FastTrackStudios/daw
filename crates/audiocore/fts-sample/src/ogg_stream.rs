@@ -128,7 +128,8 @@ impl OggStream {
             .find(|p| p.frames <= target)
             .map_or(index.audio_start, |p| p.offset);
         let view = UnseekableView(crate::sparse::SparseView::new(bytes, index.header(), from));
-        let mut stream = Self::from_source(MediaSourceStream::new(Box::new(view), Default::default()))?;
+        let mut stream =
+            Self::from_source(MediaSourceStream::new(Box::new(view), Default::default()))?;
         stream.frames = index.frames;
         stream.skip_to = frame.min(index.frames);
         Ok(stream)
@@ -227,9 +228,9 @@ impl OggStream {
                 Err(e) => return Err(io(e)),
             };
             let spec = *decoded.spec();
-            let samples = self.samples.get_or_insert_with(|| {
-                SampleBuffer::new(decoded.capacity() as u64, spec)
-            });
+            let samples = self
+                .samples
+                .get_or_insert_with(|| SampleBuffer::new(decoded.capacity() as u64, spec));
             if samples.capacity() < decoded.capacity() * channels {
                 *samples = SampleBuffer::new(decoded.capacity() as u64, spec);
             }
@@ -295,22 +296,37 @@ mod tests {
         let mut whole = OggStream::open(Arc::clone(&bytes)).expect("open");
         let (_, all) = decode_all(&mut whole);
         let index = crate::ogg_index::OggIndex::build(&bytes, 44_100).expect("index");
-        assert_eq!((index.channels, index.sample_rate), (2, 44_100), "set up from the index alone");
+        assert_eq!(
+            (index.channels, index.sample_rate),
+            (2, 44_100),
+            "set up from the index alone"
+        );
 
         let target: u64 = 44_100 * 12 + 777;
         let want = 8192u64;
         let sparse = crate::sparse::SparseBytes::in_memory(bytes.len() as u64);
         let header = index.header();
-        sparse.insert(header.start, &bytes[header.start as usize..header.end as usize]).unwrap();
+        sparse
+            .insert(
+                header.start,
+                &bytes[header.start as usize..header.end as usize],
+            )
+            .unwrap();
         let range = index.bytes_for(target.saturating_sub(4096), target + want);
-        sparse.insert(range.start, &bytes[range.start as usize..range.end as usize]).unwrap();
+        sparse
+            .insert(
+                range.start,
+                &bytes[range.start as usize..range.end as usize],
+            )
+            .unwrap();
         assert!(
             range.start > index.audio_start && range.end < bytes.len() as u64,
             "a stretch, not the file: {range:?} of {}",
             bytes.len()
         );
 
-        let mut stream = OggStream::open_view(Arc::clone(&sparse), &index, target).expect("open at the stretch");
+        let mut stream =
+            OggStream::open_view(Arc::clone(&sparse), &index, target).expect("open at the stretch");
         let mut out = Vec::new();
         let (at, _) = stream.decode(&mut out).expect("decode").expect("audio");
         assert_eq!(at, target, "the first frame out is the one asked for");
@@ -334,7 +350,10 @@ mod tests {
             }
         };
         assert!(err.is_not_yet(), "{err}");
-        assert!(sparse.wanted().is_some(), "the fetcher is told what to bring");
+        assert!(
+            sparse.wanted().is_some(),
+            "the fetcher is told what to bring"
+        );
     }
 
     #[test]
@@ -351,7 +370,9 @@ mod tests {
                 .map(|i: usize| (all[i * 2] - tone((i as i64 + lag) as usize)).abs())
                 .sum()
         };
-        let best = (-2048i64..=2048).min_by(|a, b| error_at(*a).total_cmp(&error_at(*b))).unwrap();
+        let best = (-2048i64..=2048)
+            .min_by(|a, b| error_at(*a).total_cmp(&error_at(*b)))
+            .unwrap();
         assert_eq!(best, 0, "decoded audio is shifted by {best} frames");
         // The declared length may carry the encoder's last-block padding —
         // a few ms of silence at the end, never a shift at the start.
@@ -360,7 +381,11 @@ mod tests {
             "the declared length: {}",
             whole.frames()
         );
-        assert_eq!(all.len() as u64, whole.frames() * 2, "every declared frame, and no more");
+        assert_eq!(
+            all.len() as u64,
+            whole.frames() * 2,
+            "every declared frame, and no more"
+        );
 
         let mut sought = OggStream::open(bytes).expect("open");
         let target = 44_100 * 2 + 12_345;
@@ -379,6 +404,9 @@ mod tests {
             .zip(&all[base + 4096..base + 8192 * 2])
             .map(|(a, b)| (a - b).abs())
             .fold(0.0f32, f32::max);
-        assert!(worst < 0.02, "a sought window matches the straight decode: {worst}");
+        assert!(
+            worst < 0.02,
+            "a sought window matches the straight decode: {worst}"
+        );
     }
 }

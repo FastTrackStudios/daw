@@ -48,7 +48,10 @@ impl Sim {
             speed,
             sample_rate: 48_000.0,
             buffer: 256,
-            state: RefCell::new(State { rate: 1.0, ..State::default() }),
+            state: RefCell::new(State {
+                rate: 1.0,
+                ..State::default()
+            }),
         }
     }
 
@@ -104,7 +107,11 @@ impl Sim {
     /// buffer start, not the engine's stamp.
     fn truth(&self, t: f64) -> f64 {
         let s = self.state.borrow();
-        if s.playing { s.start_playhead + (t - s.start_t) * self.speed * s.rate } else { s.start_playhead }
+        if s.playing {
+            s.start_playhead + (t - s.start_t) * self.speed * s.rate
+        } else {
+            s.start_playhead
+        }
     }
 }
 
@@ -131,7 +138,10 @@ impl TransportBackend for Sim {
 struct Lcg(u64);
 impl Lcg {
     fn next(&mut self) -> f64 {
-        self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
         (self.0 >> 11) as f64 / (1u64 << 53) as f64
     }
 }
@@ -160,9 +170,15 @@ fn run(speed: f64, jitter_up: f64, jitter_down: f64) -> Run {
     leader.state.borrow_mut().playing = true;
 
     let dt = 0.0005;
-    let (mut next_leader, mut next_follower, mut next_ping, mut next_tick) = (0.0, 0.0003, 0.0, 0.0);
+    let (mut next_leader, mut next_follower, mut next_ping, mut next_tick) =
+        (0.0, 0.0003, 0.0, 0.0);
     let settled_at = 12.0;
-    let mut out = Run { worst_samples: 0.0, offset_error: 0.0, locates_after_settling: 0, locates: 0 };
+    let mut out = Run {
+        worst_samples: 0.0,
+        offset_error: 0.0,
+        locates_after_settling: 0,
+        locates: 0,
+    };
     let mut t = 0.0;
     while t < 40.0 {
         // Each device starts its buffers on its own steady clock; the
@@ -177,7 +193,10 @@ fn run(speed: f64, jitter_up: f64, jitter_down: f64) -> Run {
         }
         // 10 Hz pings from the follower to the leader.
         if t >= next_ping {
-            let (up, down) = (0.0002 + jitter_up * jitter.next(), 0.0002 + jitter_down * jitter.next());
+            let (up, down) = (
+                0.0002 + jitter_up * jitter.next(),
+                0.0002 + jitter_down * jitter.next(),
+            );
             let t1 = follower.clock(t);
             let t2 = leader.clock(t + up);
             let t3 = leader.clock(t + up + 0.00005);
@@ -223,7 +242,12 @@ fn on_a_lan_a_fast_follower_is_held_within_a_few_samples() {
     let r = run(1.000_08, 0.0008, 0.0003);
     assert!(r.locates >= 1, "it starts with a locate");
     assert_eq!(r.locates_after_settling, 0, "settled, rate alone holds it");
-    assert!(r.worst_samples < 8.0, "{:.1} samples (offset error {:.0} µs)", r.worst_samples, r.offset_error);
+    assert!(
+        r.worst_samples < 8.0,
+        "{:.1} samples (offset error {:.0} µs)",
+        r.worst_samples,
+        r.offset_error
+    );
 }
 
 #[test]
@@ -232,7 +256,12 @@ fn across_the_internet_it_stays_under_a_millisecond_without_jumps() {
     // protocol can see bounds it, not the controller.
     let r = run(1.000_08, 0.010, 0.004);
     assert_eq!(r.locates_after_settling, 0, "settled, rate alone holds it");
-    assert!(r.worst_samples < 48.0, "{:.1} samples (offset error {:.0} µs)", r.worst_samples, r.offset_error);
+    assert!(
+        r.worst_samples < 48.0,
+        "{:.1} samples (offset error {:.0} µs)",
+        r.worst_samples,
+        r.offset_error
+    );
 }
 
 #[test]
@@ -242,8 +271,16 @@ fn the_offset_is_found_through_asymmetric_jitter() {
     let offset = 1_234_567.0;
     for i in 0..64 {
         let t1 = f64::from(i) * 100_000.0;
-        let (up, down) = (500.0 + 8_000.0 * jitter.next(), 500.0 + 2_000.0 * jitter.next());
-        estimator.record(t1, t1 + up + offset, t1 + up + offset + 50.0, t1 + up + 50.0 + down);
+        let (up, down) = (
+            500.0 + 8_000.0 * jitter.next(),
+            500.0 + 2_000.0 * jitter.next(),
+        );
+        estimator.record(
+            t1,
+            t1 + up + offset,
+            t1 + up + offset + 50.0,
+            t1 + up + 50.0 + down,
+        );
     }
     let error = (estimator.offset_micros().unwrap() - offset).abs();
     assert!(error < 1_000.0, "{error} µs");
@@ -255,8 +292,16 @@ fn a_leader_that_stops_stops_the_follower() {
     follower.state.borrow_mut().playing = true;
     follower.callback(0.0, 0.0);
     let mut follow = Follower::default();
-    let stopped = Position { host_micros: 0.0, playhead_seconds: 42.0, playrate: 1.0, is_playing: false };
-    assert_eq!(follow.tick(&follower, &stopped, 0.0, 1_000.0), Correction::Stop { position: 42.0 });
+    let stopped = Position {
+        host_micros: 0.0,
+        playhead_seconds: 42.0,
+        playrate: 1.0,
+        is_playing: false,
+    };
+    assert_eq!(
+        follow.tick(&follower, &stopped, 0.0, 1_000.0),
+        Correction::Stop { position: 42.0 }
+    );
     assert!(!follower.state.borrow().playing);
 }
 

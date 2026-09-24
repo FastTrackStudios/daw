@@ -112,7 +112,11 @@ mod proxy_fallback {
         std::fs::write(dir.path().join("Media/Keys.wav"), b"wav").unwrap();
         let r = ProjectRelativeResolver::new(dir.path());
         assert_eq!(r.resolve("Media/Bass.wav").unwrap(), b"ogg");
-        assert_eq!(r.resolve("Media/Keys.wav").unwrap(), b"wav", "the original wins when it is there");
+        assert_eq!(
+            r.resolve("Media/Keys.wav").unwrap(),
+            b"wav",
+            "the original wins when it is there"
+        );
         assert!(r.resolve("Media/Gone.wav").is_err());
         assert_eq!(
             r.resolve_path("Media/Bass.wav"),

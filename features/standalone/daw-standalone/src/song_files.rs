@@ -33,7 +33,13 @@ impl daw_proto::SongFiles for Standalone {
         return Err(no_folder(&project));
     }
 
-    async fn read(&self, project: ProjectContext, path: String, start: u64, len: u32) -> DawResult<Vec<u8>> {
+    async fn read(
+        &self,
+        project: ProjectContext,
+        path: String,
+        start: u64,
+        len: u32,
+    ) -> DawResult<Vec<u8>> {
         #[cfg(not(target_arch = "wasm32"))]
         return folder::read(&self.project_file(&project)?, &path, start, len);
         #[cfg(target_arch = "wasm32")]

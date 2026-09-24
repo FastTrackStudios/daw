@@ -733,7 +733,8 @@ impl Chord {
                 {
                     consumed += 1;
                     let closed = paren == 0
-                        || (consumed < tokens.len() && tokens[consumed].token_type == TokenType::RParen);
+                        || (consumed < tokens.len()
+                            && tokens[consumed].token_type == TokenType::RParen);
                     if closed {
                         consumed += paren;
                         additions.push(degree);
@@ -3005,4 +3006,3 @@ mod tests {
 }
 
 // endregion: --- Tests
-

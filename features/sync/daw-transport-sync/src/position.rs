@@ -28,6 +28,9 @@ impl Position {
     /// this one (`other = this + offset`).
     #[must_use]
     pub fn shifted(self, offset_micros: f64) -> Self {
-        Self { host_micros: self.host_micros + offset_micros, ..self }
+        Self {
+            host_micros: self.host_micros + offset_micros,
+            ..self
+        }
     }
 }

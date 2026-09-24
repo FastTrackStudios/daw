@@ -18,8 +18,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "linux")]
 use std::time::Duration;
 
-use daw_audio_io::duplex::{Backend, DuplexBackend, DuplexConfig, EngineStats, ProcessBlock};
 use daw_audio_io::AudioIoPrefs;
+use daw_audio_io::duplex::{Backend, DuplexBackend, DuplexConfig, EngineStats, ProcessBlock};
 #[cfg(target_os = "linux")]
 use daw_audio_io::pw;
 

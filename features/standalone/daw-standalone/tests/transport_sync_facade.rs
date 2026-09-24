@@ -65,7 +65,10 @@ async fn the_server_clock_is_this_process_clock() -> eyre::Result<()> {
     }
     let offset = clock.offset_micros().unwrap();
     let rtt = clock.round_trip_micros().unwrap();
-    assert!(offset.abs() <= rtt / 2.0 + 1.0, "offset {offset} µs, rtt {rtt} µs");
+    assert!(
+        offset.abs() <= rtt / 2.0 + 1.0,
+        "offset {offset} µs, rtt {rtt} µs"
+    );
     assert!(offset.abs() < 1_000.0, "offset {offset} µs");
     Ok(())
 }
@@ -182,7 +185,11 @@ async fn a_follower_locks_onto_a_leader_through_the_facade() -> eyre::Result<()>
     lead_device.abort();
     follow_device.abort();
 
-    assert!(leader.clock_samples() >= 10, "pinged {}", leader.clock_samples());
+    assert!(
+        leader.clock_samples() >= 10,
+        "pinged {}",
+        leader.clock_samples()
+    );
     let offset = leader.offset_micros().unwrap();
     assert!(offset.abs() < 1_000.0, "offset {offset} µs in one process");
     assert!(locates >= 1, "started by a locate");

@@ -1122,15 +1122,24 @@ fn a_session_keeps_the_history_it_was_saved_with() {
     let dir = tmp.path().join("Song.session");
 
     let live = LoroDoc::new();
-    live.get_text("chart").insert(0, "VS 4\n1 4 6m 5\n").unwrap();
+    live.get_text("chart")
+        .insert(0, "VS 4\n1 4 6m 5\n")
+        .unwrap();
     live.commit();
     live.get_text("chart").insert(0, "IN 2\n1 5\n").unwrap();
     live.commit();
     save_session_with_history(&daw, &loaded.project_guid, &dir, Some(&live)).unwrap();
 
     let back = load_session_history(&dir).expect("history kept");
-    assert_eq!(back.get_text("chart").to_string(), "IN 2\n1 5\nVS 4\n1 4 6m 5\n");
-    assert_eq!(back.oplog_vv(), live.oplog_vv(), "every edit, not just the text");
+    assert_eq!(
+        back.get_text("chart").to_string(),
+        "IN 2\n1 5\nVS 4\n1 4 6m 5\n"
+    );
+    assert_eq!(
+        back.oplog_vv(),
+        live.oplog_vv(),
+        "every edit, not just the text"
+    );
 
     save_session(&daw, &loaded.project_guid, &dir).unwrap();
     let fresh = load_session_history(&dir).expect("a plain save still writes a log");

@@ -12,7 +12,7 @@ use daw_proto::midi::Midi;
 use daw_proto::project::ProjectContext;
 use daw_proto::{ItemRef, Peaks, ProjectInfo, TakeRef, Takes, TrackRef, Tracks};
 use daw_standalone::audio_engine::materialize::materialize_audio_streaming;
-use daw_standalone::reapeaks::{stamp, ReaPeaks};
+use daw_standalone::reapeaks::{ReaPeaks, stamp};
 use daw_standalone::sync::Standalone;
 
 const RATE: u32 = 48_000;

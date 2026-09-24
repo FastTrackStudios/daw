@@ -627,7 +627,9 @@ mod tests {
     /// `additional` field.
     #[test]
     fn a_region_without_a_guid_keeps_its_lane_round_trip() {
-        let region = crate::builder::MarkerBuilder::region(2, 0.0, 4.0, "Cue 1").lane(2).build();
+        let region = crate::builder::MarkerBuilder::region(2, 0.0, 4.0, "Cue 1")
+            .lane(2)
+            .build();
         let mut line = String::new();
         region.write_marker_line(&mut line, "");
         let first = line.lines().next().expect("a start line");

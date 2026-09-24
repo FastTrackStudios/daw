@@ -358,7 +358,9 @@ mod tests {
         assert!(!settings.chord_memory());
         settings.parse_setting_line("/CHORD_MEMORY=true").unwrap();
         assert!(settings.chord_memory());
-        settings.parse_setting_line("/chord-memory = false").unwrap();
+        settings
+            .parse_setting_line("/chord-memory = false")
+            .unwrap();
         assert!(!settings.chord_memory());
     }
 

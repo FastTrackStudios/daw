@@ -1634,17 +1634,35 @@ mod anchor_tests {
         let daw = Standalone::new();
         let one = load_rpp_text(&daw, "One", "/set/One/One.RPP", PROJECT).unwrap();
         let two = load_rpp_text(&daw, "Two", "/set/Two/Two.RPP", PROJECT).unwrap();
-        assert_eq!(anchor_media(&daw, &one.project_guid, std::path::Path::new("/set/One")), 1);
-        assert_eq!(anchor_media(&daw, &two.project_guid, std::path::Path::new("/set/Two")), 1);
+        assert_eq!(
+            anchor_media(&daw, &one.project_guid, std::path::Path::new("/set/One")),
+            1
+        );
+        assert_eq!(
+            anchor_media(&daw, &two.project_guid, std::path::Path::new("/set/Two")),
+            1
+        );
         let path = |guid: &str| {
             daw.read_project(guid, |p| {
-                p.takes.values().flat_map(|l| l.takes.iter()).find_map(|t| t.source_file_path.clone())
+                p.takes
+                    .values()
+                    .flat_map(|l| l.takes.iter())
+                    .find_map(|t| t.source_file_path.clone())
             })
             .flatten()
         };
-        assert_eq!(path(&one.project_guid).as_deref(), Some("/set/One/Media/Click.wav"));
-        assert_eq!(path(&two.project_guid).as_deref(), Some("/set/Two/Media/Click.wav"));
-        assert_eq!(anchor_media(&daw, &one.project_guid, std::path::Path::new("/elsewhere")), 0);
+        assert_eq!(
+            path(&one.project_guid).as_deref(),
+            Some("/set/One/Media/Click.wav")
+        );
+        assert_eq!(
+            path(&two.project_guid).as_deref(),
+            Some("/set/Two/Media/Click.wav")
+        );
+        assert_eq!(
+            anchor_media(&daw, &one.project_guid, std::path::Path::new("/elsewhere")),
+            0
+        );
     }
 
     /// A folder given relative to the working directory still anchors to
@@ -1656,7 +1674,10 @@ mod anchor_tests {
         anchor_media(&daw, &song.project_guid, std::path::Path::new("../set/One"));
         let path = daw
             .read_project(&song.project_guid, |p| {
-                p.takes.values().flat_map(|l| l.takes.iter()).find_map(|t| t.source_file_path.clone())
+                p.takes
+                    .values()
+                    .flat_map(|l| l.takes.iter())
+                    .find_map(|t| t.source_file_path.clone())
             })
             .flatten()
             .expect("a path");

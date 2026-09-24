@@ -3,14 +3,20 @@
 //! seek re-plans.
 
 #![cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
-#![allow(clippy::unwrap_used, clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation
+)]
 
 use std::ops::Range;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use daw_standalone::audio_engine::media_fetch::{FetchConfig, RangeFetch, StreamedTake, drive, plan};
+use daw_standalone::audio_engine::media_fetch::{
+    FetchConfig, RangeFetch, StreamedTake, drive, plan,
+};
 use fts_sample::ogg_index::OggIndex;
 use fts_sample::sparse::SparseBytes;
 
@@ -30,7 +36,9 @@ fn proxy(seconds: usize, seed: u32) -> Arc<[u8]> {
         pcm.push(s);
         pcm.push(-s);
     }
-    fts_sample::cache::encode_ogg_vorbis(&pcm, 2, RATE, 0.4).unwrap().into()
+    fts_sample::cache::encode_ogg_vorbis(&pcm, 2, RATE, 0.4)
+        .unwrap()
+        .into()
 }
 
 fn take(bytes: &Arc<[u8]>, path: &str, start: f64, end: f64, source_offset: f64) -> StreamedTake {
@@ -60,11 +68,17 @@ fn the_plan_is_headers_then_everyones_next_seconds() {
     // Then the next three seconds of both, interleaved — nothing later.
     let audio: Vec<_> = requests.iter().filter(|r| r.heard_in >= 0.0).collect();
     assert!(audio.iter().any(|r| r.take == 0) && audio.iter().any(|r| r.take == 1));
-    assert!(audio.windows(2).all(|w| w[0].heard_in <= w[1].heard_in), "soonest first");
+    assert!(
+        audio.windows(2).all(|w| w[0].heard_in <= w[1].heard_in),
+        "soonest first"
+    );
     for r in &audio {
         let t = &takes[r.take];
         let within = t.index.bytes_for(frames(9.0), frames(14.0));
-        assert!(r.range.start >= within.start && r.range.end <= within.end, "{r:?} outside {within:?}");
+        assert!(
+            r.range.start >= within.start && r.range.end <= within.end,
+            "{r:?} outside {within:?}"
+        );
     }
 }
 
@@ -78,7 +92,10 @@ fn a_long_file_is_fetched_from_where_it_plays() {
     let near = takes[0].index.bytes_for(frames(119.0), frames(124.0));
     assert!(!audio.is_empty());
     for r in audio {
-        assert!(r.range.start >= near.start && r.range.end <= near.end, "{r:?}: 120 s of the file, not its start");
+        assert!(
+            r.range.start >= near.start && r.range.end <= near.end,
+            "{r:?}: 120 s of the file, not its start"
+        );
     }
 }
 
@@ -95,8 +112,14 @@ impl RangeFetch for SlowLink {
         path: &str,
         range: Range<u64>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>, String>> + Send>> {
-        let data = self.files.iter().find(|(p, _)| p == path).map(|(_, b)| Arc::clone(b));
-        let wait = Duration::from_secs_f64((range.end - range.start) as f64 / self.bytes_per_second + 0.01);
+        let data = self
+            .files
+            .iter()
+            .find(|(p, _)| p == path)
+            .map(|(_, b)| Arc::clone(b));
+        let wait = Duration::from_secs_f64(
+            (range.end - range.start) as f64 / self.bytes_per_second + 0.01,
+        );
         let landed = Arc::clone(&self.landed);
         let path = path.to_owned();
         Box::pin(async move {
@@ -110,14 +133,26 @@ impl RangeFetch for SlowLink {
 
 #[tokio::test(start_paused = true)]
 async fn on_a_slow_link_the_near_seconds_land_first_and_a_seek_replans() {
-    let files: Vec<(String, Arc<[u8]>)> = (0..3).map(|i| (format!("t{i}"), proxy(60, 10 + i))).collect();
-    let takes: Vec<StreamedTake> = files.iter().map(|(p, b)| take(b, p, 0.0, 60.0, 0.0)).collect();
+    let files: Vec<(String, Arc<[u8]>)> = (0..3)
+        .map(|i| (format!("t{i}"), proxy(60, 10 + i)))
+        .collect();
+    let takes: Vec<StreamedTake> = files
+        .iter()
+        .map(|(p, b)| take(b, p, 0.0, 60.0, 0.0))
+        .collect();
     let shared = Arc::new(Mutex::new(takes));
     let playhead = Arc::new(Mutex::new(10.0f64));
     let landed = Arc::new(Mutex::new(Vec::new()));
-    let link = Arc::new(SlowLink { files: files.clone(), bytes_per_second: 1_000_000.0, landed: Arc::clone(&landed) });
+    let link = Arc::new(SlowLink {
+        files: files.clone(),
+        bytes_per_second: 1_000_000.0,
+        landed: Arc::clone(&landed),
+    });
     let stop = Arc::new(AtomicBool::new(false));
-    let config = FetchConfig { max_request: 32 * 1024, ..FetchConfig::default() };
+    let config = FetchConfig {
+        max_request: 32 * 1024,
+        ..FetchConfig::default()
+    };
     let at = Arc::clone(&playhead);
     let driver = tokio::spawn(drive(
         Arc::clone(&shared),
@@ -135,7 +170,11 @@ async fn on_a_slow_link_the_near_seconds_land_first_and_a_seek_replans() {
         let takes = shared.lock().unwrap().clone();
         if takes.iter().all(near_done) {
             for t in &takes {
-                assert!(t.bytes.missing(&far(t)).len() > 0, "{}: the far end was not fetched first", t.path);
+                assert!(
+                    t.bytes.missing(&far(t)).len() > 0,
+                    "{}: the far end was not fetched first",
+                    t.path
+                );
             }
             break;
         }
@@ -150,7 +189,11 @@ async fn on_a_slow_link_the_near_seconds_land_first_and_a_seek_replans() {
         let takes = shared.lock().unwrap().clone();
         if takes.iter().all(seek_done) {
             for t in &takes {
-                assert!(!t.bytes.has(&middle(t)), "{}: the middle came before the seek", t.path);
+                assert!(
+                    !t.bytes.has(&middle(t)),
+                    "{}: the middle came before the seek",
+                    t.path
+                );
             }
             break;
         }
@@ -166,16 +209,35 @@ async fn what_is_behind_the_playhead_comes_last_and_the_fetch_finishes() {
     // own (from 0 s in the timeline); the playhead parked at 30 s.
     let whole = proxy(60, 21);
     let part = proxy(60, 22);
-    let files = vec![("whole".to_owned(), Arc::clone(&whole)), ("part".to_owned(), Arc::clone(&part))];
-    let takes = vec![take(&whole, "whole", 0.0, 60.0, 0.0), take(&part, "part", 0.0, 20.0, 20.0)];
+    let files = vec![
+        ("whole".to_owned(), Arc::clone(&whole)),
+        ("part".to_owned(), Arc::clone(&part)),
+    ];
+    let takes = vec![
+        take(&whole, "whole", 0.0, 60.0, 0.0),
+        take(&part, "part", 0.0, 20.0, 20.0),
+    ];
     let shared = Arc::new(Mutex::new(takes));
     let landed = Arc::new(Mutex::new(Vec::new()));
-    let link = Arc::new(SlowLink { files, bytes_per_second: 1_000_000.0, landed: Arc::clone(&landed) });
-    let config = FetchConfig { max_request: 32 * 1024, ..FetchConfig::default() };
+    let link = Arc::new(SlowLink {
+        files,
+        bytes_per_second: 1_000_000.0,
+        landed: Arc::clone(&landed),
+    });
+    let config = FetchConfig {
+        max_request: 32 * 1024,
+        ..FetchConfig::default()
+    };
     // Returns by itself: nothing stops it but being done.
     tokio::time::timeout(
         Duration::from_secs(600),
-        drive(Arc::clone(&shared), link, Arc::new(|| 30.0), config, Arc::new(AtomicBool::new(false))),
+        drive(
+            Arc::clone(&shared),
+            link,
+            Arc::new(|| 30.0),
+            config,
+            Arc::new(AtomicBool::new(false)),
+        ),
     )
     .await
     .expect("the fetch finishes with the playhead parked mid-song");
@@ -183,38 +245,79 @@ async fn what_is_behind_the_playhead_comes_last_and_the_fetch_finishes() {
     let takes = shared.lock().unwrap().clone();
     assert!(takes.iter().all(StreamedTake::complete));
     let whole_take = &takes[0];
-    assert!(whole_take.bytes.has(&whole_take.index.bytes_for(0, frames(5.0))), "the start, behind the playhead, came too");
+    assert!(
+        whole_take
+            .bytes
+            .has(&whole_take.index.bytes_for(0, frames(5.0))),
+        "the start, behind the playhead, came too"
+    );
     // The part take's file beyond what it plays was never asked for.
     let part_take = &takes[1];
-    assert!(!part_take.bytes.missing(&part_take.index.bytes_for(frames(50.0), frames(60.0))).is_empty());
+    assert!(
+        !part_take
+            .bytes
+            .missing(&part_take.index.bytes_for(frames(50.0), frames(60.0)))
+            .is_empty()
+    );
     // And what was behind came after what was in front — but for the
     // requests already in flight when the last of the front was asked.
     let order = landed.lock().unwrap().clone();
     let first_behind = order
         .iter()
-        .position(|(p, r)| p == "whole" && r.start >= whole_take.index.audio_start && r.start < whole_take.index.bytes_for(frames(20.0), frames(21.0)).start)
+        .position(|(p, r)| {
+            p == "whole"
+                && r.start >= whole_take.index.audio_start
+                && r.start < whole_take.index.bytes_for(frames(20.0), frames(21.0)).start
+        })
         .unwrap();
     let last_ahead = order
         .iter()
-        .rposition(|(p, r)| p == "whole" && r.start > whole_take.index.bytes_for(frames(31.0), frames(32.0)).end)
+        .rposition(|(p, r)| {
+            p == "whole" && r.start > whole_take.index.bytes_for(frames(31.0), frames(32.0)).end
+        })
         .unwrap();
     let in_flight = FetchConfig::default().concurrency;
-    assert!(first_behind + in_flight > last_ahead, "behind at {first_behind}, ahead until {last_ahead}");
+    assert!(
+        first_behind + in_flight > last_ahead,
+        "behind at {first_behind}, ahead until {last_ahead}"
+    );
 }
 
 #[tokio::test(start_paused = true)]
 async fn a_resident_window_holds_only_what_is_near_the_playhead() {
     use daw_standalone::audio_engine::media_fetch::Resident;
-    let files: Vec<(String, Arc<[u8]>)> = (0..2).map(|i| (format!("w{i}"), proxy(120, 30 + i))).collect();
-    let takes: Vec<StreamedTake> = files.iter().map(|(p, b)| take(b, p, 0.0, 120.0, 0.0)).collect();
+    let files: Vec<(String, Arc<[u8]>)> = (0..2)
+        .map(|i| (format!("w{i}"), proxy(120, 30 + i)))
+        .collect();
+    let takes: Vec<StreamedTake> = files
+        .iter()
+        .map(|(p, b)| take(b, p, 0.0, 120.0, 0.0))
+        .collect();
     let shared = Arc::new(Mutex::new(takes));
     let playhead = Arc::new(Mutex::new(10.0f64));
-    let link = Arc::new(SlowLink { files: files.clone(), bytes_per_second: 4_000_000.0, landed: Arc::new(Mutex::new(Vec::new())) });
+    let link = Arc::new(SlowLink {
+        files: files.clone(),
+        bytes_per_second: 4_000_000.0,
+        landed: Arc::new(Mutex::new(Vec::new())),
+    });
     let stop = Arc::new(AtomicBool::new(false));
-    let window = Resident { behind: 5.0, ahead: 20.0 };
-    let config = FetchConfig { max_request: 32 * 1024, resident: Some(window), ..FetchConfig::default() };
+    let window = Resident {
+        behind: 5.0,
+        ahead: 20.0,
+    };
+    let config = FetchConfig {
+        max_request: 32 * 1024,
+        resident: Some(window),
+        ..FetchConfig::default()
+    };
     let at = Arc::clone(&playhead);
-    let driver = tokio::spawn(drive(Arc::clone(&shared), link, Arc::new(move || *at.lock().unwrap()), config, Arc::clone(&stop)));
+    let driver = tokio::spawn(drive(
+        Arc::clone(&shared),
+        link,
+        Arc::new(move || *at.lock().unwrap()),
+        config,
+        Arc::clone(&stop),
+    ));
 
     let settle = || async {
         for _ in 0..200 {
@@ -222,11 +325,22 @@ async fn a_resident_window_holds_only_what_is_near_the_playhead() {
         }
     };
     settle().await;
-    let held = |t: &StreamedTake, a: f64, b: f64| t.bytes.has(&t.index.bytes_for(frames(a), frames(b)));
+    let held =
+        |t: &StreamedTake, a: f64, b: f64| t.bytes.has(&t.index.bytes_for(frames(a), frames(b)));
     for t in shared.lock().unwrap().iter() {
         assert!(held(t, 10.0, 29.0), "{}: the window is here", t.path);
-        assert!(!held(t, 60.0, 61.0), "{}: nothing far ahead is fetched", t.path);
-        assert!(t.bytes.resident() < t.bytes.len() / 3, "{}: {} of {} held", t.path, t.bytes.resident(), t.bytes.len());
+        assert!(
+            !held(t, 60.0, 61.0),
+            "{}: nothing far ahead is fetched",
+            t.path
+        );
+        assert!(
+            t.bytes.resident() < t.bytes.len() / 3,
+            "{}: {} of {} held",
+            t.path,
+            t.bytes.resident(),
+            t.bytes.len()
+        );
     }
 
     // The playhead moves on: what it left is let go, what it nears arrives.

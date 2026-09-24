@@ -109,7 +109,12 @@ impl TransportSync {
         project_guid: impl Into<String>,
         local_clock: fn() -> f64,
     ) -> TransportLeader {
-        TransportLeader::spawn(self.clone(), project_guid.into(), local_clock, PING_INTERVAL)
+        TransportLeader::spawn(
+            self.clone(),
+            project_guid.into(),
+            local_clock,
+            PING_INTERVAL,
+        )
     }
 }
 
@@ -122,7 +127,10 @@ pub struct ProjectTransportSync {
 
 impl ProjectTransportSync {
     pub(crate) fn new(guid: String, clients: Arc<DawClients>) -> Self {
-        Self { guid, inner: TransportSync::new(clients) }
+        Self {
+            guid,
+            inner: TransportSync::new(clients),
+        }
     }
 
     /// The server's sync clock now, microseconds.
@@ -132,7 +140,9 @@ impl ProjectTransportSync {
 
     /// This project's latest stamped position.
     pub async fn snapshot(&self) -> Result<Option<StampedPosition>> {
-        self.inner.snapshot(ProjectContext::project(&self.guid)).await
+        self.inner
+            .snapshot(ProjectContext::project(&self.guid))
+            .await
     }
 
     /// This project's stamped positions.
@@ -205,11 +215,16 @@ impl TransportLeader {
             // Ends when the leader is dropped or the stream ends (the
             // connection is gone) — dropping both loops, which
             // unsubscribes.
-            let _ = futures::future::select(futures::future::select(pinger, listener), stop_rx)
-                .await;
+            let _ =
+                futures::future::select(futures::future::select(pinger, listener), stop_rx).await;
         });
 
-        Self { project_guid, local_clock, state, _stop: stop_tx }
+        Self {
+            project_guid,
+            local_clock,
+            state,
+            _stop: stop_tx,
+        }
     }
 
     /// The project followed.
@@ -275,7 +290,10 @@ impl TransportLeader {
     ) -> Option<Correction> {
         let (leader, offset) = {
             let state = self.state();
-            (state.latest.as_ref()?.position(), state.clock.offset_micros()?)
+            (
+                state.latest.as_ref()?.position(),
+                state.clock.offset_micros()?,
+            )
         };
         Some(follower.tick(backend, &leader, offset, self.local_now()))
     }

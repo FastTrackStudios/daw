@@ -125,7 +125,11 @@ fn main() -> Result<(), String> {
         let engine = daw
             .attach_duplex_engine(&proj.project_guid, &args.prefs)
             .map_err(hint)?;
-        let (stats, rate, latency) = (Some(engine.stats()), engine.sample_rate(), engine.latency_frames());
+        let (stats, rate, latency) = (
+            Some(engine.stats()),
+            engine.sample_rate(),
+            engine.latency_frames(),
+        );
         (Box::new(engine), stats, rate, latency)
     } else {
         let engine = daw
@@ -140,7 +144,9 @@ fn main() -> Result<(), String> {
     // The first callback reports the block size the device actually runs at.
     std::thread::sleep(std::time::Duration::from_millis(200));
     if let Some(stats) = &stats {
-        let frames = stats.block_frames.load(std::sync::atomic::Ordering::Relaxed);
+        let frames = stats
+            .block_frames
+            .load(std::sync::atomic::Ordering::Relaxed);
         println!(
             "  {} engine: {rate} Hz, {frames}-frame blocks ({:.2} ms)",
             if args.duplex { "duplex" } else { "cpal" },
@@ -274,7 +280,9 @@ impl Args {
                 "--in" => args.prefs.input_device = value("--in")?,
                 "--duplex" => args.duplex = true,
                 "--list-devices" => args.list_devices = true,
-                flag if flag.starts_with("--") => return Err(format!("unknown option {flag}\n{USAGE}")),
+                flag if flag.starts_with("--") => {
+                    return Err(format!("unknown option {flag}\n{USAGE}"));
+                }
                 _ => args.path = Some(arg),
             }
         }
@@ -283,7 +291,8 @@ impl Args {
 }
 
 fn parse_u32(s: &str) -> Result<u32, String> {
-    s.parse().map_err(|_| format!("`{s}` is not a whole number"))
+    s.parse()
+        .map_err(|_| format!("`{s}` is not a whole number"))
 }
 
 fn list_devices() {

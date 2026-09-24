@@ -19,24 +19,42 @@ fn song_folder(label: &str) -> std::path::PathBuf {
     .unwrap();
     let proxy: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
     std::fs::write(dir.join("Media/Proxies/Bass.ogg"), &proxy).unwrap();
-    std::fs::write(dir.join("Media/Proxies/Bass.ogg.idx"), "ogg-index 2 300000 0 0 2 48000\n").unwrap();
+    std::fs::write(
+        dir.join("Media/Proxies/Bass.ogg.idx"),
+        "ogg-index 2 300000 0 0 2 48000\n",
+    )
+    .unwrap();
     dir
 }
 
 #[reaper_test(isolated)]
-async fn song_files_lists_and_reads_the_folder_reaper_opened(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
+async fn song_files_lists_and_reads_the_folder_reaper_opened(
+    ctx: &daw::test::ReaperTestContext,
+) -> eyre::Result<()> {
     let dir = song_folder("list");
-    let project = ctx.daw.open_project(dir.join("Song.RPP").to_string_lossy().into_owned()).await?;
+    let project = ctx
+        .daw
+        .open_project(dir.join("Song.RPP").to_string_lossy().into_owned())
+        .await?;
     let result = async {
         let files = project.song_files().list().await?;
         let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
-        eyre::ensure!(paths.first() == Some(&"Song.RPP"), "the project first: {paths:?}");
+        eyre::ensure!(
+            paths.first() == Some(&"Song.RPP"),
+            "the project first: {paths:?}"
+        );
         eyre::ensure!(paths.contains(&"Media/Proxies/Bass.ogg"), "{paths:?}");
-        let proxy = files.iter().find(|f| f.path == "Media/Proxies/Bass.ogg").unwrap();
+        let proxy = files
+            .iter()
+            .find(|f| f.path == "Media/Proxies/Bass.ogg")
+            .unwrap();
         eyre::ensure!(proxy.size == 300_000, "its size: {}", proxy.size);
 
         // A range from the middle, as the fetcher asks.
-        let bytes = project.song_files().read("Media/Proxies/Bass.ogg", 100_000..100_010).await?;
+        let bytes = project
+            .song_files()
+            .read("Media/Proxies/Bass.ogg", 100_000..100_010)
+            .await?;
         let want: Vec<u8> = (100_000..100_010u32).map(|i| (i % 251) as u8).collect();
         eyre::ensure!(bytes == want, "{bytes:?} vs {want:?}");
 

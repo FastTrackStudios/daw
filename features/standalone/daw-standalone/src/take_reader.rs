@@ -29,25 +29,16 @@ pub(crate) struct TakeReader {
     pub markers: Vec<StretchMarker>,
     /// The source's on-disk media file, when the resolver (or the raw
     /// path) points at one — the key for the `.reapeaks` sidecar.
-    #[cfg(all(
-        feature = "reapeaks",
-        any(feature = "audio", feature = "decode")
-    ))]
+    #[cfg(all(feature = "reapeaks", any(feature = "audio", feature = "decode")))]
     pub media_path: Option<std::path::PathBuf>,
     /// The file name the take asks for (`Bass.wav`) — what a stand-in's
     /// peaks are filed under when the file playing is its proxy.
-    #[cfg(all(
-        feature = "reapeaks",
-        any(feature = "audio", feature = "decode")
-    ))]
+    #[cfg(all(feature = "reapeaks", any(feature = "audio", feature = "decode")))]
     pub original_name: Option<String>,
     /// Parsed source-level peak mipmap (see [`crate::peak_store`]);
     /// populated by [`Self::ensure_reapeaks`], never eagerly — the
     /// audio accessor opens readers too and must stay scan-free.
-    #[cfg(all(
-        feature = "reapeaks",
-        any(feature = "audio", feature = "decode")
-    ))]
+    #[cfg(all(feature = "reapeaks", any(feature = "audio", feature = "decode")))]
     pub reapeaks: Option<std::sync::Arc<dawfile_reaper::reapeaks::ReaPeaks>>,
 }
 
@@ -78,10 +69,7 @@ impl TakeReader {
             .read_project(&guid, |p| p.stretch_markers.get(&t.guid).cloned())
             .flatten()
             .unwrap_or_default();
-        #[cfg(all(
-            feature = "reapeaks",
-            any(feature = "audio", feature = "decode")
-        ))]
+        #[cfg(all(feature = "reapeaks", any(feature = "audio", feature = "decode")))]
         let media_path = t.source_file_path.as_deref().and_then(|p| {
             // The bay resolver is authoritative (project-relative paths);
             // a plain absolute path that exists works without one.
@@ -96,24 +84,15 @@ impl TakeReader {
             play_rate: if t.play_rate > 0.0 { t.play_rate } else { 1.0 },
             length,
             markers,
-            #[cfg(all(
-                feature = "reapeaks",
-                any(feature = "audio", feature = "decode")
-            ))]
+            #[cfg(all(feature = "reapeaks", any(feature = "audio", feature = "decode")))]
             media_path,
-            #[cfg(all(
-                feature = "reapeaks",
-                any(feature = "audio", feature = "decode")
-            ))]
+            #[cfg(all(feature = "reapeaks", any(feature = "audio", feature = "decode")))]
             original_name: t
                 .source_file_path
                 .as_deref()
                 .and_then(|p| std::path::Path::new(p).file_name())
                 .map(|n| n.to_string_lossy().into_owned()),
-            #[cfg(all(
-                feature = "reapeaks",
-                any(feature = "audio", feature = "decode")
-            ))]
+            #[cfg(all(feature = "reapeaks", any(feature = "audio", feature = "decode")))]
             reapeaks: None,
         })
     }
@@ -165,10 +144,7 @@ impl TakeReader {
     /// no sidecar. Called by the peaks builder, deliberately not by
     /// [`Self::open`]: the first build scans the source once, and the
     /// audio accessor's opens must stay scan-free.
-    #[cfg(all(
-        feature = "reapeaks",
-        any(feature = "audio", feature = "decode")
-    ))]
+    #[cfg(all(feature = "reapeaks", any(feature = "audio", feature = "decode")))]
     pub(crate) fn ensure_reapeaks(&mut self) {
         if self.reapeaks.is_some() {
             return;
@@ -201,10 +177,7 @@ impl TakeReader {
         }
     }
 
-    #[cfg(not(all(
-        feature = "reapeaks",
-        any(feature = "audio", feature = "decode")
-    )))]
+    #[cfg(not(all(feature = "reapeaks", any(feature = "audio", feature = "decode"))))]
     pub(crate) fn ensure_reapeaks(&mut self) {}
 
     pub(crate) fn channels(&self) -> u16 {
@@ -276,10 +249,7 @@ impl TakeReader {
         // Coarse zooms fold from the persistent source mipmap instead of
         // scanning PCM; fine zooms (span below the finest mipmap ratio)
         // still read the source — the mipmap can't resolve them.
-        #[cfg(all(
-            feature = "reapeaks",
-            any(feature = "audio", feature = "decode")
-        ))]
+        #[cfg(all(feature = "reapeaks", any(feature = "audio", feature = "decode")))]
         if let Some(pk) = &self.reapeaks
             && let Some(fine) = pk.levels.first()
             && (hi - lo) as u64 >= fine.samples_per_peak.max(1) as u64

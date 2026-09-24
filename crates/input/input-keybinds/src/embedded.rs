@@ -12,28 +12,138 @@ use crate::loader::{Profile, load_profile_from};
 
 /// Every file of `reaper-input/config/config/fasttrackstudio`, by name.
 pub const FASTTRACKSTUDIO: &[(&str, &str)] = &[
-    ("profile.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/profile.styx")),
-    ("transport.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/transport.styx")),
-    ("navigation.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/navigation.styx")),
-    ("modes.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/modes.styx")),
-    ("editing.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/editing.styx")),
-    ("grid.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/grid.styx")),
-    ("options.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/options.styx")),
-    ("tracks.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/tracks.styx")),
-    ("lanes-takes.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/lanes-takes.styx")),
-    ("visibility.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/visibility.styx")),
-    ("automation.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/automation.styx")),
-    ("fx.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/fx.styx")),
-    ("scrolling.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/scrolling.styx")),
-    ("zoom.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/zoom.styx")),
-    ("markers.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/markers.styx")),
-    ("views.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/views.styx")),
-    ("utility.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/utility.styx")),
-    ("midi-modes.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/midi-modes.styx")),
-    ("midi.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/midi.styx")),
-    ("expression-editor.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/expression-editor.styx")),
-    ("mouse.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/mouse.styx")),
-    ("mouse-profile.styx", include_str!("../../../../features/reaper/reaper-input/config/config/fasttrackstudio/mouse-profile.styx")),
+    (
+        "profile.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/profile.styx"
+        ),
+    ),
+    (
+        "transport.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/transport.styx"
+        ),
+    ),
+    (
+        "navigation.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/navigation.styx"
+        ),
+    ),
+    (
+        "modes.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/modes.styx"
+        ),
+    ),
+    (
+        "editing.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/editing.styx"
+        ),
+    ),
+    (
+        "grid.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/grid.styx"
+        ),
+    ),
+    (
+        "options.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/options.styx"
+        ),
+    ),
+    (
+        "tracks.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/tracks.styx"
+        ),
+    ),
+    (
+        "lanes-takes.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/lanes-takes.styx"
+        ),
+    ),
+    (
+        "visibility.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/visibility.styx"
+        ),
+    ),
+    (
+        "automation.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/automation.styx"
+        ),
+    ),
+    (
+        "fx.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/fx.styx"
+        ),
+    ),
+    (
+        "scrolling.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/scrolling.styx"
+        ),
+    ),
+    (
+        "zoom.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/zoom.styx"
+        ),
+    ),
+    (
+        "markers.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/markers.styx"
+        ),
+    ),
+    (
+        "views.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/views.styx"
+        ),
+    ),
+    (
+        "utility.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/utility.styx"
+        ),
+    ),
+    (
+        "midi-modes.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/midi-modes.styx"
+        ),
+    ),
+    (
+        "midi.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/midi.styx"
+        ),
+    ),
+    (
+        "expression-editor.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/expression-editor.styx"
+        ),
+    ),
+    (
+        "mouse.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/mouse.styx"
+        ),
+    ),
+    (
+        "mouse-profile.styx",
+        include_str!(
+            "../../../../features/reaper/reaper-input/config/config/fasttrackstudio/mouse-profile.styx"
+        ),
+    ),
 ];
 
 /// The FastTrackStudio profile, from the embedded copy.

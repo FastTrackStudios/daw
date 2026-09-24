@@ -580,10 +580,25 @@ async fn add_notes_takes_lengths_in_ticks() {
     let track = Tracks::add(&daw, ctx.clone(), "Click", None).unwrap();
     let loc = Midi::create_midi_item(&daw, ctx, TrackRef::Guid(track), 0.0, 4.0)
         .expect("MIDI item created");
-    Midi::add_notes(&daw, loc.clone(), vec![MidiNoteCreate::new(60, 100, 2.0, 960.0)]);
-    Midi::add_notes_ppq(&daw, loc.clone(), vec![MidiNoteCreate::new(62, 100, 3.0, 0.5)]);
+    Midi::add_notes(
+        &daw,
+        loc.clone(),
+        vec![MidiNoteCreate::new(60, 100, 2.0, 960.0)],
+    );
+    Midi::add_notes_ppq(
+        &daw,
+        loc.clone(),
+        vec![MidiNoteCreate::new(62, 100, 3.0, 0.5)],
+    );
     let notes = Midi::notes(&daw, loc);
     assert_eq!(notes[0].start_ppq, 2.0);
-    assert!((notes[0].length_ppq - 1.0).abs() < 1e-9, "{}", notes[0].length_ppq);
-    assert!((notes[1].length_ppq - 0.5).abs() < 1e-9, "the round trip is as given");
+    assert!(
+        (notes[0].length_ppq - 1.0).abs() < 1e-9,
+        "{}",
+        notes[0].length_ppq
+    );
+    assert!(
+        (notes[1].length_ppq - 0.5).abs() < 1e-9,
+        "the round trip is as given"
+    );
 }

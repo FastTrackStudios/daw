@@ -124,12 +124,17 @@ impl SnapshotCell {
         let (hi, lo) = split(snap.project_id);
         self.project_hi.store(hi, Ordering::Relaxed);
         self.project_lo.store(lo, Ordering::Relaxed);
-        self.host_micros.store(snap.host_micros.to_bits(), Ordering::Relaxed);
-        self.playhead.store(snap.playhead_seconds.to_bits(), Ordering::Relaxed);
-        self.playrate.store(snap.playrate.to_bits(), Ordering::Relaxed);
-        self.sample_rate.store(snap.sample_rate.to_bits(), Ordering::Relaxed);
+        self.host_micros
+            .store(snap.host_micros.to_bits(), Ordering::Relaxed);
+        self.playhead
+            .store(snap.playhead_seconds.to_bits(), Ordering::Relaxed);
+        self.playrate
+            .store(snap.playrate.to_bits(), Ordering::Relaxed);
+        self.sample_rate
+            .store(snap.sample_rate.to_bits(), Ordering::Relaxed);
         self.buffer_len.store(snap.buffer_len, Ordering::Relaxed);
-        self.is_playing.store(u32::from(snap.is_playing), Ordering::Relaxed);
+        self.is_playing
+            .store(u32::from(snap.is_playing), Ordering::Relaxed);
         self.seq.store(start.wrapping_add(1), Ordering::Release);
     }
 

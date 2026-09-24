@@ -63,13 +63,22 @@ impl Follower {
         offset_micros: f64,
         now_local_micros: f64,
     ) -> Correction {
-        let Some(mut local) = backend.snapshot() else { return Correction::Hold };
+        let Some(mut local) = backend.snapshot() else {
+            return Correction::Hold;
+        };
         local.host_micros += offset_micros;
-        let correction = self.controller.step(&local, leader, now_local_micros + offset_micros);
+        let correction = self
+            .controller
+            .step(&local, leader, now_local_micros + offset_micros);
         match correction {
             Correction::Hold => {}
             Correction::Rate(rate) => backend.set_rate(rate),
-            Correction::Locate { at_micros, position, playing, rate } => {
+            Correction::Locate {
+                at_micros,
+                position,
+                playing,
+                rate,
+            } => {
                 backend.locate_at(at_micros - offset_micros, position, playing, rate);
             }
             Correction::Stop { position } => backend.stop(position),

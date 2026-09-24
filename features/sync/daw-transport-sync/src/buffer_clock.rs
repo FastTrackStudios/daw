@@ -63,7 +63,8 @@ impl BufferClock {
     /// of this buffer, µs.
     pub fn tick(&mut self, now_micros: f64, frames: u32, sample_rate: f64) -> f64 {
         let nominal = f64::from(frames) / sample_rate * 1e6;
-        let reshaped = frames != self.frames || (sample_rate - self.sample_rate).abs() > f64::EPSILON;
+        let reshaped =
+            frames != self.frames || (sample_rate - self.sample_rate).abs() > f64::EPSILON;
         // A gap of several buffers (a stall, a stop and start): the loop's
         // prediction means nothing, begin again from this callback.
         let stalled = self.started && (now_micros - self.t1).abs() > 4.0 * self.period.max(nominal);

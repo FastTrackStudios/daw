@@ -33,7 +33,12 @@ impl RollingWindow {
     #[must_use]
     pub fn new(cap: usize) -> Self {
         let cap = cap.max(1);
-        Self { values: vec![0.0; cap], cap, cursor: 0, len: 0 }
+        Self {
+            values: vec![0.0; cap],
+            cap,
+            cursor: 0,
+            len: 0,
+        }
     }
 
     pub fn push(&mut self, v: f64) {
@@ -57,7 +62,9 @@ impl RollingWindow {
     /// The interquartile mean; 0 when empty.
     #[must_use]
     pub fn average(&self) -> f64 {
-        let Some(values) = self.values.get(..self.len) else { return 0.0 };
+        let Some(values) = self.values.get(..self.len) else {
+            return 0.0;
+        };
         iqm(values)
     }
 }
@@ -69,7 +76,11 @@ fn iqm(values: &[f64]) -> f64 {
     }
     let mut sorted = values.to_vec();
     sorted.sort_by(f64::total_cmp);
-    let q = if sorted.len() < 4 { 0 } else { sorted.len() / 4 };
+    let q = if sorted.len() < 4 {
+        0
+    } else {
+        sorted.len() / 4
+    };
     let kept = sorted.get(q..sorted.len() - q).unwrap_or(&sorted);
     kept.iter().sum::<f64>() / kept.len() as f64
 }
@@ -109,7 +120,12 @@ impl ClockEstimator {
     /// Keep the last `cap` exchanges (32 at 10 Hz is ~3 s).
     #[must_use]
     pub fn new(cap: usize) -> Self {
-        Self { window: Vec::with_capacity(cap.max(1)), cap: cap.max(1), cursor: 0, smoothed: None }
+        Self {
+            window: Vec::with_capacity(cap.max(1)),
+            cap: cap.max(1),
+            cursor: 0,
+            smoothed: None,
+        }
     }
 
     /// Record one exchange: `t1` sent here, `t2` received there, `t3`
@@ -121,7 +137,10 @@ impl ClockEstimator {
         if !round_trip.is_finite() || round_trip < 0.0 {
             return;
         }
-        let exchange = Exchange { offset: ((t2 - t1) + (t3 - t4)) / 2.0, round_trip };
+        let exchange = Exchange {
+            offset: ((t2 - t1) + (t3 - t4)) / 2.0,
+            round_trip,
+        };
         if self.window.len() < self.cap {
             self.window.push(exchange);
         } else if let Some(slot) = self.window.get_mut(self.cursor) {

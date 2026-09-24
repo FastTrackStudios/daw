@@ -60,6 +60,7 @@ pub mod region;
 pub mod resource;
 pub mod routing;
 pub mod screenset;
+pub mod song_files;
 pub mod stretch_marker;
 pub mod take;
 pub mod take_ranking;
@@ -67,7 +68,6 @@ pub mod tempo_map;
 pub mod toolbar;
 pub mod track;
 pub mod transport;
-pub mod song_files;
 pub mod transport_sync;
 pub mod ui;
 pub mod undo;
@@ -164,11 +164,13 @@ pub use track::{
 pub use transport::*;
 // Explicit re-exports (see marker / track for the rationale).
 #[cfg(feature = "vox")]
-pub use transport_sync::{TransportSyncClient, TransportSyncStreamClient, TransportSyncStreamSource};
-pub use transport_sync::{StampedPosition, TransportSync};
-#[cfg(feature = "vox")]
 pub use song_files::SongFilesClient;
 pub use song_files::{SongFile, SongFiles};
+pub use transport_sync::{StampedPosition, TransportSync};
+#[cfg(feature = "vox")]
+pub use transport_sync::{
+    TransportSyncClient, TransportSyncStreamClient, TransportSyncStreamSource,
+};
 pub use ui::*;
 pub use undo::*;
 pub use window_geometry::*;

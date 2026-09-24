@@ -52,7 +52,10 @@ fn a_loaded_projects_lanes_are_zero_based() {
     assert_eq!(marker.lane, Some(2));
 
     // The file's flags come through as project info, as REAPER reports them.
-    assert_eq!(daw.get_project_info(project.clone(), "RULER_LANE_FLAGS:0"), 4.0);
+    assert_eq!(
+        daw.get_project_info(project.clone(), "RULER_LANE_FLAGS:0"),
+        4.0
+    );
     assert_eq!(daw.get_project_info(project, "RULER_LANE_FLAGS:1"), 8.0);
 }
 
@@ -68,7 +71,10 @@ fn fresh_regions_and_markers_land_on_the_default_lanes() {
 
     // Moving the default is exclusive, as in REAPER.
     daw.set_project_info(project.clone(), "RULER_LANE_FLAGS:2", 8.0);
-    assert_eq!(daw.get_project_info(project.clone(), "RULER_LANE_FLAGS:1"), 0.0);
+    assert_eq!(
+        daw.get_project_info(project.clone(), "RULER_LANE_FLAGS:1"),
+        0.0
+    );
     let moved = Regions::add(&daw, project.clone(), 30.0, 40.0, "BR").unwrap();
     assert_eq!(Regions::get(&daw, project, moved).unwrap().lane, Some(2));
 }
@@ -76,10 +82,20 @@ fn fresh_regions_and_markers_land_on_the_default_lanes() {
 #[test]
 fn naming_a_lane_past_the_end_grows_the_count_contiguously() {
     let daw = Standalone::new();
-    let summary = load_rpp_text(&daw, "Empty", "/tmp/empty.rpp", "<REAPER_PROJECT 0.1 \"7.0\" 0\n>\n").unwrap();
+    let summary = load_rpp_text(
+        &daw,
+        "Empty",
+        "/tmp/empty.rpp",
+        "<REAPER_PROJECT 0.1 \"7.0\" 0\n>\n",
+    )
+    .unwrap();
     let project = ProjectContext::Project(summary.project_guid);
     assert_eq!(daw.ruler_lane_count(project.clone()), 0);
     daw.set_ruler_lane_name(project.clone(), 2, "MARKS");
-    assert_eq!(daw.ruler_lane_count(project.clone()), 3, "lanes 0 and 1 exist, unnamed");
+    assert_eq!(
+        daw.ruler_lane_count(project.clone()),
+        3,
+        "lanes 0 and 1 exist, unnamed"
+    );
     assert_eq!(daw.get_ruler_lane_name(project, 1), "");
 }

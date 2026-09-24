@@ -30,6 +30,6 @@ pub(crate) mod project;
 // Standalone` lives at `crate::transport`.
 
 pub use daw::{
-    EnvelopeData, EnvelopeKey, FxChainKey, FxEntry, ItemEntry, ProjectState, RulerLane,
-    Standalone, StandaloneState, TakeList, TrackExt,
+    EnvelopeData, EnvelopeKey, FxChainKey, FxEntry, ItemEntry, ProjectState, RulerLane, Standalone,
+    StandaloneState, TakeList, TrackExt,
 };

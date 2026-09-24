@@ -471,9 +471,22 @@ impl ReaPeaks {
                 data.push(min);
             }
         }
-        let mut out = vec![PeakLevel { samples_per_peak: spp, count, data }];
-        out.extend(levels.iter().skip(1).filter(|l| l.samples_per_peak > spp).map(|l| (*l).clone()));
-        Self { levels: out, ..self.clone() }
+        let mut out = vec![PeakLevel {
+            samples_per_peak: spp,
+            count,
+            data,
+        }];
+        out.extend(
+            levels
+                .iter()
+                .skip(1)
+                .filter(|l| l.samples_per_peak > spp)
+                .map(|l| (*l).clone()),
+        );
+        Self {
+            levels: out,
+            ..self.clone()
+        }
     }
 
     /// Render `columns` min/max pairs for `channel` over a source time range
@@ -531,16 +544,31 @@ mod tests {
         }
         let pk = ReaPeaks {
             levels: vec![
-                PeakLevel { samples_per_peak: 160, count: 10, data },
-                PeakLevel { samples_per_peak: 2400, count: 1, data: vec![30_000, -30_000] },
+                PeakLevel {
+                    samples_per_peak: 160,
+                    count: 10,
+                    data,
+                },
+                PeakLevel {
+                    samples_per_peak: 2400,
+                    count: 1,
+                    data: vec![30_000, -30_000],
+                },
             ],
             ..ReaPeaks::compute(1, 48_000, 1600, |_, _| 0.0)
         };
         let small = pk.coarsened(1024);
         let fine = &small.levels[0];
-        assert_eq!(fine.samples_per_peak, 960, "six peaks folded: the most under 1024");
+        assert_eq!(
+            fine.samples_per_peak, 960,
+            "six peaks folded: the most under 1024"
+        );
         assert_eq!(fine.count, 2);
-        assert_eq!(fine.data, vec![500, -500, 30_000, -30_000], "each fold keeps its extremes");
+        assert_eq!(
+            fine.data,
+            vec![500, -500, 30_000, -30_000],
+            "each fold keeps its extremes"
+        );
         assert_eq!(small.levels.len(), 2, "the coarser level kept");
         assert_eq!(small.levels[1].samples_per_peak, 2400);
     }

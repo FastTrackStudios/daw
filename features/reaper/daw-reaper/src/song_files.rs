@@ -31,7 +31,13 @@ impl daw_proto::SongFiles for crate::Reaper {
         folder::list(&project_file(project).await?)
     }
 
-    async fn read(&self, project: ProjectContext, path: String, start: u64, len: u32) -> DawResult<Vec<u8>> {
+    async fn read(
+        &self,
+        project: ProjectContext,
+        path: String,
+        start: u64,
+        len: u32,
+    ) -> DawResult<Vec<u8>> {
         folder::read(&project_file(project).await?, &path, start, len)
     }
 }

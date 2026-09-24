@@ -75,7 +75,11 @@ pub fn pending_media(daw: &Standalone, project_guid: &str) -> Vec<PendingMedia> 
         for (item_guid, take_list) in &p.takes {
             let span = p.items.get(item_guid).map(|entry| {
                 let start = entry.item.position.as_seconds();
-                (entry.item.track_guid.clone(), start, start + entry.item.length.as_seconds())
+                (
+                    entry.item.track_guid.clone(),
+                    start,
+                    start + entry.item.length.as_seconds(),
+                )
             });
             for take in &take_list.takes {
                 if let Some(path) = &take.source_file_path
@@ -90,7 +94,11 @@ pub fn pending_media(daw: &Standalone, project_guid: &str) -> Vec<PendingMedia> 
                         start,
                         end,
                         source_offset: take.start_offset.as_seconds(),
-                        playrate: if take.play_rate > 0.0 { take.play_rate } else { 1.0 },
+                        playrate: if take.play_rate > 0.0 {
+                            take.play_rate
+                        } else {
+                            1.0
+                        },
                     });
                 }
             }
@@ -103,7 +111,8 @@ pub fn pending_media(daw: &Standalone, project_guid: &str) -> Vec<PendingMedia> 
 /// Whether a take's media is loaded (it has a source to play).
 #[must_use]
 pub fn is_loaded(daw: &Standalone, project_guid: &str, take_guid: &str) -> bool {
-    daw.with_project(project_guid, |p| p.audio_sources.contains_key(take_guid)).unwrap_or(false)
+    daw.with_project(project_guid, |p| p.audio_sources.contains_key(take_guid))
+        .unwrap_or(false)
 }
 
 /// [`materialize_audio`] with a streaming fast path: when `resolve_path`
@@ -129,7 +138,14 @@ where
     // The list is taken outside the project lock, so the resolver never
     // runs while holding it (it may do filesystem / network I/O).
     for pending in pending_media(daw, project_guid) {
-        match materialize_take(daw, project_guid, &pending.take_guid, &pending.path, &mut resolve, &mut resolve_path) {
+        match materialize_take(
+            daw,
+            project_guid,
+            &pending.take_guid,
+            &pending.path,
+            &mut resolve,
+            &mut resolve_path,
+        ) {
             Ok(()) => report.loaded += 1,
             Err(e) => report.failed.push((pending.take_guid, e)),
         }
@@ -179,7 +195,9 @@ where
     // memory but the few seconds decoded around the playhead.
     #[cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
     if let Some(disk_path) = resolve_path(path)
-        && disk_path.extension().is_some_and(|e| e.eq_ignore_ascii_case("ogg"))
+        && disk_path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("ogg"))
     {
         let stream = fts_sample::ogg_stream::OggStream::open_file(&disk_path)
             .map_err(|e| format!("ogg stream for {path}: {e}"))?;
@@ -204,8 +222,10 @@ where
     // hand back a stand-in (the proxy `Proxies/Bass.ogg` for a
     // `Bass.wav` that was never fetched), and decoding Ogg as WAV
     // fails every time.
-    let ext = sniff_extension(&bytes)
-        .map_or_else(|| path.rsplit('.').next().unwrap_or("").to_ascii_lowercase(), str::to_owned);
+    let ext = sniff_extension(&bytes).map_or_else(
+        || path.rsplit('.').next().unwrap_or("").to_ascii_lowercase(),
+        str::to_owned,
+    );
     // An Ogg stand-in (a proxy) streams around the playhead rather than
     // decoding whole: resident, a setlist's proxies were 17 GB.
     #[cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
@@ -221,7 +241,8 @@ where
     // budget still loads — playback must not silently fail). FUTURE
     // SEAM: compressed timeline streaming (a butler thread over
     // fts-sample's stream layer) replaces this eager decode.
-    let decoded = decode_audio_with_extension(&bytes, &ext).ok_or_else(|| format!("decode failed for {path}"))?;
+    let decoded = decode_audio_with_extension(&bytes, &ext)
+        .ok_or_else(|| format!("decode failed for {path}"))?;
     attach_audio_source(daw, project_guid, take_guid, decoded);
     Ok(())
 }
@@ -232,7 +253,12 @@ where
 /// # Errors
 ///
 /// As [`materialize_take`].
-pub fn materialize_take_via_bay(daw: &Standalone, project_guid: &str, take_guid: &str, path: &str) -> Result<(), String> {
+pub fn materialize_take_via_bay(
+    daw: &Standalone,
+    project_guid: &str,
+    take_guid: &str,
+    path: &str,
+) -> Result<(), String> {
     let bay = daw.media_bay();
     materialize_take(
         daw,
@@ -265,7 +291,8 @@ pub fn attach_audio_source(
 /// attaches.
 pub fn attach_source(daw: &Standalone, project_guid: &str, take_guid: &str, source: AudioSource) {
     let _ = daw.with_project_mut(project_guid, |p| {
-        p.audio_sources.insert(take_guid.to_string(), Arc::new(source));
+        p.audio_sources
+            .insert(take_guid.to_string(), Arc::new(source));
     });
 }
 
@@ -295,8 +322,10 @@ fn stream_ogg(
     use super::streamed::{StreamFeeder, Streamed};
     let streamed = Streamed::new(stream.channels(), stream.sample_rate(), stream.frames());
     let _ = daw.with_project_mut(project_guid, |p| {
-        p.audio_sources
-            .insert(take_guid.to_owned(), Arc::new(AudioSource::Streamed(streamed.clone())));
+        p.audio_sources.insert(
+            take_guid.to_owned(),
+            Arc::new(AudioSource::Streamed(streamed.clone())),
+        );
     });
     super::streamed::butler_adopt(StreamFeeder::new(streamed, stream));
 }
@@ -320,8 +349,10 @@ pub fn attach_remote_ogg(
     use super::streamed::{RemoteOgg, StreamFeeder, Streamed};
     let streamed = Streamed::new(index.channels, index.sample_rate, index.frames);
     let _ = daw.with_project_mut(project_guid, |p| {
-        p.audio_sources
-            .insert(take_guid.to_owned(), Arc::new(AudioSource::Streamed(streamed.clone())));
+        p.audio_sources.insert(
+            take_guid.to_owned(),
+            Arc::new(AudioSource::Streamed(streamed.clone())),
+        );
     });
     StreamFeeder::new(streamed, RemoteOgg::new(bytes, index))
 }
@@ -335,7 +366,13 @@ pub fn stream_remote_ogg(
     bytes: Arc<fts_sample::sparse::SparseBytes>,
     index: fts_sample::ogg_index::OggIndex,
 ) {
-    super::streamed::butler_adopt(attach_remote_ogg(daw, project_guid, take_guid, bytes, index));
+    super::streamed::butler_adopt(attach_remote_ogg(
+        daw,
+        project_guid,
+        take_guid,
+        bytes,
+        index,
+    ));
 }
 
 /// The container a file's first bytes announce, when they announce one.

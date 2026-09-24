@@ -153,7 +153,16 @@ mod tests {
     /// 3 Bass  (folder)   4 Bass -> 6
     /// 7 BUSES (folder)   5 Drum bus    6 Bass bus
     fn live_bus() -> (Vec<Option<usize>>, Vec<Vec<usize>>) {
-        let parents = vec![None, Some(0), Some(0), None, Some(3), Some(7), Some(7), None];
+        let parents = vec![
+            None,
+            Some(0),
+            Some(0),
+            None,
+            Some(3),
+            Some(7),
+            Some(7),
+            None,
+        ];
         let sends = vec![
             vec![],
             vec![5],

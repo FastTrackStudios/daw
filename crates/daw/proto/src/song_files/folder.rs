@@ -24,7 +24,8 @@ pub fn song_folder(project_file: &str) -> DawResult<(PathBuf, PathBuf)> {
     if project_file.is_empty() {
         return Err(DawError::NotFound("the project has no file".into()));
     }
-    let file = std::path::absolute(PathBuf::from(project_file)).unwrap_or_else(|_| PathBuf::from(project_file));
+    let file = std::path::absolute(PathBuf::from(project_file))
+        .unwrap_or_else(|_| PathBuf::from(project_file));
     let folder = file
         .parent()
         .map(Path::to_path_buf)
@@ -45,9 +46,18 @@ pub fn list(project_file: &str) -> DawResult<Vec<SongFile>> {
     walk(&folder, &folder, &mut files);
     files.sort_by(|a, b| a.path.cmp(&b.path));
     let project_rel = file.strip_prefix(&folder).map(relative).unwrap_or_default();
-    let project_size = std::fs::metadata(&file).ok().filter(std::fs::Metadata::is_file).map_or(0, |m| m.len());
+    let project_size = std::fs::metadata(&file)
+        .ok()
+        .filter(std::fs::Metadata::is_file)
+        .map_or(0, |m| m.len());
     files.retain(|f| f.path != project_rel);
-    files.insert(0, SongFile { path: project_rel, size: project_size });
+    files.insert(
+        0,
+        SongFile {
+            path: project_rel,
+            size: project_size,
+        },
+    );
     Ok(files)
 }
 
@@ -60,9 +70,12 @@ pub fn list(project_file: &str) -> DawResult<Vec<SongFile>> {
 pub fn read(project_file: &str, path: &str, start: u64, len: u32) -> DawResult<Vec<u8>> {
     use std::io::{Read, Seek, SeekFrom};
     let (_, folder) = song_folder(project_file)?;
-    let file = inside(&folder, path).ok_or_else(|| DawError::OperationFailed(format!("{path}: outside the song")))?;
-    let mut f = std::fs::File::open(&file).map_err(|e| DawError::NotFound(format!("{path}: {e}")))?;
-    f.seek(SeekFrom::Start(start)).map_err(|e| DawError::OperationFailed(format!("{path}: {e}")))?;
+    let file = inside(&folder, path)
+        .ok_or_else(|| DawError::OperationFailed(format!("{path}: outside the song")))?;
+    let mut f =
+        std::fs::File::open(&file).map_err(|e| DawError::NotFound(format!("{path}: {e}")))?;
+    f.seek(SeekFrom::Start(start))
+        .map_err(|e| DawError::OperationFailed(format!("{path}: {e}")))?;
     let mut out = vec![0u8; usize::try_from(len.min(MAX_READ)).unwrap_or(0)];
     let mut got = 0usize;
     while got < out.len() {
@@ -77,7 +90,9 @@ pub fn read(project_file: &str, path: &str, start: u64, len: u32) -> DawResult<V
 }
 
 fn walk(folder: &Path, at: &Path, out: &mut Vec<SongFile>) {
-    let Ok(entries) = std::fs::read_dir(at) else { return };
+    let Ok(entries) = std::fs::read_dir(at) else {
+        return;
+    };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         if skipped(&name) {
@@ -88,7 +103,10 @@ fn walk(folder: &Path, at: &Path, out: &mut Vec<SongFile>) {
         if meta.is_dir() {
             walk(folder, &path, out);
         } else if let Ok(rel) = path.strip_prefix(folder) {
-            out.push(SongFile { path: relative(rel), size: meta.len() });
+            out.push(SongFile {
+                path: relative(rel),
+                size: meta.len(),
+            });
         }
     }
 }
@@ -119,7 +137,10 @@ mod tests {
     #[test]
     fn nothing_outside_the_song_is_served() {
         let folder = Path::new("/songs/Washed");
-        assert_eq!(inside(folder, "Media/Proxies/Bass.ogg"), Some(folder.join("Media/Proxies/Bass.ogg")));
+        assert_eq!(
+            inside(folder, "Media/Proxies/Bass.ogg"),
+            Some(folder.join("Media/Proxies/Bass.ogg"))
+        );
         assert_eq!(inside(folder, "../Other/secret"), None);
         assert_eq!(inside(folder, "/etc/passwd"), None);
         assert_eq!(inside(folder, "Media/../../x"), None);

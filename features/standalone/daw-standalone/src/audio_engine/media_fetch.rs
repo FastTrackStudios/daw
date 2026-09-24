@@ -45,7 +45,10 @@ pub struct StreamedTake {
 
 impl std::fmt::Debug for StreamedTake {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StreamedTake").field("path", &self.path).field("start", &self.start).finish_non_exhaustive()
+        f.debug_struct("StreamedTake")
+            .field("path", &self.path)
+            .field("start", &self.start)
+            .finish_non_exhaustive()
     }
 }
 
@@ -54,9 +57,10 @@ impl StreamedTake {
     /// its span — not the rest of a file an item plays only part of.
     #[must_use]
     pub fn needed(&self) -> [Range<u64>; 2] {
-        let span = self
-            .index
-            .bytes_for(self.frame_at(self.start).saturating_sub(PREROLL), self.frame_at(self.end));
+        let span = self.index.bytes_for(
+            self.frame_at(self.start).saturating_sub(PREROLL),
+            self.frame_at(self.end),
+        );
         [self.index.header(), span]
     }
 
@@ -109,7 +113,11 @@ pub fn plan(takes: &[StreamedTake], playhead: f64, horizon: f64, max_request: u6
             let end = at.saturating_add(max_request).min(range.end);
             #[allow(clippy::cast_precision_loss)]
             let through = (at - range.start) as f64 / len as f64;
-            out.push(Request { take, range: at..end, heard_in: (heard_to - heard_from).mul_add(through, heard_from) });
+            out.push(Request {
+                take,
+                range: at..end,
+                heard_in: (heard_to - heard_from).mul_add(through, heard_from),
+            });
             at = end;
         }
     };
@@ -125,12 +133,18 @@ pub fn plan(takes: &[StreamedTake], playhead: f64, horizon: f64, max_request: u6
         let from = playhead.max(take.start);
         let to = (playhead + horizon).min(take.end);
         if horizon.is_infinite() && take.start < from {
-            let behind = take.index.bytes_for(take.frame_at(take.start).saturating_sub(PREROLL), take.frame_at(from));
+            let behind = take.index.bytes_for(
+                take.frame_at(take.start).saturating_sub(PREROLL),
+                take.frame_at(from),
+            );
             let span = behind.end.saturating_sub(behind.start).max(1);
             for missing in take.bytes.missing(&behind) {
                 #[allow(clippy::cast_precision_loss)]
                 let at = |b: u64| {
-                    (from - take.start).mul_add((b.saturating_sub(behind.start)) as f64 / span as f64, BEHIND)
+                    (from - take.start).mul_add(
+                        (b.saturating_sub(behind.start)) as f64 / span as f64,
+                        BEHIND,
+                    )
                 };
                 let (a, b) = (at(missing.start), at(missing.end));
                 push(i, missing, a, b);
@@ -139,14 +153,20 @@ pub fn plan(takes: &[StreamedTake], playhead: f64, horizon: f64, max_request: u6
         if from >= to {
             continue;
         }
-        let bytes = take
-            .index
-            .bytes_for(take.frame_at(from).saturating_sub(PREROLL), take.frame_at(to));
+        let bytes = take.index.bytes_for(
+            take.frame_at(from).saturating_sub(PREROLL),
+            take.frame_at(to),
+        );
         let span = bytes.end.saturating_sub(bytes.start).max(1);
         for missing in take.bytes.missing(&bytes) {
             // How soon each part is heard: where it sits in the stretch.
             #[allow(clippy::cast_precision_loss)]
-            let at = |b: u64| (to - from).mul_add((b.saturating_sub(bytes.start)) as f64 / span as f64, from - playhead);
+            let at = |b: u64| {
+                (to - from).mul_add(
+                    (b.saturating_sub(bytes.start)) as f64 / span as f64,
+                    from - playhead,
+                )
+            };
             let (a, b) = (at(missing.start), at(missing.end));
             push(i, missing, a, b);
         }
@@ -159,7 +179,8 @@ pub fn plan(takes: &[StreamedTake], playhead: f64, horizon: f64, max_request: u6
 /// browser a request is a JS promise, which is not, and there is only the
 /// one thread.
 #[cfg(not(target_arch = "wasm32"))]
-pub type Fetching = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>, String>> + Send>>;
+pub type Fetching =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>, String>> + Send>>;
 /// A fetch in flight (see the native definition).
 #[cfg(target_arch = "wasm32")]
 pub type Fetching = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>, String>>>>;
@@ -208,7 +229,10 @@ pub struct Resident {
 
 impl Resident {
     /// A browser's: 30 s in front, 5 s behind — a few MB for a whole band.
-    pub const BROWSER: Self = Self { behind: 5.0, ahead: 30.0 };
+    pub const BROWSER: Self = Self {
+        behind: 5.0,
+        ahead: 30.0,
+    };
 }
 
 impl StreamedTake {
@@ -219,7 +243,10 @@ impl StreamedTake {
         let to = (playhead + window.ahead).min(self.end);
         let mut keep = vec![self.index.header()];
         if from < to {
-            keep.push(self.index.bytes_for(self.frame_at(from).saturating_sub(PREROLL), self.frame_at(to)));
+            keep.push(self.index.bytes_for(
+                self.frame_at(from).saturating_sub(PREROLL),
+                self.frame_at(to),
+            ));
         }
         keep
     }
@@ -251,10 +278,14 @@ pub async fn drive(
 ) {
     use futures::StreamExt as _;
     #[cfg(not(target_arch = "wasm32"))]
-    type InFlight = std::pin::Pin<Box<dyn std::future::Future<Output = (Request, Result<Vec<u8>, String>)> + Send>>;
+    type InFlight = std::pin::Pin<
+        Box<dyn std::future::Future<Output = (Request, Result<Vec<u8>, String>)> + Send>,
+    >;
     #[cfg(target_arch = "wasm32")]
-    type InFlight = std::pin::Pin<Box<dyn std::future::Future<Output = (Request, Result<Vec<u8>, String>)>>>;
-    let mut in_flight: futures::stream::FuturesUnordered<InFlight> = futures::stream::FuturesUnordered::new();
+    type InFlight =
+        std::pin::Pin<Box<dyn std::future::Future<Output = (Request, Result<Vec<u8>, String>)>>>;
+    let mut in_flight: futures::stream::FuturesUnordered<InFlight> =
+        futures::stream::FuturesUnordered::new();
     let mut flying: Vec<Request> = Vec::new();
     loop {
         if stop.load(Ordering::Relaxed) {
@@ -284,13 +315,18 @@ pub async fn drive(
             if overlaps(&flying, &request) {
                 continue;
             }
-            let Some(take) = snapshot.get(request.take) else { continue };
+            let Some(take) = snapshot.get(request.take) else {
+                continue;
+            };
             let future = fetch.fetch(&take.path, request.range.clone());
             let r = request.clone();
             in_flight.push(Box::pin(async move { (r, future.await) }));
             flying.push(request);
         }
-        if config.resident.is_none() && flying.is_empty() && snapshot.iter().all(StreamedTake::complete) {
+        if config.resident.is_none()
+            && flying.is_empty()
+            && snapshot.iter().all(StreamedTake::complete)
+        {
             return;
         }
         // The next landing, or a tick to re-plan for a moving playhead.
@@ -325,5 +361,7 @@ pub async fn drive(
 }
 
 fn overlaps(flying: &[Request], r: &Request) -> bool {
-    flying.iter().any(|f| f.take == r.take && f.range.start < r.range.end && r.range.start < f.range.end)
+    flying
+        .iter()
+        .any(|f| f.take == r.take && f.range.start < r.range.end && r.range.start < f.range.end)
 }

@@ -71,7 +71,12 @@ pub enum Correction {
     Rate(f64),
     /// Be at `position` at `at_micros` (the controller's clock), playing
     /// or not, at `rate`.
-    Locate { at_micros: f64, position: f64, playing: bool, rate: f64 },
+    Locate {
+        at_micros: f64,
+        position: f64,
+        playing: bool,
+        rate: f64,
+    },
     /// Stop, resting at `position`.
     Stop { position: f64 },
 }
@@ -149,7 +154,12 @@ impl DriftController {
 
     /// What to do, given this engine's latest snapshot and the leader's
     /// position, both stamped in the same clock, at `now_micros` in it.
-    pub fn step(&mut self, local: &AudioSnapshot, leader: &Position, now_micros: f64) -> Correction {
+    pub fn step(
+        &mut self,
+        local: &AudioSnapshot,
+        leader: &Position,
+        now_micros: f64,
+    ) -> Correction {
         let c = self.config;
         if now_micros - leader.host_micros > c.max_position_age_micros {
             self.last_drift = None;
@@ -164,11 +174,15 @@ impl DriftController {
                 self.last_drift = None;
                 self.measured_at = None;
                 self.rate = 1.0;
-                Correction::Stop { position: leader.playhead_seconds }
+                Correction::Stop {
+                    position: leader.playhead_seconds,
+                }
             }
             (false, false) => {
                 self.last_drift = None;
-                if (local.playhead_seconds - leader.playhead_seconds).abs() > c.locate_threshold_seconds {
+                if (local.playhead_seconds - leader.playhead_seconds).abs()
+                    > c.locate_threshold_seconds
+                {
                     self.locate(leader, now_micros, false)
                 } else {
                     self.back_to(1.0)
@@ -187,14 +201,22 @@ impl DriftController {
                 // The integral learns from every measurement (a new
                 // snapshot only), deadband or not: the mismatch is there
                 // either way.
-                let since = self.measured_at.map_or(0.0, |at| ((local.host_micros - at) * 1e-6).max(0.0));
+                let since = self
+                    .measured_at
+                    .map_or(0.0, |at| ((local.host_micros - at) * 1e-6).max(0.0));
                 if since > 0.0 && c.integral_seconds > 0.0 {
                     let learn = -drift / (c.convergence_seconds * c.integral_seconds) * since;
-                    self.integral = (self.integral + learn).clamp(-c.max_rate_deviation, c.max_rate_deviation);
+                    self.integral =
+                        (self.integral + learn).clamp(-c.max_rate_deviation, c.max_rate_deviation);
                 }
                 self.measured_at = Some(local.host_micros);
-                let proportional = if drift.abs() < c.deadband_seconds { 0.0 } else { -drift / c.convergence_seconds };
-                let nudge = (proportional + self.integral).clamp(-c.max_rate_deviation, c.max_rate_deviation);
+                let proportional = if drift.abs() < c.deadband_seconds {
+                    0.0
+                } else {
+                    -drift / c.convergence_seconds
+                };
+                let nudge = (proportional + self.integral)
+                    .clamp(-c.max_rate_deviation, c.max_rate_deviation);
                 self.back_to(leader.playrate * (1.0 + nudge))
             }
         }
@@ -216,6 +238,11 @@ impl DriftController {
         // base for learning starts over.
         self.measured_at = None;
         self.rate = leader.playrate;
-        Correction::Locate { at_micros, position: leader.at(at_micros), playing, rate: leader.playrate }
+        Correction::Locate {
+            at_micros,
+            position: leader.at(at_micros),
+            playing,
+            rate: leader.playrate,
+        }
     }
 }

@@ -34,7 +34,11 @@ impl PublishGate {
     /// from where the last published position projects.
     #[must_use]
     pub const fn new(keepalive_micros: f64, jump_seconds: f64) -> Self {
-        Self { last: None, keepalive_micros, jump_seconds }
+        Self {
+            last: None,
+            keepalive_micros,
+            jump_seconds,
+        }
     }
 
     /// The last snapshot this gate let through.
@@ -56,14 +60,17 @@ impl PublishGate {
             self.last = Some(*snap);
             return true;
         };
-        if snap.sequence == last.sequence && snap.host_micros.to_bits() == last.host_micros.to_bits() {
+        if snap.sequence == last.sequence
+            && snap.host_micros.to_bits() == last.host_micros.to_bits()
+        {
             return false;
         }
         let changed = snap.is_playing != last.is_playing
             || snap.playrate.to_bits() != last.playrate.to_bits()
             || snap.sequence < last.sequence
             || snap.host_micros < last.host_micros
-            || (snap.playhead_seconds - last.position().at(snap.host_micros)).abs() > self.jump_seconds;
+            || (snap.playhead_seconds - last.position().at(snap.host_micros)).abs()
+                > self.jump_seconds;
         let due = snap.host_micros - last.host_micros >= self.keepalive_micros;
         if changed || due {
             self.last = Some(*snap);
@@ -109,11 +116,21 @@ mod tests {
         assert!(gate.offer(&playing(0, 0.0)));
         assert!(!gate.offer(&playing(1, 5_000.0)));
         // Stopped.
-        assert!(gate.offer(&AudioSnapshot { is_playing: false, ..playing(2, 10_000.0) }));
+        assert!(gate.offer(&AudioSnapshot {
+            is_playing: false,
+            ..playing(2, 10_000.0)
+        }));
         // Playing again, located.
-        assert!(gate.offer(&AudioSnapshot { playhead_seconds: 30.0, ..playing(3, 15_000.0) }));
+        assert!(gate.offer(&AudioSnapshot {
+            playhead_seconds: 30.0,
+            ..playing(3, 15_000.0)
+        }));
         // Rate.
-        assert!(gate.offer(&AudioSnapshot { playhead_seconds: 30.005, playrate: 1.001, ..playing(4, 20_000.0) }));
+        assert!(gate.offer(&AudioSnapshot {
+            playhead_seconds: 30.005,
+            playrate: 1.001,
+            ..playing(4, 20_000.0)
+        }));
     }
 
     #[test]

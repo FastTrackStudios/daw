@@ -4,8 +4,8 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use daw_proto::song_files::{MAX_READ, SongFile};
 use daw_proto::ProjectContext;
+use daw_proto::song_files::{MAX_READ, SongFile};
 
 use crate::{DawClients, Result};
 
@@ -24,7 +24,11 @@ impl SongFiles {
     /// Every file in the song folder with its size; the project itself (the
     /// path to open — a `.session` folder is listed with size 0) first.
     pub async fn list(&self) -> Result<Vec<SongFile>> {
-        Ok(self.clients.song_files.list(ProjectContext::project(&self.guid)).await??)
+        Ok(self
+            .clients
+            .song_files
+            .list(ProjectContext::project(&self.guid))
+            .await??)
     }
 
     /// The bytes `range` of `path`, in reads of at most
@@ -37,7 +41,12 @@ impl SongFiles {
             let got = self
                 .clients
                 .song_files
-                .read(ProjectContext::project(&self.guid), path.to_owned(), at, want)
+                .read(
+                    ProjectContext::project(&self.guid),
+                    path.to_owned(),
+                    at,
+                    want,
+                )
                 .await??;
             if got.is_empty() {
                 break;

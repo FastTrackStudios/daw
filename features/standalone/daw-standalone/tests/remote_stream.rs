@@ -3,7 +3,11 @@
 //! jump into a stretch not yet fetched goes silent again until it lands.
 
 #![cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
-#![allow(clippy::unwrap_used, clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation
+)]
 
 use std::sync::Arc;
 
@@ -23,11 +27,18 @@ fn proxy(seconds: usize) -> Arc<[u8]> {
         pcm.push((t * 220.0 * std::f32::consts::TAU).sin() * 0.5);
         pcm.push((t * 330.0 * std::f32::consts::TAU).sin() * 0.5);
     }
-    fts_sample::cache::encode_ogg_vorbis(&pcm, 2, RATE, 0.4).unwrap().into()
+    fts_sample::cache::encode_ogg_vorbis(&pcm, 2, RATE, 0.4)
+        .unwrap()
+        .into()
 }
 
 fn arrive(sparse: &SparseBytes, bytes: &[u8], range: std::ops::Range<u64>) {
-    sparse.insert(range.start, &bytes[range.start as usize..range.end as usize]).unwrap();
+    sparse
+        .insert(
+            range.start,
+            &bytes[range.start as usize..range.end as usize],
+        )
+        .unwrap();
 }
 
 fn pump(feeder: &mut StreamFeeder<RemoteOgg>) {
@@ -53,16 +64,32 @@ fn a_streamed_proxy_plays_what_has_arrived_and_waits_for_the_rest() {
     let sparse = SparseBytes::in_memory(bytes.len() as u64);
     arrive(&sparse, &bytes, index.header());
     let source = Streamed::new(index.channels, index.sample_rate, index.frames);
-    let mut feeder = StreamFeeder::new(source.clone(), RemoteOgg::new(Arc::clone(&sparse), index.clone()));
+    let mut feeder = StreamFeeder::new(
+        source.clone(),
+        RemoteOgg::new(Arc::clone(&sparse), index.clone()),
+    );
     let playhead = u64::from(RATE) * 10;
     source.want(playhead);
     pump(&mut feeder);
     let chunk = (playhead as usize) / CHUNK;
-    assert!(!source.resident(chunk), "nothing to play before the bytes arrive");
-    assert!(sparse.wanted().is_some(), "the fetcher is told what is wanted");
+    assert!(
+        !source.resident(chunk),
+        "nothing to play before the bytes arrive"
+    );
+    assert!(
+        sparse.wanted().is_some(),
+        "the fetcher is told what is wanted"
+    );
 
     // The next few seconds' bytes arrive: they play, as decoded straight.
-    arrive(&sparse, &bytes, index.bytes_for(playhead.saturating_sub(8192), playhead + u64::from(RATE) * 4));
+    arrive(
+        &sparse,
+        &bytes,
+        index.bytes_for(
+            playhead.saturating_sub(8192),
+            playhead + u64::from(RATE) * 4,
+        ),
+    );
     pump(&mut feeder);
     assert!(source.resident(chunk), "what arrived plays");
     let frame = playhead as usize + 1_000;
@@ -76,7 +103,11 @@ fn a_streamed_proxy_plays_what_has_arrived_and_waits_for_the_rest() {
     pump(&mut feeder);
     let far = (jump as usize) / CHUNK;
     assert!(!source.resident(far), "not yet");
-    arrive(&sparse, &bytes, index.bytes_for(jump.saturating_sub(8192), jump + u64::from(RATE) * 2));
+    arrive(
+        &sparse,
+        &bytes,
+        index.bytes_for(jump.saturating_sub(8192), jump + u64::from(RATE) * 2),
+    );
     pump(&mut feeder);
     assert!(source.resident(far), "arrived, and plays");
     let frame = jump as usize + 500;

@@ -35,10 +35,19 @@ async fn a_peer_lists_and_reads_the_song_folder() -> eyre::Result<()> {
     let names: Vec<&str> = list.iter().map(|f| f.path.as_str()).collect();
     assert!(names.contains(&"Media/Proxies/Bass.ogg") && names.contains(&"Washed.kf"));
     assert!(!names.iter().any(|n| n.starts_with("Backups")), "{names:?}");
-    assert_eq!(list.iter().find(|f| f.path == "Media/Proxies/Bass.ogg").unwrap().size, 5000);
+    assert_eq!(
+        list.iter()
+            .find(|f| f.path == "Media/Proxies/Bass.ogg")
+            .unwrap()
+            .size,
+        5000
+    );
 
     let got = files.read("Media/Proxies/Bass.ogg", 1000..1300).await?;
     assert_eq!(got, proxy[1000..1300]);
-    assert!(files.read("../secret.txt", 0..10).await.is_err(), "nothing outside the song");
+    assert!(
+        files.read("../secret.txt", 0..10).await.is_err(),
+        "nothing outside the song"
+    );
     Ok(())
 }

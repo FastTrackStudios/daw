@@ -18,8 +18,8 @@ use architect::{Layer, Services, layers};
 use daw_proto::{
     action_registry, audio_engine, automation, batch, dawfile_service, event_bus, ext_state, fx,
     fx_chains, fx_params, health, input, item, live_midi, marker, midi, peak, plugin_loader,
-    project, region, resource, routing, screenset, take, tempo_map, toolbar, track, transport,
-    song_files, transport_sync, window_geometry,
+    project, region, resource, routing, screenset, song_files, take, tempo_map, toolbar, track,
+    transport, transport_sync, window_geometry,
 };
 
 use crate::sync::Standalone;
