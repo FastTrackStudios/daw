@@ -59,6 +59,8 @@ pub struct PhonesBus {
     /// when this one stops or overruns): the phones then carry only this
     /// engine's own signal, and the device sums the two processes.
     blend_mix: std::sync::atomic::AtomicBool,
+    /// Mute the main pair only (routing on): the phones keep the signal.
+    main_mute: std::sync::atomic::AtomicBool,
 }
 
 impl PhonesBus {
@@ -68,6 +70,7 @@ impl PhonesBus {
             volume: std::sync::atomic::AtomicU32::new(0x3f800000), // 1.0
             self_mix: std::sync::atomic::AtomicU32::new(0x3f800000), // 1.0
             blend_mix: std::sync::atomic::AtomicBool::new(true),
+            main_mute: std::sync::atomic::AtomicBool::new(false),
         };
         &BUS
     }
@@ -82,6 +85,16 @@ impl PhonesBus {
     /// (see the field).
     pub fn set_blend_mix(&self, on: bool) {
         self.blend_mix.store(on, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Mute the main output pair and keep the phones (routing on; with
+    /// routing off there is one pair, and the caller mutes the master).
+    pub fn set_main_mute(&self, on: bool) {
+        self.main_mute.store(on, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn main_muted(&self) -> bool {
+        self.main_mute.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn blends_mix(&self) -> bool {
@@ -184,6 +197,7 @@ impl DuplexAudioEngine {
             allow_builtin_mic: prefs.allow_builtin_mic,
             buffer: None,
         };
+        let mut main_gain = 1.0f32;
         let backend = Backend::start(
             cfg,
             Box::new(move |b: &mut ProcessBlock| {
@@ -202,14 +216,20 @@ impl DuplexAudioEngine {
                 let outs = b.outputs.len();
                 let (vol, self_mix) = ph.levels();
                 let blend = ph.blends_mix();
+                // The main pair's mute glides across the block (no click).
+                let main_to = if routing && ph.main_muted() { 0.0 } else { 1.0 };
+                let main_from = main_gain;
+                main_gain = main_to;
+                let step = (main_to - main_from) / frames.max(1) as f32;
                 for f in 0..frames {
                     let l = block.samples.get(f * 2).copied().unwrap_or(0.0);
                     let rr = block.samples.get(f * 2 + 1).copied().unwrap_or(0.0);
+                    let g = step.mul_add(f as f32 + 1.0, main_from);
                     if main_l < outs {
-                        b.outputs[main_l][f] = l;
+                        b.outputs[main_l][f] = l * g;
                     }
                     if main_r < outs {
-                        b.outputs[main_r][f] = rr;
+                        b.outputs[main_r][f] = rr * g;
                     }
                     if routing && (ph_l != main_l || ph_r != main_r) {
                         let ext = |c: usize| if blend { b.inputs.get(c).map_or(0.0, |ch| ch[f]) } else { 0.0 };
