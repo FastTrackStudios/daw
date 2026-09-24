@@ -89,6 +89,9 @@ use dawfile_reaper::types::track::{
     VolPanSettings as TrackVolPan, comp_area_from_proto, lane_settings,
 };
 use dawfile_standalone::project::{DAW_EXTENSION, DawProject, SESSION_EXTENSION};
+/// For reading a `.session` directory that is not on a disk: which file
+/// is its manifest, and where its objects are.
+pub use dawfile_standalone::{OBJECTS_DIR, choose_manifest};
 
 use crate::plugin::FxFactory;
 use crate::project_loader::{self as loader, LoadedProject};
@@ -190,6 +193,27 @@ pub fn session_rpp_text(dir: &Path) -> Result<String, String> {
     project
         .to_rpp()
         .map_err(|e| format!("exporting session {}: {e}", dir.display()))
+}
+
+/// [`session_rpp_text`] for a `.session` that is not on a disk: its
+/// manifest's text (`origin` names it) and its objects by file name — the
+/// folder as it arrived from a share link or a peer.
+///
+/// # Errors
+///
+/// An object is not what its name says, or the manifest does not parse or
+/// export.
+pub fn session_rpp_text_from_parts(
+    manifest: &str,
+    origin: &str,
+    objects: impl IntoIterator<Item = (String, Vec<u8>)>,
+) -> Result<String, String> {
+    let objects = dawfile_standalone::ObjectStore::from_named(objects)
+        .map_err(|e| format!("opening session {origin}: {e}"))?;
+    DawProject::from_parts(manifest, origin, objects)
+        .map_err(|e| format!("opening session {origin}: {e}"))?
+        .to_rpp()
+        .map_err(|e| format!("exporting session {origin}: {e}"))
 }
 
 /// Load a `.session` directory into a fresh project in `daw`, exactly as

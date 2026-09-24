@@ -155,14 +155,27 @@ pub fn plan(takes: &[StreamedTake], playhead: f64, horizon: f64, max_request: u6
     out
 }
 
+/// A fetch in flight: `Send` natively (it may run on any worker); in a
+/// browser a request is a JS promise, which is not, and there is only the
+/// one thread.
+#[cfg(not(target_arch = "wasm32"))]
+pub type Fetching = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>, String>> + Send>>;
+/// A fetch in flight (see the native definition).
+#[cfg(target_arch = "wasm32")]
+pub type Fetching = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>, String>>>>;
+
 /// Where a streamed take's bytes come from.
+#[cfg(not(target_arch = "wasm32"))]
 pub trait RangeFetch: Send + Sync + 'static {
     /// The bytes `range` of the file `path` names.
-    fn fetch(
-        &self,
-        path: &str,
-        range: Range<u64>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>, String>> + Send>>;
+    fn fetch(&self, path: &str, range: Range<u64>) -> Fetching;
+}
+
+/// Where a streamed take's bytes come from (see the native definition).
+#[cfg(target_arch = "wasm32")]
+pub trait RangeFetch: 'static {
+    /// The bytes `range` of the file `path` names.
+    fn fetch(&self, path: &str, range: Range<u64>) -> Fetching;
 }
 
 /// How [`drive`] fetches.
@@ -201,7 +214,10 @@ pub async fn drive(
     stop: Arc<AtomicBool>,
 ) {
     use futures::StreamExt as _;
+    #[cfg(not(target_arch = "wasm32"))]
     type InFlight = std::pin::Pin<Box<dyn std::future::Future<Output = (Request, Result<Vec<u8>, String>)> + Send>>;
+    #[cfg(target_arch = "wasm32")]
+    type InFlight = std::pin::Pin<Box<dyn std::future::Future<Output = (Request, Result<Vec<u8>, String>)>>>;
     let mut in_flight: futures::stream::FuturesUnordered<InFlight> = futures::stream::FuturesUnordered::new();
     let mut flying: Vec<Request> = Vec::new();
     loop {

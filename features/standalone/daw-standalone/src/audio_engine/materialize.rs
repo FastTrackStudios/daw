@@ -301,10 +301,32 @@ fn stream_ogg(
     super::streamed::butler_adopt(StreamFeeder::new(streamed, stream));
 }
 
-/// Attach a proxy streamed from elsewhere (Task, a peer) to a take: its
-/// bytes as they arrive and its page index. The take plays what has
-/// arrived and is silent where it has not; the reader records what it
-/// wanted (`SparseBytes::wanted`) for the fetcher.
+/// Attach a proxy streamed from elsewhere (Task, a peer, a share link) to
+/// a take: its bytes as they arrive and its page index. The take plays
+/// what has arrived and is silent where it has not; the reader records
+/// what it wanted (`SparseBytes::wanted`) for the fetcher.
+///
+/// Returns the take's feeder, for whoever pumps feeders here: the butler
+/// thread natively ([`stream_remote_ogg`]), the page's audio loop in a
+/// browser.
+#[cfg(feature = "stream-ogg")]
+pub fn attach_remote_ogg(
+    daw: &Standalone,
+    project_guid: &str,
+    take_guid: &str,
+    bytes: Arc<fts_sample::sparse::SparseBytes>,
+    index: fts_sample::ogg_index::OggIndex,
+) -> super::streamed::StreamFeeder<super::streamed::RemoteOgg> {
+    use super::streamed::{RemoteOgg, StreamFeeder, Streamed};
+    let streamed = Streamed::new(index.channels, index.sample_rate, index.frames);
+    let _ = daw.with_project_mut(project_guid, |p| {
+        p.audio_sources
+            .insert(take_guid.to_owned(), Arc::new(AudioSource::Streamed(streamed.clone())));
+    });
+    StreamFeeder::new(streamed, RemoteOgg::new(bytes, index))
+}
+
+/// [`attach_remote_ogg`], fed by the butler thread.
 #[cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
 pub fn stream_remote_ogg(
     daw: &Standalone,
@@ -313,13 +335,7 @@ pub fn stream_remote_ogg(
     bytes: Arc<fts_sample::sparse::SparseBytes>,
     index: fts_sample::ogg_index::OggIndex,
 ) {
-    use super::streamed::{RemoteOgg, StreamFeeder, Streamed};
-    let streamed = Streamed::new(index.channels, index.sample_rate, index.frames);
-    let _ = daw.with_project_mut(project_guid, |p| {
-        p.audio_sources
-            .insert(take_guid.to_owned(), Arc::new(AudioSource::Streamed(streamed.clone())));
-    });
-    super::streamed::butler_adopt(StreamFeeder::new(streamed, RemoteOgg::new(bytes, index)));
+    super::streamed::butler_adopt(attach_remote_ogg(daw, project_guid, take_guid, bytes, index));
 }
 
 /// The container a file's first bytes announce, when they announce one.
