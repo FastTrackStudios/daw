@@ -25,6 +25,14 @@
 //! PipeWire backend's reconcile timer. Unlike midir-over-JACK, enumerating
 //! CoreMIDI sources creates nothing, so polling costs no client churn.
 //!
+//! A source that is *offline* counts as absent. A Bluetooth pedal switched
+//! off does not leave the source list — its endpoint stays, under the same
+//! unique id, marked offline — so a list that only tracked presence saw no
+//! change, kept its (now dead) connection, and never connected again when
+//! the pedal came back: the footswitch went silent until the app restarted.
+//! Treated as gone while offline, it is disconnected when it drops and gets
+//! a fresh connection when it returns.
+//!
 //! # Threading
 //!
 //! The client, its port and any virtual destinations live on one thread,
@@ -51,12 +59,26 @@ pub const RESCAN: Duration = Duration::from_millis(200);
 /// The unique id is what survives a rename or a reorder, so it is what the
 /// connection bookkeeping keys on; the name is what selectors match.
 fn scan() -> BTreeMap<u32, String> {
+    scan_all()
+        .into_iter()
+        .filter(|(_, (_, offline))| !offline)
+        .map(|(id, (name, _))| (id, name))
+        .collect()
+}
+
+/// Every CoreMIDI source, online or not: unique id → (display name, offline).
+fn scan_all() -> BTreeMap<u32, (String, bool)> {
     Sources
         .into_iter()
         .filter_map(|s| {
             let id = s.unique_id()?;
             let name = s.display_name().or_else(|| s.name())?;
-            Some((id, name))
+            // The property inherits from the entity and device, so a device
+            // that dropped reads offline here too. Unreadable = online.
+            let offline = s
+                .get_property(&coremidi::Properties::offline())
+                .unwrap_or(false);
+            Some((id, (name, offline)))
         })
         .collect()
 }
@@ -346,6 +368,7 @@ mod tests {
     /// creates a port other apps can see and send to.
     #[test]
     fn a_virtual_selector_creates_a_port_and_dropping_removes_it() {
+        let _serial = coremidi_lock();
         let name = format!("midicore-test-{}", std::process::id());
         let input = CoreMidiInput::open(
             InputConfig::new("midicore-test").selecting(vec![PortSelector::Virtual(name.clone())]),
@@ -366,6 +389,7 @@ mod tests {
     /// by name, and bytes sent on it arrive in the sink decoded.
     #[test]
     fn a_selected_source_delivers_decoded_events() {
+        let _serial = coremidi_lock();
         let client = Client::new("midicore-test-sender").expect("client");
         let name = format!("midicore-test-src-{}", std::process::id());
         let source = client.virtual_source(&name).expect("virtual source");
@@ -385,6 +409,67 @@ mod tests {
         source.received(&packets).expect("send");
         let event = rx.recv_timeout(Duration::from_secs(2)).expect("event arrives");
         assert!(matches!(event, midicore_proto::MidiEvent::NoteOn { .. }));
+    }
+
+    /// A source that goes offline and comes back — a Bluetooth pedal
+    /// switched off and on — is disconnected while it is away and delivers
+    /// again once it returns, without the input being reopened.
+    #[test]
+    fn a_source_that_goes_offline_and_returns_plays_again() {
+        let _serial = coremidi_lock();
+        let client = Client::new("midicore-test-offline-sender").expect("client");
+        let name = format!("midicore-test-offline-{}", std::process::id());
+        let source = client.virtual_source(&name).expect("virtual source");
+
+        let (tx, rx) = mpsc::channel();
+        let input = CoreMidiInput::open(
+            InputConfig::new("midicore-test")
+                .selecting(vec![PortSelector::NameContains(name.clone())]),
+            move |ev| {
+                let _ = tx.send(ev.event);
+            },
+        )
+        .expect("CoreMIDI reachable");
+        assert_eq!(input.ports_named(), vec![name.clone()]);
+
+        source
+            .set_property(&coremidi::Properties::offline(), true)
+            .expect("mark offline");
+        assert!(within(|| input.ports_named().is_empty()), "offline: not connected");
+
+        source
+            .set_property(&coremidi::Properties::offline(), false)
+            .expect("mark online");
+        assert!(
+            within(|| input.ports_named() == vec![name.clone()]),
+            "back online: connected again"
+        );
+
+        let packets = coremidi::PacketBuffer::new(0, &[0xB0, 64, 127]);
+        source.received(&packets).expect("send");
+        let event = rx.recv_timeout(Duration::from_secs(2)).expect("event arrives after the return");
+        assert!(matches!(event, midicore_proto::MidiEvent::ControlChange { .. }));
+    }
+
+    /// The tests that create CoreMIDI clients and endpoints run one at a
+    /// time: side by side in one process, one test's endpoints were seen to
+    /// vanish from the source list mid-test.
+    fn coremidi_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Whether `cond` holds within 3 s — CoreMIDI applies a property change
+    /// asynchronously, so a fixed wait is a race.
+    fn within(cond: impl Fn() -> bool) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline {
+            if cond() {
+                return true;
+            }
+            std::thread::sleep(RESCAN / 2);
+        }
+        cond()
     }
 
     impl CoreMidiInput {
