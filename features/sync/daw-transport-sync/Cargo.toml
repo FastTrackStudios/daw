@@ -19,5 +19,10 @@ path = "src/lib.rs"
 
 [dependencies]
 
+# `std::time::Instant` panics in a browser; `web-time`'s is the same clock
+# API over `performance.now()`.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-time = "1"
+
 [lints]
 workspace = true

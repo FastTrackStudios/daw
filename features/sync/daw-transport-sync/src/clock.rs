@@ -8,7 +8,11 @@
 //! ping, a pong) must read *this* clock, so their stamps compare.
 
 use std::sync::OnceLock;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+/// In a browser, `performance.now()` — `std`'s would panic.
+#[cfg(target_arch = "wasm32")]
+pub use web_time::Instant;
 
 fn epoch() -> Instant {
     static EPOCH: OnceLock<Instant> = OnceLock::new();
