@@ -374,20 +374,16 @@ impl<D: Decode> StreamFeeder<D> {
         let here = usize::try_from(self.source.wanted()).unwrap_or(usize::MAX) / CHUNK;
         let window = here.saturating_sub(BEHIND)..(here + self.ahead).min(count);
         self.source.evict(window.start..window.end);
-        // After a jump (the playhead's own chunk is not there), decode from
-        // just behind it on in one pass — one seek. Otherwise what will be
-        // heard first first: from the playhead on, then behind. Either way
-        // a gap whose bytes have not arrived (a proxy streamed from
-        // elsewhere) is passed over for the next, so what has arrived
-        // still decodes.
-        let jumped = !self.source.resident(here);
-        let order: Vec<usize> = if jumped {
-            window.clone().collect()
-        } else {
-            (here.max(window.start)..window.end)
-                .chain(window.start..here.min(window.end))
-                .collect()
-        };
+        // What will be heard first first: from the playhead on, then
+        // behind — after a jump too. (Decoding from just behind it in one
+        // pass saved a seek but held every stem silent for the chunks
+        // behind; a band of stems after a seek heard nothing for seconds.)
+        // A gap whose bytes have not arrived (a proxy streamed from
+        // elsewhere) is passed over for the next, so what has arrived still
+        // decodes.
+        let order: Vec<usize> = (here.max(window.start)..window.end)
+            .chain(window.start..here.min(window.end))
+            .collect();
         let gaps: Vec<usize> = order
             .into_iter()
             .filter(|i| !self.source.resident(*i))
@@ -568,21 +564,26 @@ mod tests {
     }
 
     #[test]
-    fn a_jump_seeks_once_and_evicts_what_is_behind() {
+    fn a_jump_decodes_its_own_chunk_first_and_evicts_what_is_behind() {
         let mut f = feeder(CHUNK as u64 * 100);
         fill(&mut f);
-        let seeks = f.decoder.seeks;
         let far = CHUNK as u64 * 60 + 7;
         f.source().want(far);
+        // The first work after the jump is the chunk being played — not
+        // the chunks behind it, which would hold the stem silent.
+        for _ in 0..64 {
+            if f.source().resident(60) {
+                break;
+            }
+            f.pump(1024);
+        }
+        assert!(f.source().resident(60), "the playhead's chunk comes first");
+        assert!(!f.source().resident(59), "before what is behind it");
         fill(&mut f);
-        assert_eq!(f.decoder.seeks, seeks + 1, "one seek for the jump");
         let s = f.source();
         assert_eq!(s.sample(far as usize, 0), level(far));
+        assert!(s.resident(59), "then what is behind");
         assert!(!s.resident(0), "the old window is let go");
-        // Moving on within the window decodes onward, without a seek.
-        f.source().want(far + CHUNK as u64 * 3);
-        fill(&mut f);
-        assert_eq!(f.decoder.seeks, seeks + 1);
     }
 
     #[test]
