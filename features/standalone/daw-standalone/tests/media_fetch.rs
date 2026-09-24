@@ -371,5 +371,8 @@ fn a_take_has_a_moment_once_its_header_and_the_pages_under_it_arrive() {
     assert!(!t.has_at(30.0, 2.0), "the pages, but not the header");
     put(t.index.header());
     assert!(t.has_at(30.0, 2.0));
-    assert!(!t.has_at(40.0, 2.0), "a moment whose pages have not arrived");
+    assert!(
+        !t.has_at(40.0, 2.0),
+        "a moment whose pages have not arrived"
+    );
 }
