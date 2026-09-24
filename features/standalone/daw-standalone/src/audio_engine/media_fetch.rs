@@ -50,6 +50,22 @@ impl std::fmt::Debug for StreamedTake {
 }
 
 impl StreamedTake {
+    /// The bytes this take can ever play: its header, and the pages under
+    /// its span — not the rest of a file an item plays only part of.
+    #[must_use]
+    pub fn needed(&self) -> [Range<u64>; 2] {
+        let span = self
+            .index
+            .bytes_for(self.frame_at(self.start).saturating_sub(PREROLL), self.frame_at(self.end));
+        [self.index.header(), span]
+    }
+
+    /// Whether everything this take can play has arrived.
+    #[must_use]
+    pub fn complete(&self) -> bool {
+        self.needed().iter().all(|r| self.bytes.has(r))
+    }
+
     /// The file frame the timeline moment `t` plays.
     fn frame_at(&self, t: f64) -> u64 {
         let seconds = ((t - self.start) * self.playrate + self.source_offset).max(0.0);
@@ -74,10 +90,14 @@ const HEADER: f64 = -2.0;
 const WANTED: f64 = -1.0;
 /// Frames before a stretch a decoder primes from.
 const PREROLL: u64 = 4096;
+/// How soon what is behind the playhead is heard: after everything in
+/// front of it (next time round — a loop, a jump back, a second pass).
+const BEHIND: f64 = 1.0e6;
 
 /// Everything missing under `[playhead, playhead + horizon]` across
 /// `takes`, the soonest heard first, in requests of at most `max_request`
-/// bytes.
+/// bytes. An unbounded horizon plans what is behind the playhead too, after
+/// all of what is in front: a take is only done when all it plays is here.
 #[must_use]
 pub fn plan(takes: &[StreamedTake], playhead: f64, horizon: f64, max_request: u64) -> Vec<Request> {
     let max_request = max_request.max(1);
@@ -104,6 +124,18 @@ pub fn plan(takes: &[StreamedTake], playhead: f64, horizon: f64, max_request: u6
         }
         let from = playhead.max(take.start);
         let to = (playhead + horizon).min(take.end);
+        if horizon.is_infinite() && take.start < from {
+            let behind = take.index.bytes_for(take.frame_at(take.start).saturating_sub(PREROLL), take.frame_at(from));
+            let span = behind.end.saturating_sub(behind.start).max(1);
+            for missing in take.bytes.missing(&behind) {
+                #[allow(clippy::cast_precision_loss)]
+                let at = |b: u64| {
+                    (from - take.start).mul_add((b.saturating_sub(behind.start)) as f64 / span as f64, BEHIND)
+                };
+                let (a, b) = (at(missing.start), at(missing.end));
+                push(i, missing, a, b);
+            }
+        }
         if from >= to {
             continue;
         }
@@ -198,7 +230,7 @@ pub async fn drive(
             in_flight.push(Box::pin(async move { (r, future.await) }));
             flying.push(request);
         }
-        if flying.is_empty() && snapshot.iter().all(|t| t.bytes.missing(&(0..t.bytes.len())).is_empty()) {
+        if flying.is_empty() && snapshot.iter().all(StreamedTake::complete) {
             return;
         }
         // The next landing, or a tick to re-plan for a moving playhead.

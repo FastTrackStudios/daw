@@ -159,3 +159,45 @@ async fn on_a_slow_link_the_near_seconds_land_first_and_a_seek_replans() {
     let _ = driver.await;
     assert!(!landed.lock().unwrap().is_empty());
 }
+
+#[tokio::test(start_paused = true)]
+async fn what_is_behind_the_playhead_comes_last_and_the_fetch_finishes() {
+    // One take playing all of its file, one playing only 20..40 s of its
+    // own (from 0 s in the timeline); the playhead parked at 30 s.
+    let whole = proxy(60, 21);
+    let part = proxy(60, 22);
+    let files = vec![("whole".to_owned(), Arc::clone(&whole)), ("part".to_owned(), Arc::clone(&part))];
+    let takes = vec![take(&whole, "whole", 0.0, 60.0, 0.0), take(&part, "part", 0.0, 20.0, 20.0)];
+    let shared = Arc::new(Mutex::new(takes));
+    let landed = Arc::new(Mutex::new(Vec::new()));
+    let link = Arc::new(SlowLink { files, bytes_per_second: 1_000_000.0, landed: Arc::clone(&landed) });
+    let config = FetchConfig { max_request: 32 * 1024, ..FetchConfig::default() };
+    // Returns by itself: nothing stops it but being done.
+    tokio::time::timeout(
+        Duration::from_secs(600),
+        drive(Arc::clone(&shared), link, Arc::new(|| 30.0), config, Arc::new(AtomicBool::new(false))),
+    )
+    .await
+    .expect("the fetch finishes with the playhead parked mid-song");
+
+    let takes = shared.lock().unwrap().clone();
+    assert!(takes.iter().all(StreamedTake::complete));
+    let whole_take = &takes[0];
+    assert!(whole_take.bytes.has(&whole_take.index.bytes_for(0, frames(5.0))), "the start, behind the playhead, came too");
+    // The part take's file beyond what it plays was never asked for.
+    let part_take = &takes[1];
+    assert!(!part_take.bytes.missing(&part_take.index.bytes_for(frames(50.0), frames(60.0))).is_empty());
+    // And what was behind came after what was in front — but for the
+    // requests already in flight when the last of the front was asked.
+    let order = landed.lock().unwrap().clone();
+    let first_behind = order
+        .iter()
+        .position(|(p, r)| p == "whole" && r.start >= whole_take.index.audio_start && r.start < whole_take.index.bytes_for(frames(20.0), frames(21.0)).start)
+        .unwrap();
+    let last_ahead = order
+        .iter()
+        .rposition(|(p, r)| p == "whole" && r.start > whole_take.index.bytes_for(frames(31.0), frames(32.0)).end)
+        .unwrap();
+    let in_flight = FetchConfig::default().concurrency;
+    assert!(first_behind + in_flight > last_ahead, "behind at {first_behind}, ahead until {last_ahead}");
+}
