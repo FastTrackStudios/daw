@@ -125,7 +125,10 @@ dock-proto = { path = "libs/dock/dock-proto" }
 # baseview-03 branch + the FTS delta: nice-plug-dioxus, embedded editors,
 # rich track-info, param rescan). The ONE sanctioned exception to
 # path-deps-only — it left the tree so it can track upstream.
-nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
+# Without its VST3 export: no crate here exports a plugin (processor's do,
+# from their own workspace), and the wrapper does not build for iOS, where
+# Session links these UI crates.
+nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03", default-features = false, features = ["editor", "tracing-subscriber"] }
 nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
 nice-plug-xtask = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
 utils = { path = "libs/utils" }
