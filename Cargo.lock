@@ -8520,8 +8520,6 @@ dependencies = [
  "thiserror 2.0.20",
  "tracing",
  "tracing-subscriber",
- "vst3",
- "widestring",
  "windows 0.62.2",
 ]
 
