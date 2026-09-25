@@ -55,7 +55,7 @@ jobs:
           # `CacheDirectory=` in the runner unit, or the home directory
           # when this runs anywhere else. Either way somewhere this
           # process can actually write.
-          fts_ci="${CACHE_DIRECTORY:-$HOME/.cache}/fts-ci"
+          fts_ci="${CI_CACHE_DIR:-${CACHE_DIRECTORY:-$HOME/.cache}}/fts-ci"
           mkdir -p "$fts_ci/target-reaper" "$fts_ci/cargo-home"
           {
             echo "FTS_CI=$fts_ci"
