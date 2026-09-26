@@ -68,6 +68,9 @@ pub(crate) struct LiveInput {
     /// Count of blocks where the ring couldn't supply a full block
     /// (input not keeping up) — the shortfall is zero-filled.
     pub(crate) underruns: u64,
+    /// Count of blocks where a backlog past one spare block was dropped
+    /// to keep the input → output latency at the buffer size.
+    pub(crate) resyncs: u64,
 }
 
 /// Mix the live hardware input into per-track buses (render stage 0).
@@ -101,6 +104,19 @@ pub(crate) fn mix_live_input_into_buses(
     let want = frames * channels;
     if live.scratch.len() < want {
         live.scratch.resize(want, 0.0);
+    }
+    // Latency guard: the ring is drained one block per output callback, so
+    // anything queued beyond that — input started before output, an output
+    // stall, two device clocks drifting — would otherwise stay queued (and
+    // audible as delay) for the life of the stream. Keep at most one spare
+    // block for callback jitter and drop the oldest frames past it.
+    let backlog = live.cons.slots();
+    if backlog > want * 2 {
+        let skip = (backlog - want * 2) / channels * channels;
+        if let Ok(chunk) = live.cons.read_chunk(skip) {
+            chunk.commit_all();
+            live.resyncs = live.resyncs.wrapping_add(1);
+        }
     }
     // Drain interleaved input frames from the ring; zero-fill shortfall.
     let avail = live.cons.slots();
@@ -330,6 +346,10 @@ impl RenderScratch {
 /// rebuild on change" model — and the per-block working buffers are
 /// recycled. A throwaway renderer still works, it just re-snapshots
 /// and re-allocates every call.
+/// How many times the renderer retries the plugin-instance lock before
+/// rendering a block without its FX stage — on the order of 10–50 µs.
+const PLUGIN_LOCK_SPINS: usize = 2_000;
+
 pub struct ProjectRenderer {
     daw: Standalone,
     project_guid: String,
@@ -385,6 +405,7 @@ impl ProjectRenderer {
                 channels,
                 scratch: Vec::new(),
                 underruns: 0,
+                resyncs: 0,
             });
         }
     }
@@ -693,11 +714,26 @@ impl ProjectRenderer {
         // next to the click of an underrun. The next block takes the lock
         // normally. `poisoned` still recovers, same as before — a
         // control-thread panic must not cascade into the callback.
-        let mut plugins = match self.daw.plugin_instances.try_lock() {
-            Ok(guard) => Some(guard),
-            Err(std::sync::TryLockError::Poisoned(p)) => Some(p.into_inner()),
-            Err(std::sync::TryLockError::WouldBlock) => None,
-        };
+        //
+        // Before giving up, spin briefly: a control thread's hold is a batch
+        // of map inserts (`with_plugin_instances`), a few microseconds, and
+        // for an amp chain "dry for one block" is not inaudible — it is the
+        // raw DI at full level. Bounded, never parked: a hold that outlasts
+        // the spin still costs one dry block, not an underrun.
+        let mut plugins = None;
+        for _ in 0..PLUGIN_LOCK_SPINS {
+            match self.daw.plugin_instances.try_lock() {
+                Ok(guard) => {
+                    plugins = Some(guard);
+                    break;
+                }
+                Err(std::sync::TryLockError::Poisoned(p)) => {
+                    plugins = Some(p.into_inner());
+                    break;
+                }
+                Err(std::sync::TryLockError::WouldBlock) => std::hint::spin_loop(),
+            }
+        }
 
         // 2–4) Per-track processing in topo order over the routing
         // graph (children before folder parents, senders before their
@@ -1209,6 +1245,7 @@ mod live_input_tests {
             channels,
             scratch: Vec::new(),
             underruns: 0,
+            resyncs: 0,
         }
     }
 
@@ -1277,6 +1314,46 @@ mod live_input_tests {
         );
         assert!(buses[0].samples.iter().all(|s| *s == 0.0));
         assert!(!dirty[0]);
+    }
+
+    #[test]
+    fn backlog_past_one_spare_block_is_dropped() {
+        // Five blocks queued (a stall's worth): the render must play the
+        // second-newest block and leave one spare, not the oldest — the
+        // oldest would keep the input four blocks late forever.
+        let frames = 4;
+        let channels = 2;
+        let (mut prod, cons) = rtrb::RingBuffer::<f32>::new(5 * frames * channels);
+        for f in 0..5 * frames {
+            for _ in 0..channels {
+                let _ = prod.push(f as f32);
+            }
+        }
+        let mut live = LiveInput {
+            cons,
+            channels,
+            scratch: Vec::new(),
+            underruns: 0,
+            resyncs: 0,
+        };
+        let mut buses = vec![StereoBuffer::zeroed(frames, 48_000)];
+        let mut dirty = vec![false; 1];
+
+        mix_live_input_into_buses(
+            &mut live,
+            &[Some(0)],
+            |_| true,
+            &mut buses,
+            &mut dirty,
+            frames,
+        );
+
+        for f in 0..frames {
+            assert_eq!(buses[0].samples[f * 2], (3 * frames + f) as f32);
+        }
+        assert_eq!(live.cons.slots(), frames * channels);
+        assert_eq!(live.resyncs, 1);
+        assert_eq!(live.underruns, 0);
     }
 
     #[test]

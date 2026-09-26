@@ -33,6 +33,7 @@
 pub mod device;
 pub mod duplex;
 pub mod host;
+pub mod input_guard;
 pub mod open;
 pub mod prefs;
 pub mod pw;

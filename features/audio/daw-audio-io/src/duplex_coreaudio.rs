@@ -54,6 +54,8 @@ mod ffi {
     pub const HW_DEFAULT_OUTPUT: u32 = fourcc(b"dOut");
     pub const OBJECT_NAME: u32 = fourcc(b"lnam");
     pub const DEVICE_UID: u32 = fourcc(b"uid ");
+    pub const DEVICE_TRANSPORT_TYPE: u32 = fourcc(b"tran");
+    pub const TRANSPORT_BUILT_IN: u32 = fourcc(b"bltn");
     pub const DEVICE_IS_ALIVE: u32 = fourcc(b"livn");
     pub const DEVICE_STREAM_CONFIGURATION: u32 = fourcc(b"slay");
     pub const DEVICE_STREAMS: u32 = fourcc(b"stm#");
@@ -422,6 +424,23 @@ fn scope_latency(device: AudioObjectID, scope: u32) -> u32 {
     device_latency + safety + stream_latency
 }
 
+/// Is this device built into the machine (the MacBook's own mic)?
+fn is_builtin(device: AudioObjectID) -> bool {
+    get::<u32>(device, ffi::DEVICE_TRANSPORT_TYPE, ffi::SCOPE_GLOBAL)
+        .is_ok_and(|t| t == ffi::TRANSPORT_BUILT_IN)
+}
+
+/// Whether the CoreAudio input called exactly `name` is built in, or `None`
+/// when CoreAudio has no input by that name (the caller falls back to
+/// matching the name). See [`crate::input_guard`].
+pub(crate) fn input_is_builtin(name: &str) -> Option<bool> {
+    get_ids(ffi::SYSTEM_OBJECT, ffi::HW_DEVICES, ffi::SCOPE_GLOBAL)
+        .into_iter()
+        .filter(|&d| channel_count(d, ffi::SCOPE_INPUT) > 0)
+        .find(|&d| get_string(d, ffi::OBJECT_NAME).is_some_and(|n| n == name))
+        .map(is_builtin)
+}
+
 /// Resolve a device by name substring (with channels in `scope`), or the
 /// system default for that direction.
 fn find_device(name: Option<&str>, scope: u32) -> Result<AudioObjectID, String> {
@@ -759,6 +778,10 @@ unsafe extern "C" fn on_property(
             match (*addresses.add(i)).selector {
                 ffi::DEVICE_PROCESSOR_OVERLOAD => {
                     stats.xruns.fetch_add(1, Ordering::Relaxed);
+                    let frames = stats.block_frames.load(Ordering::Relaxed);
+                    stats
+                        .drops
+                        .push(crate::duplex::DropKind::DeviceOverload, 0, 0, frames);
                 }
                 ffi::DEVICE_IS_ALIVE => {
                     stats.stream_state.store(STATE_ERROR, Ordering::Relaxed);
@@ -804,6 +827,9 @@ unsafe impl Send for CoreAudioBackend {}
 
 impl DuplexBackend for CoreAudioBackend {
     fn start(cfg: DuplexConfig, process: ProcessFn) -> Result<Self, String> {
+        // The drop log's clock starts here, not on the realtime thread's
+        // first drop.
+        let _ = crate::duplex::clock_ns();
         let output = if cfg.outputs > 0 {
             Some(find_device(
                 cfg.output_device.as_deref(),
@@ -813,7 +839,14 @@ impl DuplexBackend for CoreAudioBackend {
             None
         };
         let input = if cfg.inputs > 0 {
-            Some(find_device(cfg.input_device.as_deref(), ffi::SCOPE_INPUT)?)
+            let id = find_device(cfg.input_device.as_deref(), ffi::SCOPE_INPUT)?;
+            if is_builtin(id) {
+                let name = get_string(id, ffi::OBJECT_NAME).unwrap_or_default();
+                // Transport type is exact here; the guard's name matching is
+                // only the fallback for names CoreAudio does not know.
+                crate::input_guard::check_input_known(&name, true, cfg.allow_builtin_mic)?;
+            }
+            Some(id)
         } else {
             None
         };
@@ -861,7 +894,7 @@ impl DuplexBackend for CoreAudioBackend {
             ffi::SCOPE_GLOBAL,
         )
         .map_err(fail)?;
-        if let Some((frames, _)) = cfg.latency {
+        if let Some(frames) = cfg.latency.map(|(f, _)| f).or(cfg.buffer) {
             let clamped = (frames as f64).clamp(range.minimum, range.maximum) as u32;
             if clamped != frames {
                 tracing::warn!(
@@ -1040,6 +1073,30 @@ impl Drop for CoreAudioBackend {
 #[cfg(test)]
 mod tests {
     use super::channel_slots;
+
+    /// Every input CoreAudio reports as built in (a MacBook's own mic) is
+    /// refused by default and allowed by the override; nothing else is
+    /// touched. Vacuous on a Mac with no built-in input.
+    #[test]
+    fn builtin_inputs_are_refused_unless_allowed() {
+        use super::{channel_count, ffi, get_ids, get_string, is_builtin};
+        use crate::input_guard::check_input;
+        for d in get_ids(ffi::SYSTEM_OBJECT, ffi::HW_DEVICES, ffi::SCOPE_GLOBAL) {
+            if channel_count(d, ffi::SCOPE_INPUT) == 0 {
+                continue;
+            }
+            let Some(name) = get_string(d, ffi::OBJECT_NAME) else {
+                continue;
+            };
+            if is_builtin(d) {
+                assert!(check_input(&name, false).is_err(), "{name} was allowed");
+                assert!(
+                    check_input(&name, true).is_ok(),
+                    "{name} ignored the override"
+                );
+            }
+        }
+    }
 
     #[test]
     fn channels_flatten_across_multi_stream_devices() {

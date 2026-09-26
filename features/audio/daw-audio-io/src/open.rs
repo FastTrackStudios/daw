@@ -79,6 +79,14 @@ pub fn open_input(
 ) -> Result<OpenedInput, String> {
     let is_jack = host_is_jack(host);
     let device = pick_device(host, prefs.input_name(), true)?;
+    // Under JACK/PipeWire the cpal device is the graph, not a microphone; the
+    // duplex linker guards the capture node it links instead.
+    if !host_is_graph(host) {
+        crate::input_guard::check_input(
+            &crate::device::device_name(&device),
+            prefs.allow_builtin_mic,
+        )?;
+    }
     let channels = if host_is_graph(host) {
         // JACK / native PipeWire: open just enough channels to reach the one we
         // tap. The host targets the chosen device and the graph maps its

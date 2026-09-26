@@ -29,6 +29,9 @@ use midicore_proto::{
     Direction, MidiEvent, PortId, PortInfo, PortSelector, RawShortMessage, TimedEvent,
 };
 
+mod selectable;
+pub use selectable::SelectableInput;
+
 const CLIENT: &str = "midicore-midir";
 
 /// Per-client sequence so every opened connection gets a UNIQUE jack/ALSA

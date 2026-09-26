@@ -8197,8 +8197,20 @@ name = "midicore"
 version = "0.1.0"
 dependencies = [
  "eyre",
+ "midicore-macos",
  "midicore-midir",
  "midicore-pipewire",
+ "midicore-proto",
+ "midicore-wasm",
+ "tracing",
+]
+
+[[package]]
+name = "midicore-macos"
+version = "0.1.0"
+dependencies = [
+ "core-foundation 0.10.1",
+ "coremidi",
  "midicore-proto",
  "tracing",
 ]
@@ -8243,6 +8255,18 @@ version = "0.1.0"
 dependencies = [
  "dioxus",
  "midicore-proto",
+]
+
+[[package]]
+name = "midicore-wasm"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "midicore-proto",
+ "tracing",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -9789,6 +9813,7 @@ dependencies = [
  "audiocore-dsp",
  "criterion",
  "hound",
+ "realfft",
  "rustfft",
  "serde",
 ]

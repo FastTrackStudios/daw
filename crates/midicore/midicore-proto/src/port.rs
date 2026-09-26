@@ -48,6 +48,28 @@ pub enum PortSelector {
     Virtual(String),
 }
 
+impl PortSelector {
+    /// Does this selector want the source port called `port`?
+    ///
+    /// The one matching rule every input backend applies, so a port name
+    /// stored in a rig preset selects the same device on each of them:
+    /// `All`/`Default` want everything, `Id` is the whole name, `NameContains`
+    /// is a case-insensitive substring (empty = everything). `Virtual` names a
+    /// port the backend *creates* for others to connect to, so it never
+    /// selects an existing source.
+    #[must_use]
+    pub fn matches(&self, port: &str) -> bool {
+        match self {
+            Self::All | Self::Default => true,
+            Self::Id(PortId(id)) => port == id,
+            Self::NameContains(needle) => {
+                needle.is_empty() || port.to_lowercase().contains(&needle.to_lowercase())
+            }
+            Self::Virtual(_) => false,
+        }
+    }
+}
+
 /// A MIDI event tagged with the backend's capture timestamp (microseconds,
 /// monotonic; epoch is backend-defined). This is the streamed unit.
 #[derive(Clone, Debug, PartialEq, Eq, Facet)]
@@ -70,4 +92,36 @@ pub enum MidiIoError {
     Disconnected,
     /// Adapter-specific failure.
     Other(String),
+}
+
+#[cfg(test)]
+mod selector_tests {
+    use super::{PortId, PortSelector};
+
+    const S88: &str = "Midi-Bridge:KONTROL S88 MK3: Main (capture)";
+
+    #[test]
+    fn omni_wants_every_device() {
+        assert!(PortSelector::All.matches(S88));
+        assert!(PortSelector::NameContains(String::new()).matches(S88));
+    }
+
+    /// Case-insensitive substring — the rule stored rig presets were written
+    /// against, so they select the same device on every backend.
+    #[test]
+    fn a_named_selector_matches_a_substring_case_insensitively() {
+        assert!(PortSelector::NameContains("kontrol s88".into()).matches(S88));
+        assert!(!PortSelector::NameContains("mioXM".into()).matches(S88));
+    }
+
+    #[test]
+    fn an_id_selector_matches_the_whole_name_only() {
+        assert!(PortSelector::Id(PortId(S88.into())).matches(S88));
+        assert!(!PortSelector::Id(PortId("KONTROL".into())).matches(S88));
+    }
+
+    #[test]
+    fn a_virtual_selector_selects_no_existing_source() {
+        assert!(!PortSelector::Virtual("Signal".into()).matches(S88));
+    }
 }
