@@ -8209,6 +8209,7 @@ dependencies = [
 name = "midicore-macos"
 version = "0.1.0"
 dependencies = [
+ "core-foundation 0.10.1",
  "coremidi",
  "midicore-proto",
  "tracing",
