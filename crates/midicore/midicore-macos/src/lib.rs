@@ -76,7 +76,10 @@ pub fn init() {
             .name("midicore-coremidi-home".into())
             .spawn(move || {
                 // Connecting to the MIDI server: the first CoreMIDI call.
-                let client = Client::new_with_notifications("midicore-home", |_n: &coremidi::Notification| {});
+                let client = Client::new_with_notifications(
+                    "midicore-home",
+                    |_n: &coremidi::Notification| {},
+                );
                 let _ = tx.send(());
                 let _client = client;
                 loop {
@@ -87,7 +90,10 @@ pub fn init() {
                             false,
                         )
                     };
-                    if matches!(result, core_foundation::runloop::CFRunLoopRunResult::Finished) {
+                    if matches!(
+                        result,
+                        core_foundation::runloop::CFRunLoopRunResult::Finished
+                    ) {
                         std::thread::sleep(RESCAN);
                     }
                 }
@@ -118,7 +124,10 @@ impl CoreMidiOutput {
         let port = client
             .output_port(name)
             .map_err(|s| BackendError(format!("create CoreMIDI output port: OSStatus {s}")))?;
-        Ok(Self { port, _client: client })
+        Ok(Self {
+            port,
+            _client: client,
+        })
     }
 
     /// Send `bytes` (one or more complete short messages) to every
@@ -128,7 +137,10 @@ impl CoreMidiOutput {
         let want = device.to_lowercase();
         let mut sent = 0;
         for dest in coremidi::Destinations {
-            let name = dest.display_name().or_else(|| dest.name()).unwrap_or_default();
+            let name = dest
+                .display_name()
+                .or_else(|| dest.name())
+                .unwrap_or_default();
             if name.to_lowercase().contains(&want) {
                 let packets = coremidi::PacketBuffer::new(0, bytes);
                 if self.port.send(&dest, &packets).is_ok() {
@@ -201,7 +213,9 @@ type Sink = Arc<Mutex<dyn Fn(TimedEvent) + Send>>;
 
 fn deliver(sink: &Sink, started: Instant, packets: &PacketList) {
     let timestamp_us = started.elapsed().as_micros() as u64;
-    let sink = sink.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let sink = sink
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     for packet in packets.iter() {
         decode_all(packet.data(), |event| {
             sink(TimedEvent {
@@ -316,7 +330,9 @@ fn run(
     };
     let port = {
         let sink = sink.clone();
-        match client.input_port(&config.name, move |packets| deliver(&sink, started, packets)) {
+        match client.input_port(&config.name, move |packets| {
+            deliver(&sink, started, packets)
+        }) {
             Ok(p) => p,
             Err(status) => {
                 let _ = ready.send(Err(BackendError(format!(
@@ -333,7 +349,15 @@ fn run(
         linked: BTreeMap::new(),
         virtuals: HashMap::new(),
     };
-    reconcile(&mut state, scan(), &client, &port, &sink, started, connected);
+    reconcile(
+        &mut state,
+        scan(),
+        &client,
+        &port,
+        &sink,
+        started,
+        connected,
+    );
     let _ = ready.send(Ok(()));
 
     'outer: loop {
@@ -348,7 +372,10 @@ fn run(
                 false,
             )
         };
-        if matches!(result, core_foundation::runloop::CFRunLoopRunResult::Finished) {
+        if matches!(
+            result,
+            core_foundation::runloop::CFRunLoopRunResult::Finished
+        ) {
             std::thread::sleep(RESCAN.saturating_sub(started_slice.elapsed()));
         }
         let mut dirty = changed.swap(false, std::sync::atomic::Ordering::Relaxed);
@@ -523,7 +550,9 @@ mod tests {
 
         let packets = coremidi::PacketBuffer::new(0, &[0x90, 60, 100]);
         source.received(&packets).expect("send");
-        let event = rx.recv_timeout(Duration::from_secs(2)).expect("event arrives");
+        let event = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("event arrives");
         assert!(matches!(event, midicore_proto::MidiEvent::NoteOn { .. }));
     }
 
@@ -551,7 +580,10 @@ mod tests {
         source
             .set_property(&coremidi::Properties::offline(), true)
             .expect("mark offline");
-        assert!(within(|| input.ports_named().is_empty()), "offline: not connected");
+        assert!(
+            within(|| input.ports_named().is_empty()),
+            "offline: not connected"
+        );
 
         source
             .set_property(&coremidi::Properties::offline(), false)
@@ -563,8 +595,13 @@ mod tests {
 
         let packets = coremidi::PacketBuffer::new(0, &[0xB0, 64, 127]);
         source.received(&packets).expect("send");
-        let event = rx.recv_timeout(Duration::from_secs(2)).expect("event arrives after the return");
-        assert!(matches!(event, midicore_proto::MidiEvent::ControlChange { .. }));
+        let event = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("event arrives after the return");
+        assert!(matches!(
+            event,
+            midicore_proto::MidiEvent::ControlChange { .. }
+        ));
     }
 
     /// The tests that create CoreMIDI clients and endpoints run one at a
@@ -573,7 +610,8 @@ mod tests {
     fn coremidi_lock() -> std::sync::MutexGuard<'static, ()> {
         init();
         static LOCK: Mutex<()> = Mutex::new(());
-        LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        LOCK.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Bytes sent to a destination by name arrive: a virtual destination
@@ -592,8 +630,13 @@ mod tests {
             })
             .expect("virtual destination");
         let out = CoreMidiOutput::open("midicore-test-out").expect("output");
-        assert!(within(|| out.send_to(&name, &[0x90, 2, 127]) == 1), "the destination is found");
-        let got = rx.recv_timeout(Duration::from_secs(2)).expect("bytes arrive");
+        assert!(
+            within(|| out.send_to(&name, &[0x90, 2, 127]) == 1),
+            "the destination is found"
+        );
+        let got = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("bytes arrive");
         assert_eq!(got, vec![0x90, 2, 127]);
         assert_eq!(out.send_to("no-such-device", &[0x80, 2, 0]), 0);
     }
@@ -634,7 +677,8 @@ mod tests {
         let _serial = coremidi_lock();
         let name = format!("midicore-test-later-{}", std::process::id());
         let input = CoreMidiInput::open(
-            InputConfig::new("midicore-test").selecting(vec![PortSelector::NameContains(name.clone())]),
+            InputConfig::new("midicore-test")
+                .selecting(vec![PortSelector::NameContains(name.clone())]),
             |_| {},
         )
         .expect("CoreMIDI reachable");

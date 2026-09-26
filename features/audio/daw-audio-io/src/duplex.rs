@@ -95,7 +95,10 @@ pub enum DropKind {
 #[must_use]
 pub fn clock_ns() -> u64 {
     static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-    START.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
+    START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_nanos() as u64
 }
 
 /// A fixed ring of drop events written from the realtime callback (and the
@@ -153,7 +156,11 @@ impl DropRing {
                 at_ns: slot[1].load(Ordering::Relaxed),
                 render_ns: slot[2].load(Ordering::Relaxed),
                 budget_ns: slot[3].load(Ordering::Relaxed),
-                kind: if kf >> 32 == 1 { DropKind::DeviceOverload } else { DropKind::OverBudget },
+                kind: if kf >> 32 == 1 {
+                    DropKind::DeviceOverload
+                } else {
+                    DropKind::OverBudget
+                },
                 frames: kf as u32,
             });
         }
@@ -237,7 +244,8 @@ impl EngineStats {
             let budget_ns = frames * 1_000_000_000 / rate as u64;
             if ns > budget_ns {
                 self.over_budget.fetch_add(1, Ordering::Relaxed);
-                self.drops.push(DropKind::OverBudget, ns, budget_ns, frames as u32);
+                self.drops
+                    .push(DropKind::OverBudget, ns, budget_ns, frames as u32);
             }
         }
     }

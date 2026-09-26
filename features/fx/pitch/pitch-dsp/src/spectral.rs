@@ -328,7 +328,11 @@ impl SpectralShifter {
                         (self.pow[k + 1] + 1e-60).ln(),
                     );
                     let den = a - 2.0 * b + c;
-                    dev = if den.abs() > 1e-12 { (0.5 * (a - c) / den).clamp(-0.5, 0.5) } else { 0.0 };
+                    dev = if den.abs() > 1e-12 {
+                        (0.5 * (a - c) / den).clamp(-0.5, 0.5)
+                    } else {
+                        0.0
+                    };
                 }
                 let f_bins = k as f64 + dev;
 
@@ -361,7 +365,11 @@ impl SpectralShifter {
                 }
 
                 // Integer shift that lands the peak nearest its target.
-                let shift = if unity { 0 } else { (f_bins * alpha - f_bins).round() as isize };
+                let shift = if unity {
+                    0
+                } else {
+                    (f_bins * alpha - f_bins).round() as isize
+                };
                 let rot = Complex::new(theta.cos(), theta.sin());
                 for j in lo..=hi {
                     let t = j as isize + shift;
@@ -447,10 +455,17 @@ mod tests {
     fn unity_reconstructs_exactly_after_latency() {
         let mut s = make(1.0, 2048);
         let lat = s.latency();
-        let x: Vec<f64> = (0..20000).map(|i| ((i * 7919) % 101) as f64 / 101.0 - 0.5).collect();
+        let x: Vec<f64> = (0..20000)
+            .map(|i| ((i * 7919) % 101) as f64 / 101.0 - 0.5)
+            .collect();
         let y: Vec<f64> = x.iter().map(|&v| s.tick(v)).collect();
         for i in 2 * lat..x.len() {
-            assert!((y[i] - x[i - lat]).abs() < 1e-9, "sample {i}: {} vs {}", y[i], x[i - lat]);
+            assert!(
+                (y[i] - x[i - lat]).abs() < 1e-9,
+                "sample {i}: {} vs {}",
+                y[i],
+                x[i - lat]
+            );
         }
     }
 
@@ -466,12 +481,17 @@ mod tests {
     fn octave_up_and_down_land_on_target_at_unity_gain() {
         for (speed, f_in) in [(2.0, 220.0), (0.5, 440.0), (1.4983, 330.0)] {
             let mut s = make(speed, 4096);
-            let x: Vec<f64> = (0..96000).map(|i| (2.0 * PI * f_in * i as f64 / SR).sin() * 0.5).collect();
+            let x: Vec<f64> = (0..96000)
+                .map(|i| (2.0 * PI * f_in * i as f64 / SR).sin() * 0.5)
+                .collect();
             let y: Vec<f64> = x.iter().map(|&v| s.tick(v)).collect();
             let tail = &y[48000..];
             let target = goertzel(tail, f_in * speed);
             let orig = goertzel(tail, f_in);
-            assert!(target > 1000.0 * orig, "speed {speed}: target {target:e} orig {orig:e}");
+            assert!(
+                target > 1000.0 * orig,
+                "speed {speed}: target {target:e} orig {orig:e}"
+            );
             let rms_in = (x[48000..].iter().map(|v| v * v).sum::<f64>() / 48000.0).sqrt();
             let rms_out = (tail.iter().map(|v| v * v).sum::<f64>() / 48000.0).sqrt();
             let db = 20.0 * (rms_out / rms_in).log10();
@@ -484,7 +504,9 @@ mod tests {
         let run = |width: f64| -> (f64, f64) {
             let mut s = make(2.0, 2048);
             s.line_width_hz = width;
-            let x: Vec<f64> = (0..144000).map(|i| (2.0 * PI * 440.0 * i as f64 / SR).sin() * 0.5).collect();
+            let x: Vec<f64> = (0..144000)
+                .map(|i| (2.0 * PI * 440.0 * i as f64 / SR).sin() * 0.5)
+                .collect();
             let y: Vec<f64> = x.iter().map(|&v| s.tick(v)).collect();
             let tail = &y[48000..];
             let rms = (tail.iter().map(|v| v * v).sum::<f64>() / tail.len() as f64).sqrt();
@@ -494,8 +516,14 @@ mod tests {
         };
         let (g0, c0) = run(0.0);
         let (g6, c6) = run(6.0);
-        assert!(g0.abs() < 0.5 && g6.abs() < 1.5, "levels {g0:.2} / {g6:.2} dB");
-        assert!(c6 < 0.5 * c0, "a 6 Hz line should spread off the exact bin: {c6:.3} vs {c0:.3}");
+        assert!(
+            g0.abs() < 0.5 && g6.abs() < 1.5,
+            "levels {g0:.2} / {g6:.2} dB"
+        );
+        assert!(
+            c6 < 0.5 * c0,
+            "a 6 Hz line should spread off the exact bin: {c6:.3} vs {c0:.3}"
+        );
     }
 
     #[test]
@@ -515,7 +543,11 @@ mod tests {
                 eout += y * y;
             }
         }
-        assert!(eout <= ein * 1.05, "noise gain {:.2} dB", 10.0 * (eout / ein).log10());
+        assert!(
+            eout <= ein * 1.05,
+            "noise gain {:.2} dB",
+            10.0 * (eout / ein).log10()
+        );
     }
 
     #[test]

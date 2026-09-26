@@ -56,8 +56,8 @@ mod frame;
 mod icon;
 
 pub use frame::{
-    AppFrame, Crumbs, DragSpace, IconRail, PanelHost, PanelRail, TopBar, TrafficLights, WindowButton,
-    WindowCluster,
+    AppFrame, Crumbs, DragSpace, IconRail, PanelHost, PanelRail, TopBar, TrafficLights,
+    WindowButton, WindowCluster,
 };
 pub use icon::{Glyph, Icon};
 

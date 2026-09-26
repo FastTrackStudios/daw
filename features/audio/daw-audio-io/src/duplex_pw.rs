@@ -58,7 +58,9 @@ unsafe extern "C" fn on_process(data: *mut c_void, position: *mut spa::spa_io_po
         if xrun > st.last_xrun {
             st.stats.xruns.fetch_add(1, Ordering::Relaxed);
             let frames = st.stats.block_frames.load(Ordering::Relaxed);
-            st.stats.drops.push(crate::duplex::DropKind::DeviceOverload, 0, 0, frames);
+            st.stats
+                .drops
+                .push(crate::duplex::DropKind::DeviceOverload, 0, 0, frames);
         }
         st.last_xrun = xrun;
         if n == 0 {

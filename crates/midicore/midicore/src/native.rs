@@ -22,13 +22,13 @@ pub use midicore_pipewire::MidiInput as Backend;
 #[cfg(target_os = "macos")]
 pub use midicore_macos::CoreMidiInput as Backend;
 
-#[cfg(target_arch = "wasm32")]
-pub use midicore_wasm::WebMidiInput as Backend;
 /// Prompt for Web MIDI access early (ideally from a user gesture) and learn
 /// whether it was refused. Without it, [`input_sources`] is empty until an
 /// input has been opened and the browser has answered.
 #[cfg(target_arch = "wasm32")]
 pub use midicore_wasm::request_access;
+#[cfg(target_arch = "wasm32")]
+pub use midicore_wasm::WebMidiInput as Backend;
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_arch = "wasm32")))]
 pub use midicore_midir::SelectableInput as Backend;

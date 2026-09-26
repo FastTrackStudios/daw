@@ -61,7 +61,11 @@ impl<T> Shifter for Adapter<T> {
         (self.lat)(&self.inner)
     }
 }
-fn boxed<T: 'static>(inner: T, tick: fn(&mut T, f64) -> f64, lat: fn(&T) -> usize) -> Box<dyn Shifter> {
+fn boxed<T: 'static>(
+    inner: T,
+    tick: fn(&mut T, f64) -> f64,
+    lat: fn(&T) -> usize,
+) -> Box<dyn Shifter> {
     Box::new(Adapter { inner, tick, lat })
 }
 
@@ -201,11 +205,26 @@ mod extra {
     }
     pub fn list() -> Vec<Candidate> {
         vec![
-            Candidate { name: "pv1024x8", make: |r| pv(r, 1024, 8) },
-            Candidate { name: "pv2048x8", make: |r| pv(r, 2048, 8) },
-            Candidate { name: "pv4096x8", make: |r| pv(r, 4096, 8) },
-            Candidate { name: "pv4096x4", make: |r| pv(r, 4096, 4) },
-            Candidate { name: "pv8192x8", make: |r| pv(r, 8192, 8) },
+            Candidate {
+                name: "pv1024x8",
+                make: |r| pv(r, 1024, 8),
+            },
+            Candidate {
+                name: "pv2048x8",
+                make: |r| pv(r, 2048, 8),
+            },
+            Candidate {
+                name: "pv4096x8",
+                make: |r| pv(r, 4096, 8),
+            },
+            Candidate {
+                name: "pv4096x4",
+                make: |r| pv(r, 4096, 4),
+            },
+            Candidate {
+                name: "pv8192x8",
+                make: |r| pv(r, 8192, 8),
+            },
             Candidate {
                 name: "pvnoreset4096x8",
                 make: |r| {
@@ -306,7 +325,15 @@ fn material(di_path: Option<&str>) -> Material {
     for rep in 0..2 {
         for (j, &f) in chord_f.iter().enumerate() {
             let s = rep * (2.2 * SR) as usize + 2400 + j * 720;
-            ks_pluck(&mut chord, s, f, 2.0, 0.25, 0.998, 100 + (rep * 10 + j) as u64);
+            ks_pluck(
+                &mut chord,
+                s,
+                f,
+                2.0,
+                0.25,
+                0.998,
+                100 + (rep * 10 + j) as u64,
+            );
         }
     }
     // Steady harmonic tone (G3), partials to 12·f0, slow decay: the
@@ -318,10 +345,17 @@ fn material(di_path: Option<&str>) -> Material {
         let spec = r.spec();
         let ch = spec.channels as usize;
         let v: Vec<f64> = match spec.sample_format {
-            hound::SampleFormat::Float => r.samples::<f32>().filter_map(Result::ok).map(f64::from).collect(),
+            hound::SampleFormat::Float => r
+                .samples::<f32>()
+                .filter_map(Result::ok)
+                .map(f64::from)
+                .collect(),
             hound::SampleFormat::Int => {
                 let s = (1u64 << (spec.bits_per_sample - 1)) as f64;
-                r.samples::<i32>().filter_map(Result::ok).map(|x| x as f64 / s).collect()
+                r.samples::<i32>()
+                    .filter_map(Result::ok)
+                    .map(|x| x as f64 / s)
+                    .collect()
             }
         };
         Some(v.chunks(ch).map(|c| c[0]).collect())
@@ -396,7 +430,11 @@ fn yin_track(x: &[f64], fft: &mut Fft, hop: usize) -> Vec<(f64, f64)> {
         let b = fft.spectrum(seg, nfft);
         let mut c: Vec<Complex<f64>> = a.iter().zip(&b).map(|(p, q)| p.conj() * q).collect();
         inv.process(&mut c);
-        let r: Vec<f64> = c.iter().take(max_lag + 1).map(|z| z.re / nfft as f64).collect();
+        let r: Vec<f64> = c
+            .iter()
+            .take(max_lag + 1)
+            .map(|z| z.re / nfft as f64)
+            .collect();
         // energy terms
         let mut cum = vec![0.0; frame + 1];
         for j in 0..frame {
@@ -412,7 +450,11 @@ fn yin_track(x: &[f64], fft: &mut Fft, hop: usize) -> Vec<(f64, f64)> {
         let mut run = 0.0;
         for tau in 1..=max_lag {
             run += d[tau];
-            cmnd[tau] = if run > 0.0 { d[tau] * tau as f64 / run } else { 1.0 };
+            cmnd[tau] = if run > 0.0 {
+                d[tau] * tau as f64 / run
+            } else {
+                1.0
+            };
         }
         let mut found = None;
         let mut tau = min_lag;
@@ -433,7 +475,11 @@ fn yin_track(x: &[f64], fft: &mut Fft, hop: usize) -> Vec<(f64, f64)> {
         });
         let (y0, y1, y2) = (cmnd[tau - 1], cmnd[tau], cmnd[tau + 1]);
         let den = y0 - 2.0 * y1 + y2;
-        let shift = if den.abs() > 1e-12 { 0.5 * (y0 - y2) / den } else { 0.0 };
+        let shift = if den.abs() > 1e-12 {
+            0.5 * (y0 - y2) / den
+        } else {
+            0.0
+        };
         out.push((SR / (tau as f64 + shift.clamp(-1.0, 1.0)), cmnd[tau]));
         pos += hop;
     }
@@ -455,7 +501,15 @@ fn measure_latency(input: &[f64], output: &[f64], max_ms: usize) -> usize {
         let e = envelope(x, win);
         // onset-emphasis: positive log-envelope differences
         let l: Vec<f64> = e.iter().map(|v| (v + 1e-5).ln()).collect();
-        (0..l.len()).map(|i| if i == 0 { 0.0 } else { (l[i] - l[i - 1]).max(0.0) }).collect()
+        (0..l.len())
+            .map(|i| {
+                if i == 0 {
+                    0.0
+                } else {
+                    (l[i] - l[i - 1]).max(0.0)
+                }
+            })
+            .collect()
     };
     let a = f(input);
     let b = f(output);
@@ -499,7 +553,11 @@ impl PitchScore {
                 continue;
             }
             let (fo, _) = to[i];
-            let err = if fo > 0.0 { 1200.0 * (fo / (f * ratio)).log2() } else { 1200.0 };
+            let err = if fo > 0.0 {
+                1200.0 * (fo / (f * ratio)).log2()
+            } else {
+                1200.0
+            };
             self.errs.push(err.abs());
         }
     }
@@ -588,8 +646,17 @@ fn flux_score(seg: &[f64], fft: &mut Fft) -> f64 {
     let (mut acc, mut cnt) = (0.0, 0);
     let mut pos = 0;
     while pos + n <= seg.len() {
-        let x: Vec<f64> = seg[pos..pos + n].iter().zip(&w).map(|(a, b)| a * b).collect();
-        let m: Vec<f64> = fft.spectrum(&x, n).iter().take(n / 2).map(|z| z.norm()).collect();
+        let x: Vec<f64> = seg[pos..pos + n]
+            .iter()
+            .zip(&w)
+            .map(|(a, b)| a * b)
+            .collect();
+        let m: Vec<f64> = fft
+            .spectrum(&x, n)
+            .iter()
+            .take(n / 2)
+            .map(|z| z.norm())
+            .collect();
         let norm: f64 = m.iter().map(|v| v * v).sum::<f64>().sqrt();
         if let Some(p) = &prev {
             let pn: f64 = p.iter().map(|v| v * v).sum::<f64>().sqrt();
@@ -624,10 +691,11 @@ fn transient_scores(out: &[f64], onsets: &[usize], lat: usize) -> (f64, f64) {
             continue;
         }
         let win = &env[a..b];
-        let (pk_i, pk) = win
-            .iter()
-            .enumerate()
-            .fold((0, 0.0f64), |acc, (i, &v)| if v > acc.1 { (i, v) } else { acc });
+        let (pk_i, pk) =
+            win.iter().enumerate().fold(
+                (0, 0.0f64),
+                |acc, (i, &v)| if v > acc.1 { (i, v) } else { acc },
+            );
         if pk <= 1e-6 {
             continue;
         }
@@ -641,7 +709,12 @@ fn transient_scores(out: &[f64], onsets: &[usize], lat: usize) -> (f64, f64) {
             i10 -= 1;
         }
         rises.push((i90 - i10) as f64 * 0.5);
-        let e = |s: usize, e: usize| -> f64 { out[s.min(out.len())..e.min(out.len())].iter().map(|v| v * v).sum() };
+        let e = |s: usize, e: usize| -> f64 {
+            out[s.min(out.len())..e.min(out.len())]
+                .iter()
+                .map(|v| v * v)
+                .sum()
+        };
         let on = o + lat;
         let pre = e(on.saturating_sub(1440), on.saturating_sub(96));
         let post = e(on, on + 1440);
@@ -661,7 +734,11 @@ fn rms(x: &[f64]) -> f64 {
     (x.iter().map(|v| v * v).sum::<f64>() / x.len().max(1) as f64).sqrt()
 }
 
-fn run(make: fn(f64) -> Option<Box<dyn Shifter>>, ratio: f64, x: &[f64]) -> Option<(Vec<f64>, usize, f64)> {
+fn run(
+    make: fn(f64) -> Option<Box<dyn Shifter>>,
+    ratio: f64,
+    x: &[f64],
+) -> Option<(Vec<f64>, usize, f64)> {
     let mut s = make(ratio)?;
     let lat = s.latency();
     let t = Instant::now();
@@ -690,7 +767,9 @@ fn main() {
     let di_path = args.get(2).cloned();
     let only: Option<String> = std::env::var("PQ_ONLY").ok();
     let m = material(di_path.as_deref());
-    let mut fft = Fft { planner: FftPlanner::new() };
+    let mut fft = Fft {
+        planner: FftPlanner::new(),
+    };
     if let Some(d) = &out_dir {
         std::fs::create_dir_all(d).ok();
         write_wav(&format!("{d}/in_plucks.wav"), &m.plucks);
@@ -712,12 +791,18 @@ fn main() {
         for &st in &intervals {
             let ratio = (st / 12.0f64).exp2();
             let eff_ratio = if c.name == "dry(ref)" { 1.0 } else { ratio };
-            let Some((yp, lat_rep, ns1)) = run(c.make, ratio, &m.plucks) else { continue };
+            let Some((yp, lat_rep, ns1)) = run(c.make, ratio, &m.plucks) else {
+                continue;
+            };
             // Search up to the reported latency + 30 ms (a shifter whose heads
             // wander has a mean delay below its reported bound); 150 ms when
             // the shifter reports none.
             let max_ms = if lat_rep > 0 { lat_rep / 48 + 30 } else { 150 };
-            let lat = if c.name == "dry(ref)" { 0 } else { measure_latency(&m.plucks, &yp, max_ms) };
+            let lat = if c.name == "dry(ref)" {
+                0
+            } else {
+                measure_latency(&m.plucks, &yp, max_ms)
+            };
             let (yc, _, ns2) = run(c.make, ratio, &m.chord).unwrap();
             let (yt, _, ns3) = run(c.make, ratio, &m.tone).unwrap();
             let mut ps = PitchScore { errs: vec![] };
@@ -736,7 +821,12 @@ fn main() {
             let s0 = (1.5 * SR) as usize + lat;
             let s1 = s0 + SR as usize;
             let seg = &yt[s0.min(yt.len())..s1.min(yt.len())];
-            let (nonh, hf) = spectral_scores(seg, m.tone_f0 * eff_ratio, m.tone_top * eff_ratio * 1.1 + 150.0, &mut fft);
+            let (nonh, hf) = spectral_scores(
+                seg,
+                m.tone_f0 * eff_ratio,
+                m.tone_top * eff_ratio * 1.1 + 150.0,
+                &mut fft,
+            );
             // AM and flux relative to the ideal shifted tone.
             let ideal = harmonic_tone(m.tone_f0 * eff_ratio);
             let iseg = &ideal[(1.5 * SR) as usize..(2.5 * SR) as usize];

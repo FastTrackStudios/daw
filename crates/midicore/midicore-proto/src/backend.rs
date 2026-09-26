@@ -157,7 +157,11 @@ pub fn decode_all(bytes: &[u8], mut f: impl FnMut(MidiEvent)) {
             rest = &rest[used..];
         } else {
             let Some(status) = running else { return };
-            let len = if matches!(status & 0xF0, 0xC0 | 0xD0) { 1 } else { 2 };
+            let len = if matches!(status & 0xF0, 0xC0 | 0xD0) {
+                1
+            } else {
+                2
+            };
             if rest.len() < len {
                 return;
             }

@@ -13,9 +13,9 @@ use crate::granular::GranularShifter;
 use crate::pll::{PllOctave, PllTracker, SubWaveform};
 use crate::pog::{OctaveShift, PolyOctave};
 use crate::psola::PsolaShifter;
-use crate::spectral::SpectralShifter;
 #[cfg(feature = "rubberband")]
 use crate::rubberband::RubberbandShifter;
+use crate::spectral::SpectralShifter;
 use crate::wsola::WsolaShifter;
 
 /// Which pitch shifting algorithm to use.

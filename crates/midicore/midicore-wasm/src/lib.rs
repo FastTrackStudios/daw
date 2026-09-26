@@ -206,8 +206,10 @@ impl Drop for WebMidiInput {
             );
         }
         if let Some((access, listener)) = s.hotplug.take() {
-            let _ = access
-                .remove_event_listener_with_callback("statechange", listener.as_ref().unchecked_ref());
+            let _ = access.remove_event_listener_with_callback(
+                "statechange",
+                listener.as_ref().unchecked_ref(),
+            );
         }
     }
 }
@@ -220,8 +222,8 @@ fn attach(state: &Rc<RefCell<State>>, granted: MidiAccess) {
             reconcile(&state, &access);
         }
     });
-    let _ = granted
-        .add_event_listener_with_callback("statechange", on_change.as_ref().unchecked_ref());
+    let _ =
+        granted.add_event_listener_with_callback("statechange", on_change.as_ref().unchecked_ref());
     state.borrow_mut().hotplug = Some((granted.clone(), on_change));
     reconcile(state, &granted);
 }

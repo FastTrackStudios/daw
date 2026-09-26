@@ -779,7 +779,9 @@ unsafe extern "C" fn on_property(
                 ffi::DEVICE_PROCESSOR_OVERLOAD => {
                     stats.xruns.fetch_add(1, Ordering::Relaxed);
                     let frames = stats.block_frames.load(Ordering::Relaxed);
-                    stats.drops.push(crate::duplex::DropKind::DeviceOverload, 0, 0, frames);
+                    stats
+                        .drops
+                        .push(crate::duplex::DropKind::DeviceOverload, 0, 0, frames);
                 }
                 ffi::DEVICE_IS_ALIVE => {
                     stats.stream_state.store(STATE_ERROR, Ordering::Relaxed);
@@ -1088,7 +1090,10 @@ mod tests {
             };
             if is_builtin(d) {
                 assert!(check_input(&name, false).is_err(), "{name} was allowed");
-                assert!(check_input(&name, true).is_ok(), "{name} ignored the override");
+                assert!(
+                    check_input(&name, true).is_ok(),
+                    "{name} ignored the override"
+                );
             }
         }
     }

@@ -57,7 +57,11 @@ fn reopen(selectors: &[PortSelector], sink: &Sink) -> Vec<MidiInput> {
         .iter()
         .filter_map(|selector| {
             let sink = Arc::clone(sink);
-            let forward = move |ev| (sink.lock().unwrap_or_else(std::sync::PoisonError::into_inner))(ev);
+            let forward = move |ev| {
+                (sink
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner))(ev)
+            };
             match MidiInput::open(selector.clone(), forward) {
                 Ok(conn) => Some(conn),
                 // No device yet is normal; the next rescan retries.
@@ -99,8 +103,10 @@ impl InputBackend for SelectableInput {
                         if !unplugged_all && seen.as_ref() != Some(&now) {
                             conns.clear(); // close before reopening
                             conns = reopen(&selectors, &sink);
-                            let mut names: Vec<String> =
-                                conns.iter().flat_map(|c| c.opened.iter().cloned()).collect();
+                            let mut names: Vec<String> = conns
+                                .iter()
+                                .flat_map(|c| c.opened.iter().cloned())
+                                .collect();
                             names.sort();
                             names.dedup();
                             if let Ok(mut c) = connected.write() {

@@ -86,13 +86,15 @@ impl PhonesBus {
     /// Whether this engine blends the monitor-mix input into the phones
     /// (see the field).
     pub fn set_blend_mix(&self, on: bool) {
-        self.blend_mix.store(on, std::sync::atomic::Ordering::Relaxed);
+        self.blend_mix
+            .store(on, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Mute the main output pair and keep the phones (routing on; with
     /// routing off there is one pair, and the caller mutes the master).
     pub fn set_main_mute(&self, on: bool) {
-        self.main_mute.store(on, std::sync::atomic::Ordering::Relaxed);
+        self.main_mute
+            .store(on, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn main_muted(&self) -> bool {
@@ -244,7 +246,13 @@ impl DuplexAudioEngine {
                         b.outputs[main_r][f] = rr * g;
                     }
                     if routing && (ph_l != main_l || ph_r != main_r) {
-                        let ext = |c: usize| if blend { b.inputs.get(c).map_or(0.0, |ch| ch[f]) } else { 0.0 };
+                        let ext = |c: usize| {
+                            if blend {
+                                b.inputs.get(c).map_or(0.0, |ch| ch[f])
+                            } else {
+                                0.0
+                            }
+                        };
                         let (ext_l, ext_r) = (ext(mix_l), ext(mix_r));
                         if ph_l < outs {
                             b.outputs[ph_l][f] = (l * self_mix + ext_l) * vol;

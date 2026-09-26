@@ -41,9 +41,8 @@ pub fn name_says_builtin_mic(name: &str) -> bool {
     let builtin = (n.contains("built-in") || n.contains("builtin") || n.contains("internal"))
         && (mic || n.contains("audio"));
     // Laptop DMICs and the onboard HDA codec as PipeWire names them.
-    let onboard = n.contains("digital microphone")
-        || n.contains("dmic")
-        || n.starts_with("alsa_input.pci-");
+    let onboard =
+        n.contains("digital microphone") || n.contains("dmic") || n.starts_with("alsa_input.pci-");
     apple || builtin || onboard
 }
 

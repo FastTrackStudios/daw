@@ -1339,7 +1339,14 @@ mod live_input_tests {
         let mut buses = vec![StereoBuffer::zeroed(frames, 48_000)];
         let mut dirty = vec![false; 1];
 
-        mix_live_input_into_buses(&mut live, &[Some(0)], |_| true, &mut buses, &mut dirty, frames);
+        mix_live_input_into_buses(
+            &mut live,
+            &[Some(0)],
+            |_| true,
+            &mut buses,
+            &mut dirty,
+            frames,
+        );
 
         for f in 0..frames {
             assert_eq!(buses[0].samples[f * 2], (3 * frames + f) as f32);
