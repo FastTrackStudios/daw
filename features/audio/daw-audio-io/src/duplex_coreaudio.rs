@@ -905,13 +905,23 @@ impl DuplexBackend for CoreAudioBackend {
                     range.maximum
                 );
             }
-            set(
-                device,
-                ffi::DEVICE_BUFFER_FRAME_SIZE,
-                ffi::SCOPE_GLOBAL,
-                clamped,
-            )
-            .map_err(fail)?;
+            let current: u32 =
+                get(device, ffi::DEVICE_BUFFER_FRAME_SIZE, ffi::SCOPE_GLOBAL).unwrap_or(u32::MAX);
+            if cfg.buffer_lower_only && current <= clamped {
+                tracing::info!(
+                    requested = clamped,
+                    current,
+                    "coreaudio duplex: keeping the process's smaller block (lower-only)"
+                );
+            } else {
+                set(
+                    device,
+                    ffi::DEVICE_BUFFER_FRAME_SIZE,
+                    ffi::SCOPE_GLOBAL,
+                    clamped,
+                )
+                .map_err(fail)?;
+            }
         }
         let buffer: u32 =
             get(device, ffi::DEVICE_BUFFER_FRAME_SIZE, ffi::SCOPE_GLOBAL).map_err(fail)?;
