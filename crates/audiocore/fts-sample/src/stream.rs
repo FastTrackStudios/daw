@@ -1226,10 +1226,16 @@ mod tests {
             i += filled;
         }
         assert!(worst < 0.01, "worst streamed error {worst}");
-        // And it never grew past its working set while doing it.
+        // And it never grew past its working set while doing it: the
+        // residency budget (chunks), plus the head — a fixed cap however long
+        // the sample, not a share of it (at a budget of 24 a 1.5 MB sample is
+        // half resident, a 100 MB one about 1%).
+        let cap = (MAX_RESIDENT_CHUNKS as usize * CHUNK_FRAMES as usize + HEAD_FRAMES as usize)
+            * ch as usize
+            * std::mem::size_of::<f32>();
         assert!(
-            s.resident_bytes() < whole / 4,
-            "resident {} of {whole} bytes after a full pass",
+            s.resident_bytes() <= cap,
+            "resident {} bytes after a full pass, over the {cap}-byte working set",
             s.resident_bytes()
         );
         let _ = std::fs::remove_file(&tmp);
