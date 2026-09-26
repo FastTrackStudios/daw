@@ -33,6 +33,23 @@ pub trait Markers {
     /// Returns the DAW-assigned id.
     fn add(&self, project: ProjectContext, position: f64, name: &str) -> DawResult<u32>;
 
+    /// [`Markers::add`], but the marker carries `guid` (its
+    /// [`Marker::guid`]) instead of one the backend makes up — how a
+    /// peer re-creates a marker another engine made. Returns the
+    /// DAW-assigned id, as `add` does.
+    ///
+    /// A `guid` a marker or region of the project already has is
+    /// [`DawError::AlreadyExists`](crate::DawError::AlreadyExists).
+    /// REAPER cannot set a marker's GUID through its API, so the REAPER
+    /// backend answers `NotSupported`.
+    fn add_with_guid(
+        &self,
+        project: ProjectContext,
+        guid: &str,
+        position: f64,
+        name: &str,
+    ) -> DawResult<u32>;
+
     /// Remove the marker with the given id.
     fn remove(&self, project: ProjectContext, id: u32) -> DawResult<()>;
 

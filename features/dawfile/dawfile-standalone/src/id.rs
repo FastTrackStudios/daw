@@ -27,7 +27,7 @@
 //!
 //! `daw_proto`'s `Track::index`, `Item::index`, `Take::index` and
 //! `EnvelopePoint::index` exist because the facade's callers want them. In a
-//! `.daw` document they are **derived**: recomputed from list position by
+//! `.session` document they are **derived**: recomputed from list position by
 //! [`crate::DawDocument::reindex`] on every load and after every structural
 //! edit. Nothing in the format reads them to find anything.
 

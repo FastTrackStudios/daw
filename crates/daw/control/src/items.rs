@@ -6,7 +6,7 @@ use crate::Result;
 use crate::{DawClients, Error, MidiEditor};
 use daw_proto::{
     ProjectContext,
-    item::{FadeShape, Item, ItemRef, Take, TakeRef},
+    item::{FadeShape, Item, ItemRef, ItemSpan, Take, TakeRef},
     primitives::{Duration, PositionInSeconds},
     track::TrackRef,
 };
@@ -117,6 +117,34 @@ impl Items {
             .await?
             .ok_or_else(|| Error::Other("Failed to create item".to_string()))?;
 
+        Ok(ItemHandle::new(
+            guid,
+            self.track_guid.clone(),
+            self.project_id.clone(),
+            self.clients.clone(),
+        ))
+    }
+
+    /// [`Items::add`], but the item takes `guid` instead of a fresh one —
+    /// how a peer re-creates an item another engine made. A `guid` the
+    /// project already has is an error (`DawError::AlreadyExists`). Give
+    /// it a source afterwards through its takes (`set_source_file`).
+    pub async fn add_with_guid(
+        &self,
+        guid: &str,
+        position: PositionInSeconds,
+        length: Duration,
+    ) -> Result<ItemHandle> {
+        let guid = self
+            .clients
+            .item
+            .add_item_with_guid(
+                self.context(),
+                self.track_ref(),
+                guid.to_string(),
+                ItemSpan::new(position, length),
+            )
+            .await??;
         Ok(ItemHandle::new(
             guid,
             self.track_guid.clone(),
@@ -236,6 +264,25 @@ impl ProjectItems {
                 self.clients.clone(),
             )
         }))
+    }
+
+    /// Create an item with `guid` on the track whose guid is
+    /// `track_guid` — [`Items::add_with_guid`] without first taking a
+    /// track handle.
+    pub async fn add_with_guid(
+        &self,
+        track_guid: &str,
+        guid: &str,
+        position: PositionInSeconds,
+        length: Duration,
+    ) -> Result<ItemHandle> {
+        Items::new(
+            track_guid.to_string(),
+            self.project_id.clone(),
+            self.clients.clone(),
+        )
+        .add_with_guid(guid, position, length)
+        .await
     }
 
     /// Select all items

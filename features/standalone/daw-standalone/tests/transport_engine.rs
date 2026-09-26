@@ -565,3 +565,40 @@ async fn get_state_mirrors_engine_playhead() {
     let secs = state.playhead_position.time.as_ref().unwrap().as_seconds();
     assert!(secs > 0.05, "state-mirrored playhead = {secs}");
 }
+
+/// `add_notes` takes REAPER's contract — start in project quarter notes,
+/// length in ticks at 960 a quarter — and stores quarter notes, which is
+/// what `notes()` and the renderer read. A generated quarter-note click
+/// (length 960) is one quarter long, not 960.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn add_notes_takes_lengths_in_ticks() {
+    use daw_proto::midi::{Midi, MidiNoteCreate};
+    use daw_proto::{TrackRef, Tracks};
+
+    let (daw, _guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let track = Tracks::add(&daw, ctx.clone(), "Click", None).unwrap();
+    let loc = Midi::create_midi_item(&daw, ctx, TrackRef::Guid(track), 0.0, 4.0)
+        .expect("MIDI item created");
+    Midi::add_notes(
+        &daw,
+        loc.clone(),
+        vec![MidiNoteCreate::new(60, 100, 2.0, 960.0)],
+    );
+    Midi::add_notes_ppq(
+        &daw,
+        loc.clone(),
+        vec![MidiNoteCreate::new(62, 100, 3.0, 0.5)],
+    );
+    let notes = Midi::notes(&daw, loc);
+    assert_eq!(notes[0].start_ppq, 2.0);
+    assert!(
+        (notes[0].length_ppq - 1.0).abs() < 1e-9,
+        "{}",
+        notes[0].length_ppq
+    );
+    assert!(
+        (notes[1].length_ppq - 0.5).abs() < 1e-9,
+        "the round trip is as given"
+    );
+}

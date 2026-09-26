@@ -172,6 +172,23 @@ pub trait Tracks {
     /// the new track's guid.
     fn add(&self, project: ProjectContext, name: &str, at_index: Option<u32>) -> DawResult<String>;
 
+    /// [`Tracks::add`], but the track takes `guid` instead of a fresh
+    /// one — how a peer re-creates a track another engine made, so both
+    /// key it the same way. Returns the guid as the backend stores it
+    /// (the standalone engine keeps `guid` verbatim; REAPER normalises
+    /// it to its own spelling, `guid` must then parse as a UUID).
+    ///
+    /// A `guid` a track of the project already has is
+    /// [`DawError::AlreadyExists`](crate::DawError::AlreadyExists) —
+    /// never a second track with the same guid.
+    fn add_with_guid(
+        &self,
+        project: ProjectContext,
+        guid: &str,
+        name: &str,
+        at_index: Option<u32>,
+    ) -> DawResult<String>;
+
     fn remove(&self, project: ProjectContext, track: TrackRef) -> DawResult<()>;
 
     fn remove_all(&self, project: ProjectContext) -> DawResult<()>;
@@ -203,6 +220,19 @@ pub trait Tracks {
         track: TrackRef,
         input: RecordInput,
     ) -> DawResult<()>;
+
+    /// Move one track so it ends up at `index` (0-based, in project
+    /// order, master excluded), leaving the selection alone.
+    ///
+    /// Only the order changes: the track keeps its own folder depth,
+    /// and nothing re-parents it on purpose — set depths afterwards
+    /// with [`Tracks::set_folder_depth`] if the move should change
+    /// folder membership. (A depth left as it was can still put the
+    /// track, or the ones after it, in a different folder at the new
+    /// position; that is what the depths say, not something `move_to`
+    /// decides.) An `index` past the last track is
+    /// [`DawError::OutOfRange`](crate::DawError::OutOfRange).
+    fn move_to(&self, project: ProjectContext, track: TrackRef, index: u32) -> DawResult<()>;
 
     /// Move all currently selected tracks to `index`.
     fn reorder_selected(

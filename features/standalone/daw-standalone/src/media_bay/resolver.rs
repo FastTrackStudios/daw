@@ -63,25 +63,65 @@ impl ProjectRelativeResolver {
     }
 }
 
-impl BayFileResolver for ProjectRelativeResolver {
-    fn resolve(&self, path: &str) -> Result<Vec<u8>, String> {
+impl ProjectRelativeResolver {
+    /// Where `path` is on this machine: the file itself, or — when only
+    /// its proxy was fetched (a session pulled from a library streams
+    /// from its proxies) — `Proxies/<stem>.ogg` beside where it would be.
+    /// The same rule the proxy writer and the server's renditions use.
+    fn locate(&self, path: &str) -> Option<std::path::PathBuf> {
         let pb = std::path::PathBuf::from(path);
         let abs = if pb.is_absolute() {
             pb
         } else {
             self.project_dir.join(pb)
         };
+        if abs.exists() {
+            return Some(abs);
+        }
+        let proxy = abs
+            .parent()?
+            .join("Proxies")
+            .join(abs.file_stem()?)
+            .with_extension("ogg");
+        proxy.exists().then_some(proxy)
+    }
+}
+
+impl BayFileResolver for ProjectRelativeResolver {
+    fn resolve(&self, path: &str) -> Result<Vec<u8>, String> {
+        let abs = self
+            .locate(path)
+            .ok_or_else(|| format!("read {path}: not found (nor its proxy)"))?;
         std::fs::read(&abs).map_err(|e| format!("read {}: {e}", abs.display()))
     }
 
     fn resolve_path(&self, path: &str) -> Option<std::path::PathBuf> {
-        let pb = std::path::PathBuf::from(path);
-        let abs = if pb.is_absolute() {
-            pb
-        } else {
-            self.project_dir.join(pb)
-        };
-        abs.exists().then_some(abs)
+        self.locate(path)
+    }
+}
+
+#[cfg(test)]
+mod proxy_fallback {
+    use super::{BayFileResolver, ProjectRelativeResolver};
+
+    #[test]
+    fn a_missing_source_is_found_by_its_proxy() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("Media/Proxies")).unwrap();
+        std::fs::write(dir.path().join("Media/Proxies/Bass.ogg"), b"ogg").unwrap();
+        std::fs::write(dir.path().join("Media/Keys.wav"), b"wav").unwrap();
+        let r = ProjectRelativeResolver::new(dir.path());
+        assert_eq!(r.resolve("Media/Bass.wav").unwrap(), b"ogg");
+        assert_eq!(
+            r.resolve("Media/Keys.wav").unwrap(),
+            b"wav",
+            "the original wins when it is there"
+        );
+        assert!(r.resolve("Media/Gone.wav").is_err());
+        assert_eq!(
+            r.resolve_path("Media/Bass.wav"),
+            Some(dir.path().join("Media/Proxies/Bass.ogg"))
+        );
     }
 }
 

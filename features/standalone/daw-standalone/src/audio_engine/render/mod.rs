@@ -435,6 +435,99 @@ impl ProjectRenderer {
     /// Render `frames` stereo frames starting at `start_frame` (in
     /// output-rate samples). Returns a fresh `StereoBuffer`.
     pub fn render_block(&self, start_frame: u64, frames: usize) -> StereoBuffer {
+        self.render_block_varispeed(start_frame as f64, frames, 1.0)
+    }
+
+    /// Render one audio buffer as the transport planned it
+    /// ([`TransportShared::begin_block`](crate::transport_engine::TransportShared::begin_block)):
+    /// each run at its own start and varispeed rate, a scheduled locate
+    /// landing on its exact frame.
+    ///
+    /// `render_stopped`: a run the transport does not roll through is
+    /// still rendered at its frozen position, 1x (the duplex path — live
+    /// input and FX run while stopped); otherwise it is silence.
+    ///
+    /// A single run renders as one block, exactly as
+    /// [`render_block_varispeed`](Self::render_block_varispeed). A buffer
+    /// split by a locate, when only one side plays, renders the full
+    /// buffer from that side's clock and silences the other side — so a
+    /// plugin never sees its first block short (it sizes itself on its
+    /// first block).
+    pub fn render_plan(
+        &self,
+        plan: &crate::transport_engine::BlockPlan,
+        render_stopped: bool,
+    ) -> StereoBuffer {
+        let segs = plan.segments();
+        let total: usize = segs.iter().map(|s| s.frames).sum();
+        let run = |seg: &crate::transport_engine::BlockSegment| -> Option<StereoBuffer> {
+            if seg.playing {
+                Some(self.render_block_varispeed(seg.start_samples, seg.frames, seg.rate))
+            } else if render_stopped {
+                Some(self.render_block_varispeed(
+                    seg.start_samples.max(0.0).floor(),
+                    seg.frames,
+                    1.0,
+                ))
+            } else {
+                None
+            }
+        };
+        match segs {
+            [one] => run(one).unwrap_or_else(|| StereoBuffer::zeroed(total, self.sample_rate)),
+            [a, b] if !render_stopped && a.playing != b.playing => {
+                // One side plays: render the whole buffer on its clock,
+                // silence the side that does not.
+                let (on, silent) = if a.playing {
+                    (a, b.offset..total)
+                } else {
+                    (b, 0..b.offset)
+                };
+                let mut out = self.render_block_varispeed(on.start_at_frame_zero(), total, on.rate);
+                if let Some(s) = out.samples.get_mut(silent.start * 2..silent.end * 2) {
+                    s.fill(0.0);
+                }
+                out
+            }
+            _ => {
+                let mut out = StereoBuffer::zeroed(total, self.sample_rate);
+                for seg in segs {
+                    let Some(block) = run(seg) else { continue };
+                    let dst = seg.offset * 2..(seg.offset + seg.frames) * 2;
+                    if let (Some(d), Some(src)) = (
+                        out.samples.get_mut(dst),
+                        block.samples.get(..seg.frames * 2),
+                    ) {
+                        d.copy_from_slice(src);
+                    }
+                }
+                out
+            }
+        }
+    }
+
+    /// Render `frames` stereo frames of the timeline from `start_samples`
+    /// (output-rate samples, fractional allowed) at transport `rate`:
+    /// output frame `i` is the timeline at `start_samples + i * rate` —
+    /// true varispeed (resampled, so pitch moves with the rate), not a
+    /// playhead that skips. Everything timeline-driven follows: item
+    /// sources, take / track / send envelopes, MIDI and the metronome.
+    /// The next block continues from `start_samples + frames * rate`.
+    ///
+    /// At `rate == 1.0` with an integer start this is bit-identical to
+    /// [`render_block`](Self::render_block).
+    pub fn render_block_varispeed(
+        &self,
+        start_samples: f64,
+        frames: usize,
+        rate: f64,
+    ) -> StereoBuffer {
+        let rate = if rate.is_finite() && rate > 0.0 {
+            rate
+        } else {
+            1.0
+        };
+        let _frame = crate::plugin::RenderFrameGuard::enter(start_samples.max(0.0).floor() as u64);
         let mut master = StereoBuffer::zeroed(frames, self.sample_rate);
         if frames == 0 {
             return master;
@@ -446,8 +539,10 @@ impl ProjectRenderer {
         };
         let tracks = &snap.tracks;
         let n = tracks.len();
-        let start_seconds = start_frame as f64 / self.sample_rate as f64;
-        let end_seconds = start_seconds + (frames as f64 / self.sample_rate as f64);
+        let start_seconds = start_samples / self.sample_rate as f64;
+        let end_seconds = start_seconds + (frames as f64 * rate / self.sample_rate as f64);
+        // Output frames per timeline second (MIDI event offsets).
+        let frames_per_second = self.sample_rate as f64 / rate;
         let any_soloed = snap.solo_pass.is_some();
         let passes = |i: usize| -> bool {
             match &snap.solo_pass {
@@ -570,6 +665,7 @@ impl ProjectRenderer {
                     start_seconds,
                     end_seconds,
                     self.sample_rate,
+                    rate,
                 );
             }
         }
@@ -691,7 +787,7 @@ impl ProjectRenderer {
                 // lists go to every plugin in the chain (REAPER's
                 // default) — non-MIDI plugins ignore them.
                 let mut midi_events =
-                    collect_midi_events(t, start_seconds, end_seconds, self.sample_rate, frames);
+                    collect_midi_events(t, start_seconds, end_seconds, frames_per_second, frames);
                 // Merge programmatic / live MIDI pushed for this track
                 // this block (drained in stage 0.5), then re-sort so the
                 // combined list stays offset-ordered for the plugin.
@@ -705,9 +801,13 @@ impl ProjectRenderer {
                     t,
                     start_seconds,
                     end_seconds,
-                    self.sample_rate,
+                    frames_per_second,
                     frames,
                 );
+                // Mute is applied at the fader, after the chain, so a muted
+                // track's plugins still run (tails, meters). Say so to the
+                // plugins that need to know — see `plugin::track_muted`.
+                let _muted = crate::plugin::TrackMutedGuard::enter(t.muted);
                 for (i, fx_guid) in t.fx_chain.iter().enumerate() {
                     if !t.fx_enabled.get(i).copied().unwrap_or(true) {
                         continue;
@@ -841,7 +941,7 @@ impl ProjectRenderer {
                 let mut c_ppan = t.pan_prefx_env.as_ref().map(|p| EnvelopeCursor::new(p));
                 let mut c_mute = t.mute_env.as_ref().map(|p| EnvelopeCursor::new(p));
                 for frame in 0..bus.frames {
-                    let time = start_seconds + frame as f64 * inv_rate;
+                    let time = start_seconds + frame as f64 * rate * inv_rate;
                     let v_main = c_vol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
                     let v_prefx = c_pvol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
                     let mut vol = t.volume * v_main * v_prefx;
@@ -954,7 +1054,7 @@ impl ProjectRenderer {
                 let mut c_pan = snd.pan_env.as_ref().map(|p| EnvelopeCursor::new(p));
                 let mut c_mute = snd.mute_env.as_ref().map(|p| EnvelopeCursor::new(p));
                 for frame in 0..dest_bus.frames {
-                    let time = start_seconds + frame as f64 * inv_rate;
+                    let time = start_seconds + frame as f64 * rate * inv_rate;
                     let env_muted = c_mute
                         .as_mut()
                         .and_then(|c| c.eval_at(time))
@@ -1053,7 +1153,7 @@ impl ProjectRenderer {
                 let freq = if accent { 1568.0 } else { 1046.5 }; // G6 / C6
                 let gain = if accent { 0.5 } else { 0.35 };
                 for frame in 0..frames {
-                    let t = start_seconds + frame as f64 * inv_rate - t0;
+                    let t = start_seconds + frame as f64 * rate * inv_rate - t0;
                     if t < 0.0 || t >= click_len {
                         continue;
                     }

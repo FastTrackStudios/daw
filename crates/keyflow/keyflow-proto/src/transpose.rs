@@ -331,6 +331,74 @@ fn transpose_chord_symbol(symbol: &str, from_key: &Key, view: &ChartView) -> Opt
     renotate_chord(&parsed, &ctx).map(|(_, symbol)| symbol)
 }
 
+/// One chord symbol, as written, spelled in `notation` for a song in `key`:
+/// `"5/7"` in F is `"C/E"` as letters, `"Bb"` in F is `"4"` as a number.
+///
+/// No transposition — the chord sounds where it did, only its spelling
+/// changes. `None` when the symbol is not a chord (a rest, a word, a root
+/// that does not resolve in `key`). The single-chord entry to the same
+/// transform [`apply_view`] runs over a whole chart, for a caller holding
+/// symbols rather than a chart: a DAW's chord items, say, named as
+/// written.
+///
+/// A bare number takes the key's diatonic quality, as the chart parser
+/// gives it: `6` in F is D MINOR, so `Dm` as letters. A chart keeps the
+/// terse `6` as the chord's symbol, which is what a caller holding
+/// symbols has — so without this, re-reading the symbol alone would
+/// hear a D major the chart never wrote.
+#[must_use]
+pub fn renotate_symbol(symbol: &str, key: &Key, notation: NotationSystem) -> Option<String> {
+    let mut lexer = Lexer::new(symbol.to_string());
+    // A symbol that starts with a number is written in numbers, so an
+    // ambiguous `b<digit>` inside it is a flat degree (`b7` = ♭7), not the
+    // note B with a 7 on it — which is what the chart parser reads it as in
+    // a numbers chart too.
+    let system = if is_number_symbol(symbol) {
+        crate::chord::root::NotationSystem::Degree
+    } else {
+        crate::chord::root::NotationSystem::Auto
+    };
+    let mut parsed = Chord::parse_with_system(&lexer.tokenize(), system).ok()?;
+    parsed.root.resolve(Some(key))?;
+    if let Some(degree) = parsed.root.diatonic_scale_degree()
+        && parsed.quality == ChordQuality::Major
+        && !writes_major(symbol)
+        && let Some(implied) = key.diatonic_quality(degree)
+        && implied != ChordQuality::Major
+    {
+        parsed.set_triad_quality(implied);
+    }
+    let ctx = Ctx {
+        song_key: key,
+        display_key: key,
+        letters_delta: 0,
+        notation,
+    };
+    renotate_chord(&parsed, &ctx).map(|(_, symbol)| symbol)
+}
+
+/// Whether a symbol is written in numbers: a scale degree, with or without
+/// an accidental in front (`5/7`, `b7`, `#4m`).
+fn is_number_symbol(symbol: &str) -> bool {
+    let rest = symbol.trim_start_matches(['b', '#', '♭', '♯']);
+    rest.len() < symbol.len() && rest.starts_with(|c: char| ('1'..='7').contains(&c))
+        || symbol.starts_with(|c: char| ('1'..='7').contains(&c))
+}
+
+/// Whether a number chord says MAJOR in so many words (`6M`, `6maj`,
+/// `6:maj7`, `6^`) — the chart parser's test, so a written major is
+/// never overridden by the key's diatonic quality.
+fn writes_major(symbol: &str) -> bool {
+    let rest = symbol.trim_start_matches(['#', 'b']);
+    let rest = rest.trim_start_matches(|c: char| c.is_ascii_digit());
+    let rest = rest.strip_prefix(':').unwrap_or(rest);
+    rest.starts_with('M')
+        || rest.starts_with("maj")
+        || rest.starts_with("Maj")
+        || rest.starts_with('△')
+        || rest.starts_with('^')
+}
+
 /// Build the root notation for a resolved note under Letters or Nashville.
 fn notate_root(note: &MusicalNote, ctx: &Ctx) -> RootNotation {
     match ctx.notation {
@@ -701,6 +769,36 @@ mod tests {
     use crate::sections::{Section, SectionType};
     use crate::time::{AbsolutePosition, MusicalDuration, MusicalPosition};
     use keyflow_syntax::parsing::Lexer;
+
+    /// One symbol either way round, the way a DAW's chord items are
+    /// relabelled: numbers to names and names to numbers, slash chords and
+    /// qualities kept.
+    #[test]
+    fn renotate_symbol_both_ways() {
+        let f = Key::major(MusicalNote::from_string("F").expect("F"));
+        let as_letters = |s| renotate_symbol(s, &f, NotationSystem::Letters);
+        let as_numbers = |s| renotate_symbol(s, &f, NotationSystem::Nashville);
+        assert_eq!(as_letters("1").as_deref(), Some("F"));
+        assert_eq!(as_letters("6m").as_deref(), Some("Dm"));
+        // A bare number is the key's own chord: 6 is minor, 7 diminished,
+        // unless the chart said major outright.
+        assert_eq!(as_letters("6").as_deref(), Some("Dm"));
+        assert_eq!(as_letters("2/5").as_deref(), Some("Gm/C"));
+        assert_eq!(as_letters("6M").as_deref(), Some("D"));
+        assert_eq!(as_numbers("6").as_deref(), Some("6"));
+        // A flat degree, not the note B: b7 in F is Eb.
+        assert_eq!(as_letters("b7").as_deref(), Some("Eb"));
+        assert_eq!(as_numbers("b7").as_deref(), Some("b7"));
+        assert_eq!(as_numbers("b7/1").as_deref(), Some("b7/1"));
+        // And a letter chord is still a letter chord.
+        assert_eq!(as_numbers("B7").as_deref(), Some("b57"));
+        assert_eq!(as_letters("4").as_deref(), Some("Bb"));
+        assert_eq!(as_letters("5/7").as_deref(), Some("C/E"));
+        assert_eq!(as_numbers("Bb").as_deref(), Some("4"));
+        assert_eq!(as_numbers("C/E").as_deref(), Some("5/7"));
+        assert_eq!(as_numbers("Dm7").as_deref(), Some("6m7"));
+        assert_eq!(as_letters("hello"), None);
+    }
 
     /// Build a single-section, single-measure chart in `key` from a list of
     /// chord source tokens (letters, Nashville, or Roman — parsed via the

@@ -2,19 +2,25 @@
 // this crate predates that — burn down separately.
 #![allow(dead_code, unused)]
 
-//! Audio-thread sync primitives for sample-accurate multi-machine playback.
+//! The REAPER adapter for [`daw_transport_sync`]: sample-accurate
+//! multi-machine playback for N REAPER instances playing the same project.
 //!
-//! # Layers
+//! The maths lives in the core — the per-buffer snapshot
+//! ([`AudioSnapshot`]/[`SnapshotCell`], re-exported here), the NTP clock
+//! estimator, [`daw_transport_sync::Position`] projection and the PI
+//! [`daw_transport_sync::DriftController`]. This crate is what REAPER
+//! needs around it:
 //!
-//! - **Snapshot** ([`AudioSnapshot`], [`SnapshotCell`]): the per-buffer
-//!   observation written by the audio thread and read by everyone else
-//!   (main thread, sync engine, diagnostics RPC).
-//! - **Hook** ([`AudioSyncHook`]): implements reaper-medium's
-//!   `OnAudioBuffer`. Registered once at extension load; runs on REAPER's
-//!   real-time audio thread.
-//!
-//! Future layers (peer clock sync, sample-position protocol, drift
-//! correction) build on this foundation.
+//! - **Hooks** ([`AudioSyncHook`], [`registry::MultiProjectHook`]):
+//!   reaper-medium `OnAudioBuffer` impls that fill the core's snapshot on
+//!   REAPER's real-time audio thread, stamped in REAPER's `time_precise`
+//!   clock.
+//! - **Carrier** ([`clock_sync`]): UDP multicast discovery, unicast
+//!   ping/pong feeding one core `ClockEstimator` per peer, and position
+//!   frames.
+//! - **Actuator** ([`drift`]): a tokio loop running the core's
+//!   `DriftController` against the elected leader, applying its rate via
+//!   `CSurf_OnPlayRateChange` on the main thread.
 //!
 //! # Realtime discipline
 //!
@@ -23,16 +29,21 @@
 //! - **lock-free** — no `Mutex`, no `RwLock`, no blocking syscalls.
 //! - **bounded latency** — short, predictable work per callback.
 //!
-//! The snapshot store uses a seqlock pattern (two `AtomicU64`s for the
-//! sequence counter + per-field `AtomicU64`s) so the audio thread writes
-//! without locking and readers can detect torn reads via the sequence.
+//! The core's [`SnapshotCell`] is a seqlock the audio thread writes without
+//! waiting; readers detect torn reads via its sequence.
 
-use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
 pub mod clock_sync;
 pub mod drift;
 pub mod registry;
+
+/// The snapshot types are the core's: one definition, whatever the
+/// backend. `host_micros` is `f64` microseconds in REAPER's
+/// `time_precise` clock; `project_id` is assigned by the
+/// [`registry`] (`[0; 16]` is "the current project" for single-project
+/// consumers).
+pub use daw_transport_sync::{AudioSnapshot, ProjectId, SnapshotCell};
 
 #[inline]
 pub(crate) fn split_project_id(id: ProjectId) -> (u64, u64) {
@@ -56,158 +67,37 @@ use reaper_medium::{
     Reaper as MediumReaper,
 };
 
-/// 16-byte project identifier. Each open REAPER project gets a stable
-/// id assigned at first observation; the id is process-local (resets
-/// on extension reload) — for FTS-session matching, callers should
-/// pair this with a longer-lived identifier (project file path or
-/// REAPER project GUID) at the management layer.
+/// REAPER's sync clock now, microseconds: `time_precise` (a monotonic
+/// high-resolution clock, seconds) scaled. Every snapshot this crate
+/// publishes is stamped in it, so clock-sync offsets are between REAPER
+/// instances' `time_precise` clocks.
+#[inline]
+pub(crate) fn reaper_clock_micros(reaper: &MediumReaper<RealTimeAudioThreadScope>) -> f64 {
+    clock_micros(reaper.low())
+}
+
+/// REAPER's sync clock now, microseconds, from any thread — the clock
+/// every snapshot's `host_micros` is in (see `reaper_clock_micros`).
+/// What a remote follower pings to learn its offset to this REAPER.
+#[inline]
+pub fn clock_micros(low: &reaper_low::Reaper) -> f64 {
+    // Only exposed at the low binding level (medium hasn't wrapped it).
+    // `time_precise` reads a monotonic OS clock; it is callable from any
+    // thread (the audio hook calls it on the real-time thread).
+    low.time_precise() * 1_000_000.0
+}
+
+/// The play rate to publish with a snapshot.
 ///
-/// `[0u8; 16]` is the sentinel "no project" / "current project" value
-/// for backward compat with single-project consumers.
-pub type ProjectId = [u8; 16];
-
-/// One audio-buffer observation for a single project. Written by the
-/// audio thread, read by anyone. All fields are values at the start
-/// of the buffer.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct AudioSnapshot {
-    /// Monotonic counter — increments once per audio buffer. Readers
-    /// can use deltas to detect "did we miss a tick".
-    pub sequence: u64,
-    /// Project this snapshot describes. Distinct from REAPER's
-    /// internal project GUID; assigned by the bridge's project
-    /// registry. Single-project consumers can ignore this.
-    pub project_id: ProjectId,
-    /// REAPER's audio-clock host time at the start of this buffer
-    /// (microseconds). Same time domain as `mLink.clock().micros()` on
-    /// reablink — a high-resolution monotonic clock anchored to the
-    /// audio engine, not wall clock.
-    pub host_micros: u64,
-    /// Playhead position at the start of the buffer, in seconds.
-    /// `f64` bit-cast through `AtomicU64` for lock-free storage.
-    pub playhead_seconds: f64,
-    /// Sample rate reported by REAPER (Hz). Stored as `f64` for
-    /// arithmetic ergonomics; typically 44.1k or 48k.
-    pub sample_rate: f64,
-    /// Number of frames in this buffer. Typical 64..2048.
-    pub buffer_len: u32,
-    /// Whether the transport is playing as observed by the audio
-    /// thread (cached so consumers don't need a separate API call).
-    pub is_playing: bool,
-}
-
-/// Lock-free single-writer / multiple-reader cell holding the latest
-/// [`AudioSnapshot`]. Uses a seqlock pattern: the writer bumps the
-/// sequence on entry (making it odd → "write in progress"), stores the
-/// payload, then bumps again (making it even → "consistent"). Readers
-/// load the sequence, then the payload, then re-load the sequence; if
-/// it changed or was odd, they retry.
-pub struct SnapshotCell {
-    seq: AtomicU64,
-    snapshot_seq: AtomicU64,
-    project_id_hi: AtomicU64,
-    project_id_lo: AtomicU64,
-    host_micros: AtomicU64,
-    playhead_bits: AtomicU64,
-    sample_rate_bits: AtomicU64,
-    buffer_len: AtomicU32,
-    is_playing: AtomicU32,
-}
-
-impl SnapshotCell {
-    pub const fn new() -> Self {
-        Self {
-            seq: AtomicU64::new(0),
-            snapshot_seq: AtomicU64::new(0),
-            project_id_hi: AtomicU64::new(0),
-            project_id_lo: AtomicU64::new(0),
-            host_micros: AtomicU64::new(0),
-            playhead_bits: AtomicU64::new(0),
-            sample_rate_bits: AtomicU64::new(0),
-            buffer_len: AtomicU32::new(0),
-            is_playing: AtomicU32::new(0),
-        }
-    }
-
-    /// Write a new snapshot. Audio thread only. Wait-free.
-    ///
-    /// Internal seqlock convention: the cell's own `seq` counter is
-    /// distinct from `snap.sequence`. The audio thread increments
-    /// `seq` by 1 on entry (odd → write in progress) and by 1 again
-    /// on exit (even → consistent). `snap.sequence` rides through as
-    /// payload so readers can observe missed buffers.
-    #[inline]
-    pub fn store(&self, snap: &AudioSnapshot) {
-        let prev = self.seq.load(Ordering::Relaxed);
-        // Make odd: write-in-progress. If prev is even, +1 makes it
-        // odd; if prev is odd (uninitialised: prev=0 is even; after
-        // first store prev=2 is even; only re-entrant calls hit odd,
-        // which the audio thread never does — single producer).
-        let in_progress = prev.wrapping_add(1);
-        self.seq.store(in_progress, Ordering::Release);
-        self.snapshot_seq.store(snap.sequence, Ordering::Relaxed);
-        let (hi, lo) = split_project_id(snap.project_id);
-        self.project_id_hi.store(hi, Ordering::Relaxed);
-        self.project_id_lo.store(lo, Ordering::Relaxed);
-        self.host_micros.store(snap.host_micros, Ordering::Relaxed);
-        self.playhead_bits
-            .store(snap.playhead_seconds.to_bits(), Ordering::Relaxed);
-        self.sample_rate_bits
-            .store(snap.sample_rate.to_bits(), Ordering::Relaxed);
-        self.buffer_len.store(snap.buffer_len, Ordering::Relaxed);
-        self.is_playing
-            .store(snap.is_playing as u32, Ordering::Relaxed);
-        // Even: consistent.
-        self.seq
-            .store(in_progress.wrapping_add(1), Ordering::Release);
-    }
-
-    /// Read the latest snapshot. Returns `None` if nothing has been
-    /// stored yet. Retries on contention; gives up after a few spins
-    /// (audio thread is fast — contention windows are sub-µs).
-    pub fn load(&self) -> Option<AudioSnapshot> {
-        for _ in 0..4 {
-            let s1 = self.seq.load(Ordering::Acquire);
-            if s1 == 0 {
-                return None;
-            }
-            if s1 & 1 != 0 {
-                // Write in progress — retry.
-                core::hint::spin_loop();
-                continue;
-            }
-            let snapshot_seq = self.snapshot_seq.load(Ordering::Relaxed);
-            let project_id = combine_project_id(
-                self.project_id_hi.load(Ordering::Relaxed),
-                self.project_id_lo.load(Ordering::Relaxed),
-            );
-            let host_micros = self.host_micros.load(Ordering::Relaxed);
-            let playhead = f64::from_bits(self.playhead_bits.load(Ordering::Relaxed));
-            let sr = f64::from_bits(self.sample_rate_bits.load(Ordering::Relaxed));
-            let buffer_len = self.buffer_len.load(Ordering::Relaxed);
-            let is_playing = self.is_playing.load(Ordering::Relaxed) != 0;
-            let s2 = self.seq.load(Ordering::Acquire);
-            if s1 == s2 {
-                return Some(AudioSnapshot {
-                    sequence: snapshot_seq,
-                    project_id,
-                    host_micros,
-                    playhead_seconds: playhead,
-                    sample_rate: sr,
-                    buffer_len,
-                    is_playing,
-                });
-            }
-        }
-        None
-    }
-}
-
-impl Default for SnapshotCell {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+/// There is no audio-thread-safe way to read it: `Master_GetPlayRate` is
+/// `MainThreadOnly` in reaper-medium, and REAPER does not document it as
+/// safe from the audio thread. So the snapshot carries 1.0 (nominal) — the
+/// same assumption the position frames always made. Consequence: a
+/// follower treats the leader as playing at nominal rate; a project whose
+/// play rate is deliberately off 1.0 is not yet followed at that rate.
+/// (An audio-thread measurement is possible — playhead advance per buffer
+/// over buffer duration — if that is ever needed.)
+pub(crate) const PUBLISHED_PLAYRATE: f64 = 1.0;
 
 /// REAPER audio hook. Registered once at extension load via
 /// `ReaperSession::audio_reg_hardware_hook_add`. Writes a fresh
@@ -242,12 +132,7 @@ impl OnAudioBuffer for AudioSyncHook {
         }
         self.counter = self.counter.wrapping_add(1);
 
-        // time_precise: REAPER's monotonic audio-engine clock in
-        // seconds. Convert to microseconds for compactness in the
-        // wire protocol later. Only exposed at the low binding level
-        // (medium hasn't wrapped it), so we reach through.
-        let host_secs = self.reaper.low().time_precise();
-        let host_micros = (host_secs * 1_000_000.0) as u64;
+        let host_micros = reaper_clock_micros(&self.reaper);
 
         // get_play_position_2_ex: position of next audio block —
         // matches the audio thread's notion of "now". get_play_position
@@ -267,6 +152,7 @@ impl OnAudioBuffer for AudioSyncHook {
             project_id: [0u8; 16],
             host_micros,
             playhead_seconds: pos_value,
+            playrate: PUBLISHED_PLAYRATE,
             sample_rate: args.srate.get(),
             buffer_len: args.len,
             is_playing,
@@ -350,8 +236,9 @@ mod tests {
         let snap = AudioSnapshot {
             sequence: 42,
             project_id: [7u8; 16],
-            host_micros: 1_000_000,
+            host_micros: 1_000_000.25,
             playhead_seconds: 3.5,
+            playrate: PUBLISHED_PLAYRATE,
             sample_rate: 48000.0,
             buffer_len: 256,
             is_playing: true,
@@ -367,20 +254,22 @@ mod tests {
         assert!(cell.load().is_none());
     }
 
+    // Tore on arm64 (a few runs in a hundred) until the core's seqlock
+    // gained its fences: fence(Release) after the odd `seq` store,
+    // fence(Acquire) before the re-read.
     #[test]
     fn seqlock_under_contention() {
         let cell = Arc::new(SnapshotCell::new());
         let writer_cell = cell.clone();
         let writer = thread::spawn(move || {
-            for i in 0..10_000 {
+            for i in 0..10_000u64 {
                 writer_cell.store(&AudioSnapshot {
                     sequence: i,
-                    project_id: [0u8; 16],
-                    host_micros: i * 1000,
+                    host_micros: i as f64 * 1000.0,
                     playhead_seconds: i as f64 * 0.01,
-                    sample_rate: 48000.0,
                     buffer_len: 256,
                     is_playing: i % 2 == 0,
+                    ..AudioSnapshot::default()
                 });
             }
         });
@@ -390,7 +279,7 @@ mod tests {
                 // Cross-field consistency: playhead and host_micros
                 // were written together, so they must match.
                 assert!((s.playhead_seconds - s.sequence as f64 * 0.01).abs() < 1e-9);
-                assert_eq!(s.host_micros, s.sequence * 1000);
+                assert_eq!(s.host_micros, s.sequence as f64 * 1000.0);
                 assert!(s.sequence >= last_seq);
                 last_seq = s.sequence;
             }

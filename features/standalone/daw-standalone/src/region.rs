@@ -8,7 +8,7 @@
 
 use daw_proto::Regions;
 use daw_proto::region::{RegionEvent, RegionStreamEvent};
-use daw_proto::{DawError, DawResult, ProjectContext, Region};
+use daw_proto::{DawError, DawResult, ProjectContext, Region, TimeRange};
 
 use crate::sync::Standalone;
 
@@ -38,6 +38,38 @@ impl daw_proto::region::RegionsStreamSource for Standalone {
     }
 }
 
+/// Make a region carrying `guid` — the body of both `add` and
+/// `add_with_guid`. A guid any marker or region of the project already
+/// has is refused (they share one list in the project file).
+fn insert_region(
+    daw: &Standalone,
+    project: &ProjectContext,
+    guid: String,
+    range: TimeRange,
+    name: &str,
+) -> DawResult<u32> {
+    let project_guid =
+        resolve_project(daw, project).ok_or_else(|| DawError::not_found("Project", "current"))?;
+    let (id, region) = daw.with_project_mut(&project_guid, |p| {
+        if crate::sync::project::marker_or_region_guid_taken(p, &guid) {
+            return Err(DawError::already_exists("Region", &guid));
+        }
+        let id = p.next_region_id;
+        p.next_region_id += 1;
+        let mut region = Region::new(range, name.to_string());
+        region.id = Some(id);
+        region.guid = Some(guid);
+        region.lane = crate::sync::project::default_lane(
+            &p.ruler_lanes,
+            crate::sync::RulerLane::DEFAULT_REGION,
+        );
+        p.regions.insert(id, region.clone());
+        Ok((id, region))
+    })??;
+    publish_region_event(daw, &project_guid, RegionEvent::Added(region));
+    Ok(id)
+}
+
 impl Regions for Standalone {
     fn all(&self, project: ProjectContext) -> Vec<Region> {
         let Some(guid) = resolve_project(self, &project) else {
@@ -63,18 +95,24 @@ impl Regions for Standalone {
     }
 
     fn add(&self, project: ProjectContext, start: f64, end: f64, name: &str) -> DawResult<u32> {
-        let guid = resolve_project(self, &project)
-            .ok_or_else(|| DawError::not_found("Project", "current"))?;
-        let (id, region) = self.with_project_mut(&guid, |p| {
-            let id = p.next_region_id;
-            p.next_region_id += 1;
-            let mut region = Region::from_seconds(start, end, name.to_string());
-            region.id = Some(id);
-            p.regions.insert(id, region.clone());
-            (id, region)
-        })?;
-        publish_region_event(self, &guid, RegionEvent::Added(region));
-        Ok(id)
+        insert_region(
+            self,
+            &project,
+            crate::new_braced_guid(),
+            TimeRange::from_seconds(start, end),
+            name,
+        )
+    }
+
+    fn add_with_guid(
+        &self,
+        project: ProjectContext,
+        guid: &str,
+        range: TimeRange,
+        name: &str,
+    ) -> DawResult<u32> {
+        crate::check_new_guid("Region", guid)?;
+        insert_region(self, &project, guid.to_string(), range, name)
     }
 
     fn remove(&self, project: ProjectContext, id: u32) -> DawResult<()> {
@@ -128,7 +166,7 @@ impl Regions for Standalone {
                 .regions
                 .get_mut(&id)
                 .ok_or_else(|| DawError::not_found("Region", &id.to_string()))?;
-            r.color = if color == 0 { None } else { Some(color) };
+            r.color = crate::color_from_service(color);
             Ok::<_, DawError>(r.clone())
         })??;
         publish_region_event(self, &guid, RegionEvent::Changed(region));

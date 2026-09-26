@@ -621,6 +621,24 @@ impl fmt::Display for MarkerRegionCollection {
 
 #[cfg(test)]
 mod tests {
+
+    /// A region with no GUID keeps its lane through a write and a read:
+    /// the empty GUID holds its place, so the lane is not read as the
+    /// `additional` field.
+    #[test]
+    fn a_region_without_a_guid_keeps_its_lane_round_trip() {
+        let region = crate::builder::MarkerBuilder::region(2, 0.0, 4.0, "Cue 1")
+            .lane(2)
+            .build();
+        let mut line = String::new();
+        region.write_marker_line(&mut line, "");
+        let first = line.lines().next().expect("a start line");
+        let back = MarkerRegion::from_marker_line(first).expect("parses");
+        assert_eq!(back.lane, Some(2), "{first}");
+        assert_eq!(back.guid, "");
+        assert_eq!(back.additional, 0);
+    }
+
     use super::*;
 
     #[test]

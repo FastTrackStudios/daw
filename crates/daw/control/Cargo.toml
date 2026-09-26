@@ -29,6 +29,9 @@ tracing = { workspace = true }
 futures = { workspace = true }
 facet = { workspace = true }
 vox-types = { workspace = true }
+# `transport_sync::TransportLeader` feeds the sync core's ClockEstimator
+# and hands its Follower positions. Dependency-free and wasm-clean.
+daw-transport-sync = { workspace = true }
 # Note: No tokio - this crate is WASM-compatible for use in web apps
 
 [lints]

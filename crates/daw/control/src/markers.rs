@@ -83,6 +83,18 @@ impl Markers {
             .await??)
     }
 
+    /// [`Markers::add`], but the marker carries `guid` instead of one the
+    /// backend makes up — how a peer re-creates a marker another engine
+    /// made. A `guid` a marker or region of the project already has is an
+    /// error (`DawError::AlreadyExists`); REAPER answers `NotSupported`.
+    pub async fn add_with_guid(&self, guid: &str, position: f64, name: &str) -> Result<u32> {
+        Ok(self
+            .clients
+            .marker
+            .add_with_guid(self.context(), guid.to_string(), position, name.to_string())
+            .await??)
+    }
+
     /// Remove a marker by id.
     pub async fn remove(&self, id: u32) -> Result<()> {
         self.clients.marker.remove(self.context(), id).await??;

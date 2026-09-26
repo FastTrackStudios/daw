@@ -245,7 +245,7 @@ impl Takes for Standalone {
         take: TakeRef,
         color: Option<u32>,
     ) -> DawResult<()> {
-        self.mutate_take(&project, &item, &take, |t| t.color = color)
+        self.mutate_take_changed(&project, &item, &take, |t| t.color = color)
     }
 
     fn set_volume(
@@ -309,7 +309,7 @@ impl Takes for Standalone {
         take: TakeRef,
         preserve: bool,
     ) -> DawResult<()> {
-        self.mutate_take(&project, &item, &take, |t| t.preserve_pitch = preserve)
+        self.mutate_take_changed(&project, &item, &take, |t| t.preserve_pitch = preserve)
     }
 
     fn set_start_offset(
@@ -319,7 +319,7 @@ impl Takes for Standalone {
         take: TakeRef,
         offset: Duration,
     ) -> DawResult<()> {
-        self.mutate_take(&project, &item, &take, |t| t.start_offset = offset)
+        self.mutate_take_changed(&project, &item, &take, |t| t.start_offset = offset)
     }
 
     fn set_source_file(
@@ -401,25 +401,28 @@ impl Takes for Standalone {
         marker: TakeMarkerCreate,
     ) -> Option<u32> {
         let (proj, take_guid) = marker_target(self, &project, &item, &take)?;
-        self.with_project_mut(&proj, |p| {
-            let list = p.take_markers.entry(take_guid).or_default();
-            list.push(TakeMarker {
-                index: 0,
-                name: marker.name,
-                source_position_seconds: marker.source_position_seconds,
-                color: marker.color,
-            });
-            renumber(list);
-            // The index it landed at, not the one it was pushed to:
-            // markers are kept in source order, so an early marker
-            // added late lands in the middle.
-            list.iter()
-                .position(|m| {
-                    (m.source_position_seconds - marker.source_position_seconds).abs() < 1e-12
-                })
-                .unwrap_or(list.len() - 1) as u32
-        })
-        .ok()
+        let index = self
+            .with_project_mut(&proj, |p| {
+                let list = p.take_markers.entry(take_guid.clone()).or_default();
+                list.push(TakeMarker {
+                    index: 0,
+                    name: marker.name,
+                    source_position_seconds: marker.source_position_seconds,
+                    color: marker.color,
+                });
+                renumber(list);
+                // The index it landed at, not the one it was pushed to:
+                // markers are kept in source order, so an early marker
+                // added late lands in the middle.
+                list.iter()
+                    .position(|m| {
+                        (m.source_position_seconds - marker.source_position_seconds).abs() < 1e-12
+                    })
+                    .unwrap_or(list.len() - 1) as u32
+            })
+            .ok()?;
+        self.publish_take_changed(&proj, &item, &take_guid);
+        Some(index)
     }
 
     fn set_take_marker(
@@ -432,7 +435,7 @@ impl Takes for Standalone {
         let (proj, take_guid) = marker_target(self, &project, &item, &take)
             .ok_or_else(|| DawError::not_found("Take", "location"))?;
         self.with_project_mut(&proj, |p| {
-            let list = p.take_markers.entry(take_guid).or_default();
+            let list = p.take_markers.entry(take_guid.clone()).or_default();
             let Some(m) = list.get_mut(update.index as usize) else {
                 return Err(DawError::not_found("TakeMarker", &update.index.to_string()));
             };
@@ -449,7 +452,9 @@ impl Takes for Standalone {
             }
             renumber(list);
             Ok(())
-        })?
+        })??;
+        self.publish_take_changed(&proj, &item, &take_guid);
+        Ok(())
     }
 
     fn delete_take_marker(
@@ -462,14 +467,16 @@ impl Takes for Standalone {
         let (proj, take_guid) = marker_target(self, &project, &item, &take)
             .ok_or_else(|| DawError::not_found("Take", "location"))?;
         self.with_project_mut(&proj, |p| {
-            let list = p.take_markers.entry(take_guid).or_default();
+            let list = p.take_markers.entry(take_guid.clone()).or_default();
             if (index as usize) >= list.len() {
                 return Err(DawError::not_found("TakeMarker", &index.to_string()));
             }
             list.remove(index as usize);
             renumber(list);
             Ok(())
-        })?
+        })??;
+        self.publish_take_changed(&proj, &item, &take_guid);
+        Ok(())
     }
 
     fn add_take_marker_at_position(
@@ -508,7 +515,10 @@ impl Takes for Standalone {
 }
 
 impl Standalone {
-    fn mutate_take<F>(
+    /// Mutate a take in place and publish [`TakeEvent::Changed`] — for the
+    /// properties no specific variant names, so every setter announces
+    /// itself and a subscriber that re-reads on take events misses nothing.
+    fn mutate_take_changed<F>(
         &self,
         project: &ProjectContext,
         item: &ItemRef,
@@ -518,26 +528,30 @@ impl Standalone {
     where
         F: FnOnce(&mut Take),
     {
-        let guid = resolve_project(self, project).ok_or_else(not_found_proj)?;
-        let item_guid = resolve_item_guid(item)
-            .ok_or_else(|| DawError::not_found("Item", &format!("{item:?}")))?;
-        self.with_project_mut(&guid, |p| {
-            let tl = p
-                .takes
-                .get_mut(&item_guid)
-                .ok_or_else(|| DawError::not_found("Item", &item_guid))?;
-            let idx = resolve_take_index(tl, take)
-                .ok_or_else(|| DawError::not_found("Take", &format!("{take:?}")))?;
-            let t = tl
-                .takes
-                .get_mut(idx)
-                .ok_or_else(|| DawError::not_found("Take", &format!("{take:?}")))?;
+        self.mutate_take_evt(project, item, take, |pg, ig, t| {
             f(t);
-            Ok::<(), DawError>(())
-        })?
+            TakeEvent::Changed {
+                project_guid: pg.to_string(),
+                item_guid: ig.to_string(),
+                take_guid: t.guid.clone(),
+            }
+        })
     }
 
-    /// Like [`mutate_take`] but the closure — given the project guid, item
+    /// Announce a change to take `take_guid`'s markers (read back with
+    /// `get_take_markers`) as [`TakeEvent::Changed`].
+    fn publish_take_changed(&self, project_guid: &str, item: &ItemRef, take_guid: &str) {
+        let Some(item_guid) = resolve_item_guid(item) else {
+            return;
+        };
+        self.bus_events.publish(DawEvent::Take(TakeEvent::Changed {
+            project_guid: project_guid.to_string(),
+            item_guid,
+            take_guid: take_guid.to_string(),
+        }));
+    }
+
+    /// Mutate one take in place. The closure — given the project guid, item
     /// guid, and mutable take — returns the [`TakeEvent`] to publish on the
     /// cross-domain bus (so the sync engine replicates the change).
     fn mutate_take_evt<F>(

@@ -1030,6 +1030,15 @@ impl MarkerRegion {
     /// Regions emit two MARKER lines: the start (with name) and the end (with "").
     pub fn write_marker_line(&self, out: &mut String, indent: &str) {
         // MARKER id position name flags color locked B guid additional [lane]
+        //
+        // An empty GUID is written `""`, not left out: the fields after it
+        // are positional, and `B  0 2` reads back with the `0` as the GUID
+        // and the lane as `additional` — the lane silently lost.
+        let guid = if self.guid.is_empty() {
+            "\"\"".to_string()
+        } else {
+            self.guid.clone()
+        };
         out.push_str(&format!(
             "{}MARKER {} {} \"{}\" {} {} {} B {} {}",
             indent,
@@ -1039,7 +1048,7 @@ impl MarkerRegion {
             self.flags,
             self.color,
             self.locked,
-            self.guid,
+            guid,
             self.additional,
         ));
         if let Some(lane) = self.lane {

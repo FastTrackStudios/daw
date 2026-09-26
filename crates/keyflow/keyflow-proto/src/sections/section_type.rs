@@ -24,6 +24,7 @@ pub enum SectionType {
     Breakdown, // Breakdown section
     Vamp,    // Vamp section (repeated section for improvisation/transitions)
     Refrain, // Refrain section (recurring hook, common in worship charts)
+    Tag,     // Tag — a short repeat of a closing line, often several in a row (worship charts)
     Turnaround, // Turnaround — short instrumental link/transition back into a section
     Pre(Box<SectionType>), // Pre-Chorus, Pre-Verse, etc.
     Post(Box<SectionType>), // Post-Chorus, Post-Verse, etc.
@@ -135,6 +136,7 @@ impl SectionType {
             SectionType::Breakdown => "breakdown".to_string(),
             SectionType::Vamp => "vamp".to_string(),
             SectionType::Refrain => "refrain".to_string(),
+            SectionType::Tag => "tag".to_string(),
             SectionType::Turnaround => "turnaround".to_string(),
             SectionType::Pre(inner) => format!("pre_{}", inner.key()),
             SectionType::Post(inner) => format!("post_{}", inner.key()),
@@ -171,6 +173,7 @@ impl SectionType {
             SectionType::Breakdown => "Breakdown".to_string(),
             SectionType::Vamp => "Vamp".to_string(),
             SectionType::Refrain => "Refrain".to_string(),
+            SectionType::Tag => "Tag".to_string(),
             SectionType::Turnaround => "Turnaround".to_string(),
             SectionType::Pre(inner) => format!("Pre-{}", inner.full_name()),
             SectionType::Post(inner) => format!("Post-{}", inner.full_name()),
@@ -196,6 +199,7 @@ impl SectionType {
             SectionType::Breakdown => "BD".to_string(),
             SectionType::Vamp => "VMP".to_string(),
             SectionType::Refrain => "REF".to_string(),
+            SectionType::Tag => "TAG".to_string(),
             SectionType::Turnaround => "TURN".to_string(),
             SectionType::Pre(inner) => format!("PRE-{}", inner.abbreviation()),
             SectionType::Post(inner) => format!("POST-{}", inner.abbreviation()),
@@ -217,6 +221,7 @@ impl SectionType {
             | SectionType::Breakdown
             | SectionType::Vamp
             | SectionType::Refrain
+            | SectionType::Tag
             | SectionType::Turnaround => false,
             SectionType::Pre(_) | SectionType::Post(_) => false,
             SectionType::Custom(_) => false, // Custom sections don't get numbered
@@ -260,7 +265,7 @@ impl SectionType {
             "instrumental" | "inst" | "instrument" => return Ok(SectionType::Instrumental),
             "solo" => return Ok(SectionType::Solo),
             "count" | "countin" | "count-in" => return Ok(SectionType::CountIn),
-            "tag" | "tags" => return Ok(SectionType::Custom("Tags".to_string())),
+            "tag" | "tags" => return Ok(SectionType::Tag),
             "hits" | "hit" => return Ok(SectionType::Hits),
             "interlude" | "inter" | "int" => return Ok(SectionType::Interlude),
             "breakdown" | "bd" => return Ok(SectionType::Breakdown),
@@ -568,7 +573,7 @@ fn base_section_type(token: &str) -> Option<SectionType> {
         "outro" | "out" => Some(SectionType::Outro),
         "instrumental" | "inst" => Some(SectionType::Instrumental),
         "count" | "countin" | "count-in" => Some(SectionType::CountIn),
-        "tag" | "tags" => Some(SectionType::Custom("Tags".to_string())),
+        "tag" | "tags" => Some(SectionType::Tag),
         "hits" | "hit" => Some(SectionType::Hits),
         "interlude" | "inter" | "int" => Some(SectionType::Interlude),
         "breakdown" | "bd" => Some(SectionType::Breakdown),

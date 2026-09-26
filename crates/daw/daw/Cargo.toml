@@ -114,6 +114,10 @@ standalone-rpp = ["standalone-audio", "daw-standalone/rpp-loader"]
 # Save an opened project to a NEW .rpp beside its original
 # (`daw::standalone::save`) — the write-back experiment; never in place.
 standalone-save = ["standalone-rpp", "daw-standalone/rpp-save"]
+# Save a live project as a `.session` directory and open one back
+# (`daw::standalone::session_file::{save_session, load_session,
+# session_rpp_text}`). Native-only.
+standalone-session-file = ["standalone", "daw-standalone/session-file"]
 # In-process client over the standalone backend
 # (`daw::standalone::bootstrap::build_in_process_daw`) — what a window
 # that owns a Standalone uses to feed daw-control-driven UI.

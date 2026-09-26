@@ -163,7 +163,11 @@ impl TestRunner {
             .join("release")
             .join(cdylib_file_name("reaper_daw_bridge"));
         let plugins_dir = self.resources_dir.join("UserPlugins");
-        install_plugin(&lib_path, &reaper_plugin_file_name("reaper_daw_bridge"), &plugins_dir)?;
+        install_plugin(
+            &lib_path,
+            &reaper_plugin_file_name("reaper_daw_bridge"),
+            &plugins_dir,
+        )?;
         Ok(())
     }
 

@@ -877,7 +877,6 @@ impl LoadedVst3Plugin {
                     }
                 }
             }
-
         }
         self.initialized = true;
         Ok(())

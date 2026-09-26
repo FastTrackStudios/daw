@@ -1174,6 +1174,9 @@ async fn apply_item(
                 warn!("Failed to set active take {idx} on item {item_guid}: {e}");
             }
         }
+        // Names no property and carries no value, so there is nothing
+        // here to replay; a peer that wants these re-reads the item.
+        ItemEvent::Changed { .. } => {}
     }
 }
 
@@ -1302,6 +1305,8 @@ async fn apply_take(
             })
             .await;
         }
+        // Carries no value — nothing to replay (see `ItemEvent::Changed`).
+        TakeEvent::Changed { .. } => {}
     }
 }
 

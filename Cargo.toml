@@ -89,6 +89,7 @@ members = [
     "features/standalone/daw-standalone",
     "features/surfaces/daw-csi",
     "features/sync/daw-audio-sync",
+    "features/sync/daw-transport-sync",
     "features/sync/daw-link",
     "features/sync/daw-network",
     "features/sync/daw-synchronization",
@@ -126,7 +127,10 @@ dock-proto = { path = "libs/dock/dock-proto" }
 # baseview-03 branch + the FTS delta: nice-plug-dioxus, embedded editors,
 # rich track-info, param rescan). The ONE sanctioned exception to
 # path-deps-only — it left the tree so it can track upstream.
-nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
+# Without its VST3 export: no crate here exports a plugin (processor's do,
+# from their own workspace), and the wrapper does not build for iOS, where
+# Session links these UI crates.
+nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03", default-features = false, features = ["editor", "tracing-subscriber"] }
 nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
 nice-plug-xtask = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
 utils = { path = "libs/utils" }
@@ -192,6 +196,7 @@ daw-synchronization = { path = "features/sync/daw-synchronization" }
 daw-link = { path = "features/sync/daw-link" }
 daw-network = { path = "features/sync/daw-network" }
 daw-audio-sync = { path = "features/sync/daw-audio-sync" }
+daw-transport-sync = { path = "features/sync/daw-transport-sync" }
 dawfile-aaf = { path = "features/dawfile/dawfile-aaf" }
 dawfile-ableton = { path = "features/dawfile/dawfile-ableton" }
 dawfile-dawproject = { path = "features/dawfile/dawfile-dawproject" }
@@ -343,40 +348,40 @@ inferno-net = { git = "https://codeberg.org/FastTrackStudios/inferno-control", r
 # (FastTrackStudios/architect: the entity/RPC framework, the auth/crdt/
 # permissions stack, architect-ui + architect-story, architect-telemetry).
 # One tag pin shared by every entry so the whole framework moves together.
-architect = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
-architect-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
-architect-rpc-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
-architect-action-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
-architect-atom = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
-architect-form = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
-architect-permissions = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
-architect-permissions-proto = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
-architect-auth = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
-auth = { git = "https://github.com/FastTrackStudios/architect", rev = "5e4bb829674fe8b2d3527c3b65b9ab3a2b6baa86" }
-auth-proto = { git = "https://github.com/FastTrackStudios/architect", rev = "5e4bb829674fe8b2d3527c3b65b9ab3a2b6baa86" }
-auth-db = { git = "https://github.com/FastTrackStudios/architect", rev = "5e4bb829674fe8b2d3527c3b65b9ab3a2b6baa86" }
-auth-client = { git = "https://github.com/FastTrackStudios/architect", rev = "5e4bb829674fe8b2d3527c3b65b9ab3a2b6baa86" }
-crdt = { git = "https://github.com/FastTrackStudios/architect", rev = "5e4bb829674fe8b2d3527c3b65b9ab3a2b6baa86" }
-crdt-derive = { git = "https://github.com/FastTrackStudios/architect", rev = "5e4bb829674fe8b2d3527c3b65b9ab3a2b6baa86" }
-crdt-seaorm = { git = "https://github.com/FastTrackStudios/architect", rev = "5e4bb829674fe8b2d3527c3b65b9ab3a2b6baa86" }
+architect = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-rpc-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-action-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-atom = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-form = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-permissions = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-permissions-proto = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-auth = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+auth = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+auth-proto = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+auth-db = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+auth-client = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+crdt = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+crdt-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+crdt-seaorm = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
 # The Dioxus primitive library (was libs/ui/fts-ui, renamed on the split).
-architect-ui = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
+architect-ui = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
 # The launcher engine, vendored into architect in v0.2.0 (was
 # launcher-core / launcher-ui / providers on dioxus-launcher.git).
-architect-launcher-core = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
+architect-launcher-core = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
 # default-features = false lives here, not on the consumer: cargo refuses
 # `default-features = false` on a workspace-inherited dep.
-architect-launcher-ui = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
-architect-launcher-providers = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
+architect-launcher-ui = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-launcher-providers = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
 # Wide-events telemetry (was crates/task/telemetry).
-architect-telemetry = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
+architect-telemetry = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
 # Story/snapshot tooling (was libs/fts-story/*).
-architect-story-core = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
-architect-story-macros = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
-architect-story-runtime = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
-architect-story-shell = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
-architect-story-snapshots = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
-architect-story-parity = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.7.4-subscribe-intro" }
+architect-story-core = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-story-macros = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-story-runtime = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-story-shell = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-story-snapshots = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-story-parity = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.9.2" }
 
 # Architect's externals, merged from its dissolved workspace table
 # (root pins win — both were already on the rc.5 fleet).
@@ -405,10 +410,10 @@ totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
 # dynamic-template runs on. These lived here as subtree copies until the
 # repo split; the in-tree copies were byte-identical to the extracted
 # repo and have been deleted in favour of the tag.
-music-catalog = { git = "https://github.com/FastTrackStudios/music-convention", tag = "v0.1.0" }
-color-palette = { git = "https://github.com/FastTrackStudios/music-convention", tag = "v0.1.0" }
-monarchy = { git = "https://github.com/FastTrackStudios/music-convention", tag = "v0.1.0" }
-monarchy_derive = { git = "https://github.com/FastTrackStudios/music-convention", tag = "v0.1.0" }
+music-catalog = { git = "https://github.com/FastTrackStudios/music-convention", tag = "v0.1.3" }
+color-palette = { git = "https://github.com/FastTrackStudios/music-convention", tag = "v0.1.3" }
+monarchy = { git = "https://github.com/FastTrackStudios/music-convention", tag = "v0.1.3" }
+monarchy_derive = { git = "https://github.com/FastTrackStudios/music-convention", tag = "v0.1.3" }
 
 # ── MusicXML parsing (keyflow) ─────────────────────────────────────────
 musicxml = "1.1"
@@ -968,3 +973,4 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.pitch-dsp]
 opt-level = 3
+

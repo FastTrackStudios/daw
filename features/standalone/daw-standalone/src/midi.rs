@@ -33,6 +33,10 @@ use uuid::Uuid;
 
 use crate::sync::{Standalone, TakeList};
 
+/// The tick resolution [`Midi::add_notes`] lengths arrive in: REAPER's
+/// default, which is what the callers compute them at.
+const TICKS_PER_QN: f64 = 960.0;
+
 fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
     match ctx {
         ProjectContext::Project(guid) => Some(guid.clone()),
@@ -116,7 +120,8 @@ impl Midi for Standalone {
             let existing: Vec<u32> = (0..Midi::note_count(self, location.clone())).collect();
             Midi::delete_notes(self, location.clone(), existing);
         }
-        let indices = Midi::add_notes(self, location.clone(), content.notes);
+        // Notes as `notes()` reads them, so the round-trip path.
+        let indices = Midi::add_notes_ppq(self, location.clone(), content.notes);
         for cc in content.ccs {
             Midi::add_cc(self, location.clone(), cc);
         }
@@ -302,22 +307,34 @@ impl Midi for Standalone {
         .unwrap_or(u32::MAX)
     }
 
+    /// REAPER's contract, which is what every caller writes to: the
+    /// start a project quarter-note position, the LENGTH a raw tick
+    /// delta at 960 a quarter (`add_notes_to_take_on_main_thread`
+    /// inserts `start + length_ppq` ticks). Standalone keeps both in
+    /// quarter notes — the file loader divides by the source's ticks,
+    /// the renderer reads both through the tempo map — so the length is
+    /// converted here. Stored as given, a generated click's quarter-note
+    /// tick sounded for 960 quarter notes.
     fn add_notes(&self, location: MidiTakeLocation, notes: Vec<MidiNoteCreate>) -> Vec<u32> {
+        notes
+            .into_iter()
+            .map(|n| {
+                let n = MidiNoteCreate {
+                    length_ppq: n.length_ppq / TICKS_PER_QN,
+                    ..n
+                };
+                Midi::add_note(self, location.clone(), n)
+            })
+            .collect()
+    }
+
+    /// In the units [`Midi::notes`] hands back — quarter notes, start
+    /// and length both — so stored as given: this is the round trip.
+    fn add_notes_ppq(&self, location: MidiTakeLocation, notes: Vec<MidiNoteCreate>) -> Vec<u32> {
         notes
             .into_iter()
             .map(|n| Midi::add_note(self, location.clone(), n))
             .collect()
-    }
-
-    /// Identical to [`Midi::add_notes`] here.
-    ///
-    /// The two differ only for backends that reinterpret `start_ppq` —
-    /// the REAPER one treats it as project quarter-notes. Standalone
-    /// stores what it is given and hands the same numbers back from
-    /// `notes()`, so it already round-trips and there is nothing to
-    /// convert.
-    fn add_notes_ppq(&self, location: MidiTakeLocation, notes: Vec<MidiNoteCreate>) -> Vec<u32> {
-        Midi::add_notes(self, location, notes)
     }
 
     fn delete_note(&self, location: MidiTakeLocation, index: u32) {

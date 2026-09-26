@@ -163,6 +163,20 @@ impl Markers for Reaper {
         Ok(id)
     }
 
+    fn add_with_guid(
+        &self,
+        _project: ProjectContext,
+        _guid: &str,
+        _position: f64,
+        _name: &str,
+    ) -> DawResult<u32> {
+        // `MARKER_GUID:X` is read-only in `GetSetProjectInfo_String`, and
+        // no other API call takes a marker GUID: REAPER mints its own.
+        Err(DawError::not_supported(
+            "REAPER cannot set a marker's GUID through its API",
+        ))
+    }
+
     fn remove(&self, project: ProjectContext, id: u32) -> DawResult<()> {
         let ctx = resolve_project_context(&project);
         let low = ReaperHigh::get().medium_reaper().low();

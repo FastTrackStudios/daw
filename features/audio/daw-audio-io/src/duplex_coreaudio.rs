@@ -309,9 +309,8 @@ fn get_bytes(object: AudioObjectID, selector: u32, scope: u32) -> Result<Vec<u64
     let addr = address(selector, scope);
     let mut size = 0u32;
     // SAFETY: size query only.
-    let status = unsafe {
-        ffi::AudioObjectGetPropertyDataSize(object, &addr, 0, ptr::null(), &mut size)
-    };
+    let status =
+        unsafe { ffi::AudioObjectGetPropertyDataSize(object, &addr, 0, ptr::null(), &mut size) };
     check(status, "get property size")?;
     let mut buf = vec![0u64; (size as usize).div_ceil(8).max(1)];
     // SAFETY: `buf` holds at least `size` bytes.
@@ -362,7 +361,11 @@ fn get_string(object: AudioObjectID, selector: u32) -> Option<String> {
         ok
     };
     // SAFETY: CFStringGetCString NUL-terminated `buf` when it returned true.
-    ok.then(|| unsafe { CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().into_owned())
+    ok.then(|| {
+        unsafe { CStr::from_ptr(buf.as_ptr()) }
+            .to_string_lossy()
+            .into_owned()
+    })
 }
 
 /// Channel count per stream (`AudioBuffer`) for `scope`, in stream order —
@@ -544,7 +547,11 @@ fn dict_set(dict: &Cf, key: &str, value: &Cf) {
 /// A private aggregate of `input` + `output`: output is the clock, the
 /// input is drift-compensated. Invisible to other apps; destroyed with the
 /// backend.
-fn create_aggregate(name: &str, input: AudioObjectID, output: AudioObjectID) -> Result<AudioObjectID, String> {
+fn create_aggregate(
+    name: &str,
+    input: AudioObjectID,
+    output: AudioObjectID,
+) -> Result<AudioObjectID, String> {
     let in_uid = get_string(input, ffi::DEVICE_UID).ok_or("input device has no UID")?;
     let out_uid = get_string(output, ffi::DEVICE_UID).ok_or("output device has no UID")?;
     let uid = format!(
@@ -562,7 +569,8 @@ fn create_aggregate(name: &str, input: AudioObjectID, output: AudioObjectID) -> 
     let in_sub = sub(&in_uid, true);
     let out_sub = sub(&out_uid, false);
     // SAFETY: plain create; the array retains what is appended.
-    let subs = Cf(unsafe { ffi::CFArrayCreateMutable(ptr::null(), 2, &ffi::kCFTypeArrayCallBacks) });
+    let subs =
+        Cf(unsafe { ffi::CFArrayCreateMutable(ptr::null(), 2, &ffi::kCFTypeArrayCallBacks) });
     // Order matters: the input device's channels come first in the
     // aggregate, then the output device's (see the offsets in `start`).
     unsafe {
@@ -712,7 +720,9 @@ unsafe extern "C" fn io_proc(
         st.out_slices.clear();
         for buf in &mut st.out_bufs {
             st.out_slices
-                .push(std::mem::transmute::<&mut [f32], &'static mut [f32]>(&mut buf[..n]));
+                .push(std::mem::transmute::<&mut [f32], &'static mut [f32]>(
+                    &mut buf[..n],
+                ));
         }
         {
             let inputs: &[&[f32]] = std::mem::transmute(&st.in_slices[..]);
@@ -819,7 +829,10 @@ impl DuplexBackend for CoreAudioBackend {
         // first drop.
         let _ = crate::duplex::clock_ns();
         let output = if cfg.outputs > 0 {
-            Some(find_device(cfg.output_device.as_deref(), ffi::SCOPE_OUTPUT)?)
+            Some(find_device(
+                cfg.output_device.as_deref(),
+                ffi::SCOPE_OUTPUT,
+            )?)
         } else {
             None
         };
@@ -873,8 +886,12 @@ impl DuplexBackend for CoreAudioBackend {
 
         // Buffer: clamp into the device's range (another client may still
         // force it smaller — the HAL runs at the smallest request).
-        let range: ffi::ValueRange = get(device, ffi::DEVICE_BUFFER_FRAME_SIZE_RANGE, ffi::SCOPE_GLOBAL)
-            .map_err(fail)?;
+        let range: ffi::ValueRange = get(
+            device,
+            ffi::DEVICE_BUFFER_FRAME_SIZE_RANGE,
+            ffi::SCOPE_GLOBAL,
+        )
+        .map_err(fail)?;
         if let Some(frames) = cfg.latency.map(|(f, _)| f).or(cfg.buffer) {
             let clamped = (frames as f64).clamp(range.minimum, range.maximum) as u32;
             if clamped != frames {
@@ -886,11 +903,18 @@ impl DuplexBackend for CoreAudioBackend {
                     range.maximum
                 );
             }
-            set(device, ffi::DEVICE_BUFFER_FRAME_SIZE, ffi::SCOPE_GLOBAL, clamped)
-                .map_err(fail)?;
+            set(
+                device,
+                ffi::DEVICE_BUFFER_FRAME_SIZE,
+                ffi::SCOPE_GLOBAL,
+                clamped,
+            )
+            .map_err(fail)?;
         }
-        let buffer: u32 = get(device, ffi::DEVICE_BUFFER_FRAME_SIZE, ffi::SCOPE_GLOBAL).map_err(fail)?;
-        let rate: f64 = get(device, ffi::DEVICE_NOMINAL_SAMPLE_RATE, ffi::SCOPE_GLOBAL).map_err(fail)?;
+        let buffer: u32 =
+            get(device, ffi::DEVICE_BUFFER_FRAME_SIZE, ffi::SCOPE_GLOBAL).map_err(fail)?;
+        let rate: f64 =
+            get(device, ffi::DEVICE_NOMINAL_SAMPLE_RATE, ffi::SCOPE_GLOBAL).map_err(fail)?;
         let rate = rate.round() as u32;
 
         let in_streams = stream_channels(device, ffi::SCOPE_INPUT);
@@ -908,7 +932,9 @@ impl DuplexBackend for CoreAudioBackend {
         }
 
         // Scratch sized for the largest block the device can deliver.
-        let max_frames = (range.maximum as usize).max(buffer as usize).clamp(1, 16_384);
+        let max_frames = (range.maximum as usize)
+            .max(buffer as usize)
+            .clamp(1, 16_384);
         let stats = Arc::new(EngineStats::default());
         let mut state = Box::new(IoState {
             in_slots,
@@ -957,7 +983,8 @@ impl DuplexBackend for CoreAudioBackend {
         let client = (&mut *state as *mut IoState).cast::<c_void>();
         // SAFETY: `state` is boxed and owned by the returned backend, which
         // stops and destroys the proc before freeing it.
-        let status = unsafe { ffi::AudioDeviceCreateIOProcID(device, io_proc, client, &mut proc_id) };
+        let status =
+            unsafe { ffi::AudioDeviceCreateIOProcID(device, io_proc, client, &mut proc_id) };
         if let Err(e) = check(status, "create IOProc") {
             remove_listeners();
             return Err(fail(e));
@@ -1072,10 +1099,19 @@ mod tests {
         let streams = [2, 2, 1];
         assert_eq!(
             channel_slots(&streams, 0, 5),
-            vec![Some((0, 0)), Some((0, 1)), Some((1, 0)), Some((1, 1)), Some((2, 0))]
+            vec![
+                Some((0, 0)),
+                Some((0, 1)),
+                Some((1, 0)),
+                Some((1, 1)),
+                Some((2, 0))
+            ]
         );
         // Offset (aggregate: outputs after the input device's) and overflow.
-        assert_eq!(channel_slots(&streams, 3, 3), vec![Some((1, 1)), Some((2, 0)), None]);
+        assert_eq!(
+            channel_slots(&streams, 3, 3),
+            vec![Some((1, 1)), Some((2, 0)), None]
+        );
     }
 
     #[test]

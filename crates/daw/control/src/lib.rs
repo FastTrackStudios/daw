@@ -137,10 +137,13 @@ pub(crate) use daw_proto::ProjectsClient;
 pub(crate) use daw_proto::RegionsClient;
 pub(crate) use daw_proto::RoutingClient;
 pub(crate) use daw_proto::ScreensetsClient;
+pub(crate) use daw_proto::SongFilesClient;
 pub(crate) use daw_proto::TakesClient;
 pub(crate) use daw_proto::TempoMapClient;
 pub(crate) use daw_proto::TracksClient;
 pub(crate) use daw_proto::TransportClient;
+pub(crate) use daw_proto::TransportSyncClient;
+pub(crate) use daw_proto::TransportSyncStreamClient;
 pub(crate) use daw_proto::WindowGeometryClient;
 pub(crate) use daw_proto::batch::BatchExecutionClient;
 pub(crate) use daw_proto::diagnostics::DiagnosticsClient;
@@ -182,11 +185,13 @@ mod regions;
 mod resource;
 mod routing;
 mod screenset;
+pub mod song_files;
 mod stream;
 mod tempo_map;
 mod toolbar;
 mod tracks;
 mod transport;
+pub mod transport_sync;
 mod window_geometry;
 mod window_manager;
 
@@ -210,11 +215,13 @@ pub use self::regions::Regions;
 pub use self::resource::Resources;
 pub use self::routing::{HardwareOutputs, Receives, RouteHandle, Sends};
 pub use self::screenset::Screensets;
+pub use self::song_files::SongFiles;
 pub use self::stream::EventStream;
 pub use self::tempo_map::TempoMap;
 pub use self::toolbar::Toolbar;
 pub use self::tracks::{TrackHandle, Tracks};
 pub use self::transport::Transport;
+pub use self::transport_sync::{ProjectTransportSync, TransportLeader, TransportSync};
 pub use self::window_geometry::WindowGeometry;
 pub use self::window_manager::WindowManager;
 
@@ -253,6 +260,8 @@ architect::clients! {
         pub(crate) plugin_loader: PluginLoadingClient,
         pub(crate) batch: BatchExecutionClient,
         pub(crate) diagnostics: DiagnosticsClient,
+        pub(crate) transport_sync: TransportSyncClient,
+        pub(crate) song_files: SongFilesClient,
         // `#[subscribe]` stream siblings — argless subscriptions;
         // filtering happens client-side in the handle wrappers.
         pub(crate) transport_stream: TransportStreamClient,
@@ -262,6 +271,7 @@ architect::clients! {
         pub(crate) tempo_map_stream: TempoMapStreamClient,
         pub(crate) event_bus_stream: EventBusStreamClient,
         pub(crate) peaks_stream: PeaksStreamClient,
+        pub(crate) transport_sync_stream: TransportSyncStreamClient,
     }
 }
 
@@ -333,6 +343,13 @@ impl Daw {
     /// per-sample RPC / IPC overhead.
     pub fn diagnostics(&self) -> Probes {
         Probes::new(self.clients.clone())
+    }
+
+    /// Transport sync: the server's sync clock and clock-stamped
+    /// playhead positions, so a remote client can follow any project's
+    /// transport to the sample (see [`TransportSync::leader`]).
+    pub fn transport_sync(&self) -> TransportSync {
+        TransportSync::new(self.clients.clone())
     }
 
     /// Get the current/active project

@@ -21,7 +21,14 @@ daw-proto = { workspace = true }
 # Common workspace dependencies
 serde = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 base64 = "0.22.1"
+
+# Peak-cache building (`sessionpeaks`) — decoding media is fts-sample's
+# job, not a parser's, so it arrives only with the `peaks-*` features.
+# The workspace entry is already `default-features = false`, so a
+# consumer that does not ask for peaks pays nothing.
+fts-sample = { workspace = true, optional = true }
 
 # Native-only optional speedups.
 # `parallel` brings in rayon for per-track parsing; turn it off for
@@ -34,6 +41,13 @@ libc = { version = "0.2", optional = true }
 default = ["parallel"]
 parallel = ["dep:rayon"]
 binaries = ["dep:libc"]
+# Build a `.sessionpeaks` cache from an Ogg Vorbis proxy, in memory.
+# Wasm-clean (symphonia, no threads, no I/O): a page that fetched a
+# proxy can scan it itself when no cache was served.
+peaks-ogg = ["dep:fts-sample", "fts-sample/engine-core"]
+# Build one from a WAV on disk, through a memory map. Native only —
+# memmap2 has no wasm target.
+peaks-wav = ["dep:fts-sample", "fts-sample/mapped"]
 
 [dev-dependencies]
 criterion = "0.5"
