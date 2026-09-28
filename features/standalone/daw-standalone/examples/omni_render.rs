@@ -57,13 +57,15 @@ struct Args {
     /// A note held through the pre-roll and released just after the main
     /// note starts (legato), for glide measurements.
     prev: Option<u8>,
+    /// Host tempo (the process context's).
+    bpm: f64,
 }
 
 fn usage() -> ! {
     eprintln!(
         "usage: omni_render <patch.prt_omn|default> <out.wav> [--note 48] [--vel 100] \
          [--hold 2.0] [--tail 2.0] [--sr 48000] [--part 1] [--preroll 1.0] \
-         [--dump-state FILE] [--plugin BUNDLE.vst3] [--cc N=V ...] [--prev NOTE]"
+         [--dump-state FILE] [--plugin BUNDLE.vst3] [--cc N=V ...] [--prev NOTE] [--bpm 120]"
     );
     std::process::exit(2)
 }
@@ -84,6 +86,7 @@ fn parse_args() -> Args {
         plugin: PathBuf::from("/Library/Audio/Plug-Ins/VST3/Omnisphere.vst3"),
         cc: Vec::new(),
         prev: None,
+        bpm: 120.0,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -99,6 +102,7 @@ fn parse_args() -> Args {
             "--dump-state" => a.dump_state = Some(PathBuf::from(val())),
             "--plugin" => a.plugin = PathBuf::from(val()),
             "--prev" => a.prev = Some(val().parse().unwrap_or_else(|_| usage())),
+            "--bpm" => a.bpm = val().parse().unwrap_or_else(|_| usage()),
             "--cc" => {
                 let v = val();
                 let (n, x) = v.split_once('=').unwrap_or_else(|| usage());
@@ -364,6 +368,13 @@ fn main() {
         plugin.descriptor().name
     );
 
+    if std::env::var_os("OMNI_LIST_PARAMS").is_some() {
+        for p in plugin.params() {
+            println!("{}\t{}", p.id, p.name);
+        }
+        return;
+    }
+
     // Default multi as the plugin comes up.
     let base = OmniState::parse(&component_state(&mut plugin)).expect("parse default state");
     let part = a.part - 1;
@@ -406,6 +417,7 @@ fn main() {
     }
 
     plugin.prepare(sr, BLOCK as u32).expect("prepare");
+    plugin.set_tempo(a.bpm);
 
     // Pre-roll: let the engine (and any sample streaming) settle,
     // pumping the run loop between blocks.

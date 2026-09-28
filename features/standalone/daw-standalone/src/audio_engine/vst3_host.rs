@@ -1061,6 +1061,14 @@ impl LoadedVst3Plugin {
         self.activation.as_ref().map(|a| a.block_size)
     }
 
+    /// Set the tempo the plugin sees (the process context's, for
+    /// tempo-synced LFOs, envelopes and delays). No-op before activation.
+    pub fn set_tempo(&mut self, bpm: f64) {
+        if let Some(act) = self.activation.as_mut() {
+            act.process_context.tempo = bpm.max(1.0);
+        }
+    }
+
     /// Process one block of stereo audio. `events.midi` is delivered
     /// to the plugin via a host-implemented `IEventList` (required
     /// for VST3i instrument plugins to make sound). `events.params`
