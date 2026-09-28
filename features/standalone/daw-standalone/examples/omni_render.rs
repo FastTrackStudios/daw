@@ -54,13 +54,16 @@ struct Args {
     plugin: PathBuf,
     /// Controller values `(cc, value)` sent before the note (mod wheel = 1).
     cc: Vec<(u8, u8)>,
+    /// A note held through the pre-roll and released just after the main
+    /// note starts (legato), for glide measurements.
+    prev: Option<u8>,
 }
 
 fn usage() -> ! {
     eprintln!(
         "usage: omni_render <patch.prt_omn|default> <out.wav> [--note 48] [--vel 100] \
          [--hold 2.0] [--tail 2.0] [--sr 48000] [--part 1] [--preroll 1.0] \
-         [--dump-state FILE] [--plugin BUNDLE.vst3] [--cc N=V ...]"
+         [--dump-state FILE] [--plugin BUNDLE.vst3] [--cc N=V ...] [--prev NOTE]"
     );
     std::process::exit(2)
 }
@@ -80,6 +83,7 @@ fn parse_args() -> Args {
         dump_state: None,
         plugin: PathBuf::from("/Library/Audio/Plug-Ins/VST3/Omnisphere.vst3"),
         cc: Vec::new(),
+        prev: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -94,6 +98,7 @@ fn parse_args() -> Args {
             "--preroll" => a.preroll = val().parse().unwrap_or_else(|_| usage()),
             "--dump-state" => a.dump_state = Some(PathBuf::from(val())),
             "--plugin" => a.plugin = PathBuf::from(val()),
+            "--prev" => a.prev = Some(val().parse().unwrap_or_else(|_| usage())),
             "--cc" => {
                 let v = val();
                 let (n, x) = v.split_once('=').unwrap_or_else(|| usage());
@@ -409,11 +414,30 @@ fn main() {
             },
         })
         .collect();
+    let prev_ch = Channel::new((a.part - 1) as u8);
     let mut done = 0;
     while done < pre_frames {
         let n = BLOCK.min(pre_frames - done);
         let first = done == 0;
-        render(&mut plugin, n, |_| if first { ccs.clone() } else { Vec::new() });
+        // The previous note starts half a second before the main one.
+        let prev_on = a.prev.filter(|_| {
+            let at = pre_frames.saturating_sub((0.5 * sr) as usize);
+            (done..done + n).contains(&at)
+        });
+        render(&mut plugin, n, |_| {
+            let mut ev = if first { ccs.clone() } else { Vec::new() };
+            if let Some(k) = prev_on {
+                ev.push(PluginMidiEvent {
+                    offset: 0,
+                    message: MidiEvent::NoteOn {
+                        channel: prev_ch,
+                        key: KeyNumber::new(k),
+                        velocity: Velocity::new(a.vel),
+                    },
+                });
+            }
+            ev
+        });
         pump_run_loop(0.0);
         done += n;
     }
@@ -450,6 +474,18 @@ fn main() {
                     velocity: Velocity::new(vel),
                 },
             });
+        }
+        if pos == 0 {
+            if let Some(k) = a.prev {
+                ev.push(PluginMidiEvent {
+                    offset: 1,
+                    message: MidiEvent::NoteOff {
+                        channel: ch,
+                        key: KeyNumber::new(k),
+                        velocity: Velocity::new(0),
+                    },
+                });
+            }
         }
         if (pos..pos + BLOCK).contains(&hold_frames) {
             ev.push(PluginMidiEvent {
