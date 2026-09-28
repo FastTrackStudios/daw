@@ -185,9 +185,17 @@ impl OmniState {
 /// Find `<tag>..</tag>` starting at or after `from` (tags don't nest
 /// for SynthEngine) and return its byte range.
 fn element_range(x: &str, from: usize, tag: &str) -> Option<(usize, usize)> {
-    let open = format!("<{tag}>");
+    // `<Tag>` or `<Tag …>` (older patches write `<SynthEngine >`).
+    let open = format!("<{tag}");
     let close = format!("</{tag}>");
-    let s = from + x[from..].find(&open)?;
+    let mut at = from;
+    let s = loop {
+        let i = at + x[at..].find(&open)?;
+        match x[i + open.len()..].chars().next() {
+            Some('>') | Some(' ') | Some('\t') | Some('\n') | Some('\r') => break i,
+            _ => at = i + open.len(),
+        }
+    };
     let e = s + x[s..].find(&close)? + close.len();
     Some((s, e))
 }
