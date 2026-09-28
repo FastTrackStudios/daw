@@ -32,7 +32,7 @@ use std::ffi::c_void;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use daw_proto::{Channel, KeyNumber, MidiEvent, Velocity};
+use daw_proto::{Channel, ControllerNumber, ControllerValue, KeyNumber, MidiEvent, Velocity};
 use daw_standalone::audio_engine::vst3_host::{LoadedVst3Plugin, Vst3Host};
 use daw_standalone::plugin::{PluginEvents, PluginMidiEvent};
 
@@ -52,13 +52,15 @@ struct Args {
     preroll: f64,
     dump_state: Option<PathBuf>,
     plugin: PathBuf,
+    /// Controller values `(cc, value)` sent before the note (mod wheel = 1).
+    cc: Vec<(u8, u8)>,
 }
 
 fn usage() -> ! {
     eprintln!(
         "usage: omni_render <patch.prt_omn|default> <out.wav> [--note 48] [--vel 100] \
          [--hold 2.0] [--tail 2.0] [--sr 48000] [--part 1] [--preroll 1.0] \
-         [--dump-state FILE] [--plugin BUNDLE.vst3]"
+         [--dump-state FILE] [--plugin BUNDLE.vst3] [--cc N=V ...]"
     );
     std::process::exit(2)
 }
@@ -77,6 +79,7 @@ fn parse_args() -> Args {
         preroll: 1.0,
         dump_state: None,
         plugin: PathBuf::from("/Library/Audio/Plug-Ins/VST3/Omnisphere.vst3"),
+        cc: Vec::new(),
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -91,6 +94,14 @@ fn parse_args() -> Args {
             "--preroll" => a.preroll = val().parse().unwrap_or_else(|_| usage()),
             "--dump-state" => a.dump_state = Some(PathBuf::from(val())),
             "--plugin" => a.plugin = PathBuf::from(val()),
+            "--cc" => {
+                let v = val();
+                let (n, x) = v.split_once('=').unwrap_or_else(|| usage());
+                a.cc.push((
+                    n.parse().unwrap_or_else(|_| usage()),
+                    x.parse().unwrap_or_else(|_| usage()),
+                ));
+            }
             "-h" | "--help" => usage(),
             s if s.starts_with("--") => usage(),
             _ => pos.push(arg),
@@ -386,10 +397,23 @@ fn main() {
     // Pre-roll: let the engine (and any sample streaming) settle,
     // pumping the run loop between blocks.
     let pre_frames = (a.preroll * sr) as usize;
+    let ccs: Vec<PluginMidiEvent> = a
+        .cc
+        .iter()
+        .map(|&(n, v)| PluginMidiEvent {
+            offset: 0,
+            message: MidiEvent::ControlChange {
+                channel: Channel::new((a.part - 1) as u8),
+                controller: ControllerNumber::new(n),
+                value: ControllerValue::new(v),
+            },
+        })
+        .collect();
     let mut done = 0;
     while done < pre_frames {
         let n = BLOCK.min(pre_frames - done);
-        render(&mut plugin, n, |_| Vec::new());
+        let first = done == 0;
+        render(&mut plugin, n, |_| if first { ccs.clone() } else { Vec::new() });
         pump_run_loop(0.0);
         done += n;
     }
