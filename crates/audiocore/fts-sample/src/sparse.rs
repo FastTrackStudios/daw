@@ -41,6 +41,8 @@ struct Inner {
     have: Vec<Range<u64>>,
     /// The last range a reader asked for and found missing.
     wanted: Option<Range<u64>>,
+    /// How many times bytes have arrived: see [`SparseBytes::arrivals`].
+    arrivals: u64,
 }
 
 /// A file's bytes, as they arrive.
@@ -72,6 +74,7 @@ impl SparseBytes {
                 store: Store::Memory(HashMap::new()),
                 have: Vec::new(),
                 wanted: None,
+                arrivals: 0,
             }),
         })
     }
@@ -103,6 +106,7 @@ impl SparseBytes {
                 store: Store::File(file),
                 have: Vec::new(),
                 wanted: None,
+                arrivals: 0,
             }),
         }))
     }
@@ -161,6 +165,7 @@ impl SparseBytes {
             }
         }
         add_range(&mut inner.have, offset..end);
+        inner.arrivals += 1;
         if inner
             .wanted
             .as_ref()
@@ -169,6 +174,14 @@ impl SparseBytes {
             inner.wanted = None;
         }
         Ok(())
+    }
+
+    /// How many times bytes have arrived. Unchanged means nothing new
+    /// has: a reader that stopped short can wait for it to move rather
+    /// than read the same bytes again to find out.
+    #[must_use]
+    pub fn arrivals(&self) -> u64 {
+        lock(&self.inner).arrivals
     }
 
     /// The ranges that have arrived.
