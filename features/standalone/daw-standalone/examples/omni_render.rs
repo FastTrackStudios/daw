@@ -483,6 +483,10 @@ fn main() {
     let key = KeyNumber::new(a.note);
     let ch = Channel::new((a.part - 1) as u8);
     let vel = a.vel;
+    let chord: Vec<u8> = std::env::var("OMNI_CHORD")
+        .ok()
+        .map(|v| v.split(',').filter_map(|k| k.trim().parse().ok()).collect())
+        .unwrap_or_default();
     let (l, r) = render(&mut plugin, total, |pos| {
         let mut ev = Vec::new();
         if pos == 0 {
@@ -504,6 +508,23 @@ fn main() {
                         key: KeyNumber::new(k),
                         velocity: Velocity::new(0),
                     },
+                });
+            }
+        }
+        // OMNI_CHORD="52,55,60": extra notes held with the main one, each
+        // 50 ms after the last (a voice limit then steals the earliest).
+        for (i, k) in chord.iter().enumerate() {
+            let at = (i + 1) * (sr as usize / 20);
+            if (pos..pos + BLOCK).contains(&at) {
+                ev.push(PluginMidiEvent {
+                    offset: (at - pos) as u32,
+                    message: MidiEvent::NoteOn { channel: ch, key: KeyNumber::new(*k), velocity: Velocity::new(vel) },
+                });
+            }
+            if (pos..pos + BLOCK).contains(&hold_frames) {
+                ev.push(PluginMidiEvent {
+                    offset: (hold_frames - pos) as u32,
+                    message: MidiEvent::NoteOff { channel: ch, key: KeyNumber::new(*k), velocity: Velocity::new(0) },
                 });
             }
         }
