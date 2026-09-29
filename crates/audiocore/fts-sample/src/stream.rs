@@ -802,10 +802,19 @@ impl StreamedSample {
             }
             let from = chunk_no * CHUNK_FRAMES;
             let decode_started = std::time::Instant::now();
-            let Some(pcm) = decode_chunk(stream, &self.index, from, CHUNK_FRAMES, self.channels)
-            else {
-                tracing::warn!(chunk_no, from, "stream: chunk decode failed");
-                continue;
+            let pcm = match decode_chunk_why(stream, &self.index, from, CHUNK_FRAMES, self.channels) {
+                Ok(pcm) => pcm,
+                Err(why) => {
+                    tracing::warn!(
+                        chunk_no,
+                        from,
+                        num_frames = self.num_frames,
+                        offset = self.offset,
+                        bytes = self.bytes,
+                        "stream: chunk decode failed: {why}"
+                    );
+                    continue;
+                }
             };
             DECODE_NS.fetch_add(
                 decode_started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64,
@@ -889,8 +898,23 @@ fn decode_chunk(
     frames: u32,
     channels: u16,
 ) -> Option<Vec<i16>> {
-    let (bytes, starts_at) = index.chunk(stream, from_frame, frames)?;
-    let mut reader = claxon::FlacReader::new(std::io::Cursor::new(bytes)).ok()?;
+    decode_chunk_why(stream, index, from_frame, frames, channels).ok()
+}
+
+/// [`decode_chunk`], saying which step failed — the streamer logs it.
+fn decode_chunk_why(
+    stream: &[u8],
+    index: &FlacIndex,
+    from_frame: u32,
+    frames: u32,
+    channels: u16,
+) -> Result<Vec<i16>, String> {
+    let (bytes, starts_at) = index
+        .chunk(stream, from_frame, frames)
+        .ok_or_else(|| format!("no frame covers it (stream {} bytes, {} total frames)", stream.len(), index.total_frames()))?;
+    let n_bytes = bytes.len();
+    let mut reader = claxon::FlacReader::new(std::io::Cursor::new(bytes))
+        .map_err(|e| format!("FLAC header: {e} ({n_bytes} bytes from frame {starts_at})"))?;
     let info = reader.streaminfo();
     let shift = info.bits_per_sample as i32 - 16;
     let ch = channels.max(1) as usize;
@@ -902,14 +926,16 @@ fn decode_chunk(
         if i < skip {
             continue;
         }
-        let v = s.ok()?;
+        let v = s.map_err(|e| {
+            format!("sample {i}: {e} ({n_bytes} bytes from frame {starts_at}, wanted {from_frame})")
+        })?;
         let v = if shift > 0 { v >> shift } else { v << (-shift) };
         out.push(v.clamp(i16::MIN as i32, i16::MAX as i32) as i16);
         if out.len() >= want {
             break;
         }
     }
-    Some(out)
+    Ok(out)
 }
 
 // ── The streamer thread ─────────────────────────────────────────────────────
