@@ -211,6 +211,12 @@ pub trait Decode {
     ///
     /// The stream is corrupt, or its next bytes have not arrived.
     fn decode(&mut self, out: &mut Vec<f32>) -> Result<Option<(u64, usize)>, DecodeError>;
+    /// A count that moves when more of the stream's bytes arrive — after a
+    /// [`DecodeError::NotYet`], nothing new can decode until it does. A
+    /// stream whose bytes are all here keeps it at 0.
+    fn arrivals(&self) -> u64 {
+        0
+    }
 }
 
 impl<D: Decode + ?Sized> Decode for Box<D> {
@@ -220,6 +226,10 @@ impl<D: Decode + ?Sized> Decode for Box<D> {
 
     fn decode(&mut self, out: &mut Vec<f32>) -> Result<Option<(u64, usize)>, DecodeError> {
         (**self).decode(out)
+    }
+
+    fn arrivals(&self) -> u64 {
+        (**self).arrivals()
     }
 }
 
@@ -273,6 +283,10 @@ impl Decode for RemoteOgg {
         Ok(())
     }
 
+    fn arrivals(&self) -> u64 {
+        self.bytes.arrivals()
+    }
+
     fn decode(&mut self, out: &mut Vec<f32>) -> Result<Option<(u64, usize)>, DecodeError> {
         let Some(stream) = self.stream.as_mut() else {
             return Err(DecodeError::NotYet);
@@ -300,6 +314,10 @@ pub struct StreamFeeder<D> {
     failed: bool,
     /// Chunks kept decoded ahead of the playhead ([`AHEAD`] unless set).
     ahead: usize,
+    /// Stopped short for bytes that had not arrived: the decoder's
+    /// [`Decode::arrivals`] and the playhead's chunk then. Until one of
+    /// them moves, a pump has nothing new to try.
+    stalled: Option<(u64, usize)>,
 }
 
 /// How far ahead of the playhead to keep decoded, and how far behind.
@@ -330,6 +348,7 @@ impl<D: Decode> StreamFeeder<D> {
             pending: (0, Vec::new()),
             failed: false,
             ahead: AHEAD,
+            stalled: None,
         }
     }
 
@@ -360,6 +379,7 @@ impl<D: Decode> StreamFeeder<D> {
             pending: self.pending,
             failed: self.failed,
             ahead: self.ahead,
+            stalled: self.stalled,
         }
     }
 
@@ -372,6 +392,17 @@ impl<D: Decode> StreamFeeder<D> {
         }
         let count = self.source.chunk_count();
         let here = usize::try_from(self.source.wanted()).unwrap_or(usize::MAX) / CHUNK;
+        // Read before trying, so bytes arriving during the try are tried
+        // on the next pump rather than taken as already seen.
+        let arrivals = self.decoder.arrivals();
+        if self.stalled == Some((arrivals, here)) {
+            // Waiting on bytes, and none have come: trying again would
+            // decode the same frames to stop at the same place. (It did,
+            // every few milliseconds, for every take whose proxy was
+            // only partly fetched — a core, for as long as the set was
+            // open.)
+            return false;
+        }
         let window = here.saturating_sub(BEHIND)..(here + self.ahead).min(count);
         self.source.evict(window.start..window.end);
         // What will be heard first first: from the playhead on, then
@@ -388,12 +419,19 @@ impl<D: Decode> StreamFeeder<D> {
             .into_iter()
             .filter(|i| !self.source.resident(*i))
             .collect();
+        let mut waiting = false;
         for next in gaps.into_iter().take(MAX_GAPS_TRIED) {
             match self.fill(next, &window, budget) {
-                Filled::Some => return true,
-                Filled::NotYet => continue,
+                Filled::Some => {
+                    self.stalled = None;
+                    return true;
+                }
+                Filled::NotYet => waiting = true,
                 Filled::Nothing => return false,
             }
+        }
+        if waiting {
+            self.stalled = Some((arrivals, here));
         }
         false
     }
@@ -426,6 +464,8 @@ impl<D: Decode> StreamFeeder<D> {
             self.pending = (next, Vec::with_capacity(CHUNK * ch));
         }
         let mut done = 0usize;
+        // Progress is a chunk kept: what a stop short drops does not count.
+        let first = self.pending.0;
         while done < budget {
             let before = self.pending.1.len();
             match self.decoder.decode(&mut self.pending.1) {
@@ -445,10 +485,12 @@ impl<D: Decode> StreamFeeder<D> {
                 }
                 Err(DecodeError::NotYet) => {
                     // What was half built is dropped; the next pump seeks to
-                    // the chunk again once more has arrived.
+                    // the chunk again once more has arrived. Only a chunk
+                    // kept on the way is progress — counting what was just
+                    // dropped kept the butler decoding it again forever.
                     self.at = None;
                     self.pending.1.clear();
-                    return if done > 0 {
+                    return if self.pending.0 > first {
                         Filled::Some
                     } else {
                         Filled::NotYet
@@ -594,6 +636,84 @@ mod tests {
         let s = f.source();
         assert_eq!(s.sample(frames as usize - 1, 0), level(frames - 1));
         assert_eq!(s.sample(frames as usize, 0), 0.0, "past the end");
+    }
+
+    /// A proxy whose bytes have arrived up to `have` frames: decoding past
+    /// them is `NotYet`, and every frame decoded is counted.
+    struct Partial {
+        ramp: Ramp,
+        have: u64,
+        arrivals: u64,
+        decoded: u64,
+    }
+
+    impl Decode for Partial {
+        fn seek(&mut self, frame: u64) -> Result<(), DecodeError> {
+            self.ramp.seek(frame)
+        }
+
+        fn decode(&mut self, out: &mut Vec<f32>) -> Result<Option<(u64, usize)>, DecodeError> {
+            if self.ramp.at >= self.have {
+                return Err(DecodeError::NotYet);
+            }
+            let got = self.ramp.decode(out)?;
+            if let Some((_, n)) = got {
+                self.decoded += n as u64;
+            }
+            Ok(got)
+        }
+
+        fn arrivals(&self) -> u64 {
+            self.arrivals
+        }
+    }
+
+    #[test]
+    fn a_take_short_of_its_bytes_waits_for_more_rather_than_decoding_again() {
+        let frames = CHUNK as u64 * 100;
+        // Two and a half chunks arrived: the third stops short.
+        let have = CHUNK as u64 * 5 / 2;
+        let mut f = StreamFeeder::new(
+            Streamed::new(2, 44_100, frames),
+            Partial {
+                ramp: Ramp {
+                    frames,
+                    at: 0,
+                    seeks: 0,
+                },
+                have,
+                arrivals: 1,
+                decoded: 0,
+            },
+        );
+        let mut turns = 0;
+        while f.pump(4_096) {
+            turns += 1;
+            assert!(turns < 1_000, "a take short of its bytes must stop pumping");
+        }
+        assert!(f.source().resident(1), "what arrived is decoded");
+        assert!(
+            !f.source().resident(2),
+            "the chunk short of its bytes is not"
+        );
+        let decoded = f.decoder.decoded;
+        for _ in 0..50 {
+            assert!(!f.pump(4_096));
+        }
+        assert_eq!(
+            f.decoder.decoded, decoded,
+            "nothing arrived: nothing decoded again"
+        );
+
+        // The rest arrives: it decodes.
+        f.decoder.have = frames;
+        f.decoder.arrivals += 1;
+        while f.pump(4_096) {}
+        assert!(f.source().resident(2));
+        assert_eq!(
+            f.source().sample(CHUNK * 2 + 9, 0),
+            level(CHUNK as u64 * 2 + 9)
+        );
     }
 }
 
