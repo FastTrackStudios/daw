@@ -143,6 +143,50 @@ impl StreamCursor {
         v
     }
 
+    /// Two consecutive frames starting at sample index `a` (interleaved,
+    /// `ch` channels; `b` the second frame's index) straight from the held
+    /// head or chunk — ONE range check and plain slice reads, instead of a
+    /// [`get`](Self::get) per sample (each re-checking the range, re-branching
+    /// head vs chunk, re-testing the prefetch). `None` when the pair is not
+    /// wholly inside what the cursor holds. Issues the read-ahead like `get`.
+    #[inline]
+    pub fn frame_pair(&mut self, a: usize, b: usize, ch: usize) -> Option<((f32, f32), (f32, f32))> {
+        const SCALE: f32 = 1.0 / 32768.0;
+        let hi_needed = b + ch.max(1);
+        if a < self.lo || hi_needed > self.hi {
+            return None;
+        }
+        let (data, base): (&[i16], usize) = if let Some(stream) = self.head.as_ref() {
+            (&stream.head, 0)
+        } else {
+            (self.chunk.as_deref()?.as_slice(), self.lo)
+        };
+        let (ia, ib) = (a - base, b - base);
+        if ib + ch.max(1) > data.len() {
+            return None;
+        }
+        let pair = if ch >= 2 {
+            (
+                (f32::from(data[ia]) * SCALE, f32::from(data[ia + 1]) * SCALE),
+                (f32::from(data[ib]) * SCALE, f32::from(data[ib + 1]) * SCALE),
+            )
+        } else {
+            let (x, y) = (f32::from(data[ia]) * SCALE, f32::from(data[ib]) * SCALE);
+            ((x, x), (y, y))
+        };
+        if !self.prefetched && self.head.is_none() {
+            if let Some(stream) = self.src.as_ref() {
+                let ch = stream.channels.max(1) as usize;
+                if b + ch * READ_AHEAD_FRAMES as usize >= self.hi {
+                    let chunk_no = (self.lo / ch) as u32 / CHUNK_FRAMES;
+                    stream.request(chunk_no + 1);
+                    self.prefetched = true;
+                }
+            }
+        }
+        Some(pair)
+    }
+
     /// Point the cursor at whichever chunk covers `index`. Returns whether it
     /// now holds one.
     #[inline]

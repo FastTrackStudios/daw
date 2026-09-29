@@ -631,28 +631,20 @@ impl SampleData {
         let ch = self.channels as usize;
         let next = (frame_idx + 1).min(last);
         let (a, b) = (frame_idx * ch, next * ch);
-        // The head is always resident and read directly; the cursor covers
-        // the streamed body.
-        let want_hi = b + ch.saturating_sub(1);
-        if cursor.get(a).is_none() || cursor.get(want_hi).is_none() {
-            // A pair straddling a chunk boundary is rare (once per chunk) and
-            // handled by the per-sample fallback below rather than by holding
-            // two chunks.
-            if !cursor.seek(stream, a) {
-                return self.frame_pair(frame_idx, last);
+        // The common case: both frames inside what the cursor already holds
+        // (the resident head, or the chunk in progress) — one range check.
+        if let Some(pair) = cursor.frame_pair(a, b, ch) {
+            return pair;
+        }
+        // Otherwise move to the chunk covering `a`. A pair straddling a chunk
+        // boundary is rare (once per chunk) and handled by the per-sample
+        // fallback rather than by holding two chunks.
+        if cursor.seek(stream, a) {
+            if let Some(pair) = cursor.frame_pair(a, b, ch) {
+                return pair;
             }
         }
-        let mut read = |i: usize| cursor.get(i);
-        match self.channels {
-            1 => match (read(a), read(b)) {
-                (Some(x), Some(y)) => ((x, x), (y, y)),
-                _ => self.frame_pair(frame_idx, last),
-            },
-            _ => match (read(a), read(a + 1), read(b), read(b + 1)) {
-                (Some(l0), Some(r0), Some(l1), Some(r1)) => ((l0, r0), (l1, r1)),
-                _ => self.frame_pair(frame_idx, last),
-            },
-        }
+        self.frame_pair(frame_idx, last)
     }
 
     /// The two consecutive stereo frames a linear interpolator needs, read
