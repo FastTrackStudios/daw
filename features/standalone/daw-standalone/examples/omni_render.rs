@@ -266,12 +266,26 @@ fn render(
     let zeros = vec![0.0f32; BLOCK];
     let mut l = vec![0.0f32; frames];
     let mut r = vec![0.0f32; frames];
+    // OMNI_PARAMS="9=0.264,6=0.264": host parameters (plain values) held
+    // every block — e.g. a gig's widgets driving Omnisphere's MIDI-learned
+    // automation slots.
+    let params: Vec<(u32, f64)> = std::env::var("OMNI_PARAMS")
+        .ok()
+        .map(|v| {
+            v.split(',')
+                .filter_map(|kv| {
+                    let (k, v) = kv.split_once('=')?;
+                    Some((k.trim().parse().ok()?, v.trim().parse().ok()?))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let mut pos = 0;
     while pos < frames {
         let n = BLOCK.min(frames - pos);
         let midi = events_at(pos);
         let ev = PluginEvents {
-            params: &[],
+            params: &params,
             midi: &midi,
             note_expressions: &[],
         };
@@ -387,7 +401,15 @@ fn main() {
     );
 
     let mut expect_name = None;
-    if a.patch.is_none() {
+    // OMNI_STATE=<file>: a whole captured multi (the component state as
+    // Omnisphere writes it — e.g. a gig's instance, decoded), instead of a
+    // patch spliced into the default one. Play its parts by `--part`.
+    if let Some(path) = std::env::var_os("OMNI_STATE") {
+        let bytes = std::fs::read(&path).expect("read OMNI_STATE");
+        set_component_state(&mut plugin, &bytes);
+        pump_run_loop(1.0);
+        eprintln!("[{:>6.2?}] setState from {}", t0.elapsed(), std::path::Path::new(&path).display());
+    } else if a.patch.is_none() {
         // Round-trip the untouched default multi through setState so
         // both renders take the same path through the plugin.
         set_component_state(&mut plugin, &base.to_bytes());
@@ -407,6 +429,14 @@ fn main() {
             trailer: base.trailer.clone(),
         };
         st.xml.replace_range(s..e, &engine);
+        // OMNI_PLEVEL=0.44: the part's mixer fader (`pLevelN`, 0.75 at
+        // init), for measuring its law.
+        if let Some(level) = std::env::var("OMNI_PLEVEL").ok().and_then(|v| v.parse::<f32>().ok()) {
+            let key = format!("pLevel{part}=\"");
+            let at = st.xml.find(&key).expect("multi has no part level") + key.len();
+            let end = at + st.xml[at..].find('"').expect("unterminated pLevel");
+            st.xml.replace_range(at..end, &format!("{:08x}", level.to_bits()));
+        }
         set_component_state(&mut plugin, &st.to_bytes());
         pump_run_loop(0.5);
         eprintln!(
