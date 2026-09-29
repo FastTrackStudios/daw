@@ -1160,11 +1160,15 @@ impl SampleCache {
         self.inner
             .pcm_pack
             .as_ref()
+            // ANY streamed entry makes it a streaming pack. Judging by the
+            // first entry of a hash map was random: a pack mixing long notes
+            // with short key-up samples came out "not streamable" whenever a
+            // short one iterated first, its preload was then capped (to 64
+            // samples by default) and the uncovered notes dropped — a
+            // different set every run.
             .map(|pack| {
                 pack.entries_iter()
-                    .next()
-                    .map(|(_, e)| e.mapped_fmt().is_none() && should_stream(e))
-                    .unwrap_or(false)
+                    .any(|(_, e)| e.mapped_fmt().is_none() && should_stream(e))
             })
             .unwrap_or(false)
     }
@@ -1564,9 +1568,14 @@ impl SampleCache {
     }
 
     fn publish_loaded_snapshot(&self) {
-        if let Ok(loaded) = self.inner.loaded.read() {
-            self.inner.loaded_snapshot.store(Arc::new(loaded.clone()));
-        }
+        // Clone and store under the WRITE lock: publishes serialize, so the
+        // last one to store always carries the latest map. Under a read lock
+        // two publishers could interleave — A clones, B inserts and stores,
+        // A stores its older clone — and B's sample vanished from the
+        // audio-thread view for good (a streaming pack's notes then dropped
+        // at random, all or nothing per run).
+        let loaded = self.inner.loaded.write().unwrap_or_else(|e| e.into_inner());
+        self.inner.loaded_snapshot.store(Arc::new(loaded.clone()));
     }
 }
 
@@ -1595,21 +1604,26 @@ fn estimated_decoded_bytes(
     const F32: usize = std::mem::size_of::<f32>();
     const UNKNOWN: usize = 2 * 1024 * 1024;
     // Raw-PCM entries are mapped, not decoded: they cost no anonymous memory,
-    // so they never spend budget and never stop a preload.
-    if let Some((_, entry)) = packed {
-        return if entry.mapped_fmt().is_some() {
+    // so they never spend budget and never stop a preload. A STREAMED FLAC
+    // entry keeps only its head resident (i16 frames, plus the block index),
+    // so that is what it costs — charging its whole decoded size made a big
+    // streaming pack "exceed" the budget on paper, and the preload then
+    // skipped entries at random (their notes dropped, all or nothing).
+    let cost = |entry: &PackEntry| {
+        if entry.mapped_fmt().is_some() {
             0
+        } else if should_stream(entry) {
+            super::stream::HEAD_FRAMES as usize * entry.channels as usize * 2 + 16 * 1024
         } else {
             entry.samples() * F32
-        };
+        }
+    };
+    if let Some((_, entry)) = packed {
+        return cost(entry);
     }
     if let Some(pack) = inner.pcm_pack.as_ref() {
         if let Some(entry) = pack.entry_for_path(path) {
-            return if entry.mapped_fmt().is_some() {
-                0
-            } else {
-                entry.samples() * F32
-            };
+            return cost(entry);
         }
     }
     if let Some(entry) = inner.prepared.get(path) {
