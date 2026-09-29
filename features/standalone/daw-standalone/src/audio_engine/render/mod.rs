@@ -350,6 +350,17 @@ impl RenderScratch {
 /// rendering a block without its FX stage — on the order of 10–50 µs.
 const PLUGIN_LOCK_SPINS: usize = 2_000;
 
+/// Blocks rendered WITHOUT their plugin stage because a control thread held
+/// the plugin map (see the try-lock in `render_block_varispeed`). For an
+/// instrument track that block is silent — a dropout no CPU measure shows.
+static PLUGIN_STAGE_SKIPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How many blocks have rendered without their plugin stage (process-wide).
+#[must_use]
+pub fn plugin_stage_skips() -> u64 {
+    PLUGIN_STAGE_SKIPS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 pub struct ProjectRenderer {
     daw: Standalone,
     project_guid: String,
@@ -733,6 +744,10 @@ impl ProjectRenderer {
                 }
                 Err(std::sync::TryLockError::WouldBlock) => std::hint::spin_loop(),
             }
+        }
+
+        if plugins.is_none() {
+            PLUGIN_STAGE_SKIPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
 
         // 2–4) Per-track processing in topo order over the routing
