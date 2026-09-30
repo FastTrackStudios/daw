@@ -36,6 +36,7 @@ mod envelope;
 mod graph;
 mod item_mix;
 mod midi;
+mod parallel;
 mod snapshot;
 
 use std::sync::Arc;
@@ -45,6 +46,7 @@ use item_mix::mix_item_into_bus;
 use midi::{collect_midi_events_into, collect_note_expressions};
 #[cfg(test)]
 use midi::collect_midi_events;
+use parallel::{LaneJob, PluginPtr};
 use snapshot::{RenderSnapshot, TrackSnapshot};
 
 use crate::sync::Standalone;
@@ -318,7 +320,19 @@ struct RenderScratch {
     /// thread.
     midi_buckets: Vec<Vec<crate::plugin::PluginMidiEvent>>,
     midi_events: Vec<crate::plugin::PluginMidiEvent>,
+    /// Realtime mode with a lane pool: this block's independent tracks, one
+    /// job each (see [`LaneJob`]), and which tracks ran that way.
+    lane_jobs: Vec<LaneJob>,
+    /// Per track: something feeds its bus (a child or a send), so it waits
+    /// for the topo loop.
+    fed: Vec<bool>,
+    /// Per track: its FX chain already ran in the parallel pass.
+    chain_done: Vec<bool>,
+    /// Per track: its chain's time last block, to hand out the longest
+    /// lanes first.
+    lane_cost: Vec<u32>,
 }
+
 
 impl RenderScratch {
     /// Size everything for `n` tracks × `frames` and zero the buses.
@@ -338,6 +352,11 @@ impl RenderScratch {
         }
         self.dirty.clear();
         self.dirty.resize(n, false);
+        self.chain_done.clear();
+        self.chain_done.resize(n, false);
+        if self.lane_cost.len() != n {
+            self.lane_cost.resize(n, 0);
+        }
         for v in [
             &mut self.in_l,
             &mut self.in_r,
@@ -487,6 +506,9 @@ pub struct ProjectRenderer {
     /// snapshot builder the audio thread hands project changes to.
     #[cfg(not(target_arch = "wasm32"))]
     realtime: std::sync::OnceLock<SnapshotBuilder>,
+    /// Realtime mode: the worker threads independent tracks render on.
+    #[cfg(not(target_arch = "wasm32"))]
+    lanes: std::sync::OnceLock<parallel::LanePool>,
 }
 
 /// Builds render snapshots off the audio thread, for a realtime renderer.
@@ -538,6 +560,8 @@ impl ProjectRenderer {
             live_midi: std::sync::Mutex::new(None),
             #[cfg(not(target_arch = "wasm32"))]
             realtime: std::sync::OnceLock::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            lanes: std::sync::OnceLock::new(),
         }
     }
 
@@ -549,6 +573,11 @@ impl ProjectRenderer {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn set_realtime(&self) {
         use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        let threads = parallel::default_threads();
+        if threads > 0 {
+            let pool = self.lanes.get_or_init(|| parallel::LanePool::new(threads));
+            tracing::debug!(workers = pool.threads(), "render: lane pool");
+        }
         self.realtime.get_or_init(|| {
             let wanted = Arc::new(AtomicU64::new(NO_REVISION));
             let ready = Arc::new(std::sync::Mutex::new(None));
@@ -856,6 +885,10 @@ impl ProjectRenderer {
             panicked_fx,
             midi_buckets,
             midi_events,
+            lane_jobs,
+            fed,
+            chain_done,
+            lane_cost,
             ..
         } = &mut *scratch;
 
@@ -1027,6 +1060,117 @@ impl ProjectRenderer {
         let plugin_lock_us = t_lock.us();
         let (mut fx_us, mut slowest) = (0u32, (0u32, 0u32));
 
+        // 1.5) Realtime with a lane pool: every track nothing feeds (no
+        // children, no received sends) already holds its whole input, so its
+        // FX chain — an instrument lane's synth — runs now, across cores. The
+        // topo loop below then skips those chains. Only chains whose every
+        // plugin is `parallel_safe` and prepared go; anything else waits for
+        // the loop, exactly as before.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let (Some(pool), Some(map)) = (self.lanes.get(), plugins.as_mut()) {
+            fed.clear();
+            fed.resize(n, false);
+            for t in tracks.iter() {
+                if t.parent_send
+                    && let Some(pi) = t.parent_idx
+                {
+                    fed[pi] = true;
+                }
+                for snd in &t.sends {
+                    if let Some(di) = snd.dest_idx {
+                        fed[di] = true;
+                    }
+                }
+            }
+            let mut jobs = 0;
+            for &ti in &snap.order {
+                let t = &tracks[ti];
+                if fed[ti]
+                    || !passes(ti)
+                    || t.fx_chain.is_empty()
+                    || t.sends.iter().any(|s| s.mode == daw_proto::routing::SendMode::PreFx)
+                {
+                    continue;
+                }
+                if lane_jobs.len() <= jobs {
+                    lane_jobs.push(LaneJob::default());
+                }
+                let job = &mut lane_jobs[jobs];
+                job.chain.clear();
+                let mut ok = true;
+                for (i, fx_guid) in t.fx_chain.iter().enumerate() {
+                    if !t.fx_enabled.get(i).copied().unwrap_or(true) || panicked_fx.contains(fx_guid) {
+                        continue;
+                    }
+                    let Some(plugin) = map.get_mut(fx_guid) else { continue };
+                    if !plugin.is_prepared() || !plugin.parallel_safe() {
+                        ok = false;
+                        break;
+                    }
+                    job.chain.push((i, PluginPtr::new(&mut **plugin)));
+                }
+                if !ok || job.chain.is_empty() {
+                    job.chain.clear();
+                    continue;
+                }
+                job.ti = ti;
+                job.bus = buses[ti].samples.as_mut_ptr() as usize;
+                for v in [&mut job.in_l, &mut job.in_r, &mut job.out_l, &mut job.out_r] {
+                    if v.len() != frames {
+                        v.resize(frames, 0.0);
+                    }
+                }
+                collect_midi_events_into(
+                    &mut job.midi,
+                    t,
+                    start_seconds,
+                    end_seconds,
+                    frames_per_second,
+                    frames,
+                );
+                if let Some(bucket) = live_midi_buckets.get_mut(ti)
+                    && !bucket.is_empty()
+                {
+                    job.midi.append(bucket);
+                    job.midi.sort_by_key(|e| e.offset);
+                }
+                job.note_expr =
+                    collect_note_expressions(t, start_seconds, end_seconds, frames_per_second, frames);
+                job.ran = false;
+                job.panicked = None;
+                jobs += 1;
+            }
+            if jobs >= 2 {
+                // Longest lanes first, so the last job to finish is short.
+                lane_jobs[..jobs].sort_unstable_by_key(|j| std::cmp::Reverse(lane_cost[j.ti]));
+                pool.run_lanes(&mut lane_jobs[..jobs], tracks, frames);
+                for job in &mut lane_jobs[..jobs] {
+                    let ti = job.ti;
+                    chain_done[ti] = true;
+                    dirty[ti] |= job.ran;
+                    lane_cost[ti] = job.us;
+                    fx_us += job.us;
+                    if job.us > slowest.1 {
+                        slowest = (ti as u32, job.us);
+                    }
+                    if let Some(i) = job.panicked
+                        && let Some(fx_guid) = tracks[ti].fx_chain.get(i)
+                    {
+                        panicked_fx.insert(fx_guid.clone());
+                        tracing::error!(
+                            "plugin {fx_guid} PANICKED in process_block on track '{}' — \
+                             bypassing it from now on",
+                            tracks[ti].name,
+                        );
+                    }
+                }
+            }
+            // No pointer into the map outlives this block.
+            for job in &mut lane_jobs[..jobs] {
+                job.chain.clear();
+            }
+        }
+
         // 2–4) Per-track processing in topo order over the routing
         // graph (children before folder parents, senders before their
         // destinations): each track's bus is gained/panned, its sends
@@ -1074,7 +1218,7 @@ impl ProjectRenderer {
             // received sends — REAPER's signal flow. Synthetic /
             // unloaded FX are skipped — no DSP, no work.
             let t_fx = Stamp::now();
-            if !t.fx_chain.is_empty() {
+            if !t.fx_chain.is_empty() && !chain_done[ti] {
                 let bus = &mut buses[ti];
                 // MIDI + note-expression events for this block. Both
                 // lists go to every plugin in the chain (REAPER's
@@ -1185,7 +1329,7 @@ impl ProjectRenderer {
                     dirty[ti] = true;
                 }
             }
-            if !t.fx_chain.is_empty() {
+            if !t.fx_chain.is_empty() && !chain_done[ti] {
                 let us = t_fx.us();
                 fx_us += us;
                 if us > slowest.1 {
