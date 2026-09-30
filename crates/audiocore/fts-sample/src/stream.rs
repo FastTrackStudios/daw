@@ -187,6 +187,36 @@ impl StreamCursor {
         Some(pair)
     }
 
+    /// What the cursor holds — `(interleaved samples, the index of the
+    /// first)` — for a reader that walks it directly (a voice's fast path).
+    /// Call [`touch`](Self::touch) with the furthest index read, so the
+    /// read-ahead still fires.
+    #[inline]
+    #[must_use]
+    pub fn held(&self) -> Option<(&[i16], usize)> {
+        if let Some(stream) = self.head.as_ref() {
+            return Some((&stream.head[..self.hi.min(stream.head.len())], 0));
+        }
+        self.chunk.as_deref().map(|c| (c.as_slice(), self.lo))
+    }
+
+    /// A direct reader got as far as sample index `b`: issue the read-ahead
+    /// for the next chunk if that is near the end of this one — what
+    /// [`frame_pair`](Self::frame_pair) does on every read.
+    #[inline]
+    pub fn touch(&mut self, b: usize) {
+        if !self.prefetched && self.head.is_none() {
+            if let Some(stream) = self.src.as_ref() {
+                let ch = stream.channels.max(1) as usize;
+                if b + ch * READ_AHEAD_FRAMES as usize >= self.hi {
+                    let chunk_no = (self.lo / ch) as u32 / CHUNK_FRAMES;
+                    stream.request(chunk_no + 1);
+                    self.prefetched = true;
+                }
+            }
+        }
+    }
+
     /// Point the cursor at whichever chunk covers `index`. Returns whether it
     /// now holds one.
     #[inline]

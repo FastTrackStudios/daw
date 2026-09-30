@@ -42,7 +42,9 @@ use std::sync::Arc;
 
 use envelope::EnvelopeCursor;
 use item_mix::mix_item_into_bus;
-use midi::{collect_midi_events, collect_note_expressions};
+use midi::{collect_midi_events_into, collect_note_expressions};
+#[cfg(test)]
+use midi::collect_midi_events;
 use snapshot::{RenderSnapshot, TrackSnapshot};
 
 use crate::sync::Standalone;
@@ -311,6 +313,11 @@ struct RenderScratch {
     current: Option<(u64, Arc<RenderSnapshot>)>,
     /// Realtime mode: the meter bank, re-read only when its lock is free.
     meters: Option<Arc<crate::metering::Meters>>,
+    /// Live MIDI for this block, per track, and one track's merged events —
+    /// kept across blocks so a note played does not allocate on the audio
+    /// thread.
+    midi_buckets: Vec<Vec<crate::plugin::PluginMidiEvent>>,
+    midi_events: Vec<crate::plugin::PluginMidiEvent>,
 }
 
 impl RenderScratch {
@@ -847,6 +854,8 @@ impl ProjectRenderer {
             pre_fx_tap,
             pre_fader_tap,
             panicked_fx,
+            midi_buckets,
+            midi_events,
             ..
         } = &mut *scratch;
 
@@ -878,7 +887,10 @@ impl ProjectRenderer {
         // `WebRenderer` MIDI methods) — drained here with the same
         // guid-resolve + bucket merge.
         #[allow(unused_mut)]
-        let mut live_midi_buckets: Vec<Vec<crate::plugin::PluginMidiEvent>> = Vec::new();
+        let live_midi_buckets = midi_buckets;
+        for b in live_midi_buckets.iter_mut() {
+            b.clear();
+        }
         #[cfg(not(target_arch = "wasm32"))]
         {
             let mut midi_guard = self
@@ -892,7 +904,7 @@ impl ProjectRenderer {
                 // guid → index over the snapshot (built lazily on demand).
                 let idx_of =
                     |guid: &str| -> Option<usize> { tracks.iter().position(|t| t.guid == guid) };
-                drain_live_midi(queue, idx_of, &mut live_midi_buckets);
+                drain_live_midi(queue, idx_of, live_midi_buckets);
             }
         }
         #[cfg(target_arch = "wasm32")]
@@ -903,7 +915,7 @@ impl ProjectRenderer {
                 let idx_of =
                     |guid: &str| -> Option<usize> { tracks.iter().position(|t| t.guid == guid) };
                 let mut queue = LiveMidiQueue { events };
-                drain_live_midi(&mut queue, idx_of, &mut live_midi_buckets);
+                drain_live_midi(&mut queue, idx_of, live_midi_buckets);
             }
         }
 
@@ -1067,8 +1079,14 @@ impl ProjectRenderer {
                 // MIDI + note-expression events for this block. Both
                 // lists go to every plugin in the chain (REAPER's
                 // default) — non-MIDI plugins ignore them.
-                let mut midi_events =
-                    collect_midi_events(t, start_seconds, end_seconds, frames_per_second, frames);
+                collect_midi_events_into(
+                    midi_events,
+                    t,
+                    start_seconds,
+                    end_seconds,
+                    frames_per_second,
+                    frames,
+                );
                 // Merge programmatic / live MIDI pushed for this track
                 // this block (drained in stage 0.5), then re-sort so the
                 // combined list stays offset-ordered for the plugin.
@@ -1135,7 +1153,7 @@ impl ProjectRenderer {
                     let param_events = t.fx_params.get(i).map(Vec::as_slice).unwrap_or(&[]);
                     let events = crate::plugin::PluginEvents {
                         params: param_events,
-                        midi: &midi_events,
+                        midi: midi_events.as_slice(),
                         note_expressions: &note_expr_events,
                     };
                     // catch_unwind so a panicking third-party plugin bypasses
@@ -1228,7 +1246,31 @@ impl ProjectRenderer {
                 let mut c_pan = t.pan_env.as_ref().map(|p| EnvelopeCursor::new(p));
                 let mut c_ppan = t.pan_prefx_env.as_ref().map(|p| EnvelopeCursor::new(p));
                 let mut c_mute = t.mute_env.as_ref().map(|p| EnvelopeCursor::new(p));
-                for frame in 0..bus.frames {
+                // No envelope and no VCA lead: the gains are the same on every
+                // frame — work them out once (the per-frame arithmetic below,
+                // with its absent envelopes at their defaults) and just scale.
+                let fixed = c_vol.is_none()
+                    && c_pvol.is_none()
+                    && c_pan.is_none()
+                    && c_ppan.is_none()
+                    && c_mute.is_none()
+                    && vca_leads.is_empty();
+                if fixed {
+                    let vol = t.volume * 1.0 * 1.0;
+                    let pan = (t.pan + 0.0 + 0.0).clamp(-1.0, 1.0);
+                    if t.muted || vca_lead_muted {
+                        bus.samples[..bus.frames * 2].fill(0.0);
+                    } else {
+                        let sign = if t.phase_inverted { -1.0 } else { 1.0 };
+                        let lg = (((1.0 - pan) * 0.5).sqrt() * vol * sign) as f32;
+                        let rg = (((1.0 + pan) * 0.5).sqrt() * vol * sign) as f32;
+                        for fr in bus.samples[..bus.frames * 2].chunks_exact_mut(2) {
+                            fr[0] *= lg;
+                            fr[1] *= rg;
+                        }
+                    }
+                }
+                for frame in (0..bus.frames).filter(|_| !fixed) {
                     let time = start_seconds + frame as f64 * rate * inv_rate;
                     let v_main = c_vol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
                     let v_prefx = c_pvol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);

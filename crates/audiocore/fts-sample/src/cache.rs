@@ -220,6 +220,45 @@ impl EvictStats {
 
 // ── Loaded sample data ────────────────────────────────────────────────────────
 
+/// A run of interleaved samples (see [`SampleData::span_cursored`]).
+#[derive(Clone, Copy, Debug)]
+pub enum Span<'a> {
+    F32(&'a [f32]),
+    /// Resident 16-bit PCM (scaled like [`Pcm::sample`]).
+    I16(&'a [i16]),
+    /// A streamed chunk or head (scaled like the stream cursor's reads).
+    Stream(&'a [i16]),
+}
+
+impl Span<'_> {
+    /// Samples in the run.
+    #[inline]
+    #[must_use]
+    pub fn len(&self) -> usize {
+        match self {
+            Self::F32(v) => v.len(),
+            Self::I16(v) | Self::Stream(v) => v.len(),
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Sample `i` of the run, as the per-frame reads convert it.
+    #[inline]
+    #[must_use]
+    pub fn get(&self, i: usize) -> f32 {
+        match self {
+            Self::F32(v) => v[i],
+            Self::I16(v) => v[i] as f32 * I16_SCALE,
+            Self::Stream(v) => f32::from(v[i]) * (1.0 / 32768.0),
+        }
+    }
+}
+
 /// Where a sample's PCM actually lives.
 ///
 /// Kontakt-style samplers keep libraries playable without keeping them
@@ -645,6 +684,36 @@ impl SampleData {
             }
         }
         self.frame_pair(frame_idx, last)
+    }
+
+    /// The contiguous run of interleaved samples holding frame `frame_idx`,
+    /// for a reader that walks it directly instead of asking per frame:
+    /// `(samples, the frame the run starts at)`. Streamed samples come from
+    /// `cursor` (moved to the chunk covering the frame); `None` when there is
+    /// no such run (a mapped window, a chunk not yet resident) — read per
+    /// frame then. A streamed reader calls `cursor.touch` with the furthest
+    /// sample it read, so the read-ahead fires.
+    #[inline]
+    pub fn span_cursored<'a>(
+        &'a self,
+        frame_idx: usize,
+        cursor: &'a mut crate::stream::StreamCursor,
+    ) -> Option<(Span<'a>, usize)> {
+        let ch = self.channels.max(1) as usize;
+        match &self.pcm {
+            Pcm::F32(v) => Some((Span::F32(v.as_slice()), 0)),
+            Pcm::I16(v) => Some((Span::I16(v.as_slice()), 0)),
+            Pcm::Streamed(stream) => {
+                let a = frame_idx * ch;
+                let covered = cursor.held().is_some_and(|(d, lo)| a >= lo && a < lo + d.len());
+                if !covered && !cursor.seek(stream, a) {
+                    return None;
+                }
+                let (data, lo) = cursor.held()?;
+                (lo % ch == 0).then_some((Span::Stream(data), lo / ch))
+            }
+            _ => None,
+        }
     }
 
     /// The two consecutive stereo frames a linear interpolator needs, read
