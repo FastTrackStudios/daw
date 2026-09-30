@@ -543,8 +543,12 @@ fn main() {
         }
         // OMNI_CHORD="52,55,60": extra notes held with the main one, each
         // 50 ms after the last (a voice limit then steals the earliest).
+        let stagger = std::env::var("OMNI_STAGGER_MS")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .map_or(sr as usize / 20, |ms| (ms / 1000.0 * sr) as usize);
         for (i, k) in chord.iter().enumerate() {
-            let at = (i + 1) * (sr as usize / 20);
+            let at = (i + 1) * stagger;
             if (pos..pos + BLOCK).contains(&at) {
                 ev.push(PluginMidiEvent {
                     offset: (at - pos) as u32,
