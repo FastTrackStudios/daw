@@ -132,6 +132,9 @@ impl DuplexAudioEngine {
         shared.set_sample_rate(sample_rate);
 
         let renderer = Arc::new(ProjectRenderer::new(&daw, &project_guid, sample_rate));
+        // A live callback: never wait on the project lock, never build a
+        // snapshot on the audio thread.
+        renderer.set_realtime();
 
         // Live / programmatic MIDI ring (same wiring as the cpal engine).
         {
