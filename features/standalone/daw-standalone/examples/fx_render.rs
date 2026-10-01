@@ -32,6 +32,10 @@ fn read_wav(path: &Path) -> (u32, Vec<f32>, Vec<f32>) {
                 chans = usize::from(u16_at(i + 10));
                 sr = u32_at(i + 12);
                 bits = u16_at(i + 22);
+                // WAVE_FORMAT_EXTENSIBLE: the real format is the sub-format.
+                if fmt == 0xFFFE && len >= 26 {
+                    fmt = u16_at(i + 32);
+                }
             }
             b"data" => data = &b[i + 8..(i + 8 + len).min(b.len())],
             _ => {}
