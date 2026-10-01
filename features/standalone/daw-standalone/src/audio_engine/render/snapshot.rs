@@ -375,9 +375,15 @@ fn snapshot_track(
         .unwrap_or(true);
 
     // Live hardware input: a track whose record input is
-    // `RecordInput::Audio { channel }` taps that input-device channel.
+    // `RecordInput::Audio { channel }` hears that input-device channel —
+    // when it is armed and monitoring its input, as REAPER has it. A
+    // record input alone is only where a take would come from: a project
+    // naming input 1 on every track (most do) put the one microphone
+    // through every track to the speakers, and a phone playing it fed
+    // back without end.
+    let monitoring = t.armed && t.input_monitor != daw_proto::track::InputMonitoringMode::Off;
     let input_channel = match p.track_ext.get(&t.guid).map(|e| e.record_input) {
-        Some(daw_proto::track::RecordInput::Audio { channel }) => Some(channel),
+        Some(daw_proto::track::RecordInput::Audio { channel }) if monitoring => Some(channel),
         _ => None,
     };
 
@@ -727,5 +733,48 @@ fn snapshot_track(
         mute_env: track_env(EnvelopeType::Mute),
         volume_prefx_env: track_env(EnvelopeType::VolumePrefx),
         pan_prefx_env: track_env(EnvelopeType::PanPrefx),
+    }
+}
+
+#[cfg(test)]
+mod input_monitoring_tests {
+    use daw_proto::track::{InputMonitoringMode, RecordInput};
+
+    use super::RenderSnapshot;
+    use crate::sync::{ProjectState, TrackExt};
+
+    /// One track recording from input 1, armed or not, monitoring as given.
+    fn project(armed: bool, monitor: InputMonitoringMode) -> ProjectState {
+        let mut p = ProjectState::new(daw_proto::project::ProjectInfo {
+            guid: "p".into(),
+            name: "p".into(),
+            path: String::new(),
+        });
+        let mut track = daw_proto::Track::new("t".into(), 0, "Vocal".into());
+        track.armed = armed;
+        track.input_monitor = monitor;
+        p.tracks.push(track);
+        p.track_ext.insert(
+            "t".into(),
+            TrackExt {
+                record_input: RecordInput::Audio { channel: 0 },
+                ..TrackExt::default()
+            },
+        );
+        p
+    }
+
+    #[test]
+    fn a_track_hears_its_input_only_armed_and_monitoring() {
+        let hears =
+            |armed, monitor| RenderSnapshot::build(&project(armed, monitor)).input_channels[0];
+        assert_eq!(
+            hears(false, InputMonitoringMode::Normal),
+            None,
+            "a record input alone is not monitoring: a project naming input 1 on every track fed the microphone through all of them"
+        );
+        assert_eq!(hears(true, InputMonitoringMode::Off), None);
+        assert_eq!(hears(true, InputMonitoringMode::Normal), Some(0));
+        assert_eq!(hears(true, InputMonitoringMode::NotWhenPlaying), Some(0));
     }
 }

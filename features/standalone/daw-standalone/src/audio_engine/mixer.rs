@@ -511,10 +511,16 @@ impl AudioEngine {
         // records from a hardware channel. The highest tapped channel sets how
         // many input channels we must open to reach it. Native-only —
         // `daw_audio_io` (and live capture) don't exist on the web.
+        //
+        // Not on iOS for a track's input alone: there the input is a second
+        // RemoteIO unit beside the output's, and the session's microphone
+        // with it — for a phone that only plays, opened for nothing. There
+        // it opens when asked for.
         #[cfg(not(target_arch = "wasm32"))]
         let input_stream = {
             let max_armed = Self::max_audio_input_channel(&daw, &project_guid);
-            if prefs.want_input || max_armed.is_some() {
+            let tracks_want_input = max_armed.is_some() && cfg!(not(target_os = "ios"));
+            if prefs.want_input || tracks_want_input {
                 let max_channel = max_armed.unwrap_or(0);
                 let host = daw_audio_io::audio_host();
                 match Self::open_live_input(&host, prefs, sample_rate, max_channel, &renderer) {
