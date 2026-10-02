@@ -65,6 +65,7 @@ mod ffi {
     pub const DEVICE_LATENCY: u32 = fourcc(b"ltnc");
     pub const DEVICE_SAFETY_OFFSET: u32 = fourcc(b"saft");
     pub const DEVICE_PROCESSOR_OVERLOAD: u32 = fourcc(b"ovrl");
+    pub const DEVICE_IO_THREAD_WORKGROUP: u32 = fourcc(b"oswg");
     pub const STREAM_LATENCY: u32 = fourcc(b"ltnc");
     pub const STREAM_VIRTUAL_FORMAT: u32 = fourcc(b"sfmt");
 
@@ -905,13 +906,23 @@ impl DuplexBackend for CoreAudioBackend {
                     range.maximum
                 );
             }
-            set(
-                device,
-                ffi::DEVICE_BUFFER_FRAME_SIZE,
-                ffi::SCOPE_GLOBAL,
-                clamped,
-            )
-            .map_err(fail)?;
+            let current: u32 =
+                get(device, ffi::DEVICE_BUFFER_FRAME_SIZE, ffi::SCOPE_GLOBAL).unwrap_or(u32::MAX);
+            if cfg.buffer_lower_only && current <= clamped {
+                tracing::info!(
+                    requested = clamped,
+                    current,
+                    "coreaudio duplex: keeping the process's smaller block (lower-only)"
+                );
+            } else {
+                set(
+                    device,
+                    ffi::DEVICE_BUFFER_FRAME_SIZE,
+                    ffi::SCOPE_GLOBAL,
+                    clamped,
+                )
+                .map_err(fail)?;
+            }
         }
         let buffer: u32 =
             get(device, ffi::DEVICE_BUFFER_FRAME_SIZE, ffi::SCOPE_GLOBAL).map_err(fail)?;
@@ -1000,6 +1011,14 @@ impl DuplexBackend for CoreAudioBackend {
             return Err(fail(e));
         }
         stats.stream_state.store(STATE_STREAMING, Ordering::Relaxed);
+        // Render workers join the IO thread's workgroup (see `rt_workers`).
+        // The property hands over a retained `os_workgroup_t`.
+        let workgroup = get::<usize>(device, ffi::DEVICE_IO_THREAD_WORKGROUP, ffi::SCOPE_GLOBAL)
+            .unwrap_or(0) as *mut c_void;
+        crate::rt_workers::publish(
+            workgroup,
+            u64::from(buffer) * 1_000_000_000 / u64::from(rate.max(1)),
+        );
 
         let latency = (
             scope_latency(device, ffi::SCOPE_INPUT) + buffer,

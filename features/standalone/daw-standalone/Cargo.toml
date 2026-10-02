@@ -193,3 +193,11 @@ required-features = ["rpp-loader"]
 [[example]]
 name = "route_probe"
 required-features = ["rpp-project"]
+
+[[example]]
+name = "omni_render"
+required-features = ["vst3-host"]
+
+[[example]]
+name = "fx_render"
+required-features = ["vst3-host"]

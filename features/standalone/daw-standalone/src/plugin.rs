@@ -183,6 +183,16 @@ pub trait PluginInstance: Send {
     /// Whether `prepare` has been called and the plugin is ready.
     fn is_prepared(&self) -> bool;
 
+    /// Whether this plugin may process on a render worker thread, at the
+    /// same time as other tracks' plugins. Only a plugin that shares no
+    /// per-block state with any other track may say yes: the guide
+    /// instruments, which hand cues between tracks keyed by
+    /// [`render_cycle`], must run on the render thread in track order. A
+    /// track is rendered in parallel only when every plugin on it says yes.
+    fn parallel_safe(&self) -> bool {
+        false
+    }
+
     /// Render one block. `events` carries per-block parameter changes
     /// and MIDI input (needed for virtual instruments like CLAPi /
     /// VST3i, which produce audio from note events rather than
@@ -411,6 +421,20 @@ impl RenderFrameGuard {
     pub(crate) fn enter(start_frame: u64) -> Self {
         let cycle = RENDER_CYCLE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         RENDER_FRAME.with(|c| c.set(Some((cycle, start_frame))));
+        Self
+    }
+}
+
+impl RenderFrameGuard {
+    /// This thread's render context, for a worker to [`adopt`](Self::adopt).
+    pub(crate) fn current() -> Option<(u64, u64)> {
+        RENDER_FRAME.with(std::cell::Cell::get)
+    }
+
+    /// Publish the render thread's context on a worker rendering part of
+    /// the same block — the same cycle, not a new one.
+    pub(crate) fn adopt(context: Option<(u64, u64)>) -> Self {
+        RENDER_FRAME.with(|c| c.set(context));
         Self
     }
 }

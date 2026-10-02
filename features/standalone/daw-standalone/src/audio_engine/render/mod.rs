@@ -36,13 +36,17 @@ mod envelope;
 mod graph;
 mod item_mix;
 mod midi;
+mod parallel;
 mod snapshot;
 
 use std::sync::Arc;
 
 use envelope::EnvelopeCursor;
 use item_mix::mix_item_into_bus;
-use midi::{collect_midi_events, collect_note_expressions};
+use midi::{collect_midi_events_into, collect_note_expressions};
+#[cfg(test)]
+use midi::collect_midi_events;
+use parallel::{LaneJob, PluginPtr};
 use snapshot::{RenderSnapshot, TrackSnapshot};
 
 use crate::sync::Standalone;
@@ -305,7 +309,30 @@ struct RenderScratch {
     /// that panics once can't be trusted on the audio thread again.
     /// Persists across blocks (never cleared by `reset`).
     panicked_fx: std::collections::HashSet<String>,
+    /// Realtime mode: the snapshot this renderer is playing (revision,
+    /// snapshot) — the audio thread's own, swapped for the builder's newer
+    /// one between blocks (see [`ProjectRenderer::set_realtime`]).
+    current: Option<(u64, Arc<RenderSnapshot>)>,
+    /// Realtime mode: the meter bank, re-read only when its lock is free.
+    meters: Option<Arc<crate::metering::Meters>>,
+    /// Live MIDI for this block, per track, and one track's merged events —
+    /// kept across blocks so a note played does not allocate on the audio
+    /// thread.
+    midi_buckets: Vec<Vec<crate::plugin::PluginMidiEvent>>,
+    midi_events: Vec<crate::plugin::PluginMidiEvent>,
+    /// Realtime mode with a lane pool: this block's independent tracks, one
+    /// job each (see [`LaneJob`]), and which tracks ran that way.
+    lane_jobs: Vec<LaneJob>,
+    /// Per track: something feeds its bus (a child or a send), so it waits
+    /// for the topo loop.
+    fed: Vec<bool>,
+    /// Per track: its FX chain already ran in the parallel pass.
+    chain_done: Vec<bool>,
+    /// Per track: its chain's time last block, to hand out the longest
+    /// lanes first.
+    lane_cost: Vec<u32>,
 }
+
 
 impl RenderScratch {
     /// Size everything for `n` tracks × `frames` and zero the buses.
@@ -325,6 +352,11 @@ impl RenderScratch {
         }
         self.dirty.clear();
         self.dirty.resize(n, false);
+        self.chain_done.clear();
+        self.chain_done.resize(n, false);
+        if self.lane_cost.len() != n {
+            self.lane_cost.resize(n, 0);
+        }
         for v in [
             &mut self.in_l,
             &mut self.in_r,
@@ -350,6 +382,105 @@ impl RenderScratch {
 /// rendering a block without its FX stage — on the order of 10–50 µs.
 const PLUGIN_LOCK_SPINS: usize = 2_000;
 
+/// Blocks rendered WITHOUT their plugin stage because a control thread held
+/// the plugin map (see the try-lock in `render_block_varispeed`). For an
+/// instrument track that block is silent — a dropout no CPU measure shows.
+static PLUGIN_STAGE_SKIPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How many blocks have rendered without their plugin stage (process-wide).
+#[must_use]
+pub fn plugin_stage_skips() -> u64 {
+    PLUGIN_STAGE_SKIPS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A point in time for the block profile — a no-op on wasm, where
+/// `std::time::Instant` panics (the browser rig renders here too).
+#[derive(Clone, Copy)]
+struct Stamp(#[cfg(not(target_arch = "wasm32"))] std::time::Instant);
+
+impl Stamp {
+    fn now() -> Self {
+        Self(
+            #[cfg(not(target_arch = "wasm32"))]
+            std::time::Instant::now(),
+        )
+    }
+
+    /// Microseconds since `now` (0 on wasm).
+    fn us(self) -> u32 {
+        #[cfg(not(target_arch = "wasm32"))]
+        return self.0.elapsed().as_micros().min(u128::from(u32::MAX)) as u32;
+        #[cfg(target_arch = "wasm32")]
+        0
+    }
+}
+
+/// Where one rendered block spent its time (microseconds) — the worst
+/// block of a window, for a live engine's health log: a block that runs
+/// long because a lock was held or a snapshot was built reads very
+/// differently from one that simply had too many voices.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BlockProfile {
+    /// The whole block.
+    pub total_us: u32,
+    /// Getting the project snapshot (and the scratch) — lock waits and any
+    /// snapshot build land here.
+    pub snapshot_us: u32,
+    /// Waiting for the plugin map.
+    pub plugin_lock_us: u32,
+    /// Every track's FX chain (instruments included).
+    pub fx_us: u32,
+    /// The track whose FX chain took longest (project track index), and how
+    /// long.
+    pub slowest_track: u32,
+    pub slowest_track_us: u32,
+    /// Frames in the block.
+    pub frames: u32,
+}
+
+/// The worst [`BlockProfile`] of the current window, written by one render
+/// thread and taken by a reader — atomics, no lock.
+#[derive(Debug, Default)]
+pub struct BlockProfileCell {
+    fields: [std::sync::atomic::AtomicU32; 7],
+}
+
+impl BlockProfileCell {
+    fn record(&self, p: &BlockProfile) {
+        use std::sync::atomic::Ordering::Relaxed;
+        if p.total_us <= self.fields[0].load(Relaxed) {
+            return;
+        }
+        let v = [
+            p.total_us,
+            p.snapshot_us,
+            p.plugin_lock_us,
+            p.fx_us,
+            p.slowest_track,
+            p.slowest_track_us,
+            p.frames,
+        ];
+        for (f, x) in self.fields.iter().zip(v) {
+            f.store(x, Relaxed);
+        }
+    }
+
+    /// The worst block since the last take, and start a new window.
+    pub fn take(&self) -> Option<BlockProfile> {
+        use std::sync::atomic::Ordering::Relaxed;
+        let v: Vec<u32> = self.fields.iter().map(|f| f.swap(0, Relaxed)).collect();
+        (v[0] > 0).then(|| BlockProfile {
+            total_us: v[0],
+            snapshot_us: v[1],
+            plugin_lock_us: v[2],
+            fx_us: v[3],
+            slowest_track: v[4],
+            slowest_track_us: v[5],
+            frames: v[6],
+        })
+    }
+}
+
 pub struct ProjectRenderer {
     daw: Standalone,
     project_guid: String,
@@ -371,6 +502,48 @@ pub struct ProjectRenderer {
     /// the target track's per-block MIDI events. `None` until installed.
     #[cfg(not(target_arch = "wasm32"))]
     live_midi: std::sync::Mutex<Option<LiveMidiQueue>>,
+    /// Realtime mode (see [`set_realtime`](Self::set_realtime)): the
+    /// snapshot builder the audio thread hands project changes to.
+    #[cfg(not(target_arch = "wasm32"))]
+    realtime: std::sync::OnceLock<SnapshotBuilder>,
+    /// Realtime mode: the worker threads independent tracks render on.
+    #[cfg(not(target_arch = "wasm32"))]
+    lanes: std::sync::OnceLock<parallel::LanePool>,
+}
+
+/// Builds render snapshots off the audio thread, for a realtime renderer.
+///
+/// The audio thread must never wait: not on the project lock (every control
+/// operation — a fader, a mute, a status query — holds it, and a holder
+/// preempted mid-hold turns into a multi-millisecond block), and not on a
+/// snapshot build (a walk of the whole project, allocating). So it only
+/// ever *tries* the project lock to read the revision, asks this thread for
+/// a snapshot when the revision has moved, and keeps playing the one it has
+/// until the new one is handed over. A mixer change is heard a block or two
+/// later; a late block is heard as a click.
+#[cfg(not(target_arch = "wasm32"))]
+struct SnapshotBuilder {
+    /// The revision the audio thread wants built (`NO_REVISION`: none).
+    wanted: Arc<std::sync::atomic::AtomicU64>,
+    /// A built snapshot waiting for the audio thread.
+    ready: Arc<std::sync::Mutex<Option<(u64, Arc<RenderSnapshot>)>>>,
+    /// Snapshots the audio thread let go of, freed here rather than there.
+    retired: Arc<std::sync::Mutex<Vec<Arc<RenderSnapshot>>>>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    thread: std::thread::Thread,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const NO_REVISION: u64 = u64::MAX;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for ProjectRenderer {
+    fn drop(&mut self) {
+        if let Some(b) = self.realtime.get() {
+            b.stop.store(true, std::sync::atomic::Ordering::Release);
+            b.thread.unpark();
+        }
+    }
 }
 
 impl ProjectRenderer {
@@ -385,7 +558,120 @@ impl ProjectRenderer {
             live_input: std::sync::Mutex::new(None),
             #[cfg(not(target_arch = "wasm32"))]
             live_midi: std::sync::Mutex::new(None),
+            #[cfg(not(target_arch = "wasm32"))]
+            realtime: std::sync::OnceLock::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            lanes: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Render for a realtime callback: from here on the render thread never
+    /// blocks on the project lock or the meter lock and never builds a
+    /// snapshot — see [`SnapshotBuilder`]. Project edits reach the audio a
+    /// block or two late. Offline renders (tests, bounces) leave this off
+    /// and see every edit on the very next block. Idempotent.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_realtime(&self) {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        let threads = parallel::default_threads();
+        if threads > 0 {
+            let pool = self.lanes.get_or_init(|| parallel::LanePool::new(threads));
+            tracing::debug!(workers = pool.threads(), "render: lane pool");
+        }
+        self.realtime.get_or_init(|| {
+            let wanted = Arc::new(AtomicU64::new(NO_REVISION));
+            let ready = Arc::new(std::sync::Mutex::new(None));
+            let retired = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let stop = Arc::new(AtomicBool::new(false));
+            let (daw, guid) = (self.daw.clone(), self.project_guid.clone());
+            let (w, r, g, st) = (wanted.clone(), ready.clone(), retired.clone(), stop.clone());
+            let handle = std::thread::Builder::new()
+                .name("render-snapshot".into())
+                .spawn(move || {
+                    loop {
+                        std::thread::park_timeout(std::time::Duration::from_millis(250));
+                        if st.load(Ordering::Acquire) {
+                            return;
+                        }
+                        // What the audio thread let go of is freed here.
+                        if let Ok(mut old) = g.lock() {
+                            old.clear();
+                        }
+                        if w.swap(NO_REVISION, Ordering::AcqRel) == NO_REVISION {
+                            continue;
+                        }
+                        let built = daw.read_project(&guid, |p| {
+                            (p.revision, RenderSnapshot::build(p))
+                        });
+                        if let Some(built) = built {
+                            // A snapshot the audio thread never took is
+                            // dropped here, on this thread.
+                            let stale = r.lock().ok().and_then(|mut slot| slot.replace(built));
+                            drop(stale);
+                        }
+                    }
+                })
+                .expect("spawn render-snapshot thread");
+            SnapshotBuilder {
+                wanted,
+                ready,
+                retired,
+                stop,
+                thread: handle.thread().clone(),
+            }
+        });
+    }
+
+    /// Realtime mode's snapshot: the one being played, swapped for the
+    /// builder's newer one if it has handed one over, and a newer one asked
+    /// for when the project has moved on. Never waits for a lock; builds
+    /// only the very first snapshot here (before there is anything to play).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn snapshot_rt(
+        &self,
+        b: &SnapshotBuilder,
+        current: &mut Option<(u64, Arc<RenderSnapshot>)>,
+    ) -> Option<Arc<RenderSnapshot>> {
+        use std::sync::atomic::Ordering;
+        // Take a handed-over snapshot.
+        let handed = match b.ready.try_lock() {
+            Ok(mut slot) => slot.take(),
+            Err(_) => None,
+        };
+        if let Some(new) = handed {
+            if let Some((_, old)) = current.replace(new) {
+                match b.retired.try_lock() {
+                    Ok(mut bin) => bin.push(old),
+                    // The builder is emptying it this instant: the old one
+                    // is freed here — rare, and still no wait.
+                    Err(_) => drop(old),
+                }
+            }
+        }
+        // Has the project moved on? Read without waiting.
+        let revision = match self.daw.state.try_lock() {
+            Ok(s) => s.projects.get(&self.project_guid).map(|p| p.revision),
+            Err(std::sync::TryLockError::Poisoned(p)) => {
+                p.into_inner().projects.get(&self.project_guid).map(|p| p.revision)
+            }
+            Err(std::sync::TryLockError::WouldBlock) => None,
+        };
+        match (&*current, revision) {
+            (Some((rev, _)), Some(now)) if *rev != now => {
+                if b.wanted.swap(now, Ordering::AcqRel) != now {
+                    b.thread.unpark();
+                }
+            }
+            (None, _) => {
+                // Nothing to play yet: the first snapshot is built here.
+                let built = self.daw.read_project(&self.project_guid, |p| {
+                    (p.revision, RenderSnapshot::build(p))
+                })?;
+                *current = Some(built);
+            }
+            _ => {}
+        }
+        current.as_ref().map(|(_, s)| s.clone())
     }
 
     /// The backend this renderer reads its project from. Lets the cpal
@@ -533,10 +819,22 @@ impl ProjectRenderer {
             return master;
         }
 
-        let snap = match self.snapshot() {
-            Some(s) => s,
-            None => return master,
+        let t_start = Stamp::now();
+        let mut scratch = self
+            .scratch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        #[cfg(not(target_arch = "wasm32"))]
+        let snap = match self.realtime.get() {
+            Some(b) => self.snapshot_rt(b, &mut scratch.current),
+            None => self.snapshot(),
         };
+        #[cfg(target_arch = "wasm32")]
+        let snap = self.snapshot();
+        let Some(snap) = snap else {
+            return master;
+        };
+        let snapshot_us = t_start.us();
         let tracks = &snap.tracks;
         let n = tracks.len();
         let start_seconds = start_samples / self.sample_rate as f64;
@@ -556,11 +854,22 @@ impl ProjectRenderer {
         // unwinds across the extern "C" PipeWire boundary → abort → process
         // death mid-song). The guarded state is plain buffers/maps — safe to
         // keep using after another thread's panic.
-        let mut scratch = self
-            .scratch
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         scratch.reset(n, frames, self.sample_rate);
+        // The meter bank. In realtime mode, re-read only when its lock is
+        // free (its readers are UI polls) — the cached one otherwise.
+        #[cfg(not(target_arch = "wasm32"))]
+        let meters = if self.realtime.get().is_some() {
+            if let Ok(m) = self.daw.meters.try_lock() {
+                if !scratch.meters.as_ref().is_some_and(|c| Arc::ptr_eq(c, &m)) {
+                    scratch.meters = Some(m.clone());
+                }
+            }
+            scratch.meters.clone().unwrap_or_else(|| self.daw.meters())
+        } else {
+            self.daw.meters()
+        };
+        #[cfg(target_arch = "wasm32")]
+        let meters = self.daw.meters();
         // Split-borrow every scratch field so the stages below can
         // hold disjoint &muts simultaneously.
         let RenderScratch {
@@ -574,6 +883,13 @@ impl ProjectRenderer {
             pre_fx_tap,
             pre_fader_tap,
             panicked_fx,
+            midi_buckets,
+            midi_events,
+            lane_jobs,
+            fed,
+            chain_done,
+            lane_cost,
+            ..
         } = &mut *scratch;
 
         // 0) Live hardware input → per-track buses. Tracks whose
@@ -604,7 +920,10 @@ impl ProjectRenderer {
         // `WebRenderer` MIDI methods) — drained here with the same
         // guid-resolve + bucket merge.
         #[allow(unused_mut)]
-        let mut live_midi_buckets: Vec<Vec<crate::plugin::PluginMidiEvent>> = Vec::new();
+        let live_midi_buckets = midi_buckets;
+        for b in live_midi_buckets.iter_mut() {
+            b.clear();
+        }
         #[cfg(not(target_arch = "wasm32"))]
         {
             let mut midi_guard = self
@@ -618,7 +937,7 @@ impl ProjectRenderer {
                 // guid → index over the snapshot (built lazily on demand).
                 let idx_of =
                     |guid: &str| -> Option<usize> { tracks.iter().position(|t| t.guid == guid) };
-                drain_live_midi(queue, idx_of, &mut live_midi_buckets);
+                drain_live_midi(queue, idx_of, live_midi_buckets);
             }
         }
         #[cfg(target_arch = "wasm32")]
@@ -629,7 +948,7 @@ impl ProjectRenderer {
                 let idx_of =
                     |guid: &str| -> Option<usize> { tracks.iter().position(|t| t.guid == guid) };
                 let mut queue = LiveMidiQueue { events };
-                drain_live_midi(&mut queue, idx_of, &mut live_midi_buckets);
+                drain_live_midi(&mut queue, idx_of, live_midi_buckets);
             }
         }
 
@@ -691,11 +1010,10 @@ impl ProjectRenderer {
             }
         }
 
-        // Per-track meter bank: post-fader block peaks, written once
-        // per track per block (lock-free atomics — safe from the audio
-        // callback). Cell index == project track index == snapshot
-        // index, matching `TrackRef::Index` on the Peaks service.
-        let meters = self.daw.meters();
+        // Per-track meter bank (read above): post-fader block peaks,
+        // written once per track per block (lock-free atomics — safe from
+        // the audio callback). Cell index == project track index ==
+        // snapshot index, matching `TrackRef::Index` on the Peaks service.
 
         // Plugin instances for the per-track FX stage inside the loop.
         // The map lives separately from ProjectState so the audio
@@ -720,6 +1038,7 @@ impl ProjectRenderer {
         // for an amp chain "dry for one block" is not inaudible — it is the
         // raw DI at full level. Bounded, never parked: a hold that outlasts
         // the spin still costs one dry block, not an underrun.
+        let t_lock = Stamp::now();
         let mut plugins = None;
         for _ in 0..PLUGIN_LOCK_SPINS {
             match self.daw.plugin_instances.try_lock() {
@@ -732,6 +1051,123 @@ impl ProjectRenderer {
                     break;
                 }
                 Err(std::sync::TryLockError::WouldBlock) => std::hint::spin_loop(),
+            }
+        }
+
+        if plugins.is_none() {
+            PLUGIN_STAGE_SKIPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        let plugin_lock_us = t_lock.us();
+        let (mut fx_us, mut slowest) = (0u32, (0u32, 0u32));
+
+        // 1.5) Realtime with a lane pool: every track nothing feeds (no
+        // children, no received sends) already holds its whole input, so its
+        // FX chain — an instrument lane's synth — runs now, across cores. The
+        // topo loop below then skips those chains. Only chains whose every
+        // plugin is `parallel_safe` and prepared go; anything else waits for
+        // the loop, exactly as before.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let (Some(pool), Some(map)) = (self.lanes.get(), plugins.as_mut()) {
+            fed.clear();
+            fed.resize(n, false);
+            for t in tracks.iter() {
+                if t.parent_send
+                    && let Some(pi) = t.parent_idx
+                {
+                    fed[pi] = true;
+                }
+                for snd in &t.sends {
+                    if let Some(di) = snd.dest_idx {
+                        fed[di] = true;
+                    }
+                }
+            }
+            let mut jobs = 0;
+            for &ti in &snap.order {
+                let t = &tracks[ti];
+                if fed[ti]
+                    || !passes(ti)
+                    || t.fx_chain.is_empty()
+                    || t.sends.iter().any(|s| s.mode == daw_proto::routing::SendMode::PreFx)
+                {
+                    continue;
+                }
+                if lane_jobs.len() <= jobs {
+                    lane_jobs.push(LaneJob::default());
+                }
+                let job = &mut lane_jobs[jobs];
+                job.chain.clear();
+                let mut ok = true;
+                for (i, fx_guid) in t.fx_chain.iter().enumerate() {
+                    if !t.fx_enabled.get(i).copied().unwrap_or(true) || panicked_fx.contains(fx_guid) {
+                        continue;
+                    }
+                    let Some(plugin) = map.get_mut(fx_guid) else { continue };
+                    if !plugin.is_prepared() || !plugin.parallel_safe() {
+                        ok = false;
+                        break;
+                    }
+                    job.chain.push((i, PluginPtr::new(&mut **plugin)));
+                }
+                if !ok || job.chain.is_empty() {
+                    job.chain.clear();
+                    continue;
+                }
+                job.ti = ti;
+                job.bus = buses[ti].samples.as_mut_ptr() as usize;
+                for v in [&mut job.in_l, &mut job.in_r, &mut job.out_l, &mut job.out_r] {
+                    if v.len() != frames {
+                        v.resize(frames, 0.0);
+                    }
+                }
+                collect_midi_events_into(
+                    &mut job.midi,
+                    t,
+                    start_seconds,
+                    end_seconds,
+                    frames_per_second,
+                    frames,
+                );
+                if let Some(bucket) = live_midi_buckets.get_mut(ti)
+                    && !bucket.is_empty()
+                {
+                    job.midi.append(bucket);
+                    job.midi.sort_by_key(|e| e.offset);
+                }
+                job.note_expr =
+                    collect_note_expressions(t, start_seconds, end_seconds, frames_per_second, frames);
+                job.ran = false;
+                job.panicked = None;
+                jobs += 1;
+            }
+            if jobs >= 2 {
+                // Longest lanes first, so the last job to finish is short.
+                lane_jobs[..jobs].sort_unstable_by_key(|j| std::cmp::Reverse(lane_cost[j.ti]));
+                pool.run_lanes(&mut lane_jobs[..jobs], tracks, frames);
+                for job in &mut lane_jobs[..jobs] {
+                    let ti = job.ti;
+                    chain_done[ti] = true;
+                    dirty[ti] |= job.ran;
+                    lane_cost[ti] = job.us;
+                    fx_us += job.us;
+                    if job.us > slowest.1 {
+                        slowest = (ti as u32, job.us);
+                    }
+                    if let Some(i) = job.panicked
+                        && let Some(fx_guid) = tracks[ti].fx_chain.get(i)
+                    {
+                        panicked_fx.insert(fx_guid.clone());
+                        tracing::error!(
+                            "plugin {fx_guid} PANICKED in process_block on track '{}' — \
+                             bypassing it from now on",
+                            tracks[ti].name,
+                        );
+                    }
+                }
+            }
+            // No pointer into the map outlives this block.
+            for job in &mut lane_jobs[..jobs] {
+                job.chain.clear();
             }
         }
 
@@ -781,13 +1217,20 @@ impl ProjectRenderer {
             // process the children's mix, and bus FX process their
             // received sends — REAPER's signal flow. Synthetic /
             // unloaded FX are skipped — no DSP, no work.
-            if !t.fx_chain.is_empty() {
+            let t_fx = Stamp::now();
+            if !t.fx_chain.is_empty() && !chain_done[ti] {
                 let bus = &mut buses[ti];
                 // MIDI + note-expression events for this block. Both
                 // lists go to every plugin in the chain (REAPER's
                 // default) — non-MIDI plugins ignore them.
-                let mut midi_events =
-                    collect_midi_events(t, start_seconds, end_seconds, frames_per_second, frames);
+                collect_midi_events_into(
+                    midi_events,
+                    t,
+                    start_seconds,
+                    end_seconds,
+                    frames_per_second,
+                    frames,
+                );
                 // Merge programmatic / live MIDI pushed for this track
                 // this block (drained in stage 0.5), then re-sort so the
                 // combined list stays offset-ordered for the plugin.
@@ -854,7 +1297,7 @@ impl ProjectRenderer {
                     let param_events = t.fx_params.get(i).map(Vec::as_slice).unwrap_or(&[]);
                     let events = crate::plugin::PluginEvents {
                         params: param_events,
-                        midi: &midi_events,
+                        midi: midi_events.as_slice(),
                         note_expressions: &note_expr_events,
                     };
                     // catch_unwind so a panicking third-party plugin bypasses
@@ -884,6 +1327,13 @@ impl ProjectRenderer {
                     // A plugin ran — it may synthesize (MIDI → audio),
                     // so the bus can carry signal even with no items.
                     dirty[ti] = true;
+                }
+            }
+            if !t.fx_chain.is_empty() && !chain_done[ti] {
+                let us = t_fx.us();
+                fx_us += us;
+                if us > slowest.1 {
+                    slowest = (ti as u32, us);
                 }
             }
             if !dirty[ti] {
@@ -940,7 +1390,31 @@ impl ProjectRenderer {
                 let mut c_pan = t.pan_env.as_ref().map(|p| EnvelopeCursor::new(p));
                 let mut c_ppan = t.pan_prefx_env.as_ref().map(|p| EnvelopeCursor::new(p));
                 let mut c_mute = t.mute_env.as_ref().map(|p| EnvelopeCursor::new(p));
-                for frame in 0..bus.frames {
+                // No envelope and no VCA lead: the gains are the same on every
+                // frame — work them out once (the per-frame arithmetic below,
+                // with its absent envelopes at their defaults) and just scale.
+                let fixed = c_vol.is_none()
+                    && c_pvol.is_none()
+                    && c_pan.is_none()
+                    && c_ppan.is_none()
+                    && c_mute.is_none()
+                    && vca_leads.is_empty();
+                if fixed {
+                    let vol = t.volume * 1.0 * 1.0;
+                    let pan = (t.pan + 0.0 + 0.0).clamp(-1.0, 1.0);
+                    if t.muted || vca_lead_muted {
+                        bus.samples[..bus.frames * 2].fill(0.0);
+                    } else {
+                        let sign = if t.phase_inverted { -1.0 } else { 1.0 };
+                        let lg = (((1.0 - pan) * 0.5).sqrt() * vol * sign) as f32;
+                        let rg = (((1.0 + pan) * 0.5).sqrt() * vol * sign) as f32;
+                        for fr in bus.samples[..bus.frames * 2].chunks_exact_mut(2) {
+                            fr[0] *= lg;
+                            fr[1] *= rg;
+                        }
+                    }
+                }
+                for frame in (0..bus.frames).filter(|_| !fixed) {
                     let time = start_seconds + frame as f64 * rate * inv_rate;
                     let v_main = c_vol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
                     let v_prefx = c_pvol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
@@ -1183,6 +1657,20 @@ impl ProjectRenderer {
             }
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.realtime.get().is_some() {
+            self.daw.block_profile.record(&BlockProfile {
+                total_us: t_start.us(),
+                snapshot_us,
+                plugin_lock_us,
+                fx_us,
+                slowest_track: slowest.0,
+                slowest_track_us: slowest.1,
+                frames: frames as u32,
+            });
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _ = (snapshot_us, plugin_lock_us, fx_us, slowest);
         master
     }
 

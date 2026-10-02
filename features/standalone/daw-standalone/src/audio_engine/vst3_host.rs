@@ -168,6 +168,7 @@ impl Vst3Host {
             _component_handler: ComWrapper::new(HostComponentHandler),
             _host_app: ComWrapper::new(HostApplication),
             _module: module,
+            output_buses: 1,
         })
     }
 }
@@ -316,6 +317,9 @@ pub struct LoadedVst3Plugin {
     // → _component_handler → _module so the bundle stays mapped
     // until every COM ref is gone.
     activation: Option<ActivationGuard>,
+    /// Stereo output buses to run (main + aux), set before `prepare`
+    /// (see [`LoadedVst3Plugin::set_output_buses`]); 1 by default.
+    output_buses: u32,
     /// `IPluginBase::initialize` has run on the component (and a separate
     /// controller). Tracked apart from `activation` because state and
     /// parameter calls are legal — and required to be preceded by
@@ -367,6 +371,10 @@ struct ActivationGuard {
     /// inside are reseated each block to the current scratch slices.
     in_ptrs: [*mut f32; 2],
     out_ptrs: [*mut f32; 2],
+    /// Aux output buses (1..): their L/R buffers and pointer arrays,
+    /// refilled by every `process_block` (read with `aux_output`).
+    aux_bufs: Vec<[Vec<f32>; 2]>,
+    aux_ptrs: Vec<[*mut f32; 2]>,
     processing_started: bool,
     active: bool,
     /// Host-implemented IEventList that the plugin reads MIDI input
@@ -926,11 +934,18 @@ impl LoadedVst3Plugin {
                     1,
                 );
             }
-            if has_output_bus {
+            // Bus 0, plus any aux buses asked for (multi-out
+            // instruments: Kontakt routes each multi slot to a pair).
+            let out_buses = if has_output_bus {
+                self.output_buses.clamp(1, out_count.max(1) as u32)
+            } else {
+                0
+            };
+            for bus in 0..out_buses {
                 let _ = self.component.activateBus(
                     MediaTypes_::kAudio as i32,
                     BusDirections_::kOutput as i32,
-                    0,
+                    bus as i32,
                     1,
                 );
             }
@@ -942,19 +957,20 @@ impl LoadedVst3Plugin {
             // implementation-defined and they often skip allocating
             // their internal channel scratch otherwise.
             let mut in_arr: SpeakerArrangement = SpeakerArr::kStereo;
-            let mut out_arr: SpeakerArrangement = SpeakerArr::kStereo;
+            let mut out_arr: Vec<SpeakerArrangement> =
+                vec![SpeakerArr::kStereo; out_buses.max(1) as usize];
             let in_ptr: *mut SpeakerArrangement = if has_input_bus {
                 &mut in_arr
             } else {
                 ptr::null_mut()
             };
             let out_ptr: *mut SpeakerArrangement = if has_output_bus {
-                &mut out_arr
+                out_arr.as_mut_ptr()
             } else {
                 ptr::null_mut()
             };
             let in_count: int32 = if has_input_bus { 1 } else { 0 };
-            let out_count: int32 = if has_output_bus { 1 } else { 0 };
+            let out_count: int32 = out_buses as int32;
             let _ = self
                 .processor
                 .setBusArrangements(in_ptr, in_count, out_ptr, out_count);
@@ -1029,6 +1045,16 @@ impl LoadedVst3Plugin {
             samplesToNextClock: 0,
         };
 
+        let aux_count = if has_output_bus {
+            // Main + aux buses actually activated above.
+            let n = unsafe {
+                self.component
+                    .getBusCount(MediaTypes_::kAudio as i32, BusDirections_::kOutput as i32)
+            };
+            self.output_buses.clamp(1, n.max(1) as u32)
+        } else {
+            1
+        };
         self.activation = Some(ActivationGuard {
             sample_rate,
             block_size,
@@ -1038,6 +1064,10 @@ impl LoadedVst3Plugin {
             scratch_r,
             in_ptrs: [ptr::null_mut(); 2],
             out_ptrs: [ptr::null_mut(); 2],
+            aux_bufs: (1..aux_count)
+                .map(|_| [vec![0.0; block_size as usize], vec![0.0; block_size as usize]])
+                .collect(),
+            aux_ptrs: vec![[ptr::null_mut(); 2]; aux_count.saturating_sub(1) as usize],
             processing_started: true,
             active: true,
             event_list_owner,
@@ -1059,6 +1089,29 @@ impl LoadedVst3Plugin {
 
     pub fn block_size(&self) -> Option<u32> {
         self.activation.as_ref().map(|a| a.block_size)
+    }
+
+    /// Run `n` stereo output buses (main + `n − 1` aux) from the next
+    /// `prepare`: a multi-out instrument routes its parts to them. Read an
+    /// aux bus after each `process_block` with [`Self::aux_output`].
+    pub fn set_output_buses(&mut self, n: u32) {
+        self.output_buses = n.max(1);
+    }
+
+    /// The last block's samples on output bus `bus` (≥ 1), `frames` long.
+    #[must_use]
+    pub fn aux_output(&self, bus: usize, frames: usize) -> Option<(&[f32], &[f32])> {
+        let b = self.activation.as_ref()?.aux_bufs.get(bus.checked_sub(1)?)?;
+        let n = frames.min(b[0].len());
+        Some((&b[0][..n], &b[1][..n]))
+    }
+
+    /// Set the tempo the plugin sees (the process context's, for
+    /// tempo-synced LFOs, envelopes and delays). No-op before activation.
+    pub fn set_tempo(&mut self, bpm: f64) {
+        if let Some(act) = self.activation.as_mut() {
+            act.process_context.tempo = bpm.max(1.0);
+        }
     }
 
     /// Process one block of stereo audio. `events.midi` is delivered
@@ -1195,7 +1248,7 @@ impl LoadedVst3Plugin {
                 channelBuffers32: act.in_ptrs.as_mut_ptr(),
             },
         };
-        let mut out_bus = AudioBusBuffers {
+        let out_bus = AudioBusBuffers {
             numChannels: 2,
             silenceFlags: 0,
             __field0: AudioBusBuffers__type0 {
@@ -1211,8 +1264,21 @@ impl LoadedVst3Plugin {
         } else {
             (ptr::null_mut(), 0)
         };
+        // Main bus first, then the aux buses into their own buffers.
+        let mut out_buses = vec![out_bus];
+        for (bufs, ptrs) in act.aux_bufs.iter_mut().zip(act.aux_ptrs.iter_mut()) {
+            ptrs[0] = bufs[0].as_mut_ptr();
+            ptrs[1] = bufs[1].as_mut_ptr();
+            out_buses.push(AudioBusBuffers {
+                numChannels: 2,
+                silenceFlags: 0,
+                __field0: AudioBusBuffers__type0 {
+                    channelBuffers32: ptrs.as_mut_ptr(),
+                },
+            });
+        }
         let (outputs_ptr, num_outputs): (*mut AudioBusBuffers, i32) = if act.has_output_bus {
-            (&mut out_bus, 1)
+            (out_buses.as_mut_ptr(), out_buses.len() as i32)
         } else {
             (ptr::null_mut(), 0)
         };

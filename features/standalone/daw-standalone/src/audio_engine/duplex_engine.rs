@@ -132,6 +132,9 @@ impl DuplexAudioEngine {
         shared.set_sample_rate(sample_rate);
 
         let renderer = Arc::new(ProjectRenderer::new(&daw, &project_guid, sample_rate));
+        // A live callback: never wait on the project lock, never build a
+        // snapshot on the audio thread.
+        renderer.set_realtime();
 
         // Live / programmatic MIDI ring (same wiring as the cpal engine).
         {
@@ -141,11 +144,17 @@ impl DuplexAudioEngine {
             daw.set_live_midi_producer(prod);
         }
 
-        // Open enough input channels to reach the highest a track taps.
-        let in_channels = max_armed_channel(&daw, &project_guid)
-            .map(|c| c + 1)
-            .unwrap_or(1)
-            .max(1);
+        // Open enough input channels to reach the highest a track taps — none
+        // for an output-only engine (a synth): on a laptop the "default
+        // input" is its microphone, which it has no use for.
+        let in_channels = if prefs.want_input {
+            max_armed_channel(&daw, &project_guid)
+                .map(|c| c + 1)
+                .unwrap_or(1)
+                .max(1)
+        } else {
+            0
+        };
 
         // Live-input ring: producer fed by the duplex callback, consumer drained
         // by the renderer in the SAME callback. Modest capacity (a few blocks) is
@@ -174,7 +183,7 @@ impl DuplexAudioEngine {
         } else {
             2
         };
-        let in_ports = if routing {
+        let in_ports = if routing && prefs.want_input {
             in_channels.max(mix_l.max(mix_r) + 1)
         } else {
             in_channels
@@ -200,6 +209,9 @@ impl DuplexAudioEngine {
                 .map(str::to_string),
             allow_builtin_mic: prefs.allow_builtin_mic,
             buffer: None,
+            // An output-only engine shares the device's per-process block
+            // with a duplex one: it may lower it, never raise it.
+            buffer_lower_only: !prefs.want_input,
         };
         let mut main_gain = 1.0f32;
         // When each buffer really starts, in the sync clock (a DLL over

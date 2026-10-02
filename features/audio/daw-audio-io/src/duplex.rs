@@ -36,6 +36,11 @@ pub struct DuplexConfig {
     /// device's sample rate — for a client that shares a device another
     /// process owns the rate of (a headphone mixer beside the rig).
     pub buffer: Option<u32>,
+    /// Only ever *lower* the device's block size, never raise it. CoreAudio's
+    /// buffer size is one per process per device, so an output-only engine
+    /// (the keys rig) sharing a process with a duplex one (the guitar rig at
+    /// 64 frames) must not raise it to its own 256 — it takes the smaller.
+    pub buffer_lower_only: bool,
     /// Capture / playback device by name substring (`None` = system
     /// default). Backends without a graph (CoreAudio) open these devices
     /// themselves; graph backends (PipeWire) ignore them — there the

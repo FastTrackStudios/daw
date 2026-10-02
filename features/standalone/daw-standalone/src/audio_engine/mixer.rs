@@ -492,6 +492,10 @@ impl AudioEngine {
         // rebuilds when the project revision moves, so steady playback
         // re-walks nothing.
         let renderer = Arc::new(ProjectRenderer::new(&daw, &project_guid, sample_rate));
+        // A live callback: never wait on the project lock, never build a
+        // snapshot on the audio thread.
+        #[cfg(not(target_arch = "wasm32"))]
+        renderer.set_realtime();
 
         // Live / programmatic MIDI ring: the UI thread pushes events
         // through `Standalone::push_note_on`/`_off`/`_cc` (producer), the

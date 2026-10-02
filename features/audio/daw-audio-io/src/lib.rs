@@ -46,6 +46,9 @@ pub mod duplex_pw;
 #[cfg(target_os = "macos")]
 pub mod duplex_coreaudio;
 
+/// Realtime render workers joined to the device's audio workgroup.
+pub mod rt_workers;
+
 #[cfg(feature = "monitor")]
 pub mod monitor;
 
