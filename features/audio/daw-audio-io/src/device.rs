@@ -23,44 +23,70 @@ pub fn device_name(device: &cpal::Device) -> String {
 }
 
 /// List the host's input devices (name + channel count + native rate). Does not
-/// open any stream.
+/// open any stream. On iOS, the audio session's input ports (see
+/// `ios_session`).
 pub fn input_devices(host: &cpal::Host) -> Vec<DeviceInfo> {
-    let mut out = Vec::new();
-    if let Ok(devs) = host.input_devices() {
-        for d in devs {
-            let (channels, sr) = d
-                .default_input_config()
-                .map(|c| (c.channels(), c.sample_rate()))
-                .unwrap_or((0, 0));
-            out.push(DeviceInfo {
-                name: device_name(&d),
-                channels,
-                default_sample_rate: sr,
-                is_input: true,
-            });
-        }
+    #[cfg(target_os = "ios")]
+    {
+        let _ = host;
+        let rate = crate::ios_session::sample_rate();
+        crate::ios_session::inputs()
+            .into_iter()
+            .map(|(name, channels)| DeviceInfo { name, channels, default_sample_rate: rate, is_input: true })
+            .collect()
     }
-    out
+    #[cfg(not(target_os = "ios"))]
+    {
+        let mut out = Vec::new();
+        if let Ok(devs) = host.input_devices() {
+            for d in devs {
+                let (channels, sr) = d
+                    .default_input_config()
+                    .map(|c| (c.channels(), c.sample_rate()))
+                    .unwrap_or((0, 0));
+                out.push(DeviceInfo {
+                    name: device_name(&d),
+                    channels,
+                    default_sample_rate: sr,
+                    is_input: true,
+                });
+            }
+        }
+        out
+    }
 }
 
-/// List the host's output devices.
+/// List the host's output devices. On iOS, the ports the session's route
+/// plays through (an app cannot choose its output).
 pub fn output_devices(host: &cpal::Host) -> Vec<DeviceInfo> {
-    let mut out = Vec::new();
-    if let Ok(devs) = host.output_devices() {
-        for d in devs {
-            let (channels, sr) = d
-                .default_output_config()
-                .map(|c| (c.channels(), c.sample_rate()))
-                .unwrap_or((0, 0));
-            out.push(DeviceInfo {
-                name: device_name(&d),
-                channels,
-                default_sample_rate: sr,
-                is_input: false,
-            });
-        }
+    #[cfg(target_os = "ios")]
+    {
+        let _ = host;
+        let rate = crate::ios_session::sample_rate();
+        crate::ios_session::outputs()
+            .into_iter()
+            .map(|(name, channels)| DeviceInfo { name, channels, default_sample_rate: rate, is_input: false })
+            .collect()
     }
-    out
+    #[cfg(not(target_os = "ios"))]
+    {
+        let mut out = Vec::new();
+        if let Ok(devs) = host.output_devices() {
+            for d in devs {
+                let (channels, sr) = d
+                    .default_output_config()
+                    .map(|c| (c.channels(), c.sample_rate()))
+                    .unwrap_or((0, 0));
+                out.push(DeviceInfo {
+                    name: device_name(&d),
+                    channels,
+                    default_sample_rate: sr,
+                    is_input: false,
+                });
+            }
+        }
+        out
+    }
 }
 
 /// Synthesized input-channel names for the input device matching `name_substr`
@@ -124,6 +150,17 @@ pub fn pick_device(
     name: Option<&str>,
     input: bool,
 ) -> Result<cpal::Device, String> {
+    // iOS has one device each way, the session's route: a named input is a
+    // port, preferred on the session, and the default device then plays
+    // through it.
+    #[cfg(target_os = "ios")]
+    if let Some(n) = name.filter(|s| !s.is_empty()) {
+        if input && !crate::ios_session::prefer_input(n) {
+            tracing::warn!(device = n, "daw-audio-io: no such input port; using the route's");
+        }
+        let def = if input { host.default_input_device() } else { host.default_output_device() };
+        return def.ok_or_else(|| format!("no default audio {} device", if input { "input" } else { "output" }));
+    }
     if let Some(n) = name.filter(|s| !s.is_empty()) {
         // A pro interface can surface under one name as several nodes — e.g. a
         // PipeWire `Yamaha TF` appears as both a Duplex *sink* (whose monitor is

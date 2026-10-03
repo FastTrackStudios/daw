@@ -36,6 +36,11 @@ cpal = { version = "0.18", features = ["pipewire"] }
 pipewire = "0.10"
 libspa = "0.10"
 
+[target.'cfg(target_os = "ios")'.dependencies]
+# The audio session's ports are iOS's devices (src/ios_session.rs), read by
+# dynamic messaging — the same objc2 the app's session code uses.
+objc2 = "0.6"
+
 [features]
 default = []
 # Prefer cpal's JACK backend (pipewire-jack shim) over the raw ALSA/CoreAudio

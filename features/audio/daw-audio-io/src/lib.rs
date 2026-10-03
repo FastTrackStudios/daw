@@ -34,6 +34,8 @@ pub mod device;
 pub mod duplex;
 pub mod host;
 pub mod input_guard;
+#[cfg(target_os = "ios")]
+mod ios_session;
 pub mod open;
 pub mod prefs;
 pub mod pw;
