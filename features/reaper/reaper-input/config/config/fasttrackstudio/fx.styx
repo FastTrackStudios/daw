@@ -1,6 +1,6 @@
 which_key (
     {
-        prefix "<S-f>",
+        prefix "<A-f>",
         label "Semantic FX Manager",
         entries (
             {key f, label "FX Search", action "fx:search"}
