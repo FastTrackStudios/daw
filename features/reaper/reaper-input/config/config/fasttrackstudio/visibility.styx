@@ -10,7 +10,9 @@ which_key (
             {key k, label "Keys", action "FTS_VISIBILITY_MANAGER_TOGGLE_KEYS"}
             {key s, label "Synths", action "FTS_VISIBILITY_MANAGER_TOGGLE_SYNTHS"}
             {key h, label "Horns", action "FTS_VISIBILITY_MANAGER_TOGGLE_HORNS"}
-            {key v, label "Vocals", action "FTS_VISIBILITY_MANAGER_TOGGLE_VOCALS"}
+            {key v, label "Overview", action "FTS_SCENE_OVERVIEW"}
+            {key t, label "Overview Top", action "FTS_SCENE_OVERVIEW_TOP"}
+            {key l, label "Vocals", action "FTS_VISIBILITY_MANAGER_TOGGLE_VOCALS"}
             {key c, label "Choir", action "FTS_VISIBILITY_MANAGER_TOGGLE_CHOIR"}
             {key o, label "Orchestra", action "FTS_VISIBILITY_MANAGER_TOGGLE_ORCHESTRA"}
             {key x, label "SFX", action "FTS_VISIBILITY_MANAGER_TOGGLE_SFX"}
