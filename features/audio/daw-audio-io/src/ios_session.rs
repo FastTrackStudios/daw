@@ -197,3 +197,18 @@ pub(crate) fn input_access() -> crate::device::InputAccess {
         _ => InputAccess::Undetermined,
     }
 }
+
+/// Ask the session for `rate` (it may not grant it: an interface that only
+/// runs at 44.1 kHz stays there), then say what the session runs at.
+pub(crate) fn negotiate_rate(rate: Option<u32>) -> u32 {
+    unsafe {
+        if let Some(r) = rate {
+            let _: objc2::runtime::Bool = msg_send![
+                session(),
+                setPreferredSampleRate: f64::from(r),
+                error: std::ptr::null_mut::<*mut AnyObject>()
+            ];
+        }
+    }
+    sample_rate()
+}

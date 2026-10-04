@@ -125,8 +125,12 @@ impl DuplexAudioEngine {
         shared: Arc<TransportShared>,
         prefs: &AudioIoPrefs,
     ) -> Result<Self, String> {
-        let sample_rate = prefs
-            .sample_rate_opt()
+        // Where the device decides (iOS: the audio session), the rate it
+        // will actually run at — the prefs' asked for first — so the
+        // renderer is built for it: an interface that only runs at 44.1 kHz
+        // otherwise met a renderer built for 48 and the engine refused it.
+        let sample_rate = daw_audio_io::negotiate_sample_rate(prefs.sample_rate_opt())
+            .or_else(|| prefs.sample_rate_opt())
             .unwrap_or_else(|| native_rate(prefs));
         let buffer = prefs.buffer_size_opt().unwrap_or(128);
         shared.set_sample_rate(sample_rate);

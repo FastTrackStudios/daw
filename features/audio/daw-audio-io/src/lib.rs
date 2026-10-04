@@ -60,7 +60,8 @@ pub mod rt_workers;
 pub mod monitor;
 
 pub use device::{
-    DeviceCaps, DeviceInfo, InputAccess, device_caps, device_name, input_access, input_channels, session_report,
+    DeviceCaps, DeviceInfo, InputAccess, device_caps, device_name, input_access, input_channels,
+    negotiate_sample_rate, session_report,
     input_devices,
     output_devices, pick_device,
 };

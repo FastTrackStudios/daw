@@ -33,6 +33,24 @@ pub enum InputAccess {
     Undetermined,
 }
 
+/// The rate the device will run at, where the platform decides it (iOS: the
+/// audio session, asked for `requested` first — an interface that only runs
+/// at 44.1 kHz stays there). `None` where the caller picks the rate itself.
+/// An engine builds its renderer at this, so it never meets a device
+/// running at another.
+#[must_use]
+pub fn negotiate_sample_rate(requested: Option<u32>) -> Option<u32> {
+    #[cfg(target_os = "ios")]
+    {
+        Some(crate::ios_session::negotiate_rate(requested)).filter(|r| *r > 0)
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = requested;
+        None
+    }
+}
+
 /// What the audio session says about input, on one line (iOS: its route,
 /// ports, channel counts, rate and access — see `ios_session`). `None`
 /// where there is no session to ask.
