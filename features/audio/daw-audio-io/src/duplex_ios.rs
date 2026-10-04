@@ -238,6 +238,8 @@ fn route() -> Route {
 struct InputProbe {
     renders_ok: std::sync::atomic::AtomicU64,
     renders_failed: std::sync::atomic::AtomicU64,
+    /// Blocks whose processing panicked (caught; played as silence).
+    panics: std::sync::atomic::AtomicU64,
     last_status: std::sync::atomic::AtomicI32,
     /// Peak |sample| per hardware channel since the last report, as `f32`
     /// bits (a positive float's bits order as the float does).
@@ -268,9 +270,14 @@ fn input_reporter(probe: Arc<InputProbe>, stop: Arc<std::sync::atomic::AtomicBoo
                 .iter()
                 .map(|p| format!("{:.1}", db(p.swap(0, Ordering::Relaxed))))
                 .collect();
+            let panics = probe.panics.load(Ordering::Relaxed);
+            if panics > 0 {
+                tracing::error!(audio.panics = panics, "ios duplex: the audio processing panicked — those blocks played silence, the app kept running");
+            }
             tracing::info!(
                 audio.input = input,
                 audio.hw_in = hw_in,
+                audio.panics = panics,
                 audio.renders_ok = probe.renders_ok.load(Ordering::Relaxed),
                 audio.renders_failed = probe.renders_failed.load(Ordering::Relaxed),
                 audio.last_status = probe.last_status.load(Ordering::Relaxed),
@@ -311,7 +318,57 @@ struct IoState {
     probe: Arc<InputProbe>,
 }
 
+/// The render callback, as CoreAudio calls it: [`render_block`] inside
+/// `catch_unwind`. A panic must not unwind out of an `extern "C"` function
+/// (that aborts the process — the app gone mid-song), so one anywhere in the
+/// rig's processing becomes this block's silence, counted, and the next
+/// block plays on.
 unsafe extern "C" fn render(
+    ref_con: *mut c_void,
+    action_flags: *mut u32,
+    time_stamp: *const c_void,
+    bus: u32,
+    frames: u32,
+    data: *mut ffi::AudioBufferList,
+) -> ffi::OSStatus {
+    let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: as `render_block` requires — CoreAudio's arguments.
+        unsafe { render_block(ref_con, action_flags, time_stamp, bus, frames, data) }
+    }));
+    match rendered {
+        Ok(status) => status,
+        Err(_) => {
+            // SAFETY: the same output list and state as above; only the
+            // buffers' samples and an atomic counter are touched.
+            unsafe {
+                silence(data, frames as usize);
+                let st: &IoState = &*ref_con.cast::<IoState>();
+                st.probe.panics.fetch_add(1, Ordering::Relaxed);
+            }
+            0
+        }
+    }
+}
+
+/// Zero every output buffer for `n` frames.
+unsafe fn silence(data: *mut ffi::AudioBufferList, n: usize) {
+    if data.is_null() {
+        return;
+    }
+    unsafe {
+        for b in 0..(*data).number_buffers as usize {
+            let buf = ffi::AudioBufferList::buffer(data, b);
+            let dst = (*buf).data.cast::<f32>();
+            if !dst.is_null() {
+                let len = ((*buf).data_byte_size as usize / 4).min(n);
+                std::slice::from_raw_parts_mut(dst, len).fill(0.0);
+            }
+        }
+    }
+}
+
+/// One block: pull the input, run the rig, write the output.
+unsafe fn render_block(
     ref_con: *mut c_void,
     action_flags: *mut u32,
     time_stamp: *const c_void,
