@@ -470,7 +470,11 @@ impl DuplexBackend for RemoteIoBackend {
         // The phone's own microphone is no guitar input (mic → amp → speaker
         // is feedback) unless the caller allows it.
         let mut input = cfg.inputs > 0 && r.input_available && r.in_channels > 0;
-        if input && r.input_is_builtin && !cfg.allow_builtin_mic {
+        // `FTS_ALLOW_BUILTIN_MIC=1`: take the built-in microphone as the
+        // input anyway — the simulator's only input (the Mac's), so the
+        // whole input path can be run there.
+        let allow_mic = cfg.allow_builtin_mic || std::env::var_os("FTS_ALLOW_BUILTIN_MIC").is_some();
+        if input && r.input_is_builtin && !allow_mic {
             tracing::warn!("ios duplex: the route's input is the built-in microphone — opened without input");
             input = false;
         }
