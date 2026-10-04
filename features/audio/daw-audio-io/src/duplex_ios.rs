@@ -232,6 +232,55 @@ fn route() -> Route {
     }
 }
 
+/// What the input did, for the input report: counted on the render thread
+/// (atomics only), read and logged every five seconds by a plain thread.
+#[derive(Default)]
+struct InputProbe {
+    renders_ok: std::sync::atomic::AtomicU64,
+    renders_failed: std::sync::atomic::AtomicU64,
+    last_status: std::sync::atomic::AtomicI32,
+    /// Peak |sample| per hardware channel since the last report, as `f32`
+    /// bits (a positive float's bits order as the float does).
+    peaks: [std::sync::atomic::AtomicU32; PROBED_CHANNELS],
+}
+
+/// How many input channels the report shows.
+const PROBED_CHANNELS: usize = 8;
+
+/// Every five seconds, what the input did — on from start to drop. A guitar
+/// that never reaches the rig shows here as renders failing (the status
+/// says why) or as peaks at zero on every channel: the interface sends
+/// nothing to the app.
+fn input_reporter(probe: Arc<InputProbe>, stop: Arc<std::sync::atomic::AtomicBool>, input: bool, hw_in: usize) {
+    let _ = std::thread::Builder::new().name("ios-input-report".into()).spawn(move || {
+        while !stop.load(Ordering::Relaxed) {
+            for _ in 0..50 {
+                if stop.load(Ordering::Relaxed) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            let db = |bits: u32| {
+                let p = f32::from_bits(bits);
+                if p > 0.0 { (20.0 * p.log10()).max(-120.0) } else { -120.0 }
+            };
+            let peaks: Vec<String> = probe.peaks[..hw_in.min(PROBED_CHANNELS)]
+                .iter()
+                .map(|p| format!("{:.1}", db(p.swap(0, Ordering::Relaxed))))
+                .collect();
+            tracing::info!(
+                audio.input = input,
+                audio.hw_in = hw_in,
+                audio.renders_ok = probe.renders_ok.load(Ordering::Relaxed),
+                audio.renders_failed = probe.renders_failed.load(Ordering::Relaxed),
+                audio.last_status = probe.last_status.load(Ordering::Relaxed),
+                audio.peaks_db = %peaks.join(" "),
+                "ios duplex: input"
+            );
+        }
+    });
+}
+
 /// Everything the render callback touches, boxed so its address (the
 /// callback's ref-con) is stable. Only the render thread uses it.
 struct IoState {
@@ -259,6 +308,7 @@ struct IoState {
     rate: u32,
     /// Consecutive failed input renders (logged once per run of them).
     render_failures: u64,
+    probe: Arc<InputProbe>,
 }
 
 unsafe extern "C" fn render(
@@ -293,7 +343,9 @@ unsafe extern "C" fn render(
                 (*b).data = st.in_bufs[c].as_mut_ptr().cast();
             }
             let status = ffi::AudioUnitRender(st.unit, action_flags, time_stamp, ffi::INPUT_BUS, frames, list);
+            st.probe.last_status.store(status, Ordering::Relaxed);
             if status != 0 {
+                st.probe.renders_failed.fetch_add(1, Ordering::Relaxed);
                 for buf in &mut st.in_bufs {
                     buf[..n].fill(0.0);
                 }
@@ -306,6 +358,11 @@ unsafe extern "C" fn render(
                 st.stats.xruns.fetch_add(1, Ordering::Relaxed);
             } else {
                 st.render_failures = 0;
+                st.probe.renders_ok.fetch_add(1, Ordering::Relaxed);
+                for (c, peak) in st.probe.peaks.iter().enumerate().take(st.hw_in) {
+                    let p = st.in_bufs[c][..n].iter().fold(0.0f32, |m, s| m.max(s.abs()));
+                    peak.fetch_max(p.to_bits(), Ordering::Relaxed);
+                }
             }
         }
 
@@ -381,6 +438,8 @@ unsafe fn set<T>(unit: ffi::AudioUnit, id: u32, scope: u32, element: u32, value:
 /// A live RemoteIO duplex unit. Dropping it stops audio.
 pub struct RemoteIoBackend {
     unit: ffi::AudioUnit,
+    /// Ends the input report thread.
+    report_stop: Arc<std::sync::atomic::AtomicBool>,
     _state: Box<IoState>,
     stats: Arc<EngineStats>,
     sample_rate: u32,
@@ -461,7 +520,9 @@ impl DuplexBackend for RemoteIoBackend {
             stats: stats.clone(),
             rate: rate.round() as u32,
             render_failures: 0,
+            probe: Arc::new(InputProbe::default()),
         });
+        let probe = state.probe.clone();
 
         // SAFETY: setting up the unit created above; `state` outlives it.
         let configured = unsafe {
@@ -500,6 +561,8 @@ impl DuplexBackend for RemoteIoBackend {
             return Err(dispose(unit, e));
         }
         stats.stream_state.store(STATE_STREAMING, Ordering::Relaxed);
+        let report_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        input_reporter(probe, report_stop.clone(), input, hw_in);
 
         let frames = |s: f64| (s * rate).round() as u32;
         let latency = (frames(r.in_latency + r.io_buffer), frames(r.out_latency + r.io_buffer));
@@ -517,6 +580,7 @@ impl DuplexBackend for RemoteIoBackend {
         );
         Ok(Self {
             unit,
+            report_stop,
             _state: state,
             stats,
             sample_rate: rate.round() as u32,
@@ -551,5 +615,6 @@ impl Drop for RemoteIoBackend {
             ffi::AudioComponentInstanceDispose(self.unit);
         }
         self.stats.stream_state.store(0, Ordering::Relaxed);
+        self.report_stop.store(true, Ordering::Relaxed);
     }
 }
