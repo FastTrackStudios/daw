@@ -12,6 +12,7 @@
 //! |----|------|-----------|
 //! | Linux | [`crate::duplex_pw::PipewireBackend`] | `pw_filter` (capture+playback ports, one process cb) |
 //! | macOS | [`crate::duplex_coreaudio::CoreAudioBackend`] | AUHAL unit, input pulled in the output render callback |
+//! | iOS | [`crate::duplex_ios::RemoteIoBackend`] | one RemoteIO unit, input pulled in the output render callback |
 //! | Windows | _todo_ | WASAPI duplex / ASIO |
 //!
 //! The rig's signal processing (tap input channel → FX chain → stereo out) is the
@@ -298,6 +299,8 @@ pub trait DuplexBackend: Send + Sized {
 pub use crate::duplex_coreaudio::CoreAudioBackend as Backend;
 #[cfg(target_os = "linux")]
 pub use crate::duplex_pw::PipewireBackend as Backend;
+#[cfg(target_os = "ios")]
+pub use crate::duplex_ios::RemoteIoBackend as Backend;
 
 #[cfg(test)]
 mod drop_ring_tests {
