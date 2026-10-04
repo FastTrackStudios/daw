@@ -33,6 +33,21 @@ pub enum InputAccess {
     Undetermined,
 }
 
+/// What the audio session says about input, on one line (iOS: its route,
+/// ports, channel counts, rate and access — see `ios_session`). `None`
+/// where there is no session to ask.
+#[must_use]
+pub fn session_report() -> Option<String> {
+    #[cfg(target_os = "ios")]
+    {
+        Some(crate::ios_session::report())
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        None
+    }
+}
+
 /// Whether the app may read inputs (iOS: the microphone access the player
 /// gave, see `ios_session`).
 #[must_use]

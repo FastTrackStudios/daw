@@ -60,14 +60,84 @@ pub(crate) fn sample_rate() -> u32 {
     rate.round() as u32
 }
 
-/// The inputs the session can record from: name and channel count.
+/// A port's type (`USBAudio`, `MicrophoneBuiltIn`, …).
+unsafe fn port_type(port: *mut AnyObject) -> String {
+    let t: *mut AnyObject = msg_send![port, portType];
+    if t.is_null() {
+        return String::new();
+    }
+    let c: *const std::os::raw::c_char = msg_send![t, UTF8String];
+    if c.is_null() {
+        return String::new();
+    }
+    std::ffi::CStr::from_ptr(c).to_string_lossy().into_owned()
+}
+
+/// The inputs the current route records from (the ones in use).
+unsafe fn route_inputs() -> Vec<*mut AnyObject> {
+    let route: *mut AnyObject = msg_send![session(), currentRoute];
+    if route.is_null() {
+        return Vec::new();
+    }
+    ports(msg_send![route, inputs])
+}
+
+/// The inputs the session can record from: name and channel count — the
+/// one in use first (what "Automatic" plays from). A port not in the route
+/// may not say how many channels it has until it is; the one in use is
+/// counted by the session (every channel the interface has, once the app
+/// asked for them all).
 pub(crate) fn inputs() -> Vec<(String, u16)> {
     unsafe {
+        let in_use: Vec<String> = route_inputs().into_iter().map(|p| port_name(p)).collect();
+        let route_channels: isize = msg_send![session(), inputNumberOfChannels];
         let list: *mut AnyObject = msg_send![session(), availableInputs];
-        ports(list)
+        let mut out: Vec<(String, u16)> = ports(list)
             .into_iter()
-            .map(|p| (port_name(p), port_channels(p)))
-            .collect()
+            .map(|p| {
+                let name = port_name(p);
+                let mut channels = port_channels(p);
+                if in_use.contains(&name) {
+                    channels = channels.max(route_channels.max(0) as u16);
+                }
+                (name, channels)
+            })
+            .collect();
+        out.sort_by_key(|(name, _)| !in_use.contains(name));
+        out
+    }
+}
+
+/// Everything the session says about input, on one line — the wide
+/// event's `audio.session` field: why a guitar is or is not heard.
+pub(crate) fn report() -> String {
+    unsafe {
+        let s = session();
+        let describe = |list: Vec<*mut AnyObject>| -> String {
+            list.into_iter()
+                .map(|p| format!("{} [{}, {} ch]", port_name(p), port_type(p), port_channels(p)))
+                .collect::<Vec<_>>()
+                .join("; ")
+        };
+        let available = describe(ports(msg_send![s, availableInputs]));
+        let route_in = describe(route_inputs());
+        let route: *mut AnyObject = msg_send![s, currentRoute];
+        let route_out = if route.is_null() { String::new() } else { describe(ports(msg_send![route, outputs])) };
+        let preferred: *mut AnyObject = msg_send![s, preferredInput];
+        let preferred = if preferred.is_null() { "none".to_string() } else { port_name(preferred) };
+        let rate: f64 = msg_send![s, sampleRate];
+        let io: f64 = msg_send![s, IOBufferDuration];
+        let in_ch: isize = msg_send![s, inputNumberOfChannels];
+        let max_in: isize = msg_send![s, maximumInputNumberOfChannels];
+        let out_ch: isize = msg_send![s, outputNumberOfChannels];
+        let available_flag: objc2::runtime::Bool = msg_send![s, isInputAvailable];
+        let gain: f32 = msg_send![s, inputGain];
+        format!(
+            "access={:?} input_available={} route_in=[{route_in}] route_out=[{route_out}] available=[{available}] preferred={preferred} rate={rate} io_ms={:.2} in_ch={in_ch}/{max_in} out_ch={out_ch} input_gain={gain:.2}",
+            input_access(),
+            available_flag.as_bool(),
+            io * 1000.0,
+        )
     }
 }
 
