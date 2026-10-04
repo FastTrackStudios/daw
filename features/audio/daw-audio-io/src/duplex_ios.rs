@@ -155,6 +155,12 @@ mod ffi {
 /// 4096 frames, when the screen locks).
 const MAX_FRAMES: usize = 4096;
 
+/// The largest block the rig is handed at once: a bigger callback is run
+/// in pieces of this. What a phone's effects are prepared for (memory goes
+/// with it — a neural amp model's every layer is sized by it), so a rig on
+/// iOS prepares for exactly this and is never handed more.
+pub const MAX_PROCESS_FRAMES: usize = 1024;
+
 /// `EngineStats::stream_state` while the unit runs, as the other backends
 /// report it.
 const STATE_STREAMING: i32 = 3;
@@ -426,24 +432,33 @@ unsafe fn render_block(
         for buf in &mut st.out_bufs {
             buf[..n].fill(0.0);
         }
-        st.in_slices.clear();
-        for c in 0..st.want_in {
-            let src: &[f32] = if st.input && c < st.hw_in { &st.in_bufs[c][..n] } else { &st.silence[..n] };
-            st.in_slices.push(std::mem::transmute::<&[f32], &'static [f32]>(src));
+        // The rig runs in pieces of at most `MAX_PROCESS_FRAMES`: what it
+        // was prepared for. iOS can hand a callback up to 4096 frames (the
+        // screen locked); the rig's blocks are sized for less.
+        let mut at = 0;
+        while at < n {
+            let len = (n - at).min(MAX_PROCESS_FRAMES);
+            let span = at..at + len;
+            st.in_slices.clear();
+            for c in 0..st.want_in {
+                let src: &[f32] = if st.input && c < st.hw_in { &st.in_bufs[c][span.clone()] } else { &st.silence[..len] };
+                st.in_slices.push(std::mem::transmute::<&[f32], &'static [f32]>(src));
+            }
+            st.out_slices.clear();
+            for buf in &mut st.out_bufs {
+                st.out_slices
+                    .push(std::mem::transmute::<&mut [f32], &'static mut [f32]>(&mut buf[span.clone()]));
+            }
+            {
+                let inputs: &[&[f32]] = std::mem::transmute(&st.in_slices[..]);
+                let outputs: &mut [&mut [f32]] = std::mem::transmute(&mut st.out_slices[..]);
+                let mut block = ProcessBlock { inputs, outputs, frames: len };
+                (st.process)(&mut block);
+            }
+            st.in_slices.clear();
+            st.out_slices.clear();
+            at += len;
         }
-        st.out_slices.clear();
-        for buf in &mut st.out_bufs {
-            st.out_slices
-                .push(std::mem::transmute::<&mut [f32], &'static mut [f32]>(&mut buf[..n]));
-        }
-        {
-            let inputs: &[&[f32]] = std::mem::transmute(&st.in_slices[..]);
-            let outputs: &mut [&mut [f32]] = std::mem::transmute(&mut st.out_slices[..]);
-            let mut block = ProcessBlock { inputs, outputs, frames: n };
-            (st.process)(&mut block);
-        }
-        st.in_slices.clear();
-        st.out_slices.clear();
 
         // Our outputs into the device's channels (non-interleaved: one
         // buffer per channel); channels past ours stay silent.
