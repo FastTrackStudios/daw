@@ -22,6 +22,31 @@ pub fn device_name(device: &cpal::Device) -> String {
         .unwrap_or_default()
 }
 
+/// Whether the app may read inputs at all. Only iOS asks the player
+/// (microphone access); everywhere else it is always granted.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum InputAccess {
+    Granted,
+    /// Turned off in Settings: every input is silent.
+    Denied,
+    /// Never asked yet.
+    Undetermined,
+}
+
+/// Whether the app may read inputs (iOS: the microphone access the player
+/// gave, see `ios_session`).
+#[must_use]
+pub fn input_access() -> InputAccess {
+    #[cfg(target_os = "ios")]
+    {
+        crate::ios_session::input_access()
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        InputAccess::Granted
+    }
+}
+
 /// List the host's input devices (name + channel count + native rate). Does not
 /// open any stream. On iOS, the audio session's input ports (see
 /// `ios_session`).

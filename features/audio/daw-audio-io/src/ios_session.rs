@@ -102,3 +102,28 @@ pub(crate) fn prefer_input(name: &str) -> bool {
         set.as_bool()
     }
 }
+
+/// Whether the player has let the app record — on iOS an interface's input
+/// is a recording, and without this it is silent (and the session may list
+/// no inputs at all). `AVAudioApplication` from iOS 17 (the session's own
+/// `recordPermission` is deprecated there), the session's before.
+pub(crate) fn input_access() -> crate::device::InputAccess {
+    use crate::device::InputAccess;
+    // The four-char codes both classes answer with.
+    const GRANTED: usize = 0x6772_6e74; // 'grnt'
+    const DENIED: usize = 0x6465_6e79; // 'deny'
+    let code: usize = unsafe {
+        match objc2::runtime::AnyClass::get(c"AVAudioApplication") {
+            Some(app) => {
+                let shared: *mut AnyObject = msg_send![app, sharedInstance];
+                msg_send![shared, recordPermission]
+            }
+            None => msg_send![session(), recordPermission],
+        }
+    };
+    match code {
+        GRANTED => InputAccess::Granted,
+        DENIED => InputAccess::Denied,
+        _ => InputAccess::Undetermined,
+    }
+}
