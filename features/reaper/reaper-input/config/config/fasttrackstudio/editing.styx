@@ -3,6 +3,14 @@ bindings (
     {keys s,       action 40757, desc "Split items at cursor"}
     {keys d,       action 40006, desc "Delete selected items"}
 
+    // Drum quantize — on a folded kit row, cut every mic before each hit
+    // and move the slices onto the sixteenths together (Beat Detective's
+    // two passes, the kit kept in phase). Shifted, because a bare `q`
+    // records a macro (the input processor reserves it).
+    {keys "<S-q>", action "FTS_QUANTIZE_DRUMS", desc "Quantize the kit (folded drum row) to the grid",
+     mnemonic "Shift+Q for Quantize",
+     why "A kit is many mics of one performance: cutting and moving them apart would put it out of phase with itself, so the folded row quantizes them as one."}
+
     // Smart duplicate — copy selection forward by its own measure span
     // (group + color preserving, tempo-aware). Replaces stock "Duplicate
     // items" (41295) on Ctrl+D.
