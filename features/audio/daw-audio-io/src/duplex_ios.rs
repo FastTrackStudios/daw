@@ -158,8 +158,10 @@ const MAX_FRAMES: usize = 4096;
 /// The largest block the rig is handed at once: a bigger callback is run
 /// in pieces of this. What a phone's effects are prepared for (memory goes
 /// with it — a neural amp model's every layer is sized by it), so a rig on
-/// iOS prepares for exactly this and is never handed more.
-pub const MAX_PROCESS_FRAMES: usize = 1024;
+/// iOS prepares for exactly this and is never handed more. 256 — a phone's
+/// usual I/O buffer, so a callback is still one piece: at 1024 the NAM
+/// buffers of a profile's prepared patches alone held 330 MB.
+pub const MAX_PROCESS_FRAMES: usize = 256;
 
 /// `EngineStats::stream_state` while the unit runs, as the other backends
 /// report it.
