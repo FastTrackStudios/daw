@@ -63,6 +63,9 @@ pub struct PhonesBus {
     blend_mix: std::sync::atomic::AtomicBool,
     /// Mute the main pair only (routing on): the phones keep the signal.
     main_mute: std::sync::atomic::AtomicBool,
+    /// The output check's tone: `0` none, else `output << 2 | sides` —
+    /// output 1 the main pair, 2 the phones; sides 1 left, 2 right, 3 both.
+    tone: std::sync::atomic::AtomicU32,
 }
 
 impl PhonesBus {
@@ -73,8 +76,25 @@ impl PhonesBus {
             self_mix: std::sync::atomic::AtomicU32::new(0x3f800000), // 1.0
             blend_mix: std::sync::atomic::AtomicBool::new(true),
             main_mute: std::sync::atomic::AtomicBool::new(false),
+            tone: std::sync::atomic::AtomicU32::new(0),
         };
         &BUS
+    }
+
+    /// Play the output check's tone on `output` (1 main, 2 phones) — `left`,
+    /// `right`, both, or (neither) off.
+    pub fn set_test_tone(&self, output: u32, left: bool, right: bool) {
+        let sides = u32::from(left) | u32::from(right) << 1;
+        let v = if sides == 0 || output == 0 { 0 } else { output << 2 | sides };
+        self.tone.store(v, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The tone's gain on (main left, main right, phones left, phones right).
+    fn tone_gains(&self) -> [f32; 4] {
+        let v = self.tone.load(std::sync::atomic::Ordering::Relaxed);
+        let (output, l, r) = (v >> 2, v & 1 != 0, v & 2 != 0);
+        let on = |o: u32, side: bool| if output == o && side { 1.0 } else { 0.0 };
+        [on(1, l), on(1, r), on(2, l), on(2, r)]
     }
 
     pub fn set(&self, volume: f32, self_mix: f32) {
@@ -218,6 +238,10 @@ impl DuplexAudioEngine {
             buffer_lower_only: !prefs.want_input,
         };
         let mut main_gain = 1.0f32;
+        // The output check's tone: 440 Hz at −18 dBFS, its phase carried
+        // across blocks.
+        let mut tone_phase = 0.0f32;
+        let tone_step = 440.0 * std::f32::consts::TAU / sample_rate as f32;
         // When each buffer really starts, in the sync clock (a DLL over
         // callback entry times) — stamps every buffer's sync snapshot.
         let mut stamps = daw_transport_sync::BufferClock::default();
@@ -251,15 +275,27 @@ impl DuplexAudioEngine {
                 let main_from = main_gain;
                 main_gain = main_to;
                 let step = (main_to - main_from) / frames.max(1) as f32;
+                let [tm_l, tm_r, tp_l, tp_r] = ph.tone_gains();
+                let toning = tm_l + tm_r + tp_l + tp_r > 0.0;
+                // With one pair (routing off, or the phones on the main
+                // pair) the phones' check plays there.
+                let one_pair = !routing || (ph_l == main_l && ph_r == main_r);
+                let (tm_l, tm_r) = if one_pair { (tm_l.max(tp_l), tm_r.max(tp_r)) } else { (tm_l, tm_r) };
                 for f in 0..frames {
                     let l = block.samples.get(f * 2).copied().unwrap_or(0.0);
                     let rr = block.samples.get(f * 2 + 1).copied().unwrap_or(0.0);
+                    let tone = if toning {
+                        tone_phase = (tone_phase + tone_step) % std::f32::consts::TAU;
+                        tone_phase.sin() * 0.125
+                    } else {
+                        0.0
+                    };
                     let g = step.mul_add(f as f32 + 1.0, main_from);
                     if main_l < outs {
-                        b.outputs[main_l][f] = l * g;
+                        b.outputs[main_l][f] = l * g + tone * tm_l;
                     }
                     if main_r < outs {
-                        b.outputs[main_r][f] = rr * g;
+                        b.outputs[main_r][f] = rr * g + tone * tm_r;
                     }
                     if routing && (ph_l != main_l || ph_r != main_r) {
                         let ext = |c: usize| {
@@ -271,10 +307,10 @@ impl DuplexAudioEngine {
                         };
                         let (ext_l, ext_r) = (ext(mix_l), ext(mix_r));
                         if ph_l < outs {
-                            b.outputs[ph_l][f] = (l * self_mix + ext_l) * vol;
+                            b.outputs[ph_l][f] = (l * self_mix + ext_l) * vol + tone * tp_l;
                         }
                         if ph_r < outs {
-                            b.outputs[ph_r][f] = (rr * self_mix + ext_r) * vol;
+                            b.outputs[ph_r][f] = (rr * self_mix + ext_r) * vol + tone * tp_r;
                         }
                     }
                 }
