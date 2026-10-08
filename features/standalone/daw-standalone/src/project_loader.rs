@@ -501,17 +501,20 @@ pub(crate) fn item_from_rpp(
     item.track_guid = track_guid.to_string();
     item.index = item_idx as u32;
     item.position = PositionInSeconds::from_seconds(ri.position);
-    item.length = Duration::from_seconds(ri.length);
-    item.snap_offset = Duration::from_seconds(ri.snap_offset);
+    // REAPER saves the odd item with a hair of negative length (and fades
+    // to match) — `LENGTH -0.00316666666667` — and opens it as an empty
+    // item. So do we: clamped to nothing, never a panic on open.
+    item.length = Duration::from_seconds(ri.length.max(0.0));
+    item.snap_offset = Duration::from_seconds(ri.snap_offset.max(0.0));
     item.muted = ri.mute.as_ref().map(|m| m.muted).unwrap_or(false);
     item.selected = ri.selected;
     item.volume = ri.volpan.as_ref().map(|v| v.item_trim).unwrap_or(1.0);
     if let Some(fi) = &ri.fade_in {
-        item.fade_in_length = Duration::from_seconds(fi.time);
+        item.fade_in_length = Duration::from_seconds(fi.time.max(0.0));
         item.fade_in_shape = fade_curve_to_shape(fi.curve_type);
     }
     if let Some(fo) = &ri.fade_out {
-        item.fade_out_length = Duration::from_seconds(fo.time);
+        item.fade_out_length = Duration::from_seconds(fo.time.max(0.0));
         item.fade_out_shape = fade_curve_to_shape(fo.curve_type);
     }
     item.color = ri.color.map(|c| native_color_to_rgb(c as u32));
@@ -1683,5 +1686,50 @@ mod anchor_tests {
             .expect("a path");
         assert!(std::path::Path::new(&path).is_absolute(), "{path}");
         assert!(path.ends_with("set/One/Media/Click.wav"), "{path}");
+    }
+}
+
+#[cfg(test)]
+mod negative_length_tests {
+    use super::load_rpp_text;
+    use crate::sync::Standalone;
+
+    /// REAPER saves the odd item with a hair of negative length, and fades
+    /// to match (a real session, Crescendum's "it knows my name", has two).
+    /// It opens: the item is empty, not a panic.
+    #[test]
+    fn an_item_saved_with_a_negative_length_opens_empty() {
+        const PROJECT: &str = r#"<REAPER_PROJECT 0.1 "7.0/test" 0
+  <TRACK {00000000-0000-0000-0000-000000000001}
+    NAME Vocals
+    <ITEM
+      POSITION 12
+      LENGTH -0.00316666666667
+      FADEIN 1 -0.00316666666667 0 1 0 0 0
+      FADEOUT 1 -0.00316666666667 0 1 0 0 0
+      IGUID {00000000-0000-0000-0000-00000000000A}
+      <SOURCE WAVE
+        FILE "Media/Vocals.wav"
+      >
+    >
+  >
+>
+"#;
+        let daw = Standalone::new();
+        let loaded = load_rpp_text(&daw, "Song", "/set/Song/Song.RPP", PROJECT).expect("it opens");
+        let lengths = daw
+            .read_project(&loaded.project_guid, |p| {
+                p.items
+                    .values()
+                    .map(|e| {
+                        (
+                            e.item.length.as_seconds(),
+                            e.item.fade_in_length.as_seconds(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .expect("the project");
+        assert_eq!(lengths, vec![(0.0, 0.0)]);
     }
 }
