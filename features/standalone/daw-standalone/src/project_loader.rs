@@ -112,6 +112,17 @@ pub(crate) fn native_color_to_rgb(c: u32) -> u32 {
     (r << 16) | (g << 8) | b
 }
 
+/// A REAPER colour field as the colour it sets, if it sets one: only with
+/// the `0x1000000` custom flag, as REAPER reads it. Without it the field
+/// is not a colour — `PEAKCOL 16576` is REAPER's "none", drawn in the
+/// theme's default; read as a colour it painted those tracks orange. (A
+/// field written negative, `-12566400` = `0xFF404080`, has the flag: it
+/// is that colour.)
+pub(crate) fn custom_color(c: i32) -> Option<u32> {
+    let c = c as u32;
+    (c & 0x0100_0000 != 0).then(|| native_color_to_rgb(c & 0x00ff_ffff))
+}
+
 /// Summary of what was loaded.
 #[derive(Debug, Default)]
 pub struct LoadedProject {
@@ -419,7 +430,7 @@ pub(crate) fn track_from_rpp(
         },
         index: idx as u32,
         name: rt.name.clone(),
-        color: rt.peak_color.map(|c| native_color_to_rgb(c as u32)),
+        color: rt.peak_color.and_then(custom_color),
         muted,
         soloed,
         armed: rt.record.as_ref().map(|r| r.armed).unwrap_or(false),
@@ -517,7 +528,7 @@ pub(crate) fn item_from_rpp(
         item.fade_out_length = Duration::from_seconds(fo.time.max(0.0));
         item.fade_out_shape = fade_curve_to_shape(fo.curve_type);
     }
-    item.color = ri.color.map(|c| native_color_to_rgb(c as u32));
+    item.color = ri.color.and_then(custom_color);
     item.loop_source = ri.loop_source;
     // Fixed-lane membership only matters on lane-enabled
     // tracks (YPOS also appears for free item positioning).
@@ -1731,5 +1742,21 @@ mod negative_length_tests {
             })
             .expect("the project");
         assert_eq!(lengths, vec![(0.0, 0.0)]);
+    }
+}
+
+#[cfg(test)]
+mod color_tests {
+    use super::custom_color;
+
+    /// Only a flagged field is a colour: REAPER's "none" (16576) sets
+    /// nothing; a flagged one — written positive or negative — is its
+    /// colour, `0xBBGGRR` read as `0xRRGGBB`.
+    #[test]
+    fn only_a_flagged_colour_field_is_a_colour() {
+        assert_eq!(custom_color(16576), None);
+        assert_eq!(custom_color(0), None);
+        assert_eq!(custom_color(-12_566_400), Some(0x80_40_40));
+        assert_eq!(custom_color(25_184_576), Some(0x40_49_80));
     }
 }
