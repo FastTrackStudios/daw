@@ -52,6 +52,10 @@ impl Drop for DuplexAudioEngine {
 }
 
 /// Live phones-bus levels — a process-wide handle the host app writes
+/// How long the main pair's mute takes to fade out or back in: short
+/// enough to read as instant, long enough not to click.
+const MUTE_FADE_S: f32 = 0.008;
+
 /// (headphone volume + self-mix) and the duplex callback reads lock-free.
 pub struct PhonesBus {
     volume: std::sync::atomic::AtomicU32,
@@ -112,6 +116,9 @@ impl PhonesBus {
 
     /// Mute the main output pair and keep the phones (routing on; with
     /// routing off there is one pair, and the caller mutes the master).
+    /// Mute the main pair (with the phones on a pair of their own, the
+    /// phones keep the guitar; on one shared pair, everything), fading over
+    /// [`MUTE_FADE_S`].
     pub fn set_main_mute(&self, on: bool) {
         self.main_mute
             .store(on, std::sync::atomic::Ordering::Relaxed);
@@ -270,11 +277,11 @@ impl DuplexAudioEngine {
                 let outs = b.outputs.len();
                 let (vol, self_mix) = ph.levels();
                 let blend = ph.blends_mix();
-                // The main pair's mute glides across the block (no click).
-                let main_to = if routing && ph.main_muted() { 0.0 } else { 1.0 };
-                let main_from = main_gain;
-                main_gain = main_to;
-                let step = (main_to - main_from) / frames.max(1) as f32;
+                // The main pair's mute fades in and out over `MUTE_FADE_S`
+                // whatever the buffer's size (a fade across one block was
+                // 1.3 ms at 64 frames — a click), carried across blocks.
+                let main_to = if ph.main_muted() { 0.0 } else { 1.0 };
+                let fade_step = 1.0 / (MUTE_FADE_S * sample_rate as f32).max(1.0);
                 let [tm_l, tm_r, tp_l, tp_r] = ph.tone_gains();
                 let toning = tm_l + tm_r + tp_l + tp_r > 0.0;
                 // With one pair (routing off, or the phones on the main
@@ -290,7 +297,8 @@ impl DuplexAudioEngine {
                     } else {
                         0.0
                     };
-                    let g = step.mul_add(f as f32 + 1.0, main_from);
+                    main_gain += (main_to - main_gain).clamp(-fade_step, fade_step);
+                    let g = main_gain;
                     if main_l < outs {
                         b.outputs[main_l][f] = l * g + tone * tm_l;
                     }
