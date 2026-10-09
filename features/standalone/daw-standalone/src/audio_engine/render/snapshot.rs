@@ -43,7 +43,7 @@ pub(crate) struct RenderSnapshot {
     /// summing, a soloed track's signal flows THROUGH its ancestors,
     /// so they (and its descendants) keep passing audio even though
     /// they aren't soloed themselves. See [`graph::solo_pass`].
-    pub(crate) solo_pass: Option<Vec<bool>>,
+    pub(crate) solo_pass: Option<Vec<graph::Pass>>,
     /// Tempo map kept for beat-grid consumers (metronome click).
     pub(crate) tempo_map: TempoMap,
     /// Time-signature numerator (beats per measure) for click accents.

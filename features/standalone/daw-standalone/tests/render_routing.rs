@@ -300,6 +300,55 @@ fn send_onto_channels_3_4_is_not_heard() {
     assert!(rms_l(&heard) > 0.1, "the same send onto 1/2 is heard");
 }
 
+/// A soloed one-note track (the kick's Sub) hears what feeds it and
+/// only that: the mic sends into it, and is not heard dry beside it —
+/// with the Sub's fader down, nothing is heard at all.
+#[test]
+fn a_soloed_return_hears_its_feed_and_not_the_feed_dry() {
+    let (daw, guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let mic = Tracks::add(&daw, ctx.clone(), "In", None).unwrap();
+    let sub = Tracks::add(&daw, ctx.clone(), "Sub", None).unwrap();
+    create_item_with_audio(&daw, &guid, &mic, 0.0, 1.0, const_audio(1.0));
+    Routing::add_send(
+        &daw,
+        ctx.clone(),
+        TrackRef::Guid(mic),
+        TrackRef::Guid(sub.clone()),
+    )
+    .unwrap();
+    Tracks::set_soloed(&daw, ctx.clone(), TrackRef::Guid(sub.clone()), true).unwrap();
+    let r = ProjectRenderer::new(&daw, &guid, SAMPLE_RATE);
+    let soloed = r.render_block(0, SAMPLE_RATE as usize / 4);
+    assert!(rms_l(&soloed) > 0.1, "the mic, through the Sub");
+    Tracks::set_volume(&daw, ctx, TrackRef::Guid(sub), 0.0).unwrap();
+    let down = r.render_block(0, SAMPLE_RATE as usize / 4);
+    assert!(
+        rms_l(&down) < 0.001,
+        "the mic not heard dry: {}",
+        rms_l(&down)
+    );
+}
+
+/// A soloed trigger — parent send off, only a key — is listened to:
+/// straight to master while soloed, and silent again after.
+#[test]
+fn a_soloed_track_with_no_route_is_listened_to() {
+    let (daw, guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let trig = Tracks::add(&daw, ctx.clone(), "Trig", None).unwrap();
+    create_item_with_audio(&daw, &guid, &trig, 0.0, 1.0, const_audio(1.0));
+    Routing::set_parent_send_enabled(&daw, ctx.clone(), TrackRef::Guid(trig.clone()), false)
+        .unwrap();
+    let r = ProjectRenderer::new(&daw, &guid, SAMPLE_RATE);
+    Tracks::set_soloed(&daw, ctx.clone(), TrackRef::Guid(trig.clone()), true).unwrap();
+    let soloed = r.render_block(0, SAMPLE_RATE as usize / 4);
+    assert!(rms_l(&soloed) > 0.1, "the trigger, heard while soloed");
+    Tracks::set_soloed(&daw, ctx, TrackRef::Guid(trig), false).unwrap();
+    let after = r.render_block(0, SAMPLE_RATE as usize / 4);
+    assert!(rms_l(&after) < 0.001, "and unheard after");
+}
+
 #[test]
 fn parent_send_disabled_excludes_track_from_master() {
     let (daw, guid) = seeded();

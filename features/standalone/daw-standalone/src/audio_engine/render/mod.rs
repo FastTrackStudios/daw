@@ -585,12 +585,13 @@ impl ProjectRenderer {
         // Output frames per timeline second (MIDI event offsets).
         let frames_per_second = self.sample_rate as f64 / rate;
         let any_soloed = snap.solo_pass.is_some();
-        let passes = |i: usize| -> bool {
+        let pass = |i: usize| -> graph::Pass {
             match &snap.solo_pass {
                 Some(p) => p[i],
-                None => true,
+                None => graph::Pass::On,
             }
         };
+        let passes = |i: usize| -> bool { pass(i).passes() };
 
         // Poison-tolerant lock: a control-thread panic while holding one of
         // these mutexes must NOT take down the audio callback (a panic here
@@ -1154,8 +1155,15 @@ impl ProjectRenderer {
                 }
             }
 
-            // Parent / master sum.
-            if t.parent_send {
+            // Parent / master sum — not for a track that, under a solo,
+            // only feeds what is soloed; and straight to master for one
+            // soloed with no way there of its own (`graph::Pass`).
+            let mode = pass(ti);
+            if mode == graph::Pass::Monitor {
+                for (m, smp) in master.samples.iter_mut().zip(src.iter()) {
+                    *m += *smp;
+                }
+            } else if mode != graph::Pass::Feed && t.parent_send {
                 match t.parent_idx {
                     Some(pi) => {
                         let parent_bus = &mut buses[pi];
@@ -1178,7 +1186,7 @@ impl ProjectRenderer {
                         }
                     }
                 }
-            } else if t.hw_out {
+            } else if mode != graph::Pass::Feed && t.hw_out {
                 // No parent send but routed to hardware — v0 sums hw
                 // outs straight to the master device buffer.
                 for (m, smp) in master.samples.iter_mut().zip(src.iter()) {

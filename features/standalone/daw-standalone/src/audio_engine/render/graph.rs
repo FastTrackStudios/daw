@@ -54,10 +54,33 @@ pub(crate) fn topo_order(tracks: &[TrackSnapshot]) -> Vec<usize> {
     order
 }
 
-/// Solo routing: which tracks keep passing audio while something is
-/// soloed. `None` when nothing is (everything passes). See
-/// [`solo_mask`] for the rules.
-pub(crate) fn solo_pass(tracks: &[TrackSnapshot]) -> Option<Vec<bool>> {
+/// What a track does while something is soloed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Pass {
+    /// Silent: not part of what is soloed.
+    Off,
+    /// Plays, as it always does: what is soloed, what is inside it, and
+    /// its way to master.
+    On,
+    /// Plays INTO what it feeds and nowhere else: its sends run, its
+    /// folder does not hear it. A soloed Sub hears the kick's Sum, and the
+    /// kick is not heard beside it; a key keys its gate, unheard.
+    Feed,
+    /// Soloed, with no way of its own to be heard — a trigger, whose only
+    /// send is a key: put to master while soloed, so a solo is a listen.
+    Monitor,
+}
+
+impl Pass {
+    /// Whether the track is processed at all.
+    pub(crate) const fn passes(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+}
+
+/// Solo routing: what each track does while something is soloed. `None`
+/// when nothing is (everything passes). See [`solo_mask`] for the rules.
+pub(crate) fn solo_pass(tracks: &[TrackSnapshot]) -> Option<Vec<Pass>> {
     if !tracks.iter().any(|t| t.soloed) {
         return None;
     }
@@ -74,51 +97,24 @@ pub(crate) fn solo_pass(tracks: &[TrackSnapshot]) -> Option<Vec<bool>> {
             })
             .collect()
     };
+    let audio = routes(false);
     let soloed: Vec<bool> = tracks.iter().map(|t| t.soloed).collect();
-    let pass = solo_mask(&parents, &routes(false), &soloed);
-    Some(with_keys(pass, &parents, &routes(true)))
-}
-
-/// The tracks that key a passing track's plugins pass too, with
-/// everything inside them: a key is never heard — it goes to channels
-/// 3/4 — so a solo cannot be about it, and muting it by the solo would
-/// shut the gate it keys. Soloing a kick mic must not silence the kick
-/// because its trigger was not soloed.
-pub(crate) fn with_keys(
-    mut pass: Vec<bool>,
-    parents: &[Option<usize>],
-    keys: &[Vec<usize>],
-) -> Vec<bool> {
-    let n = pass.len();
-    let mut keying = vec![false; n];
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for i in 0..n {
-            if keying[i] {
-                continue;
-            }
-            let keys_a_pass = keys
-                .get(i)
-                .is_some_and(|k| k.iter().any(|&d| d < n && (pass[d] || keying[d])));
-            let in_a_key = parents
-                .get(i)
-                .copied()
-                .flatten()
-                .is_some_and(|p| p < n && keying[p]);
-            if keys_a_pass || in_a_key {
-                keying[i] = true;
-                changed = true;
-            }
+    let mut pass = with_keys(
+        solo_mask(&parents, &audio, &soloed),
+        &parents,
+        &routes(true),
+    );
+    // A soloed track with no way of its own to master — no parent send,
+    // no hardware out, no audio send — is listened to directly.
+    for ((p, t), sends) in pass.iter_mut().zip(tracks).zip(&audio) {
+        if t.soloed && !t.parent_send && !t.hw_out && sends.is_empty() {
+            *p = Pass::Monitor;
         }
     }
-    for (p, k) in pass.iter_mut().zip(keying) {
-        *p |= k;
-    }
-    pass
+    Some(pass)
 }
 
-/// The solo mask over the routing graph, REAPER's way:
+/// The solo mask over the routing graph:
 ///
 /// - a soloed track plays, and so does everything inside it (soloing a
 ///   folder solos its children);
@@ -129,24 +125,25 @@ pub(crate) fn with_keys(
 ///   parents: the bus was not in the mask, so it was skipped and the
 ///   soloed audio went nowhere. A track on that path is NOT soloed
 ///   itself: the other tracks that feed the same bus stay silent;
-/// - and so does whatever sends INTO a soloed track (with its own
-///   contents), so soloing a bus plays what feeds it.
+/// - whatever sends INTO a soloed track (repeatedly: a stem into a bus
+///   into a soloed mix bus) plays into it and only into it ([`Pass::Feed`]):
+///   soloing a bus plays the bus, soloing a return plays the return, not
+///   the dry tracks beside it. What is inside such a feeder plays into it
+///   as usual — the kick's Sum still hears its mics.
 pub(crate) fn solo_mask(
     parents: &[Option<usize>],
     sends: &[Vec<usize>],
     soloed: &[bool],
-) -> Vec<bool> {
+) -> Vec<Pass> {
     let n = parents.len();
-    // The tracks the solo is ABOUT: the soloed ones, plus whatever sends
-    // into them (repeatedly: a stem into a bus into a soloed mix bus),
-    // plus everything inside any of those.
-    let mut source = soloed.to_vec();
+    let mut feeds = vec![false; n];
     let mut changed = true;
     while changed {
         changed = false;
         for i in 0..n {
-            if !source[i] && sends[i].iter().any(|&d| d < n && source[d]) {
-                source[i] = true;
+            if !soloed[i] && !feeds[i] && sends[i].iter().any(|&d| d < n && (soloed[d] || feeds[d]))
+            {
+                feeds[i] = true;
                 changed = true;
             }
         }
@@ -166,18 +163,72 @@ pub(crate) fn solo_mask(
         }
         false
     };
-    let sources: Vec<bool> = (0..n).map(|j| source[j] || inside(j, &source)).collect();
-
-    // And everything downstream of them, which is the path to master.
-    let mut pass = sources.clone();
-    let mut queue: VecDeque<usize> = (0..n).filter(|&i| pass[i]).collect();
+    // What is soloed, and everything downstream of it: its way to master.
+    let mut on: Vec<bool> = (0..n).map(|j| soloed[j] || inside(j, soloed)).collect();
+    let mut queue: VecDeque<usize> = (0..n).filter(|&i| on[i]).collect();
     while let Some(i) = queue.pop_front() {
         let onward = parents[i].into_iter().chain(sends[i].iter().copied());
         for d in onward {
-            if d < n && !pass[d] {
-                pass[d] = true;
+            if d < n && !on[d] {
+                on[d] = true;
                 queue.push_back(d);
             }
+        }
+    }
+    (0..n)
+        .map(|j| {
+            if on[j] {
+                Pass::On
+            } else if feeds[j] {
+                Pass::Feed
+            } else if inside(j, &feeds) {
+                Pass::On
+            } else {
+                Pass::Off
+            }
+        })
+        .collect()
+}
+
+/// The tracks that key a passing track's plugins feed it, with everything
+/// inside them: a key is never heard — it goes to channels 3/4 — so a
+/// solo cannot be about it, and muting it by the solo would shut the gate
+/// it keys. Soloing a kick mic must not silence the kick because its
+/// trigger was not soloed.
+pub(crate) fn with_keys(
+    mut pass: Vec<Pass>,
+    parents: &[Option<usize>],
+    keys: &[Vec<usize>],
+) -> Vec<Pass> {
+    let n = pass.len();
+    let mut keying = vec![false; n];
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for i in 0..n {
+            if keying[i] || pass[i].passes() {
+                continue;
+            }
+            let keys_a_pass = keys
+                .get(i)
+                .is_some_and(|k| k.iter().any(|&d| d < n && (pass[d].passes() || keying[d])));
+            let in_a_key = parents
+                .get(i)
+                .copied()
+                .flatten()
+                .is_some_and(|p| p < n && keying[p]);
+            if keys_a_pass || in_a_key {
+                keying[i] = true;
+                changed = true;
+            }
+        }
+    }
+    for i in 0..n {
+        if keying[i] {
+            // The key itself only feeds; what is inside a folder of keys
+            // sums into it.
+            let in_a_key = parents[i].is_some_and(|p| p < n && keying[p]);
+            pass[i] = if in_a_key { Pass::On } else { Pass::Feed };
         }
     }
     pass
@@ -185,26 +236,27 @@ pub(crate) fn solo_mask(
 
 #[cfg(test)]
 mod key_tests {
-    use super::with_keys;
+    use super::{Pass, with_keys};
 
     /// 0 Kick (folder), 1 In (in Kick), 2 Trig folder, 3 T1 Trig (in 2)
     /// keying Kick; 4 a stranger. Soloing In passes Kick (its parent):
-    /// the trigger folder and the trigger in it pass with it — not the
-    /// stranger. With Kick not passing, nothing keys anything.
+    /// the trigger folder feeds it and the trigger in it sums into the
+    /// folder — not the stranger. With Kick not passing, nothing keys.
     #[test]
-    fn a_key_passes_with_what_it_keys() {
+    fn a_key_feeds_what_it_keys() {
+        use Pass::{Feed, Off, On};
         let parents = [None, Some(0), None, Some(2), None];
         let keys = [vec![], vec![], vec![0], vec![], vec![]];
-        let soloed_in = with_keys(vec![true, true, false, false, false], &parents, &keys);
-        assert_eq!(soloed_in, [true, true, true, true, false]);
-        let nothing = with_keys(vec![false, false, false, false, true], &parents, &keys);
-        assert_eq!(nothing, [false, false, false, false, true]);
+        let soloed_in = with_keys(vec![On, On, Off, Off, Off], &parents, &keys);
+        assert_eq!(soloed_in, [On, On, Feed, On, Off]);
+        let nothing = with_keys(vec![Off, Off, Off, Off, On], &parents, &keys);
+        assert_eq!(nothing, [Off, Off, Off, Off, On]);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::solo_mask;
+    use super::{Pass, solo_mask};
 
     /// The live-bus shape: stems inside instrument folders with their
     /// parent send off, reaching the mix only through a send to a bus in
@@ -237,7 +289,7 @@ mod tests {
         (parents, sends)
     }
 
-    fn solo(which: &[usize]) -> Vec<bool> {
+    fn solo(which: &[usize]) -> Vec<Pass> {
         let (parents, sends) = live_bus();
         let mut soloed = vec![false; parents.len()];
         for &i in which {
@@ -246,27 +298,42 @@ mod tests {
         solo_mask(&parents, &sends, &soloed)
     }
 
-    fn passing(mask: &[bool]) -> Vec<usize> {
-        (0..mask.len()).filter(|&i| mask[i]).collect()
+    fn having(mask: &[Pass], pass: Pass) -> Vec<usize> {
+        (0..mask.len()).filter(|&i| mask[i] == pass).collect()
     }
 
     #[test]
     fn a_soloed_stem_reaches_master_through_its_send() {
         // Kick, its folder, the drum bus and the BUSES folder, and NOT the
         // snare that shares the bus.
-        assert_eq!(passing(&solo(&[1])), vec![0, 1, 5, 7]);
+        assert_eq!(having(&solo(&[1]), Pass::On), vec![0, 1, 5, 7]);
+        assert!(having(&solo(&[1]), Pass::Feed).is_empty());
     }
 
     #[test]
     fn a_soloed_folder_plays_its_stems_through_their_buses() {
-        assert_eq!(passing(&solo(&[0])), vec![0, 1, 2, 5, 7]);
+        assert_eq!(having(&solo(&[0]), Pass::On), vec![0, 1, 2, 5, 7]);
     }
 
     #[test]
-    fn a_soloed_bus_plays_what_feeds_it() {
-        // Drum bus: the kick and snare that send to it, their folder, the
-        // bus and its folder; not the bass.
-        assert_eq!(passing(&solo(&[5])), vec![0, 1, 2, 5, 7]);
+    fn a_soloed_bus_hears_what_feeds_it_and_only_through_itself() {
+        // Drum bus: the kick and snare feed it — into it only — the bus
+        // and its folder play; their own folder, and the bass, do not.
+        let mask = solo(&[5]);
+        assert_eq!(having(&mask, Pass::On), vec![5, 7]);
+        assert_eq!(having(&mask, Pass::Feed), vec![1, 2]);
+        assert_eq!(mask[0], Pass::Off);
+    }
+
+    /// The kick's Sub, soloed: the kick's Sum (0's child 1, mics 2 and 3
+    /// in it) feeds the Sub (4, in Kick 0); the Sum feeds it only — not
+    /// Kick beside the Sub — and its mics still sum into it.
+    #[test]
+    fn a_soloed_sub_hears_its_feed_and_nothing_beside() {
+        let parents = [None, Some(0), Some(1), Some(1), Some(0)];
+        let sends = [vec![], vec![4], vec![], vec![], vec![]];
+        let mask = solo_mask(&parents, &sends, &[false, false, false, false, true]);
+        assert_eq!(mask, [Pass::On, Pass::Feed, Pass::On, Pass::On, Pass::On]);
     }
 
     #[test]
@@ -275,6 +342,9 @@ mod tests {
         sends[1].clear(); // the kick's send, muted (filtered by solo_pass)
         let mut soloed = vec![false; parents.len()];
         soloed[1] = true;
-        assert_eq!(passing(&solo_mask(&parents, &sends, &soloed)), vec![0, 1]);
+        assert_eq!(
+            having(&solo_mask(&parents, &sends, &soloed), Pass::On),
+            vec![0, 1]
+        );
     }
 }
