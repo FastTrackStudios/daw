@@ -15,8 +15,7 @@ use cpal::traits::HostTrait;
 pub fn audio_host() -> cpal::Host {
     #[cfg(target_os = "linux")]
     {
-        if let Ok(h) = cpal::host_from_id(cpal::HostId::PipeWire) {
-            tracing::info!("daw-audio-io: using native PipeWire host");
+        if let Some(h) = pipewire_host() {
             return h;
         }
         tracing::warn!("daw-audio-io: PipeWire host unavailable; trying JACK/default");
@@ -34,6 +33,41 @@ pub fn audio_host() -> cpal::Host {
         }
     }
     cpal::default_host()
+}
+
+/// cpal's PipeWire host, retried while PipeWire is there to be had.
+///
+/// cpal gives up on PipeWire when listing its devices takes more than two
+/// seconds, which it does for a while after another client of ours has
+/// just gone (an app quit and opened again): one try, and the engine fell
+/// back to ALSA — which took the better part of a minute and a half to
+/// open, on whatever ALSA's default output is, missing deadlines. While
+/// PipeWire's socket is there, it is worth waiting for; with none, there
+/// is nothing to wait for.
+#[cfg(target_os = "linux")]
+fn pipewire_host() -> Option<cpal::Host> {
+    const TRIES: u32 = 5;
+    for attempt in 1..=TRIES {
+        let began = std::time::Instant::now();
+        match cpal::host_from_id(cpal::HostId::PipeWire) {
+            Ok(h) => {
+                tracing::info!(attempt, "daw-audio-io: using native PipeWire host");
+                return Some(h);
+            }
+            Err(e) => {
+                let there = cpal::available_hosts().contains(&cpal::HostId::PipeWire);
+                tracing::warn!(attempt, there, error = %e, "daw-audio-io: PipeWire host not ready");
+                if !there {
+                    return None;
+                }
+                // Each try is its own two-second wait; a short pause between.
+                if began.elapsed() < std::time::Duration::from_millis(500) {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Whether `host` is the JACK backend. Under JACK the server dictates both
