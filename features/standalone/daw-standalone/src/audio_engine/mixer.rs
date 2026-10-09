@@ -268,6 +268,10 @@ pub struct AudioEngine {
     /// Media read-ahead worker (project mode only) — stops with the engine.
     #[cfg(not(target_arch = "wasm32"))]
     _prefetch: Option<super::prefetch::PrefetchWorker>,
+    /// The render snapshot builder (project mode only) — stops with the
+    /// engine. See `ProjectRenderer::build_in_background`.
+    #[cfg(not(target_arch = "wasm32"))]
+    _snapshots: Option<super::render::SnapshotBuilder>,
     /// Realtime metrics from the output callback — the block size the
     /// device actually runs at, render time, over-budget blocks. Same
     /// type the duplex engine reports. Project mode only.
@@ -434,6 +438,8 @@ impl AudioEngine {
             #[cfg(not(target_arch = "wasm32"))]
             _prefetch: None,
             #[cfg(not(target_arch = "wasm32"))]
+            _snapshots: None,
+            #[cfg(not(target_arch = "wasm32"))]
             stats: None,
         })
     }
@@ -492,6 +498,10 @@ impl AudioEngine {
         // rebuilds when the project revision moves, so steady playback
         // re-walks nothing.
         let renderer = Arc::new(ProjectRenderer::new(&daw, &project_guid, sample_rate));
+        // Snapshots built off the audio thread from here on: an edit must
+        // never make the callback walk the project.
+        #[cfg(not(target_arch = "wasm32"))]
+        let snapshots = Some(renderer.build_in_background());
 
         // Live / programmatic MIDI ring: the UI thread pushes events
         // through `Standalone::push_note_on`/`_off`/`_cc` (producer), the
@@ -602,6 +612,8 @@ impl AudioEngine {
             _input_stream: input_stream,
             #[cfg(not(target_arch = "wasm32"))]
             _prefetch: prefetch,
+            #[cfg(not(target_arch = "wasm32"))]
+            _snapshots: snapshots,
             #[cfg(not(target_arch = "wasm32"))]
             stats: Some(stats),
         })

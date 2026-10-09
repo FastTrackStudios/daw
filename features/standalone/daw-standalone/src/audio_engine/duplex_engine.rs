@@ -37,6 +37,8 @@ pub struct DuplexAudioEngine {
     shared: Arc<TransportShared>,
     _backend: Backend,
     _renderer: Arc<ProjectRenderer>,
+    /// The render snapshot builder: stops with the engine.
+    _snapshots: crate::audio_engine::render::SnapshotBuilder,
     stats: Arc<EngineStats>,
     sample_rate: u32,
     /// Hardware `(input, output)` latency in frames, when the backend knows.
@@ -132,6 +134,8 @@ impl DuplexAudioEngine {
         shared.set_sample_rate(sample_rate);
 
         let renderer = Arc::new(ProjectRenderer::new(&daw, &project_guid, sample_rate));
+        // Snapshots built off the audio thread (see the cpal engine).
+        let snapshots = renderer.build_in_background();
 
         // Live / programmatic MIDI ring (same wiring as the cpal engine).
         {
@@ -291,6 +295,7 @@ impl DuplexAudioEngine {
             shared,
             _backend: backend,
             _renderer: renderer,
+            _snapshots: snapshots,
             stats,
             sample_rate,
             latency,

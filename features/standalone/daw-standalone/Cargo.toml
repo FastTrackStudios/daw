@@ -179,6 +179,10 @@ required-features = ["bootstrap", "audio"]
 name = "play_rpp"
 required-features = ["rpp-loader"]
 
+[[example]]
+name = "render_bench"
+required-features = ["rpp-loader"]
+
 [lints]
 workspace = true
 

@@ -350,12 +350,33 @@ impl RenderScratch {
 /// rendering a block without its FX stage — on the order of 10–50 µs.
 const PLUGIN_LOCK_SPINS: usize = 2_000;
 
+/// How often the background builder looks for an edit.
+#[cfg(not(target_arch = "wasm32"))]
+const SNAPSHOT_POLL: std::time::Duration = std::time::Duration::from_millis(2);
+
+/// The background snapshot builder's guard: it stops when this drops.
+#[cfg(not(target_arch = "wasm32"))]
+pub struct SnapshotBuilder {
+    stop: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for SnapshotBuilder {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 pub struct ProjectRenderer {
     daw: Standalone,
     project_guid: String,
     sample_rate: u32,
     /// `(project revision, snapshot)` — refreshed when the revision moves.
-    cache: std::sync::Mutex<Option<(u64, Arc<RenderSnapshot>)>>,
+    /// Shared with the background builder ([`Self::build_in_background`]).
+    cache: Arc<std::sync::Mutex<Option<(u64, Arc<RenderSnapshot>)>>>,
+    /// Snapshots are built by the background builder, never on the caller's
+    /// (the audio) thread — see [`Self::build_in_background`].
+    background: std::sync::atomic::AtomicBool,
     /// Reusable block buffers. Mutex for `&self` access — the audio
     /// callback is the only steady-state caller, so it's uncontended.
     scratch: std::sync::Mutex<RenderScratch>,
@@ -379,7 +400,8 @@ impl ProjectRenderer {
             daw: daw.clone(),
             project_guid: project_guid.to_string(),
             sample_rate,
-            cache: std::sync::Mutex::new(None),
+            cache: Arc::new(std::sync::Mutex::new(None)),
+            background: std::sync::atomic::AtomicBool::new(false),
             scratch: std::sync::Mutex::new(RenderScratch::default()),
             #[cfg(not(target_arch = "wasm32"))]
             live_input: std::sync::Mutex::new(None),
@@ -1202,9 +1224,66 @@ impl ProjectRenderer {
         }
     }
 
+    /// Build snapshots on a thread of their own from now on, and only read
+    /// them here: the audio callback renders from the latest one built and
+    /// never builds, nor touches the project, itself.
+    ///
+    /// Built in the callback, a snapshot cost the whole project walked under
+    /// the project lock — ~14 ms for a 90-track song against a 2.7 ms block
+    /// — and every edit (each of an organize's hundreds, a mute while
+    /// playing) moved the revision, so the next block missed its deadline.
+    /// Now an edit reaches the audio a builder pass later (a few ms) and
+    /// nothing glitches. The first snapshot is built here, before this
+    /// returns, so the first block has one. Stops when the guard drops.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn build_in_background(&self) -> SnapshotBuilder {
+        let _ = self.snapshot();
+        self.background
+            .store(true, std::sync::atomic::Ordering::Release);
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (flag, daw, guid, cache) = (
+            stop.clone(),
+            self.daw.clone(),
+            self.project_guid.clone(),
+            self.cache.clone(),
+        );
+        let _ = std::thread::Builder::new()
+            .name("fts-render-snapshot".into())
+            .spawn(move || {
+                while !flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    let current = daw.read_project(&guid, |p| p.revision);
+                    let built = cache
+                        .lock()
+                        .ok()
+                        .and_then(|c| c.as_ref().map(|(revision, _)| *revision));
+                    if current.is_some() && current != built {
+                        // Build + revision in one lock pass, as the
+                        // synchronous path does; published by a pointer swap.
+                        if let Some((revision, snap)) =
+                            daw.read_project(&guid, |p| (p.revision, RenderSnapshot::build(p)))
+                            && let Ok(mut c) = cache.lock()
+                        {
+                            *c = Some((revision, snap));
+                        }
+                    }
+                    std::thread::sleep(SNAPSHOT_POLL);
+                }
+            });
+        SnapshotBuilder { stop }
+    }
+
     /// Revision-cached [`RenderSnapshot`] — rebuilt only when the
-    /// project's mutation revision moves.
+    /// project's mutation revision moves (by the background builder, once
+    /// one runs: then this only reads the latest).
     fn snapshot(&self) -> Option<Arc<RenderSnapshot>> {
+        if self.background.load(std::sync::atomic::Ordering::Acquire) {
+            // The builder holds this lock only for a pointer swap.
+            return self
+                .cache
+                .lock()
+                .ok()
+                .and_then(|c| c.as_ref().map(|(_, snap)| snap.clone()));
+        }
         let revision = self.daw.read_project(&self.project_guid, |p| p.revision)?;
         if let Ok(cache) = self.cache.lock()
             && let Some((cached_rev, snap)) = cache.as_ref()
@@ -1650,6 +1729,56 @@ mod folder_routing_tests {
         })
         .flatten()
         .unwrap_or_else(|| panic!("no track named {name}"))
+    }
+
+    /// A background renderer never builds a snapshot on the render thread:
+    /// after an edit it keeps rendering from the one it has, and the
+    /// builder's rebuild arrives moments later. Without the builder, the
+    /// same edit makes the render thread rebuild at once — the control.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_background_renderer_picks_up_edits_without_building_them() {
+        let (daw, guid) = seeded();
+        let edit = || {
+            daw.with_project_mut(&guid, |p| p.tracks.len())
+                .expect("the project")
+        };
+
+        let inline = ProjectRenderer::new(&daw, &guid, 48_000);
+        let before = inline.snapshot().expect("a snapshot");
+        edit();
+        let after = inline.snapshot().expect("a snapshot");
+        assert!(
+            !Arc::ptr_eq(&before, &after),
+            "built on this thread, at once"
+        );
+
+        let renderer = ProjectRenderer::new(&daw, &guid, 48_000);
+        let _builder = renderer.build_in_background();
+        let primed = renderer.snapshot().expect("primed before any block");
+        edit();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let rebuilt = loop {
+            let now = renderer.snapshot().expect("a snapshot");
+            if !Arc::ptr_eq(&primed, &now) {
+                break now;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the builder never caught up"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+        // And it is the edited project's: the builder's, not a rebuild here.
+        let current = daw
+            .read_project(&guid, |p| p.revision)
+            .expect("the project");
+        let cached = renderer
+            .cache
+            .lock()
+            .ok()
+            .and_then(|c| c.as_ref().map(|(revision, snap)| (*revision, snap.clone())));
+        assert!(cached.is_some_and(|(revision, snap)| revision == current && Arc::ptr_eq(&snap, &rebuilt)));
     }
 
     // (a) The seed populates folder parents.
