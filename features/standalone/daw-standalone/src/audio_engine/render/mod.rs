@@ -830,7 +830,21 @@ impl ProjectRenderer {
                 // track's plugins still run (tails, meters). Say so to the
                 // plugins that need to know — see `plugin::track_muted`.
                 let _muted = crate::plugin::TrackMutedGuard::enter(t.muted);
-                for (i, fx_guid) in t.fx_chain.iter().enumerate() {
+                // ...unless nothing would hear them: the fader zeroes a muted
+                // track, and only a pre-fader (post-FX) send taps it before
+                // that. Then its chain is not run at all — a mix's muted
+                // alternatives (the drum Process's seven reverbs, 4% of a
+                // core each) cost nothing while they are off.
+                let heard_while_muted = t
+                    .sends
+                    .iter()
+                    .any(|s| s.mode == daw_proto::routing::SendMode::PostFx);
+                let chain = if t.muted && !heard_while_muted {
+                    &[][..]
+                } else {
+                    t.fx_chain.as_slice()
+                };
+                for (i, fx_guid) in chain.iter().enumerate() {
                     if !t.fx_enabled.get(i).copied().unwrap_or(true) {
                         continue;
                     }
@@ -1603,7 +1617,6 @@ mod live_midi_tests {
         assert!(bucket.is_empty());
     }
 }
-
 
 /// A stereo signal's gains at `pan` (−1 left … 1 right): REAPER's default,
 /// stereo balance with a 0 dB pan law (`PANMODE 3`, `PANLAW 1`). Centred,
