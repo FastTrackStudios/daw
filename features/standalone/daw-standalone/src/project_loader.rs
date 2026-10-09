@@ -1181,6 +1181,8 @@ fn populate_routing(
                 route.muted = recv.mute;
                 route.phase_inverted = recv.invert_polarity;
                 route.send_mode = send_mode_from_rpp(recv.mode);
+                route.source_channels = channels_from_rpp(recv.source_audio_channels);
+                route.dest_channels = channels_from_rpp(recv.dest_audio_channels);
                 let sends = p.sends.entry(src_guid).or_default();
                 route.index = sends.len() as u32;
                 sends.push(route);
@@ -1768,5 +1770,43 @@ mod color_tests {
         assert_eq!(custom_color(0), None);
         assert_eq!(custom_color(-12_566_400), Some(0x80_40_40));
         assert_eq!(custom_color(25_184_576), Some(0x40_49_80));
+    }
+}
+
+/// A receive's channel field as REAPER writes it: the first channel
+/// (0 = 1/2, 2 = 3/4), `| 1024` for mono, more pairs above bit 10 —
+/// `-1` for none, read as the default pair.
+fn channels_from_rpp(field: i32) -> daw_proto::ChannelMapping {
+    let Ok(field) = u32::try_from(field) else {
+        return daw_proto::ChannelMapping::default();
+    };
+    let pairs = (field >> 11) & 0x1f;
+    daw_proto::ChannelMapping {
+        start_channel: field & 0x3ff,
+        num_channels: if field & 1024 != 0 {
+            1
+        } else {
+            2 * pairs.max(1)
+        },
+    }
+}
+
+#[cfg(test)]
+mod channel_tests {
+    use super::channels_from_rpp;
+
+    /// REAPER's receive channel fields: 0 the main pair, 2 a
+    /// sidechain on 3/4 (`AUXRECV 10 1 1 0 0 0 0 0 2` — a kick's
+    /// trigger keying its gate), mono flagged, none.
+    #[test]
+    fn a_receive_lands_on_the_channels_it_names() {
+        let at = |field| {
+            let c = channels_from_rpp(field);
+            (c.start_channel, c.num_channels)
+        };
+        assert_eq!(at(0), (0, 2));
+        assert_eq!(at(2), (2, 2));
+        assert_eq!(at(1024 | 3), (3, 1));
+        assert_eq!(at(-1), (0, 0));
     }
 }

@@ -96,7 +96,6 @@ fn rms_r(buf: &daw_standalone::audio_engine::render::StereoBuffer) -> f32 {
     ((s / buf.frames.max(1) as f64).sqrt()) as f32
 }
 
-
 /// A centred track's gain on each side: REAPER's default stereo balance
 /// with a 0 dB pan law — unity (`render::balance`).
 const CENTRE: f32 = 1.0;
@@ -261,6 +260,44 @@ fn send_routes_audio_into_destination_bus() {
     .unwrap();
     let muted = r.render_block(0, SAMPLE_RATE as usize / 4);
     assert!(rms_l(&muted) < 0.001, "muted send should be silent");
+}
+
+/// A send onto the destination's channels 3/4 is its sidechain: it keys
+/// the destination's plugins and is not heard. Moved back onto 1/2, the
+/// same send is heard — the negative control.
+#[test]
+fn send_onto_channels_3_4_is_not_heard() {
+    let (daw, guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let src = Tracks::add(&daw, ctx.clone(), "Trig", None).unwrap();
+    let gated = Tracks::add(&daw, ctx.clone(), "Kick", None).unwrap();
+    create_item_with_audio(&daw, &guid, &src, 0.0, 1.0, const_audio(1.0));
+    Routing::set_parent_send_enabled(&daw, ctx.clone(), TrackRef::Guid(src.clone()), false)
+        .unwrap();
+    Routing::add_send(
+        &daw,
+        ctx.clone(),
+        TrackRef::Guid(src.clone()),
+        TrackRef::Guid(gated),
+    )
+    .unwrap();
+    let send = daw_proto::RouteLocation {
+        track: TrackRef::Guid(src),
+        route_type: RouteType::Send,
+        route: RouteRef::Index(0),
+    };
+    let r = ProjectRenderer::new(&daw, &guid, SAMPLE_RATE);
+
+    Routing::set_dest_channels(&daw, ctx.clone(), send.clone(), 2, 2).unwrap();
+    let keyed = r.render_block(0, SAMPLE_RATE as usize / 4);
+    assert!(
+        rms_l(&keyed) < 0.001 && rms_r(&keyed) < 0.001,
+        "a sidechain is not heard"
+    );
+
+    Routing::set_dest_channels(&daw, ctx, send, 0, 2).unwrap();
+    let heard = r.render_block(0, SAMPLE_RATE as usize / 4);
+    assert!(rms_l(&heard) > 0.1, "the same send onto 1/2 is heard");
 }
 
 #[test]

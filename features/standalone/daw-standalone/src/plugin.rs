@@ -196,6 +196,13 @@ pub trait PluginInstance: Send {
         events: &PluginEvents<'_>,
     ) -> Result<(), PluginError>;
 
+    /// The sidechain for the next [`process_block`](Self::process_block)
+    /// only: what the track received on channels 3/4 this block (a
+    /// drum's trigger keying its gate). Not called on a block with
+    /// nothing there, so the plugin hears silence. Ignored by default —
+    /// a plugin without a sidechain input has nowhere to put it.
+    fn set_sidechain(&mut self, _left: &[f32], _right: &[f32]) {}
+
     /// Restore plugin state from a host-defined byte blob. The
     /// blob format is backend-specific — for round-trip safety the
     /// blob must have been produced by [`save_state`] from a plugin

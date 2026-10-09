@@ -300,6 +300,15 @@ struct RenderScratch {
     /// Send-tap copies (only filled when a send actually taps there).
     pre_fx_tap: Vec<f32>,
     pre_fader_tap: Vec<f32>,
+    /// Each track's channels 3/4 (interleaved), what sends to its
+    /// sidechain left there this block; sized on first use, so a project
+    /// without sidechains carries none.
+    sidechains: Vec<Vec<f32>>,
+    /// Which tracks' sidechains received this block.
+    keyed: Vec<bool>,
+    /// De-interleave scratch for a sidechain.
+    key_l: Vec<f32>,
+    key_r: Vec<f32>,
     /// FX guids whose plugin panicked inside `process_block`/`prepare`.
     /// Once here they are bypassed forever (this engine run) — a plugin
     /// that panics once can't be trusted on the audio thread again.
@@ -325,11 +334,21 @@ impl RenderScratch {
         }
         self.dirty.clear();
         self.dirty.resize(n, false);
+        self.sidechains.resize_with(n, Vec::new);
+        for (sidechain, keyed) in self.sidechains.iter_mut().zip(&self.keyed) {
+            if *keyed {
+                sidechain.fill(0.0);
+            }
+        }
+        self.keyed.clear();
+        self.keyed.resize(n, false);
         for v in [
             &mut self.in_l,
             &mut self.in_r,
             &mut self.out_l,
             &mut self.out_r,
+            &mut self.key_l,
+            &mut self.key_r,
         ] {
             if v.len() != frames {
                 v.resize(frames, 0.0);
@@ -595,6 +614,10 @@ impl ProjectRenderer {
             src,
             pre_fx_tap,
             pre_fader_tap,
+            sidechains,
+            keyed,
+            key_l,
+            key_r,
             panicked_fx,
         } = &mut *scratch;
 
@@ -887,6 +910,14 @@ impl ProjectRenderer {
                     for v in out_l.iter_mut().chain(out_r.iter_mut()) {
                         *v = 0.0;
                     }
+                    if keyed[ti] {
+                        let sidechain = &sidechains[ti];
+                        for f in 0..frames {
+                            key_l[f] = sidechain[f * 2];
+                            key_r[f] = sidechain[f * 2 + 1];
+                        }
+                        plugin.set_sidechain(key_l, key_r);
+                    }
                     let param_events = t.fx_params.get(i).map(Vec::as_slice).unwrap_or(&[]);
                     let events = crate::plugin::PluginEvents {
                         params: param_events,
@@ -1084,12 +1115,21 @@ impl ProjectRenderer {
                     daw_proto::routing::SendMode::PostFx if has_pre_fader_tap => pre_fader_tap,
                     _ => src,
                 };
-                let dest_bus = &mut buses[di];
-                dirty[di] = true;
+                let dest_bus: &mut [f32] = if snd.to_sidechain {
+                    let sidechain = &mut sidechains[di];
+                    if sidechain.len() != frames * 2 {
+                        sidechain.resize(frames * 2, 0.0);
+                    }
+                    keyed[di] = true;
+                    sidechain
+                } else {
+                    dirty[di] = true;
+                    &mut buses[di].samples
+                };
                 let mut c_vol = snd.volume_env.as_ref().map(|p| EnvelopeCursor::new(p));
                 let mut c_pan = snd.pan_env.as_ref().map(|p| EnvelopeCursor::new(p));
                 let mut c_mute = snd.mute_env.as_ref().map(|p| EnvelopeCursor::new(p));
-                for frame in 0..dest_bus.frames {
+                for frame in 0..frames {
                     let time = start_seconds + frame as f64 * rate * inv_rate;
                     let env_muted = c_mute
                         .as_mut()
@@ -1109,8 +1149,8 @@ impl ProjectRenderer {
                     let pan = (snd.pan + p_off).clamp(-1.0, 1.0);
                     let (lg, rg) = balance(pan);
                     let (lg, rg) = ((lg * vol) as f32, (rg * vol) as f32);
-                    dest_bus.samples[frame * 2] += send_src[frame * 2] * lg;
-                    dest_bus.samples[frame * 2 + 1] += send_src[frame * 2 + 1] * rg;
+                    dest_bus[frame * 2] += send_src[frame * 2] * lg;
+                    dest_bus[frame * 2 + 1] += send_src[frame * 2 + 1] * rg;
                 }
             }
 

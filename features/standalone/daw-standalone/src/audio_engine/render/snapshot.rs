@@ -173,6 +173,11 @@ pub(crate) struct SendSnapshot {
     /// Destination track index. `None` when the dest guid didn't
     /// resolve to a project track — the send is then a no-op.
     pub(crate) dest_idx: Option<usize>,
+    /// The send lands on the destination's channels 3/4 — its
+    /// sidechain, which keys the destination's plugins
+    /// ([`crate::plugin::PluginInstance::set_sidechain`]) rather than
+    /// being heard.
+    pub(crate) to_sidechain: bool,
     pub(crate) volume: f64,
     pub(crate) pan: f64,
     pub(crate) muted: bool,
@@ -418,6 +423,7 @@ fn snapshot_track(
                     );
                     Some(SendSnapshot {
                         dest_idx: idx_by_guid.get(dest_guid).copied(),
+                        to_sidechain: r.dest_channels.start_channel >= 2,
                         volume: r.volume,
                         pan: r.pan,
                         muted: r.muted,
