@@ -11,6 +11,15 @@ bindings (
      mnemonic "Shift+Q for Quantize",
      why "A kit is many mics of one performance: cutting and moving them apart would put it out of phase with itself, so the folded row quantizes them as one."}
 
+    // Gain staging — every recorded track at the reference kit's levels
+    // (GGD Modern & Massive 2), as item volume: nothing rendered, so
+    // Alt+G puts every staged item back as it was recorded.
+    {keys "<S-g>", action "FTS_GAIN_STAGE", desc "Gain stage the session (item volume)",
+     mnemonic "Shift+G for Gain",
+     why "Staged to one reference, every song's kit hits the same processing the same way; as item volume it never touches the audio."}
+    {keys "<A-g>", action "FTS_GAIN_STAGE_CLEAR", desc "Clear gain staging (item volume back to 1)",
+     mnemonic "Alt+G undoes Shift+G"}
+
     // Smart duplicate — copy selection forward by its own measure span
     // (group + color preserving, tempo-aware). Replaces stock "Duplicate
     // items" (41295) on Ctrl+D.
