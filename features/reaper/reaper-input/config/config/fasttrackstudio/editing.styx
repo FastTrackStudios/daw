@@ -20,6 +20,19 @@ bindings (
     {keys "<A-g>", action "FTS_GAIN_STAGE_CLEAR", desc "Clear gain staging (item volume back to 1)",
      mnemonic "Alt+G undoes Shift+G"}
 
+    // Comping — draw a razor over a folded kit row (or a track with
+    // lanes), then Ctrl+N takes that range from take N onto the comp lane
+    // of every mic in the folder at once: one performance, in phase.
+    {keys "<C-1>", action "FTS_COMP_TAKE_1", desc "Comp the razor from take 1"}
+    {keys "<C-2>", action "FTS_COMP_TAKE_2", desc "Comp the razor from take 2"}
+    {keys "<C-3>", action "FTS_COMP_TAKE_3", desc "Comp the razor from take 3"}
+    {keys "<C-4>", action "FTS_COMP_TAKE_4", desc "Comp the razor from take 4"}
+    {keys "<C-5>", action "FTS_COMP_TAKE_5", desc "Comp the razor from take 5"}
+    {keys "<C-6>", action "FTS_COMP_TAKE_6", desc "Comp the razor from take 6"}
+    {keys "<C-7>", action "FTS_COMP_TAKE_7", desc "Comp the razor from take 7"}
+    {keys "<C-8>", action "FTS_COMP_TAKE_8", desc "Comp the razor from take 8"}
+    {keys "<C-9>", action "FTS_COMP_TAKE_9", desc "Comp the razor from take 9"}
+
     // Smart duplicate — copy selection forward by its own measure span
     // (group + color preserving, tempo-aware). Replaces stock "Duplicate
     // items" (41295) on Ctrl+D.
