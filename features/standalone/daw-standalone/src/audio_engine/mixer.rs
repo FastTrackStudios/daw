@@ -684,11 +684,16 @@ impl AudioEngine {
 
         let overruns = Arc::new(AtomicU64::new(0));
         let overruns_cb = overruns.clone();
+        let mut realtime = false;
         let stream = inp
             .device
             .build_input_stream(
                 inp.config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    if !realtime {
+                        realtime = true;
+                        let _ = daw_audio_io::realtime::promote_current_thread();
+                    }
                     // Push every interleaved sample (all channels); the
                     // renderer de-interleaves per track in stage 0.
                     for &s in data {
@@ -769,10 +774,17 @@ impl AudioEngine {
         // callback entry times (scheduler jitter filtered out). Owned by
         // the callback; stamps every buffer's sync snapshot.
         let mut stamps = daw_transport_sync::BufferClock::default();
+        // The callback's thread goes realtime on its first block (see
+        // `daw_audio_io::realtime`).
+        let mut realtime = false;
         let stream = device
             .build_output_stream(
                 *config,
                 move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+                    if !realtime {
+                        realtime = true;
+                        let _ = daw_audio_io::realtime::promote_current_thread();
+                    }
                     let entry_micros = crate::transport_sync::now_micros();
                     let num_samples = data.len();
                     if channels == 0 || num_samples == 0 {
@@ -954,10 +966,15 @@ impl AudioEngine {
         let max_buffer_size = 8192 * channels;
         let mix_buffer = Arc::new(Mutex::new(vec![0.0f32; max_buffer_size]));
 
+        let mut realtime = false;
         let stream = device
             .build_output_stream(
                 *config,
                 move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+                    if !realtime {
+                        realtime = true;
+                        let _ = daw_audio_io::realtime::promote_current_thread();
+                    }
                     let num_samples = data.len();
                     let mut mix = mix_buffer.lock().unwrap();
                     if mix.len() < num_samples {

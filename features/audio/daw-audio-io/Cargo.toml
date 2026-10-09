@@ -35,6 +35,8 @@ tracing-subscriber.workspace = true
 cpal = { version = "0.18", features = ["pipewire"] }
 pipewire = "0.10"
 libspa = "0.10"
+# sched_setscheduler: the audio threads run SCHED_FIFO (`realtime`).
+libc = { workspace = true }
 
 [features]
 default = []

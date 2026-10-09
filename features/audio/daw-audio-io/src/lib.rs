@@ -37,6 +37,7 @@ pub mod input_guard;
 pub mod open;
 pub mod prefs;
 pub mod pw;
+pub mod realtime;
 
 /// Native PipeWire `pw_filter` duplex backend (Linux, `pipewire` feature).
 #[cfg(target_os = "linux")]

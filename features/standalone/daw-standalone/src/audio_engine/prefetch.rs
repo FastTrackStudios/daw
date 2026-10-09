@@ -1,12 +1,13 @@
 //! Media read-ahead worker — REAPER's "media buffering" thread.
 //!
 //! Streaming playback reads PCM through `mmap`; a page the kernel
-//! hasn't cached yet means a **page fault inside the audio callback**
-//! — instant on an SSD, a multi-millisecond stall (= audible glitch)
-//! on cold USB / network media. This worker walks the items around
-//! the playhead a few times a second and `madvise(WillNeed)`s the
-//! next few seconds of source audio so the kernel has the pages warm
-//! before the callback touches them.
+//! hasn't cached yet means a **page fault inside the audio callback** —
+//! measured ~14 ms on this machine's NVMe for a 90-track song played
+//! cold, five times a 128-frame block's deadline. This worker walks the
+//! items around the playhead several times a second and reads the next
+//! few seconds of source audio into memory itself (`PcmFile::prefetch`:
+//! a `WillNeed` hint, then a byte of every page), so the callback finds
+//! the pages there.
 //!
 //! Native-only by construction (threads + mmap); WASM gets its audio
 //! via `AudioSource::Memory` where there is nothing to prefetch.
@@ -23,10 +24,12 @@ use crate::transport_engine::TransportShared;
 /// every [`SCAN_INTERVAL`].
 const LOOKAHEAD_SECONDS: f64 = 3.0;
 
-/// Re-scan cadence. Each pass advises ~`LOOKAHEAD_SECONDS` of audio,
-/// so consecutive passes overlap heavily — a missed pass (scheduler
-/// hiccup) costs nothing.
-const SCAN_INTERVAL: Duration = Duration::from_millis(500);
+/// Re-scan cadence. Each pass reads ~`LOOKAHEAD_SECONDS` of audio in
+/// (see `PcmFile::prefetch`), so consecutive passes overlap heavily — a
+/// missed pass costs nothing. Short, so a locate to audio not yet in
+/// memory is read in before playback reaches it; a pass over audio that
+/// is already in costs ~1 ms (a 90-track song).
+const SCAN_INTERVAL: Duration = Duration::from_millis(150);
 
 /// Guard handle: the worker thread runs until this is dropped.
 pub struct PrefetchWorker {

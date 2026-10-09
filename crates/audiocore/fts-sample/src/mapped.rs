@@ -39,6 +39,10 @@ impl PcmFormat {
     }
 }
 
+/// The page size the read-ahead steps by (4 KiB: the smallest the kernel
+/// maps, so a step never skips a page).
+const PAGE: usize = 4096;
+
 /// A memory-mapped uncompressed PCM file (WAV). The mapping is backed by
 /// the OS page cache — reading pages them in on demand and the kernel may
 /// evict them under pressure; resident memory stays proportional to what's
@@ -185,16 +189,31 @@ impl PcmFile {
         }
     }
 
-    /// Touch the page range covering `[start_frame, start_frame+frames)`
-    /// so the kernel reads it ahead of the playhead (REAPER's media
-    /// read-ahead, minus the dedicated thread).
+    /// Bring the pages covering `[start_frame, start_frame+frames)` into
+    /// memory now, on the calling thread — the read-ahead thread, ahead of
+    /// the playhead — so the audio thread never waits on the disk for them.
+    ///
+    /// `WillNeed` alone is a hint the kernel may act on late or not at all:
+    /// played cold, the audio callback still page-faulted onto the disk and
+    /// stalled ~14 ms (a 2.7 ms block's deadline five times over). So after
+    /// the hint, one byte of every page is read: a page not yet in memory
+    /// loads here, blocking only this thread. Never call it from the audio
+    /// callback.
     pub fn prefetch(&self, start_frame: usize, frames: usize) {
         let bps = self.format.bytes_per_sample() * self.channels as usize;
         let start = self.data_offset + start_frame.min(self.frames) * bps;
         let len = (frames * bps).min(self.map.len().saturating_sub(start));
-        if len > 0 {
-            let _ = self.map.advise_range(memmap2::Advice::WillNeed, start, len);
+        if len == 0 {
+            return;
         }
+        let _ = self.map.advise_range(memmap2::Advice::WillNeed, start, len);
+        let mut touched = 0u8;
+        for page in (start..start + len).step_by(PAGE) {
+            touched ^= self.map.get(page).copied().unwrap_or(0);
+        }
+        // The loads are the point, not the value: `black_box` keeps the
+        // optimiser from dropping them.
+        std::hint::black_box(touched);
     }
 }
 
