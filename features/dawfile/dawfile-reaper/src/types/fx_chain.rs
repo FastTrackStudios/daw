@@ -613,8 +613,22 @@ fn parse_header_name_file(rest: &str, plugin_type: PluginType) -> ParsedPluginHe
                 header_extra: None,
             }
         }
+        PluginType::Clap => {
+            // CLAP: `"CLAP: Pro-Q 4 (FabFilter)" com.FabFilter.Pro-Q.4 ""` —
+            // the plugin's ID, bare, is the file slot (what the writer puts
+            // there too); taking the second QUOTED string read the empty
+            // custom name, and the plugin could not be found.
+            let (file, _) = extract_first_token(after_name);
+            ParsedPluginHeader {
+                plugin_type,
+                name,
+                file,
+                custom_name: None,
+                header_extra: None,
+            }
+        }
         _ => {
-            // For CLAP, Video, Other: try to extract second quoted string as file
+            // For Video, Other: try to extract second quoted string as file
             let quoted = extract_quoted_strings(rest);
             ParsedPluginHeader {
                 plugin_type,
@@ -3038,5 +3052,16 @@ mod tests {
         assert_eq!(plugin.plugin_type, PluginType::Js);
         assert_eq!(plugin.file, "loser/3BandEQ");
         assert_eq!(plugin.fxid.as_deref(), Some("{RAW-PLUGIN-ID}"));
+    }
+
+    /// A CLAP header's file slot is the plugin's ID, bare.
+    #[test]
+    fn a_clap_header_reads_its_plugin_id() {
+        let parsed = super::parse_header_name_file(
+            "\"CLAP: Pro-Q 4 (FabFilter)\" com.FabFilter.Pro-Q.4 \"\"",
+            super::PluginType::Clap,
+        );
+        assert_eq!(parsed.name, "CLAP: Pro-Q 4 (FabFilter)");
+        assert_eq!(parsed.file, "com.FabFilter.Pro-Q.4");
     }
 }

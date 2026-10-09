@@ -168,6 +168,16 @@ pub fn load_rpp_text(
     populate_tempo(daw, &project_guid, &project, &mut summary);
     populate_routing(daw, &project_guid, &project, &mut summary);
     populate_fx_chains(daw, &project_guid, &project, &mut summary);
+    // What did not come in, said once: a project mixed with its plugins
+    // missing sounds wrong with nothing on screen to say why.
+    if !summary.warnings.is_empty() {
+        tracing::warn!(
+            project.name = project_name,
+            load.warnings = summary.warnings.len(),
+            load.first = ?summary.warnings.iter().take(8).collect::<Vec<_>>(),
+            "the project loaded without some of what it holds"
+        );
+    }
 
     Ok(summary)
 }
