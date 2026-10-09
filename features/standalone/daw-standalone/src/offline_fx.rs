@@ -61,9 +61,32 @@ pub fn render(
     in_r: &[f32],
     opts: &RenderOptions,
 ) -> Result<(Vec<f32>, Vec<f32>), PluginError> {
+    render_with_sidechain(plugin, in_l, in_r, None, opts)
+}
+
+/// [`render`] with a stereo key on the plugin's sidechain input (bus 1),
+/// aligned with the main input. VST3 only; the plugin must not have been
+/// prepared yet (the bus is activated at prepare). Errors if the plugin
+/// has no sidechain bus.
+pub fn render_with_sidechain(
+    plugin: &mut dyn PluginInstance,
+    in_l: &[f32],
+    in_r: &[f32],
+    sidechain: Option<(&[f32], &[f32])>,
+    opts: &RenderOptions,
+) -> Result<(Vec<f32>, Vec<f32>), PluginError> {
     let block = opts.block_size.max(1);
+    #[cfg(feature = "vst3-host")]
+    if sidechain.is_some() {
+        let vst = vst3_of(plugin).ok_or_else(|| PluginError::LoadFailed("sidechain needs a VST3 plugin".into()))?;
+        vst.set_sidechain_input(true);
+    }
     if !plugin.is_prepared() {
         plugin.prepare(opts.sample_rate, block as u32)?;
+    }
+    #[cfg(feature = "vst3-host")]
+    if sidechain.is_some() && !vst3_of(plugin).is_some_and(|v| v.has_sidechain()) {
+        return Err(PluginError::ActivateFailed("plugin has no sidechain input bus".into()));
     }
 
     let zeros = vec![0.0f32; block];
@@ -92,6 +115,13 @@ pub fn render(
             il[k] = in_l.get(pos + k).copied().unwrap_or(0.0);
             ir[k] = in_r.get(pos + k).copied().unwrap_or(0.0);
         }
+        #[cfg(feature = "vst3-host")]
+        if let Some((sl, sr)) = sidechain {
+            let cut = |v: &[f32]| v.get(pos.min(v.len())..(pos + n).min(v.len())).unwrap_or(&[]).to_vec();
+            if let Some(vst) = vst3_of(plugin) {
+                vst.set_sidechain_block(&cut(sl), &cut(sr));
+            }
+        }
         plugin.process_block(
             &il[..n],
             &ir[..n],
@@ -104,6 +134,15 @@ pub fn render(
     l.drain(..latency);
     r.drain(..latency);
     Ok((l, r))
+}
+
+/// The concrete VST3 plugin behind a `PluginInstance`, if it is one.
+#[cfg(feature = "vst3-host")]
+fn vst3_of(plugin: &mut dyn PluginInstance) -> Option<&mut crate::audio_engine::vst3_host::LoadedVst3Plugin> {
+    plugin
+        .as_any_mut()?
+        .downcast_mut::<crate::audio_engine::vst3_host::SendableVst3Plugin>()
+        .map(|p| &mut **p)
 }
 
 /// Find a parameter by name (case-insensitive) or by numeric id.

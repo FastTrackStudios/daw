@@ -169,6 +169,7 @@ impl Vst3Host {
             _host_app: ComWrapper::new(HostApplication),
             _module: module,
             output_buses: 1,
+            sidechain_input: false,
         })
     }
 }
@@ -320,6 +321,9 @@ pub struct LoadedVst3Plugin {
     /// Stereo output buses to run (main + aux), set before `prepare`
     /// (see [`LoadedVst3Plugin::set_output_buses`]); 1 by default.
     output_buses: u32,
+    /// Activate input bus 1 (a stereo sidechain) from the next `prepare`
+    /// (see [`LoadedVst3Plugin::set_sidechain_input`]).
+    sidechain_input: bool,
     /// `IPluginBase::initialize` has run on the component (and a separate
     /// controller). Tracked apart from `activation` because state and
     /// parameter calls are legal — and required to be preceded by
@@ -375,6 +379,10 @@ struct ActivationGuard {
     /// refilled by every `process_block` (read with `aux_output`).
     aux_bufs: Vec<[Vec<f32>; 2]>,
     aux_ptrs: Vec<[*mut f32; 2]>,
+    /// Sidechain input bus 1, when activated: L/R buffers filled by
+    /// [`LoadedVst3Plugin::set_sidechain_block`] before each block.
+    sc_bufs: Option<[Vec<f32>; 2]>,
+    sc_ptrs: [*mut f32; 2],
     processing_started: bool,
     active: bool,
     /// Host-implemented IEventList that the plugin reads MIDI input
@@ -934,6 +942,16 @@ impl LoadedVst3Plugin {
                     1,
                 );
             }
+            // Input bus 1 is the sidechain on effects that have one.
+            let sidechain = self.sidechain_input && in_count >= 2;
+            if sidechain {
+                let _ = self.component.activateBus(
+                    MediaTypes_::kAudio as i32,
+                    BusDirections_::kInput as i32,
+                    1,
+                    1,
+                );
+            }
             // Bus 0, plus any aux buses asked for (multi-out
             // instruments: Kontakt routes each multi slot to a pair).
             let out_buses = if has_output_bus {
@@ -956,11 +974,11 @@ impl LoadedVst3Plugin {
             // via setBusArrangements — the default arrangement is
             // implementation-defined and they often skip allocating
             // their internal channel scratch otherwise.
-            let mut in_arr: SpeakerArrangement = SpeakerArr::kStereo;
+            let mut in_arr: [SpeakerArrangement; 2] = [SpeakerArr::kStereo; 2];
             let mut out_arr: Vec<SpeakerArrangement> =
                 vec![SpeakerArr::kStereo; out_buses.max(1) as usize];
             let in_ptr: *mut SpeakerArrangement = if has_input_bus {
-                &mut in_arr
+                in_arr.as_mut_ptr()
             } else {
                 ptr::null_mut()
             };
@@ -969,7 +987,13 @@ impl LoadedVst3Plugin {
             } else {
                 ptr::null_mut()
             };
-            let in_count: int32 = if has_input_bus { 1 } else { 0 };
+            let in_count: int32 = if sidechain {
+                2
+            } else if has_input_bus {
+                1
+            } else {
+                0
+            };
             let out_count: int32 = out_buses as int32;
             let _ = self
                 .processor
@@ -1045,6 +1069,11 @@ impl LoadedVst3Plugin {
             samplesToNextClock: 0,
         };
 
+        let sidechain = self.sidechain_input
+            && unsafe {
+                self.component
+                    .getBusCount(MediaTypes_::kAudio as i32, BusDirections_::kInput as i32)
+            } >= 2;
         let aux_count = if has_output_bus {
             // Main + aux buses actually activated above.
             let n = unsafe {
@@ -1068,6 +1097,9 @@ impl LoadedVst3Plugin {
                 .map(|_| [vec![0.0; block_size as usize], vec![0.0; block_size as usize]])
                 .collect(),
             aux_ptrs: vec![[ptr::null_mut(); 2]; aux_count.saturating_sub(1) as usize],
+            sc_bufs: sidechain
+                .then(|| [vec![0.0; block_size as usize], vec![0.0; block_size as usize]]),
+            sc_ptrs: [ptr::null_mut(); 2],
             processing_started: true,
             active: true,
             event_list_owner,
@@ -1096,6 +1128,31 @@ impl LoadedVst3Plugin {
     /// aux bus after each `process_block` with [`Self::aux_output`].
     pub fn set_output_buses(&mut self, n: u32) {
         self.output_buses = n.max(1);
+    }
+
+    /// Activate a stereo sidechain on input bus 1 from the next
+    /// `prepare` (ignored by plugins with one input bus). Feed it with
+    /// [`Self::set_sidechain_block`] before each `process_block`.
+    pub fn set_sidechain_input(&mut self, on: bool) {
+        self.sidechain_input = on;
+    }
+
+    /// Whether the sidechain bus is active (requested and present).
+    #[must_use]
+    pub fn has_sidechain(&self) -> bool {
+        self.activation.as_ref().is_some_and(|a| a.sc_bufs.is_some())
+    }
+
+    /// The sidechain samples for the next `process_block` (zero-filled
+    /// past the given length). No-op when the sidechain is not active.
+    pub fn set_sidechain_block(&mut self, l: &[f32], r: &[f32]) {
+        if let Some(b) = self.activation.as_mut().and_then(|a| a.sc_bufs.as_mut()) {
+            for (dst, src) in b.iter_mut().zip([l, r]) {
+                let n = src.len().min(dst.len());
+                dst[..n].copy_from_slice(&src[..n]);
+                dst[n..].fill(0.0);
+            }
+        }
     }
 
     /// The last block's samples on output bus `bus` (≥ 1), `frames` long.
@@ -1241,7 +1298,7 @@ impl LoadedVst3Plugin {
         act.out_ptrs[0] = out_l.as_mut_ptr();
         act.out_ptrs[1] = out_r.as_mut_ptr();
 
-        let mut in_bus = AudioBusBuffers {
+        let in_bus = AudioBusBuffers {
             numChannels: 2,
             silenceFlags: 0,
             __field0: AudioBusBuffers__type0 {
@@ -1259,8 +1316,20 @@ impl LoadedVst3Plugin {
         // Effects have an input bus, instruments don't. Pass a null
         // `inputs` + `numInputs=0` for the latter — otherwise the
         // plugin will deref a non-existent input bus.
+        let mut in_buses = vec![in_bus];
+        if let Some(b) = act.sc_bufs.as_mut() {
+            act.sc_ptrs[0] = b[0].as_mut_ptr();
+            act.sc_ptrs[1] = b[1].as_mut_ptr();
+            in_buses.push(AudioBusBuffers {
+                numChannels: 2,
+                silenceFlags: 0,
+                __field0: AudioBusBuffers__type0 {
+                    channelBuffers32: act.sc_ptrs.as_mut_ptr(),
+                },
+            });
+        }
         let (inputs_ptr, num_inputs): (*mut AudioBusBuffers, i32) = if act.has_input_bus {
-            (&mut in_bus, 1)
+            (in_buses.as_mut_ptr(), in_buses.len() as i32)
         } else {
             (ptr::null_mut(), 0)
         };
@@ -1691,6 +1760,9 @@ impl crate::plugin::PluginInstance for SendableVst3Plugin {
     }
     fn deactivate(&mut self) {
         LoadedVst3Plugin::deactivate(self)
+    }
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
     fn load_state(&mut self, state: &[u8]) -> Result<(), crate::plugin::PluginError> {
         LoadedVst3Plugin::load_state(self, state).map_err(map_err)

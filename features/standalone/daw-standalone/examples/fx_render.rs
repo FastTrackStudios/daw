@@ -91,7 +91,7 @@ fn main() {
         args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).and_then(|v| v.parse().ok()).unwrap_or(d)
     };
     let Some(bundle) = args.first() else {
-        eprintln!("usage: fx_render <bundle.vst3> --list | <in.wav> <out.wav> [--set SPEC]... [--tail S] [--preroll S]");
+        eprintln!("usage: fx_render <bundle.vst3> --list | <in.wav> <out.wav> [--set SPEC]... [--tail S] [--preroll S] [--sidechain key.wav]");
         std::process::exit(2)
     };
     let mut plugin = offline_fx::load_vst3(Path::new(bundle), 0).expect("load plugin");
@@ -110,6 +110,11 @@ fn main() {
         eprintln!("  {spec:<28} -> id {id} = {plain:.5} ({})", plugin.value_to_text(*id, *plain).unwrap_or_default().trim());
     }
     let (sr, l, r) = read_wav(Path::new(input));
+    let sidechain = args.windows(2).find(|w| w[0] == "--sidechain").map(|w| {
+        let (ssr, sl, srr) = read_wav(Path::new(&w[1]));
+        assert_eq!(ssr, sr, "sidechain sample rate must match the input");
+        (sl, srr)
+    });
     let opts = RenderOptions {
         sample_rate: f64::from(sr),
         preroll_secs: opt("--preroll", 2.0),
@@ -118,7 +123,8 @@ fn main() {
         pump_run_loop: true,
         ..RenderOptions::default()
     };
-    let (ol, or) = offline_fx::render(&mut *plugin, &l, &r, &opts).expect("render");
+    let sc = sidechain.as_ref().map(|(a, b)| (a.as_slice(), b.as_slice()));
+    let (ol, or) = offline_fx::render_with_sidechain(&mut *plugin, &l, &r, sc, &opts).expect("render");
     write_wav(Path::new(output), sr, &ol, &or);
     let peak = ol.iter().chain(&or).fold(0.0f32, |m, v| m.max(v.abs()));
     eprintln!("wrote {output} ({:.2} s, peak {peak:.3}, latency {} smp)", ol.len() as f64 / f64::from(sr), plugin.latency());
