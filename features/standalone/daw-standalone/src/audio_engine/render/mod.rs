@@ -1014,8 +1014,8 @@ impl ProjectRenderer {
                     }
                     // Polarity invert folds into the gain sign.
                     let sign = if t.phase_inverted { -1.0 } else { 1.0 };
-                    let lg = ((1.0 - pan) * 0.5).sqrt() * vol * sign;
-                    let rg = ((1.0 + pan) * 0.5).sqrt() * vol * sign;
+                    let (lg, rg) = balance(pan);
+                    let (lg, rg) = (lg * vol * sign, rg * vol * sign);
                     bus.samples[frame * 2] *= lg as f32;
                     bus.samples[frame * 2 + 1] *= rg as f32;
                 }
@@ -1093,8 +1093,8 @@ impl ProjectRenderer {
                         .map(|v| (v - 0.5) * 2.0)
                         .unwrap_or(0.0);
                     let pan = (snd.pan + p_off).clamp(-1.0, 1.0);
-                    let lg = (((1.0 - pan) * 0.5).sqrt() * vol) as f32;
-                    let rg = (((1.0 + pan) * 0.5).sqrt() * vol) as f32;
+                    let (lg, rg) = balance(pan);
+                    let (lg, rg) = ((lg * vol) as f32, (rg * vol) as f32);
                     dest_bus.samples[frame * 2] += send_src[frame * 2] * lg;
                     dest_bus.samples[frame * 2 + 1] += send_src[frame * 2 + 1] * rg;
                 }
@@ -1602,6 +1602,22 @@ mod live_midi_tests {
         assert_eq!(offsets, vec![0, 0, 128, 256]);
         assert!(bucket.is_empty());
     }
+}
+
+
+/// A stereo signal's gains at `pan` (−1 left … 1 right): REAPER's default,
+/// stereo balance with a 0 dB pan law (`PANMODE 3`, `PANLAW 1`). Centred,
+/// both sides pass at unity; panned, the far side is turned down and the
+/// near side is left as it is.
+///
+/// It was a constant-power law, √0.5 (−3 dB) on each side at centre, on
+/// every track, folder, bus and send: a centred kick mic summed through
+/// its folders and buses lost 3 dB a stage — unbreakable's kit played
+/// 24 dB under its gain-staged level.
+#[must_use]
+pub(crate) fn balance(pan: f64) -> (f64, f64) {
+    let pan = pan.clamp(-1.0, 1.0);
+    ((1.0 - pan).min(1.0), (1.0 + pan).min(1.0))
 }
 
 #[cfg(test)]

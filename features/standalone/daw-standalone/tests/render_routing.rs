@@ -96,6 +96,11 @@ fn rms_r(buf: &daw_standalone::audio_engine::render::StereoBuffer) -> f32 {
     ((s / buf.frames.max(1) as f64).sqrt()) as f32
 }
 
+
+/// A centred track's gain on each side: REAPER's default stereo balance
+/// with a 0 dB pan law — unity (`render::balance`).
+const CENTRE: f32 = 1.0;
+
 #[test]
 fn renders_single_item_to_master() {
     let (daw, guid) = seeded();
@@ -107,8 +112,8 @@ fn renders_single_item_to_master() {
     // 0.5 s of audio.
     let block = r.render_block(0, (SAMPLE_RATE / 2) as usize);
     // Constant 0.5 → after center pan + unity volume the L/R each
-    // see 0.5 * sqrt(0.5) = ~0.354.
-    let target = 0.5 * (0.5_f32).sqrt();
+    // see 0.5 (centred, a 0 dB pan law: unity).
+    let target = 0.5 * CENTRE;
     assert!(
         (rms_l(&block) - target).abs() < 0.05,
         "L rms={}, target={target}",
@@ -167,7 +172,7 @@ fn solo_isolates_track() {
         ProjectRenderer::new(&daw, &guid, SAMPLE_RATE).render_block(0, SAMPLE_RATE as usize / 4);
     // Only A contributes; B's content is suppressed.
     let l = rms_l(&block);
-    let target = 0.5 * (0.5_f32).sqrt();
+    let target = 0.5 * CENTRE;
     assert!((l - target).abs() < 0.05, "solo L rms={l}, target={target}");
 }
 
@@ -193,7 +198,7 @@ fn fade_in_attenuates_block_start() {
     // Render 100ms past the fade-in — full level.
     let later = r.render_block((SAMPLE_RATE as u64) * 3 / 10, SAMPLE_RATE as usize / 10); // start at 300ms
 
-    let target = (0.5_f32).sqrt(); // gain 1.0 then center pan
+    let target = CENTRE; // gain 1.0 then center pan
     assert!(
         rms_l(&early) < rms_l(&later),
         "fade-in early ({}) should be quieter than past-fade ({})",
@@ -540,8 +545,8 @@ fn volume_prefx_envelope_stacks_with_main_volume_envelope() {
     );
     let block =
         ProjectRenderer::new(&daw, "p", SAMPLE_RATE).render_block(0, SAMPLE_RATE as usize / 4);
-    // After center pan: gain 0.25 × sqrt(0.5) ≈ 0.177.
-    let target = 0.25 * (0.5_f32).sqrt();
+    // After center pan: gain 0.25, centred at unity.
+    let target = 0.25 * CENTRE;
     assert!(
         (rms_l(&block) - target).abs() < 0.05,
         "stacked vol envs: L rms={}, target={target}",
@@ -756,7 +761,7 @@ fn automation_mode_off_bypasses_envelope() {
         ProjectRenderer::new(&daw, "p", SAMPLE_RATE).render_block(0, SAMPLE_RATE as usize / 10);
     // Without Off this would be silent; with Off the static volume
     // (1.0) passes through.
-    let target = (0.5_f32).sqrt(); // const 1.0 audio × center pan
+    let target = CENTRE; // const 1.0 audio × center pan
     assert!(
         (rms_l(&block) - target).abs() < 0.05,
         "mode=Off should bypass envelope: L rms={}, target≈{target}",
@@ -845,8 +850,8 @@ fn render_writes_post_fader_track_meters() {
     let _ = r.render_block(0, 512);
     let meters = daw.meters();
     let cell = meters.cell(0).expect("cell 0");
-    // Constant 0.5, center pan, unity volume → ~0.354 per side.
-    let target = 0.5 * (0.5_f32).sqrt();
+    // Constant 0.5, center pan, unity volume → 0.5 per side.
+    let target = 0.5 * CENTRE;
     assert!(
         (cell.peak(0) - target).abs() < 0.05,
         "L peak={}, target={target}",
@@ -882,7 +887,7 @@ fn loop_source_tiles_past_source_end() {
         (SAMPLE_RATE + SAMPLE_RATE / 2) as u64,
         (SAMPLE_RATE / 4) as usize,
     );
-    let target = 0.5 * (0.5_f32).sqrt();
+    let target = 0.5 * CENTRE;
     assert!(
         (rms_l(&block) - target).abs() < 0.05,
         "looped tail should sound: rms={}",
@@ -907,7 +912,7 @@ fn master_volume_pan_mute_apply() {
     let t = Tracks::add(&daw, ctx, "T", None).unwrap();
     create_item_with_audio(&daw, &guid, &t, 0.0, 1.0, const_audio(0.5));
     let r = ProjectRenderer::new(&daw, &guid, SAMPLE_RATE);
-    let unity = 0.5 * (0.5_f32).sqrt();
+    let unity = 0.5 * CENTRE;
 
     daw.write_project(&guid, |p| p.master_volume = 0.5);
     let block = r.render_block(0, 512);
@@ -950,7 +955,7 @@ fn channel_modes_remap_source_channels() {
         let block = r.render_block(0, 512);
         (rms_l(&block), rms_r(&block))
     };
-    let g = (0.5_f32).sqrt(); // centre-pan constant-power gain
+    let g = CENTRE; // centred: unity
 
     let (l, r) = run(0); // normal
     assert!(
@@ -1011,7 +1016,7 @@ fn send_modes_tap_pre_or_post_fader() {
     // passes the source pan stage + send pan + bus pan (3 stages) and
     // the 0.5 fader; pre-fader taps skip the source's gain stage
     // entirely (send pan + bus pan only).
-    let g = (0.5_f32).sqrt();
+    let g = CENTRE;
     let post_expect = 0.5 * 0.5 * g * g * g;
     let pre_expect = 0.5 * g * g;
     let post = run(SendMode::PostFader);
@@ -1051,7 +1056,7 @@ fn vca_lead_scales_and_mutes_followers() {
     });
 
     let r = ProjectRenderer::new(&daw, &guid, SAMPLE_RATE);
-    let unity = 0.5 * (0.5_f32).sqrt();
+    let unity = 0.5 * CENTRE;
     let base = rms_l(&r.render_block(0, 512));
     assert!((base - unity).abs() < 0.02, "lead at unity: {base}");
 
@@ -1205,7 +1210,7 @@ fn stretch_markers_warp_playback() {
     )
     .expect("markers");
 
-    let pan = (0.5_f32).sqrt();
+    let pan = CENTRE;
     let r = ProjectRenderer::new(&daw, &guid, SAMPLE_RATE);
     let block = r.render_block(0, SAMPLE_RATE as usize);
     let at = |secs: f64| block.samples[(secs * SAMPLE_RATE as f64) as usize * 2] / pan;

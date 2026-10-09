@@ -165,8 +165,8 @@ pub(crate) fn mix_item_into_bus(
                 .as_mut()
                 .and_then(|c| c.eval_at(item_time))
                 .unwrap_or(0.5);
-            let p = ((v - 0.5) * 2.0).clamp(-1.0, 1.0) as f32;
-            (((1.0 - p) * 0.5).sqrt(), ((1.0 + p) * 0.5).sqrt())
+            let (l, r) = super::balance((v - 0.5) * 2.0);
+            (l as f32, r as f32)
         } else {
             (1.0, 1.0)
         };
