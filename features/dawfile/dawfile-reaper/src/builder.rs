@@ -964,6 +964,21 @@ impl TrackBuilder {
         self.track.automation_mode = mode;
         self
     }
+    /// Shown in the mixer and not in the track panel (`SHOWINMIX` with
+    /// the track list off): a track for mixing, out of the arrangement.
+    pub fn mixer_only(mut self) -> Self {
+        self.track.show_in_mixer = Some(crate::types::track::ShowInMixerSettings {
+            show_in_mixer: true,
+            unknown_field_2: 0.6667,
+            unknown_field_3: 0.5,
+            show_in_track_list: false,
+            unknown_field_5: 0.5,
+            unknown_field_6: 0,
+            unknown_field_7: 0,
+            unknown_field_8: 0,
+        });
+        self
+    }
 
     /// Mark track as muted.
     pub fn muted(mut self) -> Self {
