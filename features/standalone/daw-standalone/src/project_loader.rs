@@ -1776,7 +1776,7 @@ mod color_tests {
 /// A receive's channel field as REAPER writes it: the first channel
 /// (0 = 1/2, 2 = 3/4), `| 1024` for mono, more pairs above bit 10 —
 /// `-1` for none, read as the default pair.
-fn channels_from_rpp(field: i32) -> daw_proto::ChannelMapping {
+pub(crate) fn channels_from_rpp(field: i32) -> daw_proto::ChannelMapping {
     let Ok(field) = u32::try_from(field) else {
         return daw_proto::ChannelMapping::default();
     };
@@ -1788,6 +1788,17 @@ fn channels_from_rpp(field: i32) -> daw_proto::ChannelMapping {
         } else {
             2 * pairs.max(1)
         },
+    }
+}
+
+/// [`channels_from_rpp`] the other way: the field REAPER writes for
+/// `channels` — the default pair (none named) is `0`.
+pub(crate) fn channels_to_rpp(channels: &daw_proto::ChannelMapping) -> i32 {
+    let start = i32::try_from(channels.start_channel & 0x3ff).unwrap_or(0);
+    match channels.num_channels {
+        1 => start | 1024,
+        0 | 2 => start,
+        n => start | (i32::try_from((n / 2) & 0x1f).unwrap_or(1) << 11),
     }
 }
 
@@ -1808,5 +1819,12 @@ mod channel_tests {
         assert_eq!(at(2), (2, 2));
         assert_eq!(at(1024 | 3), (3, 1));
         assert_eq!(at(-1), (0, 0));
+        for field in [0, 2, 1024 | 3] {
+            assert_eq!(
+                super::channels_to_rpp(&channels_from_rpp(field)),
+                field,
+                "{field} round trips"
+            );
+        }
     }
 }

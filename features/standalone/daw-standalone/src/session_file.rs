@@ -1682,6 +1682,14 @@ impl<'a> Writer<'a> {
                 recv.pan = r.pan;
                 recv.mute = r.muted;
                 recv.invert_polarity = r.phase_inverted;
+                // The channels, when they say something REAPER's field
+                // can: a sidechain onto 3/4 written as a plain send would
+                // be heard.
+                if loader::channels_to_rpp(&r.dest_channels)
+                    != loader::channels_to_rpp(&loader::channels_from_rpp(recv.dest_audio_channels))
+                {
+                    recv.dest_audio_channels = loader::channels_to_rpp(&r.dest_channels);
+                }
                 recv
             })
             .collect();
