@@ -62,18 +62,60 @@ pub(crate) fn solo_pass(tracks: &[TrackSnapshot]) -> Option<Vec<bool>> {
         return None;
     }
     let parents: Vec<Option<usize>> = tracks.iter().map(|t| t.parent_idx).collect();
-    let sends: Vec<Vec<usize>> = tracks
-        .iter()
-        .map(|t| {
-            t.sends
-                .iter()
-                .filter(|snd| !snd.muted)
-                .filter_map(|snd| snd.dest_idx)
-                .collect()
-        })
-        .collect();
+    let routes = |sidechain: bool| -> Vec<Vec<usize>> {
+        tracks
+            .iter()
+            .map(|t| {
+                t.sends
+                    .iter()
+                    .filter(|snd| !snd.muted && snd.to_sidechain == sidechain)
+                    .filter_map(|snd| snd.dest_idx)
+                    .collect()
+            })
+            .collect()
+    };
     let soloed: Vec<bool> = tracks.iter().map(|t| t.soloed).collect();
-    Some(solo_mask(&parents, &sends, &soloed))
+    let pass = solo_mask(&parents, &routes(false), &soloed);
+    Some(with_keys(pass, &parents, &routes(true)))
+}
+
+/// The tracks that key a passing track's plugins pass too, with
+/// everything inside them: a key is never heard — it goes to channels
+/// 3/4 — so a solo cannot be about it, and muting it by the solo would
+/// shut the gate it keys. Soloing a kick mic must not silence the kick
+/// because its trigger was not soloed.
+pub(crate) fn with_keys(
+    mut pass: Vec<bool>,
+    parents: &[Option<usize>],
+    keys: &[Vec<usize>],
+) -> Vec<bool> {
+    let n = pass.len();
+    let mut keying = vec![false; n];
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for i in 0..n {
+            if keying[i] {
+                continue;
+            }
+            let keys_a_pass = keys
+                .get(i)
+                .is_some_and(|k| k.iter().any(|&d| d < n && (pass[d] || keying[d])));
+            let in_a_key = parents
+                .get(i)
+                .copied()
+                .flatten()
+                .is_some_and(|p| p < n && keying[p]);
+            if keys_a_pass || in_a_key {
+                keying[i] = true;
+                changed = true;
+            }
+        }
+    }
+    for (p, k) in pass.iter_mut().zip(keying) {
+        *p |= k;
+    }
+    pass
 }
 
 /// The solo mask over the routing graph, REAPER's way:
@@ -139,6 +181,25 @@ pub(crate) fn solo_mask(
         }
     }
     pass
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::with_keys;
+
+    /// 0 Kick (folder), 1 In (in Kick), 2 Trig folder, 3 T1 Trig (in 2)
+    /// keying Kick; 4 a stranger. Soloing In passes Kick (its parent):
+    /// the trigger folder and the trigger in it pass with it — not the
+    /// stranger. With Kick not passing, nothing keys anything.
+    #[test]
+    fn a_key_passes_with_what_it_keys() {
+        let parents = [None, Some(0), None, Some(2), None];
+        let keys = [vec![], vec![], vec![0], vec![], vec![]];
+        let soloed_in = with_keys(vec![true, true, false, false, false], &parents, &keys);
+        assert_eq!(soloed_in, [true, true, true, true, false]);
+        let nothing = with_keys(vec![false, false, false, false, true], &parents, &keys);
+        assert_eq!(nothing, [false, false, false, false, true]);
+    }
 }
 
 #[cfg(test)]
