@@ -52,6 +52,7 @@ members = [
     "features/dawfile/dawfile-protools",
     "features/dawfile/dawfile-reaper",
     "features/dawfile/dawfile-standalone",
+    "features/dawfile/dawfile-store",
     "features/expression-editor/expression-editor-audio",
     "features/expression-editor/expression-editor-core",
     "features/expression-editor/expression-editor-corpus",
@@ -198,6 +199,7 @@ daw-network = { path = "features/sync/daw-network" }
 daw-audio-sync = { path = "features/sync/daw-audio-sync" }
 daw-transport-sync = { path = "features/sync/daw-transport-sync" }
 dawfile-aaf = { path = "features/dawfile/dawfile-aaf" }
+dawfile-store = { path = "features/dawfile/dawfile-store" }
 dawfile-ableton = { path = "features/dawfile/dawfile-ableton" }
 dawfile-dawproject = { path = "features/dawfile/dawfile-dawproject" }
 dawfile-logic = { path = "features/dawfile/dawfile-logic" }
