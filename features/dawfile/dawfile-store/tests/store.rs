@@ -121,3 +121,23 @@ fn another_schema_is_refused() {
         .expect("set");
     assert!(Store::open(&path).is_err());
 }
+
+/// After a checkpoint the project is one file: nothing left in a log
+/// beside it.
+#[test]
+fn a_checkpointed_project_is_one_file() {
+    let (dir, store) = store();
+    let doc = loro::LoroDoc::new();
+    step(&store, MAIN, &doc, "k1", 1.0);
+    store
+        .put_blob("fx", &b"state".repeat(10_000))
+        .expect("a blob");
+    store.checkpoint().expect("checkpointed");
+    let wal = dir.path().join("Song.session-wal");
+    let left = std::fs::metadata(&wal).map_or(0, |m| m.len());
+    assert_eq!(left, 0, "the log is empty");
+    assert!(
+        std::fs::metadata(dir.path().join("Song.session")).map_or(0, |m| m.len()) > 4096,
+        "the file holds it"
+    );
+}

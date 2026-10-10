@@ -51,7 +51,9 @@ fn main() {
         slot.1 += bytes.len();
     }
     if let Some(history) = project.history() {
-        store.compact(dawfile_store::MAIN, history).expect("the history");
+        store
+            .compact(dawfile_store::MAIN, history)
+            .expect("the history");
     }
     let folder = folder_size(&session);
     let file = std::fs::metadata(&out).map_or(0, |m| m.len());

@@ -127,7 +127,10 @@ impl Store {
     /// read.
     pub fn open(path: &std::path::Path) -> StoreResult<Self> {
         run(async {
+            // Several processes at once — the app saving it, a script or
+            // another tool reading it — through a shared write-ahead log.
             let db = turso::Builder::new_local(&path.to_string_lossy())
+                .experimental_multiprocess_wal(true)
                 .build()
                 .await?;
             let conn = db.connect()?;
@@ -205,6 +208,25 @@ impl Store {
     /// The database refused the write.
     pub fn set_meta(&self, key: &str, value: &str) -> StoreResult<()> {
         run(self.set_meta_async(key, value))
+    }
+
+    /// Fold what is written into the file itself: the engine writes ahead
+    /// into a log beside it (`Song.session-wal`), and a project is one
+    /// file to copy, sync or send only once that log is emptied. Done after
+    /// a save.
+    ///
+    /// # Errors
+    ///
+    /// The database refused.
+    pub fn checkpoint(&self) -> StoreResult<()> {
+        run(async {
+            let mut rows = self
+                .conn
+                .query("PRAGMA wal_checkpoint(TRUNCATE)", ())
+                .await?;
+            while rows.next().await?.is_some() {}
+            StoreResult::Ok(())
+        })
     }
 
     /// Keep `bytes` (of `kind`: `fx`, `midi`, `rpp`, …) and say its name.

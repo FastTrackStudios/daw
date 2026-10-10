@@ -902,6 +902,13 @@ impl Standalone {
     ///
     /// If this is the first seeded project, it becomes the current project.
     /// Returns the GUID of the seeded project for convenience.
+    /// Whether `other` is a handle on this same engine (a clone of it),
+    /// not another one.
+    #[must_use]
+    pub fn same_engine(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.state, &other.state)
+    }
+
     pub fn seed_project(&self, info: ProjectInfo) -> String {
         let guid = info.guid.clone();
         let mut s = self.state.lock().expect("standalone state poisoned");
