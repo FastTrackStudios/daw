@@ -187,9 +187,12 @@ impl Items for Standalone {
             p.items_by_track
                 .get(&track_guid)
                 .map(|guids| {
+                    // With the take's offset, as `get_item` gives it: a
+                    // track's items read without it all claimed to play
+                    // their source from the start.
                     guids
                         .iter()
-                        .filter_map(|g| p.items.get(g).map(|e| e.item.clone()))
+                        .filter_map(|g| p.items.get(g).map(|e| with_start_offset(p, g, &e.item)))
                         .collect()
                 })
                 .unwrap_or_default()
