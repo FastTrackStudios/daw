@@ -54,6 +54,7 @@ pub use automation_touch::TouchableParam;
 mod batch;
 #[cfg(feature = "bootstrap")]
 pub mod bootstrap;
+pub mod digest;
 mod dawfile_service;
 mod diagnostics;
 mod event_bus;

@@ -766,6 +766,83 @@ fn a_builtin_fx_keeps_its_state_through_save_and_load() {
     );
 }
 
+/// A saved session reopened has the live project's digest — every
+/// section, the FX's held state included — and an edit after reopening is
+/// named by section.
+#[test]
+fn a_reopened_session_has_the_live_projects_digest() {
+    let tmp = tempfile::tempdir().unwrap();
+    let song = tmp.path().join("Song");
+    let (daw, _, guid) = open_song(&song);
+    prepare(&daw, &guid);
+    let fx = Effects::add(
+        &daw,
+        ProjectContext::Project(guid.clone()),
+        FxChainContext::Track(DRUMS.to_string()),
+        COUNT,
+    )
+    .expect("the built-in adds");
+    daw.apply_plugin_state(&fx, b"kit=heavy thwacky").unwrap();
+    let before = daw_standalone::digest::digest(&daw, &guid).expect("a digest");
+
+    let dir = song.join("Song.session");
+    save_session(&daw, &guid, &dir).unwrap();
+    let (fresh, _) = engine();
+    let loaded = load_session(&fresh, "Song", &dir).unwrap();
+    let after = daw_standalone::digest::digest(&fresh, &loaded.project_guid).expect("a digest");
+    let apart = daw_standalone::digest::differences(&before, &after);
+    assert!(apart.is_empty(), "the same project: {apart:#?}");
+
+    // The control: a change after the reopen is seen, by section.
+    let back = fresh
+        .read_project(&loaded.project_guid, |p| {
+            p.fx_chains
+                .get(&FxChainKey::Track(DRUMS.to_string()))
+                .and_then(|c| c.iter().find(|e| e.fx.name == COUNT))
+                .map(|e| e.fx.guid.clone())
+        })
+        .flatten()
+        .expect("the built-in came back");
+    fresh.apply_plugin_state(&back, b"kit=another").unwrap();
+    let edited = daw_standalone::digest::digest(&fresh, &loaded.project_guid).expect("a digest");
+    let apart = daw_standalone::digest::differences(&before, &edited);
+    assert!(apart.first().is_some_and(|l| l.starts_with("fx:")), "{apart:#?}");
+}
+
+/// Media is written relative to the folder a save is opened from: beside
+/// the song, `Media/…`; saved anywhere else, where the audio really is.
+#[test]
+fn a_session_saved_elsewhere_still_finds_its_media() {
+    let tmp = tempfile::tempdir().unwrap();
+    let song = tmp.path().join("Song");
+    let (daw, _, guid) = open_song(&song);
+    daw_standalone::project_loader::anchor_media(&daw, &guid, &song);
+    let files = |dir: &Path| -> Vec<String> {
+        session_rpp_text(dir)
+            .unwrap()
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("FILE ").map(str::to_owned))
+            .collect()
+    };
+
+    let beside = song.join("Song.session");
+    save_session(&daw, &guid, &beside).unwrap();
+    assert!(
+        files(&beside).iter().all(|f| f.starts_with("\"Media/")),
+        "beside the song, relative: {:?}",
+        files(&beside)
+    );
+
+    let elsewhere = tmp.path().join("Backups").join("Song.session");
+    save_session(&daw, &guid, &elsewhere).unwrap();
+    let media = song.join("Media").to_string_lossy().into_owned();
+    assert!(
+        files(&elsewhere).iter().all(|f| f.contains(&media)),
+        "elsewhere, where the audio is: {:?}",
+        files(&elsewhere)
+    );
+}
+
 #[test]
 fn a_prepared_song_survives_save_and_load() {
     let tmp = tempfile::tempdir().unwrap();

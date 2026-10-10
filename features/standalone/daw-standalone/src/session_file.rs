@@ -136,7 +136,12 @@ pub fn save_session_with_history(
     dir: &Path,
     history: Option<&dawfile_standalone::loro::LoroDoc>,
 ) -> Result<PathBuf, String> {
-    let text = project_rpp_text(daw, project_guid)?;
+    // Media inside the folder this save is opened from — the session
+    // folder's own folder, as an open anchors it — is written relative to
+    // it; anything else stays absolute. Relative to where the song was
+    // opened from instead, a save anywhere else lost its audio.
+    let at = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let text = project_rpp_text_relative_to(daw, project_guid, at.parent())?;
     let name = session_name(dir);
     let (imported, _report) = DawProject::import_rpp(&text, name.clone())
         .map_err(|e| format!("session import failed: {e}"))?;
@@ -241,10 +246,29 @@ pub fn load_session(
 ///
 /// No such project, or the generated text did not re-parse.
 pub fn project_rpp_text(daw: &Standalone, project_guid: &str) -> Result<String, String> {
+    let beside = daw
+        .read_project(project_guid, |p| {
+            Path::new(&p.info.path).parent().map(Path::to_path_buf)
+        })
+        .flatten();
+    project_rpp_text_relative_to(daw, project_guid, beside.as_deref())
+}
+
+/// [`project_rpp_text`], its media inside `media_dir` written relative to
+/// it (the folder the text will be opened from), the rest absolute.
+///
+/// # Errors
+///
+/// As [`project_rpp_text`].
+pub fn project_rpp_text_relative_to(
+    daw: &Standalone,
+    project_guid: &str,
+    media_dir: Option<&Path>,
+) -> Result<String, String> {
     let factory = daw.fx_factory();
     let states = builtin_states(daw, project_guid);
     daw.read_project(project_guid, |p| {
-        write_project(p, factory.as_deref(), &states)
+        write_project(p, factory.as_deref(), &states, media_dir)
     })
     .ok_or_else(|| format!("no project {project_guid}"))?
 }
@@ -932,10 +956,12 @@ fn write_project(
     p: &ProjectState,
     factory: Option<&dyn FxFactory>,
     states: &HashMap<String, Vec<u8>>,
+    media_dir: Option<&Path>,
 ) -> Result<String, String> {
     let base = open_base(&p.info.path);
     let mut writer = Writer::new(p, base.as_ref(), factory);
     writer.states = states;
+    writer.media_dir = media_dir.map(Path::to_path_buf);
     let text = writer.write()?;
     let skipped = writer.skipped_fx.into_inner();
     if !skipped.is_empty() {
