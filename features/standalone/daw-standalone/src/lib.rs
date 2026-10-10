@@ -37,17 +37,18 @@ mod audio_accessor;
     feature = "clap-host",
     feature = "vst3-host"
 ))]
-pub mod grouping;
 pub mod audio_engine;
 mod audio_engine_svc;
 mod automation;
 mod automation_touch;
+pub mod grouping;
 #[cfg(feature = "rpp-save")]
 pub mod save;
 /// Save / load a live project as a `.session` (FastTrackStudio's native
 /// project format). Native-only: pulls the `.rpp` parser and the format.
 #[cfg(feature = "session-file")]
 pub mod session_file;
+pub mod steps;
 mod stretch_marker;
 #[cfg(any(feature = "audio", feature = "decode"))]
 mod take_reader;
@@ -55,9 +56,9 @@ pub use automation_touch::TouchableParam;
 mod batch;
 #[cfg(feature = "bootstrap")]
 pub mod bootstrap;
-pub mod digest;
 mod dawfile_service;
 mod diagnostics;
+pub mod digest;
 mod event_bus;
 mod ext_state;
 mod fx;
@@ -74,6 +75,9 @@ pub mod media_bay;
 pub mod media_seed;
 pub mod metering;
 mod midi;
+/// Offline effect rendering for A/B work against reference plugins.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod offline_fx;
 mod peak;
 /// Persistent source-level peaks: REAPER `.reapeaks` sidecars next to
 /// each on-disk media file, shared with REAPER where projects overlap.
@@ -81,9 +85,6 @@ mod peak;
 mod peak_store;
 pub(crate) mod platform;
 pub mod plugin;
-/// Offline effect rendering for A/B work against reference plugins.
-#[cfg(not(target_arch = "wasm32"))]
-pub mod offline_fx;
 mod plugin_loader;
 mod position_conversion;
 mod project;

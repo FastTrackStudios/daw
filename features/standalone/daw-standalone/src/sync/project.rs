@@ -288,6 +288,7 @@ impl Projects for Standalone {
         if !label.is_empty() {
             step.label = label.to_string();
         }
+        let named = step.label.clone();
         let stack = s.undo.entry(guid.clone()).or_default();
         stack.push(step);
         if stack.len() > crate::sync::daw::UNDO_LIMIT {
@@ -295,6 +296,8 @@ impl Projects for Standalone {
         }
         // A new edit invalidates the redo branch, as everywhere.
         s.redo.remove(&guid);
+        drop(s);
+        crate::steps::finished(&guid, &named);
     }
 
     // r[impl drums.quantize.undo]
@@ -316,7 +319,9 @@ impl Projects for Standalone {
             snapshot: crate::sync::daw::EditSnapshot::capture(p),
         };
         step.snapshot.restore(p);
-        s.redo.entry(guid).or_default().push(redo_step);
+        s.redo.entry(guid.clone()).or_default().push(redo_step);
+        drop(s);
+        crate::steps::finished(&guid, &format!("Undo {}", step.label));
         true
     }
 
@@ -338,7 +343,9 @@ impl Projects for Standalone {
             snapshot: crate::sync::daw::EditSnapshot::capture(p),
         };
         step.snapshot.restore(p);
-        s.undo.entry(guid).or_default().push(undo_step);
+        s.undo.entry(guid.clone()).or_default().push(undo_step);
+        drop(s);
+        crate::steps::finished(&guid, &format!("Redo {}", step.label));
         true
     }
 
