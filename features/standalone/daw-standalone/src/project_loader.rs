@@ -253,6 +253,12 @@ fn populate_tracks(
             let lane_count = track.lane_count;
             p.tracks.push(track);
             p.track_ext.insert(guid.clone(), ext);
+            // Its ext-state (`EXT FTS:kind piece`): what the template
+            // said the track is.
+            for (key, value) in &rt.extension_data {
+                p.track_ext_state
+                    .insert((guid.clone(), String::new(), key.clone()), value.clone());
+            }
 
             // Track automation envelopes (VOLENV2 / PANENV2 / …).
             for env in &rt.envelopes {

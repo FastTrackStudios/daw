@@ -771,6 +771,29 @@ impl TrackHandle {
         Ok(())
     }
 
+    /// Every ext-state key the track carries, with its value, by key.
+    pub async fn ext_state(&self) -> Result<Vec<daw_proto::TrackExtEntry>> {
+        Ok(self
+            .clients
+            .track
+            .ext_state(self.context(), self.track_ref())
+            .await?)
+    }
+
+    /// Set the ext-state `key` to `value`; an empty value removes it.
+    pub async fn set_ext_state(&self, key: &str, value: &str) -> Result<()> {
+        self.clients
+            .track
+            .set_ext_state(
+                self.context(),
+                self.track_ref(),
+                key.to_string(),
+                value.to_string(),
+            )
+            .await??;
+        Ok(())
+    }
+
     /// Name a lane. Also how a comp is renamed — a comp's name is its
     /// lane's name.
     pub async fn set_lane_name(&self, lane: u32, name: &str) -> Result<()> {

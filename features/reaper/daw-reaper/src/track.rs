@@ -1380,6 +1380,51 @@ impl Tracks for crate::Reaper {
         crate::lanes::write_lane_play_mask(raw, mask)
     }
 
+    fn ext_state(&self, project: ProjectContext, track: TrackRef) -> Vec<daw_proto::TrackExtEntry> {
+        // REAPER lists no `P_EXT` keys: they are read off the chunk.
+        resolve_raw_track(&project, &track)
+            .and_then(crate::lanes::track_chunk)
+            .map(|chunk| {
+                crate::lanes::ext_from_chunk(&chunk)
+                    .into_iter()
+                    .map(|(key, value)| daw_proto::TrackExtEntry { key, value })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn set_ext_state(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        key: &str,
+        value: &str,
+    ) -> DawResult<()> {
+        let raw = resolve_raw_track(&project, &track)?;
+        let attr = std::ffi::CString::new(format!("P_EXT:{key}"))
+            .map_err(|_| DawError::operation_failed("an ext-state key with a NUL in it"))?;
+        let mut text = std::ffi::CString::new(value)
+            .map_err(|_| DawError::operation_failed("an ext-state value with a NUL in it"))?
+            .into_bytes_with_nul();
+        let low = reaper_high::Reaper::get().medium_reaper().low();
+        // SAFETY: `raw` is a live track of the project just resolved, the
+        // attribute and value are NUL-terminated, and REAPER reads the
+        // value only (the last argument is `true`: set).
+        let set = unsafe {
+            low.GetSetMediaTrackInfo_String(
+                raw.as_ptr(),
+                attr.as_ptr(),
+                text.as_mut_ptr().cast(),
+                true,
+            )
+        };
+        if set {
+            Ok(())
+        } else {
+            Err(DawError::operation_failed("REAPER refused the ext-state"))
+        }
+    }
+
     fn set_lane_name(
         &self,
         project: ProjectContext,

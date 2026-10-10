@@ -286,6 +286,41 @@ fn depth_one_lines(chunk: &str) -> impl Iterator<Item = (usize, &str)> {
     })
 }
 
+/// The ext-state a track chunk carries (`P_EXT`), by key: written as
+/// `EXT key value` lines of the track, or as the lines of an `<EXT`
+/// block in it.
+#[must_use]
+pub fn ext_from_chunk(chunk: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut depth = 0_i32;
+    let mut in_ext = false;
+    for line in chunk.lines() {
+        let t = line.trim();
+        if let Some(block) = t.strip_prefix('<') {
+            depth = depth.saturating_add(1);
+            in_ext = depth == 2 && block.trim() == "EXT";
+            continue;
+        }
+        if t == ">" {
+            depth = depth.saturating_sub(1);
+            in_ext = false;
+            continue;
+        }
+        let pair = if depth == 1 {
+            t.strip_prefix("EXT ")
+        } else if in_ext {
+            Some(t)
+        } else {
+            None
+        };
+        if let Some((key, value)) = pair.and_then(|rest| rest.split_once(' ')) {
+            out.push((key.to_owned(), value.trim().to_owned()));
+        }
+    }
+    out.sort();
+    out
+}
+
 const COMPING_KEYS: [&str; 3] = ["LANEREC", "ITEMLANES", "LINKEDLANE"];
 
 fn key_of(line: &str) -> &str {
@@ -388,6 +423,18 @@ mod tests {
             fade_in: Duration::from_seconds(0.01),
             fade_out: Duration::from_seconds(0.01),
         }
+    }
+
+    #[test]
+    fn ext_state_reads_from_lines_and_from_a_block() {
+        let chunk = "<TRACK\nNAME Kick\nEXT FTS:kind piece\n<EXT\nFTS:group Drums/Drum Kit/Kick\n>\n<ITEM\nEXT not:ours x\n>\n>";
+        assert_eq!(
+            ext_from_chunk(chunk),
+            [
+                ("FTS:group".to_owned(), "Drums/Drum Kit/Kick".to_owned()),
+                ("FTS:kind".to_owned(), "piece".to_owned()),
+            ]
+        );
     }
 
     #[test]

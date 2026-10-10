@@ -34,10 +34,17 @@ fn main() {
             .map(|v| format!("{v:?}"))
             .unwrap_or_default();
         if names.iter().any(|n| name.contains(n.as_str())) {
-            let pick: Vec<String> = ["guid", "muted", "lanes.count", "lanes.play", "lanes.names"]
-                .iter()
-                .map(|k| format!("{k}={:?}", map.get(*k)))
-                .collect();
+            let pick: Vec<String> = [
+                "guid",
+                "muted",
+                "lanes.count",
+                "lanes.play",
+                "lanes.names",
+                "ext",
+            ]
+            .iter()
+            .map(|k| format!("{k}={:?}", map.get(*k)))
+            .collect();
             println!("{name}: {}", pick.join(" "));
         }
     }

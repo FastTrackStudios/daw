@@ -1485,6 +1485,18 @@ impl<'a> Writer<'a> {
             t.name = e.name.clone();
             owned.key("NAME");
         }
+        // Its ext-state, as the engine holds it now.
+        let mut ext_state: Vec<(String, String)> = p
+            .track_ext_state
+            .iter()
+            .filter(|((track, section, _), _)| *track == e.guid && section.is_empty())
+            .map(|((_, _, key), value)| (key.clone(), value.clone()))
+            .collect();
+        ext_state.sort();
+        if t.extension_data != ext_state {
+            t.extension_data = ext_state;
+            owned.key("EXT");
+        }
         if differs(view.map(|v| v.color == e.color)) {
             t.peak_color = e.color.map(rgb_to_native);
             owned.key("PEAKCOL");

@@ -944,6 +944,7 @@ impl Track {
         matches!(
             key,
             "NAME"
+                | "EXT"
                 | "LOCK"
                 | "SEL"
                 | "PEAKCOL"
@@ -1056,6 +1057,16 @@ impl Track {
             }
             "LOCK" if tokens.len() > 1 => {
                 track.locked = Self::parse_bool(&tokens[1])?;
+            }
+            // An extension's key and its value, kept as written: the value
+            // may hold spaces (`EXT FTS:group Drums/Drum Kit/Kick`).
+            "EXT" if tokens.len() > 1 => {
+                let value = tokens[2..]
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                track.extension_data.push((tokens[1].to_string(), value));
             }
             "SEL" if tokens.len() > 1 => {
                 track.selected = Self::parse_bool(&tokens[1])?;
@@ -1749,6 +1760,23 @@ impl fmt::Display for MidiNoteName {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A template's ext-state comes back as written: the key, and the
+    /// value with its spaces.
+    #[test]
+    fn extension_lines_are_kept() {
+        let track = Track::from_rpp_block(
+            "<TRACK\n  NAME \"Kick\"\n  EXT FTS:kind piece\n  EXT FTS:group Drums/Drum Kit/Kick\n>",
+        )
+        .expect("a track");
+        assert_eq!(
+            track.extension_data,
+            [
+                ("FTS:kind".to_owned(), "piece".to_owned()),
+                ("FTS:group".to_owned(), "Drums/Drum Kit/Kick".to_owned()),
+            ]
+        );
+    }
 
     #[test]
     fn test_parse_simple_track() {

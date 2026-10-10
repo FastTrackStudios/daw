@@ -1107,6 +1107,50 @@ impl Tracks for Standalone {
         Ok(())
     }
 
+    fn ext_state(&self, project: ProjectContext, track: TrackRef) -> Vec<daw_proto::TrackExtEntry> {
+        let Some(guid) = resolve_project(self, &project) else {
+            return Vec::new();
+        };
+        self.with_project(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track)?;
+            let own = &p.tracks[i].guid;
+            let mut entries: Vec<daw_proto::TrackExtEntry> = p
+                .track_ext_state
+                .iter()
+                .filter(|((track_guid, section, _), _)| track_guid == own && section.is_empty())
+                .map(|((_, _, key), value)| daw_proto::TrackExtEntry {
+                    key: key.clone(),
+                    value: value.clone(),
+                })
+                .collect();
+            entries.sort_by(|a, b| a.key.cmp(&b.key));
+            Some(entries)
+        })
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+    }
+
+    fn set_ext_state(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        key: &str,
+        value: &str,
+    ) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let at = (p.tracks[i].guid.clone(), String::new(), key.to_owned());
+            if value.is_empty() {
+                p.track_ext_state.remove(&at);
+            } else {
+                p.track_ext_state.insert(at, value.to_owned());
+            }
+            Ok::<(), DawError>(())
+        })?
+    }
+
     fn set_lane_name(
         &self,
         project: ProjectContext,
