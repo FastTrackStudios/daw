@@ -242,8 +242,11 @@ pub fn load_session(
 /// No such project, or the generated text did not re-parse.
 pub fn project_rpp_text(daw: &Standalone, project_guid: &str) -> Result<String, String> {
     let factory = daw.fx_factory();
-    daw.read_project(project_guid, |p| write_project(p, factory.as_deref()))
-        .ok_or_else(|| format!("no project {project_guid}"))?
+    let states = builtin_states(daw, project_guid);
+    daw.read_project(project_guid, |p| {
+        write_project(p, factory.as_deref(), &states)
+    })
+    .ok_or_else(|| format!("no project {project_guid}"))?
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -890,11 +893,49 @@ struct Writer<'a> {
     /// `ISBUS` depth delta per engine track.
     folder_deltas: Vec<i32>,
     skipped_fx: std::cell::RefCell<Vec<String>>,
+    /// The built-in FX's states, by FX guid ([`builtin_states`]): what the
+    /// plugins hold that a project file can carry.
+    states: &'a HashMap<String, Vec<u8>>,
 }
 
-fn write_project(p: &ProjectState, factory: Option<&dyn FxFactory>) -> Result<String, String> {
+/// No states: a writer given none.
+static NO_STATES: std::sync::LazyLock<HashMap<String, Vec<u8>>> =
+    std::sync::LazyLock::new(HashMap::new);
+
+/// Each built-in FX's state, by FX guid, from the plugins themselves — so
+/// a saved session carries what they were set to (a sampler's kit, a
+/// rig's capture), and loads them so again.
+fn builtin_states(daw: &Standalone, project_guid: &str) -> HashMap<String, Vec<u8>> {
+    let Some(factory) = daw.fx_factory() else {
+        return HashMap::new();
+    };
+    let guids: Vec<String> = daw
+        .read_project(project_guid, |p| {
+            p.fx_chains
+                .values()
+                .flatten()
+                .filter(|entry| factory.provides(&entry.fx.name))
+                .map(|entry| entry.fx.guid.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    guids
+        .into_iter()
+        .filter_map(|guid| {
+            let state = daw.save_plugin_state(&guid).ok()?;
+            (!state.is_empty()).then_some((guid, state))
+        })
+        .collect()
+}
+
+fn write_project(
+    p: &ProjectState,
+    factory: Option<&dyn FxFactory>,
+    states: &HashMap<String, Vec<u8>>,
+) -> Result<String, String> {
     let base = open_base(&p.info.path);
-    let writer = Writer::new(p, base.as_ref(), factory);
+    let mut writer = Writer::new(p, base.as_ref(), factory);
+    writer.states = states;
     let text = writer.write()?;
     let skipped = writer.skipped_fx.into_inner();
     if !skipped.is_empty() {
@@ -978,6 +1019,7 @@ impl<'a> Writer<'a> {
             new_index,
             folder_deltas: folder_deltas(&p.tracks),
             skipped_fx: std::cell::RefCell::new(Vec::new()),
+            states: &NO_STATES,
         }
     }
 
@@ -1862,14 +1904,24 @@ impl<'a> Writer<'a> {
                 })
             });
             let (kept, orig_builtins) = split_builtin_groups(orig_chunk, self.factory);
-            let eng_names: Vec<&str> = builtins.iter().map(|fx| fx.name.as_str()).collect();
-            if orig_builtins == eng_names {
+            // Unchanged — the same built-ins, each holding what the file
+            // has it holding — and the chunk goes out as it came in.
+            let engine: Vec<(String, Vec<u8>)> = builtins
+                .iter()
+                .map(|fx| {
+                    (
+                        fx.name.clone(),
+                        self.states.get(&fx.guid).cloned().unwrap_or_default(),
+                    )
+                })
+                .collect();
+            if orig_builtins == engine {
                 return None;
             }
             owned.key("FXCHAIN");
             let mut text = String::new();
             for fx in &builtins {
-                builtin_fx_node(fx).write_rpp(&mut text, "");
+                builtin_fx_node(fx, self.states.get(&fx.guid)).write_rpp(&mut text, "");
             }
             let mut children = match (orig_chunk, kept) {
                 (Some(_), kept) => kept,
@@ -1893,7 +1945,10 @@ impl<'a> Writer<'a> {
         for entry in chain {
             let fx = &entry.fx;
             if builtins.iter().any(|b| b.guid == fx.guid) {
-                nodes.push(FxChainNode::Plugin(builtin_fx_node(fx)));
+                nodes.push(FxChainNode::Plugin(builtin_fx_node(
+                    fx,
+                    self.states.get(&fx.guid),
+                )));
             } else if let Some(node) = bundle_fx_node(fx) {
                 nodes.push(FxChainNode::Plugin(node));
             } else {
@@ -2384,7 +2439,7 @@ fn write_lanes(t: &mut RppTrack, e: &PTrack, ext: &TrackExt) {
 
 /// The RPP node for a built-in FX: a CLAP node whose display name and
 /// plugin id are both the factory name (see the module docs).
-fn builtin_fx_node(fx: &daw_proto::fx::Fx) -> FxPlugin {
+fn builtin_fx_node(fx: &daw_proto::fx::Fx, state: Option<&Vec<u8>>) -> FxPlugin {
     FxPlugin {
         name: fx.name.clone(),
         custom_name: None,
@@ -2397,7 +2452,9 @@ fn builtin_fx_node(fx: &daw_proto::fx::Fx) -> FxPlugin {
         float_pos: None,
         wak: None,
         parallel: false,
-        state_data: Vec::new(),
+        // What the plugin holds, as a CLAP block's lines: the loader
+        // hands it back (`project_loader`'s built-in path).
+        state_data: state.map_or_else(Vec::new, |s| crate::rpp_state::state_to_reaper_clap(s)),
         raw_block: String::new(),
         param_envelopes: Vec::new(),
         params_on_tcp: Vec::new(),
@@ -2419,19 +2476,20 @@ fn bundle_fx_node(fx: &daw_proto::fx::Fx) -> Option<FxPlugin> {
     if !Path::new(&fx.name).exists() {
         return None;
     }
-    let mut node = builtin_fx_node(fx);
+    let mut node = builtin_fx_node(fx, None);
     node.plugin_type = plugin_type;
     node.name = name;
     Some(node)
 }
 
 /// An original `<FXCHAIN>`'s children without its built-in FX, and the
-/// built-ins' names in order. An FX in the chunk is the run of lines from
+/// built-ins' names and states in order (a state as its `<CLAP>` block
+/// holds it, empty for none). An FX in the chunk is the run of lines from
 /// its `BYPASS` to the next one.
 fn split_builtin_groups(
     chunk: Option<&RChunk>,
     factory: Option<&dyn FxFactory>,
-) -> (Vec<RNodeTree>, Vec<String>) {
+) -> (Vec<RNodeTree>, Vec<(String, Vec<u8>)>) {
     let Some(chunk) = chunk else {
         return (Vec::new(), Vec::new());
     };
@@ -2439,7 +2497,7 @@ fn split_builtin_groups(
     fn flush(
         group: &mut Vec<RNodeTree>,
         kept: &mut Vec<RNodeTree>,
-        names: &mut Vec<String>,
+        names: &mut Vec<(String, Vec<u8>)>,
         factory: Option<&dyn FxFactory>,
     ) {
         let builtin = group.iter().find_map(|c| match c {
@@ -2448,9 +2506,24 @@ fn split_builtin_groups(
                 let mut h = p.header.clone();
                 let file = h.get_param(1).unwrap_or_default();
                 let name = h.get_param(0).unwrap_or_default();
-                [file, name]
+                let name = [file, name]
                     .into_iter()
-                    .find(|n| !n.is_empty() && factory.provides(n))
+                    .find(|n| !n.is_empty() && factory.provides(n))?;
+                let lines: Vec<String> = p
+                    .children
+                    .iter()
+                    .filter_map(|c| match c {
+                        RNodeTree::Node(n) => n.line.as_ref().map(|l| l.trim().to_string()),
+                        RNodeTree::Chunk(_) => None,
+                    })
+                    .filter(|l| !l.is_empty())
+                    .collect();
+                let state = if lines.is_empty() {
+                    Vec::new()
+                } else {
+                    crate::rpp_state::reaper_clap_to_state(&lines).unwrap_or_default()
+                };
+                Some((name, state))
             }
             _ => None,
         });

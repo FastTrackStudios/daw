@@ -1294,7 +1294,25 @@ fn apply_fx_node(
             // `session_file::builtin_fx_node`.
             if let Some(name) = builtin_fx_name(daw, p) {
                 match daw_proto::fx::Effects::add(daw, ctx.clone(), chain_ctx.clone(), &name) {
-                    Some(fx_guid) => apply_fx_flags(daw, ctx, &chain_ctx, &fx_guid, p),
+                    Some(fx_guid) => {
+                        // What it was set to, as the session writer saved
+                        // it (`session_file::builtin_fx_node`): a CLAP
+                        // block's state.
+                        if !p.state_data.is_empty() {
+                            match crate::rpp_state::reaper_clap_to_state(&p.state_data)
+                                .map_err(|e| e.to_string())
+                                .and_then(|blob| {
+                                    daw.apply_plugin_state(&fx_guid, &blob)
+                                        .map_err(|e| e.to_string())
+                                }) {
+                                Ok(()) => {}
+                                Err(e) => summary.warnings.push(format!(
+                                    "FX state not restored for built-in '{name}': {e}"
+                                )),
+                            }
+                        }
+                        apply_fx_flags(daw, ctx, &chain_ctx, &fx_guid, p);
+                    }
                     None => summary
                         .warnings
                         .push(format!("FX add failed: built-in '{name}'")),

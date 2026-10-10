@@ -53,12 +53,12 @@ impl FxFactory for GuideFactory {
     fn create(&self, name: &str, _sample_rate: f64) -> Option<Box<dyn PluginInstance>> {
         self.provides(name).then(|| {
             self.created.fetch_add(1, Ordering::SeqCst);
-            Box::new(Silence(name.to_string())) as Box<dyn PluginInstance>
+            Box::new(Silence(name.to_string(), Vec::new())) as Box<dyn PluginInstance>
         })
     }
 }
 
-struct Silence(String);
+struct Silence(String, Vec<u8>);
 
 impl PluginInstance for Silence {
     fn descriptor(&self) -> PluginDescriptor {
@@ -102,6 +102,13 @@ impl PluginInstance for Silence {
         out_l.fill(0.0);
         out_r.fill(0.0);
         Ok(())
+    }
+    fn load_state(&mut self, state: &[u8]) -> Result<(), PluginError> {
+        self.1 = state.to_vec();
+        Ok(())
+    }
+    fn save_state(&mut self) -> Result<Vec<u8>, PluginError> {
+        Ok(self.1.clone())
     }
     fn deactivate(&mut self) {}
 }
@@ -716,6 +723,48 @@ fn manifest(dir: &Path) -> String {
 // ────────────────────────────────────────────────────────────────────
 // Tests
 // ────────────────────────────────────────────────────────────────────
+
+/// What a built-in FX was set to — a sampler's kit, a rig's capture —
+/// is saved with the session and handed back when it opens; and a session
+/// saved again unchanged is the same file.
+#[test]
+fn a_builtin_fx_keeps_its_state_through_save_and_load() {
+    let tmp = tempfile::tempdir().unwrap();
+    let song = tmp.path().join("Song");
+    let (daw, _, guid) = open_song(&song);
+    let ctx = ProjectContext::Project(guid.clone());
+    let fx = Effects::add(&daw, ctx, FxChainContext::Track(DRUMS.to_string()), COUNT)
+        .expect("the built-in adds");
+    daw.apply_plugin_state(&fx, b"kit=heavy thwacky").unwrap();
+
+    let dir = song.join("Song.session");
+    save_session(&daw, &guid, &dir).unwrap();
+    let first = session_rpp_text(&dir).unwrap();
+
+    let (fresh, _) = engine();
+    let loaded = load_session(&fresh, "Song", &dir).unwrap();
+    let back = fresh
+        .read_project(&loaded.project_guid, |p| {
+            p.fx_chains
+                .get(&FxChainKey::Track(DRUMS.to_string()))
+                .and_then(|c| c.iter().find(|e| e.fx.name == COUNT))
+                .map(|e| e.fx.guid.clone())
+        })
+        .flatten()
+        .expect("the built-in came back");
+    assert_eq!(
+        fresh.save_plugin_state(&back).unwrap(),
+        b"kit=heavy thwacky"
+    );
+
+    let again = song.join("Again.session");
+    save_session(&fresh, &loaded.project_guid, &again).unwrap();
+    assert_eq!(
+        session_rpp_text(&again).unwrap(),
+        first,
+        "saved again, the same"
+    );
+}
 
 #[test]
 fn a_prepared_song_survives_save_and_load() {

@@ -125,6 +125,21 @@ pub fn reaper_clap_to_state(lines: &[String]) -> Result<Vec<u8>, RppStateError> 
     Ok(raw[16..].to_vec())
 }
 
+/// A plugin's state blob as the lines of a `<CLAP ... >` block —
+/// [`reaper_clap_to_state`]'s inverse: REAPER's 16-byte preamble (no
+/// preset name, no flags) and the state, base64 in 128-column lines.
+#[must_use]
+pub fn state_to_reaper_clap(state: &[u8]) -> Vec<String> {
+    use base64::Engine;
+    let mut raw = vec![0_u8; 16];
+    raw.extend_from_slice(state);
+    let text = base64::engine::general_purpose::STANDARD.encode(raw);
+    text.as_bytes()
+        .chunks(128)
+        .map(|line| String::from_utf8_lossy(line).into_owned())
+        .collect()
+}
+
 /// Raw base64 decode of a `Vec<String>` of base64 lines (whitespace
 /// in each line is tolerated).
 pub fn decode_b64_lines(lines: &[String]) -> Result<Vec<u8>, base64::DecodeError> {
@@ -153,6 +168,16 @@ fn wrap_daw3(component: &[u8], controller: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+
+    /// A state written as a CLAP block reads back as itself.
+    #[test]
+    fn a_clap_state_round_trips() {
+        let state: Vec<u8> = (0..=255_u8).cycle().take(1_000).collect();
+        let lines = super::state_to_reaper_clap(&state);
+        assert!(lines.len() > 1 && lines.iter().all(|l| l.len() <= 128));
+        assert_eq!(super::reaper_clap_to_state(&lines).expect("decodes"), state);
+    }
+
     use super::*;
 
     #[test]
