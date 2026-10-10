@@ -9,22 +9,27 @@
 //! meta       key → value              the schema, the project's id
 //! blobs      hash → bytes (zstd)      plugin states, MIDI sources, an
 //!                                     imported project's verbatim text —
-//!                                     once each, however many versions
+//!                                     once each, however many branches
 //!                                     or joined projects refer to them
-//! updates    seq → Loro update        each undo step's edits, appended
-//!                                     (zstd); folded into a snapshot by
-//!                                     [`Store::compact`]
-//! snapshots  upto → Loro snapshot     the doc as of update `upto`
-//! versions   name → frontiers         named points in the history: a
-//!                                     song's alternatives and checkpoints
+//! branches   name → parent, base      the song (`main`) and its
+//!                                     alternatives and checkpoints, each
+//!                                     forked from another at a point
+//! updates    seq → branch, update     each undo step's edits, appended
+//!                                     to its branch (zstd)
+//! snapshots  branch → upto, snapshot  a branch's doc as of its update
+//!                                     `upto`, folded by [`Store::compact`]
 //! ```
+//!
+//! A branch is Logic's alternative: `Organized` forked from the song when
+//! the organizing was done, edited on its own after. It shares everything
+//! before the fork with the song — the history up to there, every blob —
+//! and keeps only what it did since.
 //!
 //! Media is not here: audio stays files beside the project, as it is now.
 //!
 //! What makes it small is what goes in, not the engine: a project as a
-//! Loro doc rather than text, every blob stored once by content, and a
-//! checkpoint a name for a point in one history rather than a copy of the
-//! project. Turso itself does not compress; the blobs and the history are
+//! Loro doc rather than text, every blob stored once by content, and an
+//! alternative a fork of one history rather than a copy of the project. Turso itself does not compress; the blobs and the history are
 //! zstd'd here.
 //!
 //! Turso's API is async; the store drives it to completion on the
@@ -54,7 +59,12 @@ pub enum StoreError {
     Corrupt(String),
     #[error("the store is schema {found}, this build reads {SCHEMA}")]
     Schema { found: i64 },
+    #[error("no branch {0}")]
+    NoBranch(String),
 }
+
+/// The song's own branch: what it is when nothing else is named.
+pub const MAIN: &str = "main";
 
 /// The store's results.
 pub type StoreResult<T> = Result<T, StoreError>;
@@ -73,13 +83,13 @@ pub fn hash_of(bytes: &[u8]) -> String {
     out
 }
 
-/// A named point in the project's history.
+/// A branch: the song, or an alternative or checkpoint of it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Version {
+pub struct Branch {
     pub name: String,
-    /// The Loro frontiers, encoded.
-    pub frontiers: Vec<u8>,
-    /// Seconds since the epoch it was named at.
+    /// The branch it was forked from; `None` for the song itself.
+    pub parent: Option<String>,
+    /// Seconds since the epoch it was made at.
     pub at: i64,
 }
 
@@ -101,6 +111,13 @@ fn now() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
+fn import(doc: &loro::LoroDoc, packed: &[u8]) -> StoreResult<()> {
+    let bytes = zstd::decode_all(packed)?;
+    doc.import(&bytes)
+        .map_err(|e| StoreError::Loro(e.to_string()))?;
+    Ok(())
+}
+
 impl Store {
     /// Open the project file at `path`, made if it is not there.
     ///
@@ -118,15 +135,22 @@ impl Store {
                 "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
                 "CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, kind TEXT NOT NULL, \
                  size INTEGER NOT NULL, data BLOB NOT NULL)",
+                "CREATE TABLE IF NOT EXISTS branches (name TEXT PRIMARY KEY, parent TEXT, \
+                 base BLOB, at INTEGER NOT NULL)",
                 "CREATE TABLE IF NOT EXISTS updates (seq INTEGER PRIMARY KEY AUTOINCREMENT, \
-                 label TEXT NOT NULL, at INTEGER NOT NULL, data BLOB NOT NULL)",
-                "CREATE TABLE IF NOT EXISTS snapshots (upto INTEGER PRIMARY KEY, \
-                 at INTEGER NOT NULL, data BLOB NOT NULL)",
-                "CREATE TABLE IF NOT EXISTS versions (name TEXT PRIMARY KEY, \
-                 frontiers BLOB NOT NULL, at INTEGER NOT NULL)",
+                 branch TEXT NOT NULL, label TEXT NOT NULL, at INTEGER NOT NULL, \
+                 data BLOB NOT NULL)",
+                "CREATE TABLE IF NOT EXISTS snapshots (branch TEXT PRIMARY KEY, \
+                 upto INTEGER NOT NULL, at INTEGER NOT NULL, data BLOB NOT NULL)",
             ] {
                 conn.execute(sql, ()).await?;
             }
+            conn.execute(
+                "INSERT INTO branches (name, parent, base, at) VALUES (?1, NULL, NULL, ?2) \
+                 ON CONFLICT(name) DO NOTHING",
+                (MAIN, now()),
+            )
+            .await?;
             let store = Self { conn, _db: db };
             match store.meta_async("schema").await? {
                 None => {
@@ -185,7 +209,7 @@ impl Store {
 
     /// Keep `bytes` (of `kind`: `fx`, `midi`, `rpp`, …) and say its name.
     /// Bytes already here are not written again: a blob is stored once
-    /// however many versions, alternatives or joined projects use it.
+    /// however many branches or joined projects use it.
     ///
     /// # Errors
     ///
@@ -247,53 +271,156 @@ impl Store {
         })
     }
 
-    /// Append one step of edits — a Loro update, `label` the undo step's
-    /// name — to the history.
+    /// Every branch: the song first, then its alternatives oldest first.
+    ///
+    /// # Errors
+    ///
+    /// The database refused the read.
+    pub fn branches(&self) -> StoreResult<Vec<Branch>> {
+        run(async {
+            let mut rows = self
+                .conn
+                .query(
+                    "SELECT name, parent, at FROM branches \
+                     ORDER BY (name = ?1) DESC, at, name",
+                    (MAIN,),
+                )
+                .await?;
+            let mut out = Vec::new();
+            while let Some(row) = rows.next().await? {
+                out.push(Branch {
+                    name: row.get(0)?,
+                    parent: row.get::<Option<String>>(1)?,
+                    at: row.get(2)?,
+                });
+            }
+            Ok(out)
+        })
+    }
+
+    /// Fork `name` from `parent` at `doc`'s current state (`doc` being
+    /// `parent` as loaded, with whatever it holds unsaved appended first by
+    /// the caller). A branch of that name already here is replaced.
     ///
     /// # Errors
     ///
     /// The database refused the write.
-    pub fn append_update(&self, label: &str, update: &[u8]) -> StoreResult<()> {
+    pub fn fork(&self, name: &str, parent: &str, doc: &loro::LoroDoc) -> StoreResult<()> {
+        let base = doc.state_frontiers().encode();
+        run(async {
+            self.conn.execute("BEGIN", ()).await?;
+            for sql in [
+                "DELETE FROM updates WHERE branch = ?1",
+                "DELETE FROM snapshots WHERE branch = ?1",
+                "DELETE FROM branches WHERE name = ?1",
+            ] {
+                self.conn.execute(sql, (name,)).await?;
+            }
+            self.conn
+                .execute(
+                    "INSERT INTO branches (name, parent, base, at) VALUES (?1, ?2, ?3, ?4)",
+                    (name, parent, base, now()),
+                )
+                .await?;
+            self.conn.execute("COMMIT", ()).await?;
+            StoreResult::Ok(())
+        })
+    }
+
+    /// Forget branch `name` and what it did; the song itself cannot go.
+    ///
+    /// # Errors
+    ///
+    /// The database refused the write.
+    pub fn delete_branch(&self, name: &str) -> StoreResult<()> {
+        if name == MAIN {
+            return Err(StoreError::NoBranch(name.to_owned()));
+        }
+        run(async {
+            for sql in [
+                "DELETE FROM updates WHERE branch = ?1",
+                "DELETE FROM snapshots WHERE branch = ?1",
+                "DELETE FROM branches WHERE name = ?1",
+            ] {
+                self.conn.execute(sql, (name,)).await?;
+            }
+            StoreResult::Ok(())
+        })
+    }
+
+    /// Append one step of edits — a Loro update, `label` the undo step's
+    /// name — to `branch`.
+    ///
+    /// # Errors
+    ///
+    /// The database refused the write.
+    pub fn append_update(&self, branch: &str, label: &str, update: &[u8]) -> StoreResult<()> {
         let packed = zstd::encode_all(update, LEVEL)?;
         run(self.conn.execute(
-            "INSERT INTO updates (label, at, data) VALUES (?1, ?2, ?3)",
-            (label, now(), packed),
+            "INSERT INTO updates (branch, label, at, data) VALUES (?1, ?2, ?3, ?4)",
+            (branch, label, now(), packed),
         ))?;
         Ok(())
     }
 
-    /// The project's doc: the latest snapshot, every update after it
-    /// imported. An empty doc for a new project.
+    /// `branch`'s doc: its snapshot if it has one, else its parent forked
+    /// where it forked; then every update of its own after that.
     ///
     /// # Errors
     ///
-    /// The database refused the read, or the history would not import.
-    pub fn load(&self) -> StoreResult<loro::LoroDoc> {
-        let doc = loro::LoroDoc::new();
-        let (upto, snapshot): (i64, Option<Vec<u8>>) = run(async {
+    /// No such branch, the database refused the read, or the history
+    /// would not import.
+    pub fn load(&self, branch: &str) -> StoreResult<loro::LoroDoc> {
+        let (parent, base): (Option<String>, Option<Vec<u8>>) = run(async {
             let mut rows = self
                 .conn
                 .query(
-                    "SELECT upto, data FROM snapshots ORDER BY upto DESC LIMIT 1",
-                    (),
+                    "SELECT parent, base FROM branches WHERE name = ?1",
+                    (branch,),
+                )
+                .await?;
+            match rows.next().await? {
+                Some(row) => Ok((row.get(0)?, row.get(1)?)),
+                None => Err(StoreError::NoBranch(branch.to_owned())),
+            }
+        })?;
+        let snapshot: Option<(i64, Vec<u8>)> = run(async {
+            let mut rows = self
+                .conn
+                .query(
+                    "SELECT upto, data FROM snapshots WHERE branch = ?1",
+                    (branch,),
                 )
                 .await?;
             StoreResult::Ok(match rows.next().await? {
-                Some(row) => (row.get(0)?, Some(row.get::<Vec<u8>>(1)?)),
-                None => (0, None),
+                Some(row) => Some((row.get(0)?, row.get(1)?)),
+                None => None,
             })
         })?;
-        if let Some(packed) = snapshot {
-            let bytes = zstd::decode_all(packed.as_slice())?;
-            doc.import(&bytes)
-                .map_err(|e| StoreError::Loro(e.to_string()))?;
-        }
+        let (doc, upto) = match (snapshot, parent, base) {
+            (Some((upto, packed)), _, _) => {
+                let doc = loro::LoroDoc::new();
+                import(&doc, &packed)?;
+                (doc, upto)
+            }
+            (None, Some(parent), Some(base)) => {
+                let from = self.load(&parent)?;
+                let at =
+                    loro::Frontiers::decode(&base).map_err(|e| StoreError::Loro(e.to_string()))?;
+                (
+                    from.fork_at(&at)
+                        .map_err(|e| StoreError::Loro(e.to_string()))?,
+                    0,
+                )
+            }
+            _ => (loro::LoroDoc::new(), 0),
+        };
         let updates: Vec<Vec<u8>> = run(async {
             let mut rows = self
                 .conn
                 .query(
-                    "SELECT data FROM updates WHERE seq > ?1 ORDER BY seq",
-                    (upto,),
+                    "SELECT data FROM updates WHERE branch = ?1 AND seq > ?2 ORDER BY seq",
+                    (branch, upto),
                 )
                 .await?;
             let mut out = Vec::new();
@@ -303,22 +430,21 @@ impl Store {
             StoreResult::Ok(out)
         })?;
         for packed in updates {
-            let bytes = zstd::decode_all(packed.as_slice())?;
-            doc.import(&bytes)
-                .map_err(|e| StoreError::Loro(e.to_string()))?;
+            import(&doc, &packed)?;
         }
         Ok(doc)
     }
 
-    /// Fold the history into one snapshot of `doc` (which must hold every
-    /// update appended so far) and drop the updates it covers. History is
-    /// kept: a Loro snapshot carries every operation, so versions named
-    /// before still check out.
+    /// Fold `branch`'s history into one snapshot of `doc` (which must be
+    /// the branch as loaded, with every update appended so far) and drop
+    /// the updates it covers. History is kept — a Loro snapshot carries
+    /// every operation — so a branch forked from this one still finds its
+    /// fork point.
     ///
     /// # Errors
     ///
     /// The doc would not export, or the database refused the write.
-    pub fn compact(&self, doc: &loro::LoroDoc) -> StoreResult<()> {
+    pub fn compact(&self, branch: &str, doc: &loro::LoroDoc) -> StoreResult<()> {
         let snapshot = doc
             .export(loro::ExportMode::Snapshot)
             .map_err(|e| StoreError::Loro(e.to_string()))?;
@@ -326,7 +452,10 @@ impl Store {
         run(async {
             let mut rows = self
                 .conn
-                .query("SELECT COALESCE(MAX(seq), 0) FROM updates", ())
+                .query(
+                    "SELECT COALESCE(MAX(seq), 0) FROM updates WHERE branch = ?1",
+                    (branch,),
+                )
                 .await?;
             let upto: i64 = match rows.next().await? {
                 Some(row) => row.get(0)?,
@@ -336,61 +465,20 @@ impl Store {
             self.conn.execute("BEGIN", ()).await?;
             self.conn
                 .execute(
-                    "INSERT INTO snapshots (upto, at, data) VALUES (?1, ?2, ?3) \
-                     ON CONFLICT(upto) DO UPDATE SET at = excluded.at, data = excluded.data",
-                    (upto, now(), packed),
+                    "INSERT INTO snapshots (branch, upto, at, data) VALUES (?1, ?2, ?3, ?4) \
+                     ON CONFLICT(branch) DO UPDATE SET upto = excluded.upto, \
+                     at = excluded.at, data = excluded.data",
+                    (branch, upto, now(), packed),
                 )
                 .await?;
             self.conn
-                .execute("DELETE FROM snapshots WHERE upto < ?1", (upto,))
-                .await?;
-            self.conn
-                .execute("DELETE FROM updates WHERE seq <= ?1", (upto,))
+                .execute(
+                    "DELETE FROM updates WHERE branch = ?1 AND seq <= ?2",
+                    (branch, upto),
+                )
                 .await?;
             self.conn.execute("COMMIT", ()).await?;
             StoreResult::Ok(())
-        })
-    }
-
-    /// Name the doc's current point in history `name` — an alternative,
-    /// a checkpoint. A name already taken moves to here.
-    ///
-    /// # Errors
-    ///
-    /// The database refused the write.
-    pub fn name_version(&self, name: &str, doc: &loro::LoroDoc) -> StoreResult<()> {
-        let frontiers = doc.state_frontiers().encode();
-        run(self.conn.execute(
-            "INSERT INTO versions (name, frontiers, at) VALUES (?1, ?2, ?3) \
-             ON CONFLICT(name) DO UPDATE SET frontiers = excluded.frontiers, at = excluded.at",
-            (name, frontiers, now()),
-        ))?;
-        Ok(())
-    }
-
-    /// Every named version, oldest first.
-    ///
-    /// # Errors
-    ///
-    /// The database refused the read.
-    pub fn versions(&self) -> StoreResult<Vec<Version>> {
-        run(async {
-            let mut rows = self
-                .conn
-                .query(
-                    "SELECT name, frontiers, at FROM versions ORDER BY at, name",
-                    (),
-                )
-                .await?;
-            let mut out = Vec::new();
-            while let Some(row) = rows.next().await? {
-                out.push(Version {
-                    name: row.get(0)?,
-                    frontiers: row.get(1)?,
-                    at: row.get(2)?,
-                });
-            }
-            Ok(out)
         })
     }
 }
