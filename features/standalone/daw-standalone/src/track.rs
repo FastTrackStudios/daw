@@ -49,7 +49,7 @@ fn group_followers(
     follow_of: impl Fn(&daw_proto::track::TrackGrouping) -> u128,
 ) -> Vec<usize> {
     let lead_mask = lead_of(&tracks[origin].grouping);
-    if lead_mask == 0 {
+    if lead_mask == 0 || !crate::grouping::enabled() {
         return Vec::new();
     }
     tracks

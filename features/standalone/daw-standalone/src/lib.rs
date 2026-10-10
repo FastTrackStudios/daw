@@ -37,6 +37,7 @@ mod audio_accessor;
     feature = "clap-host",
     feature = "vst3-host"
 ))]
+pub mod grouping;
 pub mod audio_engine;
 mod audio_engine_svc;
 mod automation;
