@@ -63,8 +63,19 @@ fn the_song_loads_back_compacted_or_not() {
         store.load(MAIN).expect("loaded").get_deep_value(),
         doc.get_deep_value()
     );
+    let names = |store: &Store| -> Vec<String> {
+        store
+            .steps(MAIN)
+            .expect("the steps")
+            .into_iter()
+            .map(|s| s.label)
+            .collect()
+    };
+    assert_eq!(names(&store), ["Add k1", "Add k2", "Add k3"]);
     store.compact(MAIN, &doc).expect("compacted");
+    assert!(names(&store).is_empty(), "folded into the snapshot");
     step(&store, MAIN, &doc, "k4", 9.0);
+    assert_eq!(names(&store), ["Add k4"]);
     drop(store);
     let reopened = Store::open(&dir.path().join("Song.session")).expect("reopened");
     assert_eq!(

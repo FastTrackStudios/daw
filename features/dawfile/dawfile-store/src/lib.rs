@@ -93,6 +93,17 @@ pub struct Branch {
     pub at: i64,
 }
 
+/// One step of a branch's history, as [`Store::steps`] lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Step {
+    /// The undo step's name.
+    pub label: String,
+    /// When it was written, in seconds since the epoch.
+    pub at: i64,
+    /// What it keeps, packed.
+    pub bytes: i64,
+}
+
 /// One project's file.
 pub struct Store {
     conn: turso::Connection,
@@ -383,6 +394,33 @@ impl Store {
             (branch, label, now(), packed),
         ))?;
         Ok(())
+    }
+
+    /// `branch`'s own steps since its last compaction, oldest first: each
+    /// one's name, when, and how many bytes it keeps.
+    ///
+    /// # Errors
+    ///
+    /// The database refused the read.
+    pub fn steps(&self, branch: &str) -> StoreResult<Vec<Step>> {
+        run(async {
+            let mut rows = self
+                .conn
+                .query(
+                    "SELECT label, at, length(data) FROM updates WHERE branch = ?1 ORDER BY seq",
+                    (branch,),
+                )
+                .await?;
+            let mut out = Vec::new();
+            while let Some(row) = rows.next().await? {
+                out.push(Step {
+                    label: row.get(0)?,
+                    at: row.get(1)?,
+                    bytes: row.get(2)?,
+                });
+            }
+            Ok(out)
+        })
     }
 
     /// `branch`'s doc: its snapshot if it has one, else its parent forked
