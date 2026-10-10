@@ -1760,8 +1760,24 @@ impl ProjectRenderer {
     /// hook: `(pos_beats, tempo_bpm, time_sig_num, time_sig_den)` from
     /// the revision-cached snapshot (tempo map + project transport).
     /// Falls back to 120 bpm 4/4 when the project has no snapshot.
+    ///
+    /// Realtime mode reads the snapshot being played and never builds one:
+    /// this runs in the audio callback after every block, and a build there
+    /// (the whole project, every item cloned) is what froze playback once
+    /// an edit had cut the kit into thousands of slices.
     pub(crate) fn clock_info(&self, seconds: f64) -> (f64, f64, u32, u32) {
-        match self.snapshot() {
+        #[cfg(not(target_arch = "wasm32"))]
+        let snap = if self.realtime.get().is_some() {
+            self.scratch
+                .try_lock()
+                .ok()
+                .and_then(|s| s.current.as_ref().map(|(_, snap)| snap.clone()))
+        } else {
+            self.snapshot()
+        };
+        #[cfg(target_arch = "wasm32")]
+        let snap = self.snapshot();
+        match snap {
             Some(snap) => (
                 snap.tempo_map.seconds_to_beat(seconds),
                 snap.tempo_map.tempo_at(seconds),
