@@ -18,8 +18,8 @@ use architect::{Layer, Services, layers};
 use daw_proto::{
     action_registry, audio_engine, automation, batch, dawfile_service, event_bus, ext_state, fx,
     fx_chains, fx_params, health, input, item, live_midi, marker, midi, peak, plugin_loader,
-    project, region, resource, routing, screenset, song_files, take, tempo_map, toolbar, track,
-    transport, transport_sync, window_geometry,
+    project, region, resource, routing, screenset, song_files, stretch_marker, take, tempo_map,
+    toolbar, track, transport, transport_sync, window_geometry,
 };
 
 use crate::sync::Standalone;
@@ -63,6 +63,9 @@ impl Services for Standalone {
             transport_sync::Service,
             // A peer streaming the song in: its folder's files by range.
             song_files::Service,
+            // A take's stretch markers: what an edited slice plays through,
+            // read and rebuilt by the project doc's bridge.
+            stretch_marker::Service,
             // `#[subscribe]` stream siblings — served from the PubSub
             // hubs on `Standalone` (see each domain's StreamSource
             // impl). The event-bus base service is empty post-port;

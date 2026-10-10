@@ -497,6 +497,15 @@ impl ItemHandle {
         Ok(())
     }
 
+    /// Loop its source across it, or play it once.
+    pub async fn set_loop_source(&self, loop_source: bool) -> Result<()> {
+        self.clients
+            .item
+            .set_loop_source(self.context(), self.item_ref(), loop_source)
+            .await??;
+        Ok(())
+    }
+
     /// Unlock the item
     pub async fn unlock(&self) -> Result<()> {
         self.clients
@@ -858,6 +867,31 @@ impl TakeHandle {
                 self.item_ref(),
                 self.take_ref.clone(),
                 offset,
+            )
+            .await??;
+        Ok(())
+    }
+
+    /// The take's stretch markers, in order.
+    pub async fn stretch_markers(&self) -> Result<Vec<daw_proto::StretchMarker>> {
+        Ok(self
+            .clients
+            .stretch_markers
+            .get_stretch_markers(self.context(), self.item_ref(), self.take_ref.clone())
+            .await?)
+    }
+
+    /// Replace the take's stretch markers with `markers`.
+    pub async fn set_stretch_markers(&self, markers: Vec<daw_proto::StretchMarker>) -> Result<()> {
+        self.clients
+            .stretch_markers
+            .set_stretch_markers(
+                daw_proto::StretchTakeRef::new(
+                    self.context(),
+                    self.item_ref(),
+                    self.take_ref.clone(),
+                ),
+                markers,
             )
             .await??;
         Ok(())

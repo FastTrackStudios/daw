@@ -138,6 +138,7 @@ pub(crate) use daw_proto::RegionsClient;
 pub(crate) use daw_proto::RoutingClient;
 pub(crate) use daw_proto::ScreensetsClient;
 pub(crate) use daw_proto::SongFilesClient;
+pub(crate) use daw_proto::StretchMarkersClient;
 pub(crate) use daw_proto::TakesClient;
 pub(crate) use daw_proto::TempoMapClient;
 pub(crate) use daw_proto::TracksClient;
@@ -262,6 +263,7 @@ architect::clients! {
         pub(crate) diagnostics: DiagnosticsClient,
         pub(crate) transport_sync: TransportSyncClient,
         pub(crate) song_files: SongFilesClient,
+        pub(crate) stretch_markers: StretchMarkersClient,
         // `#[subscribe]` stream siblings — argless subscriptions;
         // filtering happens client-side in the handle wrappers.
         pub(crate) transport_stream: TransportStreamClient,
