@@ -66,6 +66,26 @@ pub fn digest(daw: &Standalone, project_guid: &str) -> Option<Digest> {
     Some(digest)
 }
 
+/// The digest as one number: two projects with the same fingerprint have
+/// the same digest (to a 64-bit hash). What "unsaved changes" compares —
+/// the song now against the song as it was opened or last saved — cheap
+/// to keep where a whole digest is not.
+#[must_use]
+pub fn fingerprint(daw: &Standalone, project_guid: &str) -> Option<u64> {
+    let digest = digest(daw, project_guid)?;
+    Some(
+        digest
+            .sections
+            .iter()
+            .flat_map(|(name, lines)| {
+                std::iter::once(*name).chain(lines.iter().map(String::as_str))
+            })
+            .fold(0xcbf2_9ce4_8422_2325_u64, |h, line| {
+                fnv1a_from(h, line.as_bytes()) ^ 0x0a
+            }),
+    )
+}
+
 /// What differs between `before` and `after`: per section that does, its
 /// name, how many lines each side has, and the first few lines apart.
 /// Empty when they are the same.
@@ -98,9 +118,14 @@ pub fn differences(before: &Digest, after: &Digest) -> Vec<String> {
 
 /// FNV-1a, 64-bit: a stable hash of a state blob (std's is seeded).
 fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
-        (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
-    })
+    fnv1a_from(0xcbf2_9ce4_8422_2325, bytes)
+}
+
+/// FNV-1a over `bytes`, carrying on from `h`.
+fn fnv1a_from(h: u64, bytes: &[u8]) -> u64 {
+    bytes
+        .iter()
+        .fold(h, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3))
 }
 
 /// Everything but the FX's held state, from the project itself.

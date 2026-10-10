@@ -793,6 +793,12 @@ fn a_reopened_session_has_the_live_projects_digest() {
     let apart = daw_standalone::digest::differences(&before, &after);
     assert!(apart.is_empty(), "the same project: {apart:#?}");
 
+    assert_eq!(
+        daw_standalone::digest::fingerprint(&daw, &guid),
+        daw_standalone::digest::fingerprint(&fresh, &loaded.project_guid),
+        "the same fingerprint"
+    );
+
     // The control: a change after the reopen is seen, by section.
     let back = fresh
         .read_project(&loaded.project_guid, |p| {
@@ -807,6 +813,11 @@ fn a_reopened_session_has_the_live_projects_digest() {
     let edited = daw_standalone::digest::digest(&fresh, &loaded.project_guid).expect("a digest");
     let apart = daw_standalone::digest::differences(&before, &edited);
     assert!(apart.first().is_some_and(|l| l.starts_with("fx:")), "{apart:#?}");
+    assert_ne!(
+        daw_standalone::digest::fingerprint(&daw, &guid),
+        daw_standalone::digest::fingerprint(&fresh, &loaded.project_guid),
+        "an edit changes the fingerprint"
+    );
 }
 
 /// Media is written relative to the folder a save is opened from: beside
