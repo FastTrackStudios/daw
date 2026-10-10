@@ -220,6 +220,45 @@ impl EvictStats {
 
 // ── Loaded sample data ────────────────────────────────────────────────────────
 
+/// A run of interleaved samples (see [`SampleData::span_cursored`]).
+#[derive(Clone, Copy, Debug)]
+pub enum Span<'a> {
+    F32(&'a [f32]),
+    /// Resident 16-bit PCM (scaled like [`Pcm::sample`]).
+    I16(&'a [i16]),
+    /// A streamed chunk or head (scaled like the stream cursor's reads).
+    Stream(&'a [i16]),
+}
+
+impl Span<'_> {
+    /// Samples in the run.
+    #[inline]
+    #[must_use]
+    pub fn len(&self) -> usize {
+        match self {
+            Self::F32(v) => v.len(),
+            Self::I16(v) | Self::Stream(v) => v.len(),
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Sample `i` of the run, as the per-frame reads convert it.
+    #[inline]
+    #[must_use]
+    pub fn get(&self, i: usize) -> f32 {
+        match self {
+            Self::F32(v) => v[i],
+            Self::I16(v) => v[i] as f32 * I16_SCALE,
+            Self::Stream(v) => f32::from(v[i]) * (1.0 / 32768.0),
+        }
+    }
+}
+
 /// Where a sample's PCM actually lives.
 ///
 /// Kontakt-style samplers keep libraries playable without keeping them
@@ -433,9 +472,26 @@ impl SampleData {
     }
 
     /// A sample that stays compressed in its pack and streams as it plays.
+    ///
+    /// `FTS_NO_STREAM=1` decodes the whole entry up front instead, giving a
+    /// fully resident sample with no streamer involvement at all. It is a
+    /// DIAGNOSTIC, not a mode to ship: it trades every byte of the library
+    /// for certainty, and a real library will not fit. The point is to settle
+    /// whether an artefact is the streamer's fault by removing the streamer —
+    /// if the crackle survives this, it was never streaming.
     pub fn streamed(sample: Arc<super::stream::StreamedSample>) -> Self {
         let (channels, sample_rate, num_frames) =
             (sample.channels, sample.sample_rate, sample.num_frames);
+        if no_stream() {
+            let pcm = sample.decode_all();
+            tracing::debug!(
+                target: "fts_sample::stream",
+                frames = num_frames,
+                mib = (pcm.len() * 4) as f64 / (1024.0 * 1024.0),
+                "FTS_NO_STREAM: decoded entry fully resident"
+            );
+            return Self::from_f32(pcm, channels, sample_rate, num_frames);
+        }
         Self {
             pcm: Pcm::Streamed(sample),
             channels,
@@ -614,27 +670,49 @@ impl SampleData {
         let ch = self.channels as usize;
         let next = (frame_idx + 1).min(last);
         let (a, b) = (frame_idx * ch, next * ch);
-        // The head is always resident and read directly; the cursor covers
-        // the streamed body.
-        let want_hi = b + ch.saturating_sub(1);
-        if cursor.get(a).is_none() || cursor.get(want_hi).is_none() {
-            // A pair straddling a chunk boundary is rare (once per chunk) and
-            // handled by the per-sample fallback below rather than by holding
-            // two chunks.
-            if !cursor.seek(stream, a) {
-                return self.frame_pair(frame_idx, last);
+        // The common case: both frames inside what the cursor already holds
+        // (the resident head, or the chunk in progress) — one range check.
+        if let Some(pair) = cursor.frame_pair(a, b, ch) {
+            return pair;
+        }
+        // Otherwise move to the chunk covering `a`. A pair straddling a chunk
+        // boundary is rare (once per chunk) and handled by the per-sample
+        // fallback rather than by holding two chunks.
+        if cursor.seek(stream, a) {
+            if let Some(pair) = cursor.frame_pair(a, b, ch) {
+                return pair;
             }
         }
-        let read = |i: usize| cursor.get(i);
-        match self.channels {
-            1 => match (read(a), read(b)) {
-                (Some(x), Some(y)) => ((x, x), (y, y)),
-                _ => self.frame_pair(frame_idx, last),
-            },
-            _ => match (read(a), read(a + 1), read(b), read(b + 1)) {
-                (Some(l0), Some(r0), Some(l1), Some(r1)) => ((l0, r0), (l1, r1)),
-                _ => self.frame_pair(frame_idx, last),
-            },
+        self.frame_pair(frame_idx, last)
+    }
+
+    /// The contiguous run of interleaved samples holding frame `frame_idx`,
+    /// for a reader that walks it directly instead of asking per frame:
+    /// `(samples, the frame the run starts at)`. Streamed samples come from
+    /// `cursor` (moved to the chunk covering the frame); `None` when there is
+    /// no such run (a mapped window, a chunk not yet resident) — read per
+    /// frame then. A streamed reader calls `cursor.touch` with the furthest
+    /// sample it read, so the read-ahead fires.
+    #[inline]
+    pub fn span_cursored<'a>(
+        &'a self,
+        frame_idx: usize,
+        cursor: &'a mut crate::stream::StreamCursor,
+    ) -> Option<(Span<'a>, usize)> {
+        let ch = self.channels.max(1) as usize;
+        match &self.pcm {
+            Pcm::F32(v) => Some((Span::F32(v.as_slice()), 0)),
+            Pcm::I16(v) => Some((Span::I16(v.as_slice()), 0)),
+            Pcm::Streamed(stream) => {
+                let a = frame_idx * ch;
+                let covered = cursor.held().is_some_and(|(d, lo)| a >= lo && a < lo + d.len());
+                if !covered && !cursor.seek(stream, a) {
+                    return None;
+                }
+                let (data, lo) = cursor.held()?;
+                (lo % ch == 0).then_some((Span::Stream(data), lo / ch))
+            }
+            _ => None,
         }
     }
 
@@ -686,6 +764,13 @@ impl SampleData {
 }
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
+
+/// Whether to bypass streaming entirely and decode every entry up front.
+/// Read once — this is consulted per sample load, and `env::var` is not free.
+fn no_stream() -> bool {
+    static NO_STREAM: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *NO_STREAM.get_or_init(|| std::env::var_os("FTS_NO_STREAM").is_some())
+}
 
 /// Shared sample cache, safe to use across the audio thread and a
 /// background preloader simultaneously.
@@ -1136,11 +1221,15 @@ impl SampleCache {
         self.inner
             .pcm_pack
             .as_ref()
+            // ANY streamed entry makes it a streaming pack. Judging by the
+            // first entry of a hash map was random: a pack mixing long notes
+            // with short key-up samples came out "not streamable" whenever a
+            // short one iterated first, its preload was then capped (to 64
+            // samples by default) and the uncovered notes dropped — a
+            // different set every run.
             .map(|pack| {
                 pack.entries_iter()
-                    .next()
-                    .map(|(_, e)| e.mapped_fmt().is_none() && should_stream(e))
-                    .unwrap_or(false)
+                    .any(|(_, e)| e.mapped_fmt().is_none() && should_stream(e))
             })
             .unwrap_or(false)
     }
@@ -1540,9 +1629,14 @@ impl SampleCache {
     }
 
     fn publish_loaded_snapshot(&self) {
-        if let Ok(loaded) = self.inner.loaded.read() {
-            self.inner.loaded_snapshot.store(Arc::new(loaded.clone()));
-        }
+        // Clone and store under the WRITE lock: publishes serialize, so the
+        // last one to store always carries the latest map. Under a read lock
+        // two publishers could interleave — A clones, B inserts and stores,
+        // A stores its older clone — and B's sample vanished from the
+        // audio-thread view for good (a streaming pack's notes then dropped
+        // at random, all or nothing per run).
+        let loaded = self.inner.loaded.write().unwrap_or_else(|e| e.into_inner());
+        self.inner.loaded_snapshot.store(Arc::new(loaded.clone()));
     }
 }
 
@@ -1571,21 +1665,26 @@ fn estimated_decoded_bytes(
     const F32: usize = std::mem::size_of::<f32>();
     const UNKNOWN: usize = 2 * 1024 * 1024;
     // Raw-PCM entries are mapped, not decoded: they cost no anonymous memory,
-    // so they never spend budget and never stop a preload.
-    if let Some((_, entry)) = packed {
-        return if entry.mapped_fmt().is_some() {
+    // so they never spend budget and never stop a preload. A STREAMED FLAC
+    // entry keeps only its head resident (i16 frames, plus the block index),
+    // so that is what it costs — charging its whole decoded size made a big
+    // streaming pack "exceed" the budget on paper, and the preload then
+    // skipped entries at random (their notes dropped, all or nothing).
+    let cost = |entry: &PackEntry| {
+        if entry.mapped_fmt().is_some() {
             0
+        } else if should_stream(entry) {
+            super::stream::HEAD_FRAMES as usize * entry.channels as usize * 2 + 16 * 1024
         } else {
             entry.samples() * F32
-        };
+        }
+    };
+    if let Some((_, entry)) = packed {
+        return cost(entry);
     }
     if let Some(pack) = inner.pcm_pack.as_ref() {
         if let Some(entry) = pack.entry_for_path(path) {
-            return if entry.mapped_fmt().is_some() {
-                0
-            } else {
-                entry.samples() * F32
-            };
+            return cost(entry);
         }
     }
     if let Some(entry) = inner.prepared.get(path) {

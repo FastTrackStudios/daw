@@ -24,6 +24,8 @@ pub struct FramePoint {
     pub offset: u32,
     /// Index of the frame's first sample (per channel).
     pub first_frame: u32,
+    /// Samples (per channel) the frame carries — where the next one starts.
+    pub block_size: u32,
 }
 
 /// A parsed FLAC stream: its metadata header, and where its audio frames are.
@@ -142,14 +144,20 @@ impl FlacIndex {
             };
             // A CRC-8 that happens to match inside compressed audio still
             // produces a phantom frame, and one bogus point misaligns every
-            // chunk decoded from it. Real frames run strictly forward, and
-            // under a fixed blocking strategy they land on block boundaries —
-            // anything else is noise that passed the checksum.
-            let plausible = points
-                .last()
-                .map(|prev: &FramePoint| first_frame > prev.first_frame as u64)
-                .unwrap_or(true)
-                && (self.fixed_block == 0 || first_frame % self.fixed_block == 0);
+            // chunk decoded from it. "Strictly forward" is not enough: under
+            // fixed blocking every frame number is a block multiple, so a
+            // phantom numbered far ahead was accepted — and then every real
+            // frame after it rejected as going backwards, and a chunk ending
+            // at the phantom was cut mid-frame ("Expected one more byte";
+            // the held note went silent after its head). The scan runs in
+            // order from the first frame, so a real frame starts EXACTLY
+            // where the previous one ends.
+            let plausible = match points.last() {
+                Some(prev) => {
+                    first_frame == u64::from(prev.first_frame) + u64::from(prev.block_size)
+                }
+                None => first_frame == 0,
+            } && (self.fixed_block == 0 || first_frame % self.fixed_block == 0);
             if !plausible {
                 *pos += 1;
                 continue;
@@ -157,6 +165,7 @@ impl FlacIndex {
             points.push(FramePoint {
                 offset: *pos as u32,
                 first_frame: first_frame.min(u32::MAX as u64) as u32,
+                block_size: fh.block_size,
             });
             // Frames are variable length with no length field, so the next
             // sync has to be found by scanning; skipping the header we just
@@ -317,6 +326,49 @@ fn crc8(bytes: &[u8]) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A frame header: fixed 4096-sample blocks, 44.1 kHz, stereo, 16-bit,
+    /// `number` (< 128), CRC-8 valid.
+    fn frame_header(number: u8) -> Vec<u8> {
+        let mut h = vec![0xFF, 0xF8, 0xC9, 0x18, number];
+        h.push(crc8(&h));
+        h
+    }
+
+    /// `fLaC` + a STREAMINFO for fixed 4096-sample blocks.
+    fn stream_header(total: u64) -> Vec<u8> {
+        let mut info = vec![0x10, 0x00, 0x10, 0x00, 0, 0, 0, 0, 0, 0];
+        // 20-bit rate 44100 | 3-bit channels-1 (1) | 5-bit bps-1 (15) | 36-bit total.
+        let packed: u64 = (44_100u64 << 44) | (1u64 << 41) | (15u64 << 36) | total;
+        info.extend_from_slice(&packed.to_be_bytes());
+        info.extend_from_slice(&[0u8; 16]);
+        let mut out = b"fLaC".to_vec();
+        out.push(0x80); // last block, STREAMINFO
+        out.extend_from_slice(&(info.len() as u32).to_be_bytes()[1..]);
+        out.extend_from_slice(&info);
+        out
+    }
+
+    /// A phantom header — a CRC-valid sync inside audio, numbered far ahead —
+    /// must not enter the map: before, it was accepted (it runs "forward"),
+    /// every real frame after it was then rejected as going backwards, and a
+    /// chunk ending at it was cut mid-frame.
+    #[test]
+    fn a_phantom_frame_numbered_ahead_is_not_indexed() {
+        let mut b = stream_header(4 * 4096);
+        for n in 0..4u8 {
+            b.extend_from_slice(&frame_header(n));
+            b.extend_from_slice(&[0x11; 40]);
+            if n == 1 {
+                b.extend_from_slice(&frame_header(9));
+                b.extend_from_slice(&[0x11; 40]);
+            }
+        }
+        let idx = FlacIndex::build(&b).expect("index");
+        idx.scan_to(&b, 20_000);
+        let firsts: Vec<u32> = idx.points.lock().unwrap().iter().map(|p| p.first_frame).collect();
+        assert_eq!(firsts, vec![0, 4096, 8192, 12288]);
+    }
 
     #[test]
     fn crc8_is_the_flac_polynomial() {

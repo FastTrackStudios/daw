@@ -2888,6 +2888,7 @@ dependencies = [
  "facet",
  "libc",
  "libspa",
+ "objc2 0.6.4",
  "pipewire",
  "rtrb",
  "tracing",

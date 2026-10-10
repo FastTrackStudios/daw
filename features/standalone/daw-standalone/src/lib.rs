@@ -79,6 +79,9 @@ mod peak;
 mod peak_store;
 pub(crate) mod platform;
 pub mod plugin;
+/// Offline effect rendering for A/B work against reference plugins.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod offline_fx;
 mod plugin_loader;
 mod position_conversion;
 mod project;

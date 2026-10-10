@@ -622,6 +622,10 @@ pub struct Standalone {
     /// audio engine can install a freshly-sized bank when it attaches; empty
     /// until then, so `track_peak` reports silence.
     pub(crate) meters: Arc<Mutex<Arc<crate::metering::Meters>>>,
+    /// Where this engine's worst recent block spent its time — written by
+    /// the realtime renderer, read (and reset) by a health log.
+    #[cfg(any(feature = "decode", feature = "audio"))]
+    pub(crate) block_profile: Arc<crate::audio_engine::render::BlockProfileCell>,
     /// Meter-frame stream hub (`PeaksStreamSource`). A process-wide
     /// pump (spawned lazily by the first `set_meters`, i.e. when an
     /// audio engine attaches) reads the meter bank at ~30 Hz and
@@ -687,6 +691,8 @@ impl Standalone {
             transport_events: architect::PubSub::sliding(1024),
             bus_events: architect::PubSub::sliding(1024),
             meters: Arc::new(Mutex::new(crate::metering::Meters::empty())),
+            #[cfg(any(feature = "decode", feature = "audio"))]
+            block_profile: Arc::default(),
             meter_events: architect::PubSub::sliding(64),
             meter_pump_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             sync_positions: architect::PubSub::sliding(64),
@@ -700,6 +706,14 @@ impl Standalone {
 
     /// The current per-track peak-meter bank (written by the audio engine,
     /// read by the `Peaks` service).
+    /// Where the worst block since the last call spent its time, if a
+    /// realtime renderer has rendered one; resets the window.
+    #[cfg(any(feature = "decode", feature = "audio"))]
+    #[must_use]
+    pub fn take_block_profile(&self) -> Option<crate::audio_engine::render::BlockProfile> {
+        self.block_profile.take()
+    }
+
     pub fn meters(&self) -> Arc<crate::metering::Meters> {
         self.meters.lock().expect("meters poisoned").clone()
     }

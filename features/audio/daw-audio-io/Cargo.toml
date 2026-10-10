@@ -38,6 +38,11 @@ libspa = "0.10"
 # sched_setscheduler: the audio threads run SCHED_FIFO (`realtime`).
 libc = { workspace = true }
 
+[target.'cfg(target_os = "ios")'.dependencies]
+# The audio session's ports are iOS's devices (src/ios_session.rs), read by
+# dynamic messaging — the same objc2 the app's session code uses.
+objc2 = "0.6"
+
 [features]
 default = []
 # Prefer cpal's JACK backend (pipewire-jack shim) over the raw ALSA/CoreAudio

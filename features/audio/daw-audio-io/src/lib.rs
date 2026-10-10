@@ -34,6 +34,8 @@ pub mod device;
 pub mod duplex;
 pub mod host;
 pub mod input_guard;
+#[cfg(target_os = "ios")]
+mod ios_session;
 pub mod open;
 pub mod prefs;
 pub mod pw;
@@ -46,6 +48,9 @@ pub mod duplex_pw;
 /// CoreAudio AUHAL duplex backend (macOS).
 #[cfg(target_os = "macos")]
 pub mod duplex_coreaudio;
+
+/// Realtime render workers joined to the device's audio workgroup.
+pub mod rt_workers;
 
 #[cfg(feature = "monitor")]
 pub mod monitor;
