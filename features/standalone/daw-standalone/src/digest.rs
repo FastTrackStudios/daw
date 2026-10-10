@@ -226,6 +226,16 @@ fn of_state(p: &ProjectState) -> Digest {
             }
         }
     }
+    // An FX by its place in its chain: a reopened built-in FX is the same
+    // FX under a new guid.
+    let fx_place = |guid: &str| {
+        p.fx_chains.iter().find_map(|(chain, entries)| {
+            entries
+                .iter()
+                .position(|e| e.fx.guid == guid)
+                .map(|i| format!("{chain:?}#{i}"))
+        })
+    };
     let mut envelopes: Vec<String> = p
         .envelopes
         .iter()
@@ -233,9 +243,19 @@ fn of_state(p: &ProjectState) -> Digest {
             let pts: Vec<String> = d
                 .points
                 .iter()
-                .map(|pt| format!("{:.6}={:.6}", pt.time.as_seconds(), pt.value))
+                .map(|pt| format!("{:.6}={:.6}:{:?}", pt.time.as_seconds(), pt.value, pt.shape))
                 .collect();
-            format!("{g} {k:?} {}", pts.join(" "))
+            let key = match k {
+                crate::sync::EnvelopeKey::FxParam {
+                    fx_guid,
+                    param_index,
+                } => format!(
+                    "FxParam {} {param_index}",
+                    fx_place(fx_guid).unwrap_or_else(|| fx_guid.clone())
+                ),
+                k => format!("{k:?}"),
+            };
+            format!("{g} {key} {:?} {}", d.automation_mode, pts.join(" "))
         })
         .collect();
     envelopes.sort();

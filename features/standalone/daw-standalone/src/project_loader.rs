@@ -1424,6 +1424,79 @@ fn apply_fx_flags(
     if p.offline {
         let _ = daw_proto::fx::Effects::set_offline(daw, ctx.clone(), target(), true);
     }
+    // Its parameters' automation (`<PARMENV>`), as the engine's envelopes.
+    if let (
+        daw_proto::fx::FxChainContext::Track(track),
+        daw_proto::project::ProjectContext::Project(project),
+    ) = (chain_ctx, ctx)
+        && !p.param_envelopes.is_empty()
+    {
+        let envelopes: Vec<(crate::sync::EnvelopeKey, crate::sync::EnvelopeData)> = p
+            .param_envelopes
+            .iter()
+            .map(|env| {
+                (
+                    crate::sync::EnvelopeKey::FxParam {
+                        fx_guid: fx_guid.to_owned(),
+                        param_index: env.param.index,
+                    },
+                    param_envelope(env),
+                )
+            })
+            .collect();
+        let _ = daw.with_project_mut(project, |state| {
+            for (key, data) in envelopes {
+                state.envelopes.insert((track.clone(), key), data);
+            }
+        });
+    }
+}
+
+/// A `<PARMENV>` as the engine's envelope: its points (seconds, 0..1, the
+/// shape REAPER numbers 0–5), its mode (REAPER's 0–5; off when not active),
+/// shown and armed as it was.
+fn param_envelope(
+    env: &dawfile_reaper::types::fx_chain::FxParamEnvelope,
+) -> crate::sync::EnvelopeData {
+    use daw_proto::automation::{EnvelopePoint, EnvelopeShape};
+    use daw_proto::primitives::AutomationMode;
+    let shape = |flags: &[f64]| match flags.first().map(|f| f.round() as i64) {
+        Some(1) => EnvelopeShape::Square,
+        Some(2) => EnvelopeShape::SlowStartEnd,
+        Some(3) => EnvelopeShape::FastStart,
+        Some(4) => EnvelopeShape::FastEnd,
+        Some(5) => EnvelopeShape::Bezier,
+        _ => EnvelopeShape::Linear,
+    };
+    let mut data = crate::sync::EnvelopeData::new();
+    data.visible = env.visible;
+    data.armed = env.armed;
+    data.automation_mode = if env.active {
+        match env.mode {
+            1 => AutomationMode::Read,
+            2 => AutomationMode::Touch,
+            3 => AutomationMode::Write,
+            4 => AutomationMode::Latch,
+            5 => AutomationMode::LatchPreview,
+            _ => AutomationMode::TrimRead,
+        }
+    } else {
+        AutomationMode::Off
+    };
+    data.points = env
+        .points
+        .iter()
+        .enumerate()
+        .map(|(i, pt)| EnvelopePoint {
+            index: u32::try_from(i).unwrap_or(u32::MAX),
+            time: daw_proto::primitives::PositionInSeconds::from_seconds(pt.time),
+            value: pt.value,
+            shape: shape(&pt.flags),
+            tension: pt.flags.get(4).copied().unwrap_or(0.0),
+            selected: false,
+        })
+        .collect();
+    data
 }
 
 /// Find a plugin bundle on disk given just a filename. Walks the

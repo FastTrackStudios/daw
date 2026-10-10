@@ -242,6 +242,10 @@ pub(super) struct LaneJob {
     pub(super) out_l: Vec<f32>,
     pub(super) out_r: Vec<f32>,
     pub(super) midi: Vec<crate::plugin::PluginMidiEvent>,
+    /// Where the block starts, seconds: what its FX automation is read at.
+    pub(super) at: f64,
+    /// One FX's parameters, its automation applied (reused across blocks).
+    pub(super) params: Vec<(u32, f64)>,
     pub(super) note_expr: Vec<crate::plugin::PluginNoteExpression>,
     /// A plugin processed (the bus may now carry signal).
     pub(super) ran: bool,
@@ -272,8 +276,16 @@ impl LaneJob {
             }
             self.out_l[..frames].fill(0.0);
             self.out_r[..frames].fill(0.0);
+            let fixed = t.fx_params.get(*i).map(Vec::as_slice).unwrap_or(&[]);
+            let params = match t.fx_envs.get(*i) {
+                Some(envs) if !envs.is_empty() => {
+                    super::envelope::params_at(fixed, envs, self.at, &mut self.params);
+                    self.params.as_slice()
+                }
+                _ => fixed,
+            };
             let events = crate::plugin::PluginEvents {
-                params: t.fx_params.get(*i).map(Vec::as_slice).unwrap_or(&[]),
+                params,
                 midi: &self.midi,
                 note_expressions: &self.note_expr,
             };

@@ -313,6 +313,10 @@ struct RenderScratch {
     /// De-interleave scratch for a sidechain.
     key_l: Vec<f32>,
     key_r: Vec<f32>,
+    /// One FX's parameters this block, its automation applied
+    /// ([`envelope::params_at`]): kept across blocks so it does not
+    /// allocate on the audio thread.
+    fx_param_events: Vec<(u32, f64)>,
     /// FX guids whose plugin panicked inside `process_block`/`prepare`.
     /// Once here they are bypassed forever (this engine run) — a plugin
     /// that panics once can't be trusted on the audio thread again.
@@ -906,6 +910,7 @@ impl ProjectRenderer {
             keyed,
             key_l,
             key_r,
+            fx_param_events,
             panicked_fx,
             midi_buckets,
             midi_events,
@@ -1142,6 +1147,7 @@ impl ProjectRenderer {
                     continue;
                 }
                 job.ti = ti;
+                job.at = start_seconds;
                 job.bus = buses[ti].samples.as_mut_ptr() as usize;
                 for v in [&mut job.in_l, &mut job.in_r, &mut job.out_l, &mut job.out_r] {
                     if v.len() != frames {
@@ -1344,7 +1350,14 @@ impl ProjectRenderer {
                         }
                         plugin.set_sidechain(key_l, key_r);
                     }
-                    let param_events = t.fx_params.get(i).map(Vec::as_slice).unwrap_or(&[]);
+                    let fixed = t.fx_params.get(i).map(Vec::as_slice).unwrap_or(&[]);
+                    let param_events = match t.fx_envs.get(i) {
+                        Some(envs) if !envs.is_empty() => {
+                            envelope::params_at(fixed, envs, start_seconds, fx_param_events);
+                            fx_param_events.as_slice()
+                        }
+                        _ => fixed,
+                    };
                     plugin.set_tempo(snap.tempo_map.tempo_at(start_seconds));
                     let events = crate::plugin::PluginEvents {
                         params: param_events,

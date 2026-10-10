@@ -146,6 +146,10 @@ pub(crate) struct TrackSnapshot {
     /// `fx_chain` by index and sent to hosted plugins every block so
     /// service-side parameter edits affect DSP.
     pub(crate) fx_params: Vec<Vec<(u32, f64)>>,
+    /// Per-FX automation, matched 1:1 with `fx_chain`: each automated
+    /// parameter's index and its envelope's points (an FX-param envelope
+    /// not Off). Evaluated at each block's start ([`super::envelope::params_at`]).
+    pub(crate) fx_envs: Vec<Vec<(u32, Vec<EnvelopePoint>)>>,
     /// Volume envelope points, sorted by time. Multiplies the
     /// static `volume` field when present.
     pub(crate) volume_env: Option<Vec<EnvelopePoint>>,
@@ -164,6 +168,7 @@ pub(crate) struct TrackSnapshot {
 
 #[derive(Default)]
 struct FxChainSnapshot {
+    envs: Vec<Vec<(u32, Vec<EnvelopePoint>)>>,
     chain: Vec<String>,
     enabled: Vec<bool>,
     params: Vec<Vec<(u32, f64)>>,
@@ -688,15 +693,35 @@ fn snapshot_track(
             let mut guids = Vec::with_capacity(chain.len());
             let mut enabled = Vec::with_capacity(chain.len());
             let mut params = Vec::with_capacity(chain.len());
+            let mut envs = Vec::with_capacity(chain.len());
             for e in chain {
                 guids.push(e.fx.guid.clone());
                 enabled.push(e.fx.enabled);
                 params.push(e.params.iter().map(|(&id, &value)| (id, value)).collect());
+                // Its parameters' envelopes, those that play.
+                let mut automated: Vec<(u32, Vec<EnvelopePoint>)> = p
+                    .envelopes
+                    .iter()
+                    .filter_map(|((owner, key), data)| match key {
+                        EnvelopeKey::FxParam {
+                            fx_guid,
+                            param_index,
+                        } if owner == &t.guid && fx_guid == &e.fx.guid => {
+                            active_envelope(Some(data))
+                                .filter(|points| !points.is_empty())
+                                .map(|points| (*param_index, points))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                automated.sort_by_key(|(index, _)| *index);
+                envs.push(automated);
             }
             FxChainSnapshot {
                 chain: guids,
                 enabled,
                 params,
+                envs,
             }
         })
         .unwrap_or_default();
@@ -734,6 +759,7 @@ fn snapshot_track(
         fx_chain: fx.chain,
         fx_enabled: fx.enabled,
         fx_params: fx.params,
+        fx_envs: fx.envs,
         volume_env: track_env(EnvelopeType::Volume),
         pan_env: track_env(EnvelopeType::Pan),
         mute_env: track_env(EnvelopeType::Mute),

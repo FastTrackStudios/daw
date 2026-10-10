@@ -1891,6 +1891,55 @@ impl<'a> Writer<'a> {
         }
     }
 
+    /// The FX `fx` on `track`'s parameter automation, as `<PARMENV>`s: the
+    /// engine's FX-param envelopes, by parameter.
+    fn param_envelopes(
+        &self,
+        track: &str,
+        fx: &str,
+    ) -> Vec<dawfile_reaper::types::fx_chain::FxParamEnvelope> {
+        use dawfile_reaper::types::fx_chain::{FxEnvelopePoint, FxParamEnvelope, FxParamRef};
+        let mut out: Vec<FxParamEnvelope> = self
+            .p
+            .envelopes
+            .iter()
+            .filter_map(|((owner, key), data)| match key {
+                EnvelopeKey::FxParam {
+                    fx_guid,
+                    param_index,
+                } if owner == track && fx_guid == fx => {
+                    let off = data.automation_mode == PAutomationMode::Off;
+                    Some(FxParamEnvelope {
+                        param: FxParamRef {
+                            index: *param_index,
+                            name: None,
+                        },
+                        mode: if off { 0 } else { data.automation_mode as i32 },
+                        range_max: 1.0,
+                        default_value: data.points.first().map_or(0.0, |p| p.value),
+                        eguid: None,
+                        active: !off,
+                        visible: data.visible,
+                        armed: data.armed,
+                        points: data
+                            .points
+                            .iter()
+                            .map(|pt| FxEnvelopePoint {
+                                time: pt.time.as_seconds(),
+                                value: pt.value,
+                                flags: vec![f64::from(pt.shape as u8)],
+                            })
+                            .collect(),
+                        raw_block: String::new(),
+                    })
+                }
+                _ => None,
+            })
+            .collect();
+        out.sort_by_key(|env| env.param.index);
+        out
+    }
+
     /// The built-in FX of the injected factory, by name, on an engine
     /// track.
     fn engine_builtins(&self, guid: &str) -> Vec<&'a daw_proto::fx::Fx> {
@@ -1932,12 +1981,16 @@ impl<'a> Writer<'a> {
             let (kept, orig_builtins) = split_builtin_groups(orig_chunk, self.factory);
             // Unchanged — the same built-ins, each holding what the file
             // has it holding — and the chunk goes out as it came in.
-            let engine: Vec<(String, Vec<u8>)> = builtins
+            let engine: Vec<(String, Vec<u8>, Vec<String>)> = builtins
                 .iter()
                 .map(|fx| {
                     (
                         fx.name.clone(),
                         self.states.get(&fx.guid).cloned().unwrap_or_default(),
+                        self.param_envelopes(&e.guid, &fx.guid)
+                            .iter()
+                            .map(envelope_print)
+                            .collect(),
                     )
                 })
                 .collect();
@@ -1947,7 +2000,9 @@ impl<'a> Writer<'a> {
             owned.key("FXCHAIN");
             let mut text = String::new();
             for fx in &builtins {
-                builtin_fx_node(fx, self.states.get(&fx.guid)).write_rpp(&mut text, "");
+                let mut node = builtin_fx_node(fx, self.states.get(&fx.guid));
+                node.param_envelopes = self.param_envelopes(&e.guid, &fx.guid);
+                node.write_rpp(&mut text, "");
             }
             let mut children = match (orig_chunk, kept) {
                 (Some(_), kept) => kept,
@@ -1971,10 +2026,9 @@ impl<'a> Writer<'a> {
         for entry in chain {
             let fx = &entry.fx;
             if builtins.iter().any(|b| b.guid == fx.guid) {
-                nodes.push(FxChainNode::Plugin(builtin_fx_node(
-                    fx,
-                    self.states.get(&fx.guid),
-                )));
+                let mut node = builtin_fx_node(fx, self.states.get(&fx.guid));
+                node.param_envelopes = self.param_envelopes(&e.guid, &fx.guid);
+                nodes.push(FxChainNode::Plugin(node));
             } else if let Some(node) = bundle_fx_node(fx) {
                 nodes.push(FxChainNode::Plugin(node));
             } else {
@@ -2508,14 +2562,56 @@ fn bundle_fx_node(fx: &daw_proto::fx::Fx) -> Option<FxPlugin> {
     Some(node)
 }
 
+/// A parameter envelope written down for comparing: its parameter, whether
+/// it plays, and its points — the same for an engine envelope and the
+/// file's `<PARMENV>` it would be written as.
+fn envelope_print(env: &dawfile_reaper::types::fx_chain::FxParamEnvelope) -> String {
+    let points: Vec<String> = env
+        .points
+        .iter()
+        .map(|p| {
+            format!(
+                "{:.6}:{:.6}:{}",
+                p.time,
+                p.value,
+                p.flags.first().copied().unwrap_or(0.0)
+            )
+        })
+        .collect();
+    let mode = if env.active {
+        env.mode.to_string()
+    } else {
+        "off".to_owned()
+    };
+    format!("{} {mode} {}", env.param.index, points.join(" "))
+}
+
+/// A `<PARMENV>` chunk's lines, header first and `>` last.
+fn chunk_lines(chunk: &RChunk) -> Vec<String> {
+    let mut header = chunk.header.clone();
+    let mut lines = vec![format!("<{}", header.get_tokens_as_line())];
+    for child in &chunk.children {
+        if let RNodeTree::Node(node) = child {
+            let mut node = node.clone();
+            lines.push(
+                node.line
+                    .clone()
+                    .unwrap_or_else(|| node.get_tokens_as_line()),
+            );
+        }
+    }
+    lines.push(">".to_owned());
+    lines
+}
+
 /// An original `<FXCHAIN>`'s children without its built-in FX, and the
-/// built-ins' names and states in order (a state as its `<CLAP>` block
-/// holds it, empty for none). An FX in the chunk is the run of lines from
-/// its `BYPASS` to the next one.
+/// built-ins' names, states (as its `<CLAP>` block holds it, empty for
+/// none) and parameter envelopes ([`envelope_print`]) in order. An FX in
+/// the chunk is the run of lines from its `BYPASS` to the next one.
 fn split_builtin_groups(
     chunk: Option<&RChunk>,
     factory: Option<&dyn FxFactory>,
-) -> (Vec<RNodeTree>, Vec<(String, Vec<u8>)>) {
+) -> (Vec<RNodeTree>, Vec<(String, Vec<u8>, Vec<String>)>) {
     let Some(chunk) = chunk else {
         return (Vec::new(), Vec::new());
     };
@@ -2523,7 +2619,7 @@ fn split_builtin_groups(
     fn flush(
         group: &mut Vec<RNodeTree>,
         kept: &mut Vec<RNodeTree>,
-        names: &mut Vec<(String, Vec<u8>)>,
+        names: &mut Vec<(String, Vec<u8>, Vec<String>)>,
         factory: Option<&dyn FxFactory>,
     ) {
         let builtin = group.iter().find_map(|c| match c {
@@ -2553,6 +2649,21 @@ fn split_builtin_groups(
             }
             _ => None,
         });
+        // Its `<PARMENV>`s, as the engine's would be written.
+        let envelopes: Vec<String> = group
+            .iter()
+            .filter_map(|c| match c {
+                RNodeTree::Chunk(env) if env.name().as_deref() == Some("PARMENV") => {
+                    let lines = chunk_lines(env);
+                    let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+                    Some(envelope_print(
+                        &dawfile_reaper::types::fx_chain::parse_parmenv(&lines),
+                    ))
+                }
+                _ => None,
+            })
+            .collect();
+        let builtin = builtin.map(|(name, state)| (name, state, envelopes));
         match builtin {
             Some(n) => names.push(n),
             None => kept.append(group),

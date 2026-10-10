@@ -1044,6 +1044,13 @@ fn parse_param_ref(s: &str) -> FxParamRef {
     }
 }
 
+/// A `<PARMENV>` block's lines (its header line first, `>` last) as an
+/// [`FxParamEnvelope`]: what a writer holds a file's envelope up to.
+#[must_use]
+pub fn parse_parmenv(lines: &[&str]) -> FxParamEnvelope {
+    parse_param_envelope(lines, false)
+}
+
 /// Parse a `<PARMENV ...>...</>` block into an `FxParamEnvelope`.
 ///
 /// Format: `<PARMENV <param_ref> <mode> <range_max> <default_value>`

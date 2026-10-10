@@ -64,3 +64,54 @@ impl<'a> EnvelopeCursor<'a> {
         }
     }
 }
+
+/// An FX's parameters for a block starting `at` seconds: its stored values
+/// (`fixed`), each automated one replaced by its envelope's value there.
+/// Into `out`, cleared first and reused across blocks, so a block does not
+/// allocate once it has grown to the chain's size.
+pub(crate) fn params_at(
+    fixed: &[(u32, f64)],
+    envelopes: &[(u32, Vec<EnvelopePoint>)],
+    at: f64,
+    out: &mut Vec<(u32, f64)>,
+) {
+    out.clear();
+    out.extend_from_slice(fixed);
+    for (index, points) in envelopes {
+        let Some(value) = EnvelopeCursor::new(points).eval_at(at) else {
+            continue;
+        };
+        let value = value.clamp(0.0, 1.0);
+        match out.iter_mut().find(|(i, _)| i == index) {
+            Some(slot) => slot.1 = value,
+            None => out.push((*index, value)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod params_tests {
+    use super::*;
+
+    fn point(time: f64, value: f64) -> EnvelopePoint {
+        EnvelopePoint {
+            time: daw_proto::primitives::PositionInSeconds::from_seconds(time),
+            value,
+            ..EnvelopePoint::default()
+        }
+    }
+
+    /// An automated parameter takes its envelope's value at the block;
+    /// the rest keep theirs.
+    #[test]
+    fn an_automated_parameter_follows_its_envelope() {
+        let fixed = [(0, 0.2), (1, 0.7)];
+        let envelopes = vec![(1, vec![point(0.0, 0.0), point(2.0, 1.0)])];
+        let mut out = Vec::new();
+        params_at(&fixed, &envelopes, 1.0, &mut out);
+        assert_eq!(out[0], (0, 0.2));
+        assert!((out[1].1 - 0.5).abs() < 1e-9, "{out:?}");
+        params_at(&fixed, &envelopes, 3.0, &mut out);
+        assert!((out[1].1 - 1.0).abs() < 1e-9, "held after the last point");
+    }
+}

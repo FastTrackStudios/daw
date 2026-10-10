@@ -783,7 +783,37 @@ fn a_reopened_session_has_the_live_projects_digest() {
     )
     .expect("the built-in adds");
     daw.apply_plugin_state(&fx, b"kit=heavy thwacky").unwrap();
+    // A parameter of it automated: a ramp, then a step.
+    let at = daw_proto::automation::EnvelopeLocation::new(
+        daw_proto::TrackRef::Guid(DRUMS.to_string()),
+        daw_proto::automation::EnvelopeRef::FxParam {
+            fx_guid: fx.clone(),
+            param_index: 3,
+        },
+    );
+    for (time, value, shape) in [
+        (1.0, 0.25, daw_proto::automation::EnvelopeShape::Linear),
+        (2.5, 0.75, daw_proto::automation::EnvelopeShape::Square),
+        (4.0, 0.5, daw_proto::automation::EnvelopeShape::Linear),
+    ] {
+        let _ = daw_proto::Automation::add_point(
+            &daw,
+            ProjectContext::Project(guid.clone()),
+            at.clone(),
+            daw_proto::automation::AddPointParams::new(
+                daw_proto::primitives::PositionInSeconds::from_seconds(time),
+                value,
+                shape,
+            ),
+        );
+    }
     let before = daw_standalone::digest::digest(&daw, &guid).expect("a digest");
+    assert!(
+        before.sections.iter().any(
+            |(name, lines)| *name == "envelopes" && lines.iter().any(|l| l.contains("FxParam"))
+        ),
+        "the automation is in the digest"
+    );
 
     let dir = song.join("Song.session");
     save_session(&daw, &guid, &dir).unwrap();
@@ -812,7 +842,10 @@ fn a_reopened_session_has_the_live_projects_digest() {
     fresh.apply_plugin_state(&back, b"kit=another").unwrap();
     let edited = daw_standalone::digest::digest(&fresh, &loaded.project_guid).expect("a digest");
     let apart = daw_standalone::digest::differences(&before, &edited);
-    assert!(apart.first().is_some_and(|l| l.starts_with("fx:")), "{apart:#?}");
+    assert!(
+        apart.first().is_some_and(|l| l.starts_with("fx:")),
+        "{apart:#?}"
+    );
     assert_ne!(
         daw_standalone::digest::fingerprint(&daw, &guid),
         daw_standalone::digest::fingerprint(&fresh, &loaded.project_guid),
