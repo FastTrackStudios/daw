@@ -145,11 +145,7 @@ fn insert_item(
                 return Err(DawError::already_exists("Item", &g));
             }
             Some(g) => g,
-            None => {
-                let counter = p.next_item_counter;
-                p.next_item_counter += 1;
-                format!("standalone-item-{counter:016x}")
-            }
+            None => p.mint_item_guid(),
         };
         let order = p.items_by_track.entry(track_guid.clone()).or_default();
         let index = order.len() as u32;
@@ -321,9 +317,7 @@ impl Items for Standalone {
             .with_project_mut(&guid, |p| {
                 let item_guid = item_guid_from_ref(p, &item)?;
                 let src = p.items.get(&item_guid)?.clone();
-                let counter = p.next_item_counter;
-                p.next_item_counter += 1;
-                let new_guid = format!("standalone-item-{counter:016x}");
+                let new_guid = p.mint_item_guid();
                 let order = p
                     .items_by_track
                     .entry(src.item.track_guid.clone())

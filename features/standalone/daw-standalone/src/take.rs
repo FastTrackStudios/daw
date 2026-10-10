@@ -137,9 +137,7 @@ impl Takes for Standalone {
         let item_guid = resolve_item_guid(&item)?;
         let created = self
             .with_project_mut(&guid, |p| {
-                let counter = p.next_take_counter;
-                p.next_take_counter += 1;
-                let take_guid = format!("standalone-take-{counter}");
+                let take_guid = p.mint_take_guid();
                 let tl = p.takes.entry(item_guid.clone()).or_default();
                 let mut take = Take::default();
                 take.guid = take_guid.clone();

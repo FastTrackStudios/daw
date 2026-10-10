@@ -397,6 +397,39 @@ pub struct ProjectState {
 }
 
 impl ProjectState {
+    /// A new item's GUID: the next of the engine's own, past any already in
+    /// the project. The counter starts at zero for every project opened,
+    /// and a saved session keeps the GUIDs it was given — so after a reopen
+    /// the next one minted was one already there, and the new item took
+    /// its place in the map: a split's right half wrote over another item.
+    pub fn mint_item_guid(&mut self) -> String {
+        loop {
+            let guid = format!("standalone-item-{:016x}", self.next_item_counter);
+            self.next_item_counter += 1;
+            if !self.items.contains_key(&guid) {
+                return guid;
+            }
+        }
+    }
+
+    /// A new take's GUID, past any already in the project (as
+    /// [`Self::mint_item_guid`]).
+    pub fn mint_take_guid(&mut self) -> String {
+        loop {
+            let guid = format!("standalone-take-{}", self.next_take_counter);
+            self.next_take_counter += 1;
+            if !self
+                .takes
+                .values()
+                .any(|list| list.takes.iter().any(|t| t.guid == guid))
+            {
+                return guid;
+            }
+        }
+    }
+}
+
+impl ProjectState {
     pub fn new(info: ProjectInfo) -> Self {
         Self {
             info,
