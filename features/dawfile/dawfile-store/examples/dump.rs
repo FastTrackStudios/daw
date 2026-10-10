@@ -1,5 +1,6 @@
-//! What a project file's branch holds: its items, and named tracks'
-//! fields, read straight from the doc.
+//! What a project file's branch holds: its steps since it was last
+//! folded, its items, and named tracks' fields, read straight from the
+//! doc.
 //!
 //! `cargo run -p dawfile-store --example dump -- <Song.session> [branch] [track name…]`
 
@@ -13,6 +14,9 @@ fn main() {
     let store = dawfile_store::Store::open(std::path::Path::new(&path)).expect("the store");
     for b in store.branches().expect("branches") {
         println!("branch {} (from {:?})", b.name, b.parent);
+    }
+    for step in store.steps(&branch).expect("steps") {
+        println!("step {:?} ({} bytes)", step.label, step.bytes);
     }
     let doc = store.load(&branch).expect("the branch");
     println!("items: {}", doc.get_map("items").len());
