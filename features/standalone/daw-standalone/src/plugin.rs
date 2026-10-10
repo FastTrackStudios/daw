@@ -213,6 +213,16 @@ pub trait PluginInstance: Send {
     /// a plugin without a sidechain input has nowhere to put it.
     fn set_sidechain(&mut self, _left: &[f32], _right: &[f32]) {}
 
+    /// An output beyond the main pair, after a
+    /// [`process_block`](Self::process_block): pair 0 is the track's
+    /// channels 3/4, pair 1 its 5/6 — what a send from those channels
+    /// takes (a kit's overhead mics on 3/4, sent into the overheads).
+    /// `None` for a pair the plugin does not have, which is every pair by
+    /// default.
+    fn aux_out(&self, _pair: usize) -> Option<(&[f32], &[f32])> {
+        None
+    }
+
     /// The song's tempo for the next [`process_block`](Self::process_block),
     /// bpm, from the project's tempo map at the block's start: what a
     /// plugin's note-valued times read (a synced delay, a reverb's tail or

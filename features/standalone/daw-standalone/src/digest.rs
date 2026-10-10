@@ -168,12 +168,13 @@ fn of_state(p: &ProjectState) -> Digest {
                 // them alike (`channels_to_rpp`), so they are one value.
                 let channels = r.dest_channels.num_channels.max(2);
                 format!(
-                    "{src} -> {:?} mode={:?} vol={} pan={} mute={} into={}+{channels}",
+                    "{src} -> {:?} mode={:?} vol={} pan={} mute={} from={} into={}+{channels}",
                     r.dest_track_guid,
                     r.send_mode,
                     r.volume,
                     r.pan,
                     r.muted,
+                    r.source_channels.start_channel,
                     r.dest_channels.start_channel
                 )
             })

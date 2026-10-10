@@ -1758,6 +1758,14 @@ impl<'a> Writer<'a> {
                 {
                     recv.dest_audio_channels = loader::channels_to_rpp(&r.dest_channels);
                 }
+                // And where it takes from: a plugin's 3/4 or 5/6.
+                if loader::channels_to_rpp(&r.source_channels)
+                    != loader::channels_to_rpp(&loader::channels_from_rpp(
+                        recv.source_audio_channels,
+                    ))
+                {
+                    recv.source_audio_channels = loader::channels_to_rpp(&r.source_channels);
+                }
                 recv
             })
             .collect();

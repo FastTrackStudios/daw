@@ -150,6 +150,9 @@ pub(crate) struct TrackSnapshot {
     /// parameter's index and its envelope's points (an FX-param envelope
     /// not Off). Evaluated at each block's start ([`super::envelope::params_at`]).
     pub(crate) fx_envs: Vec<Vec<(u32, Vec<EnvelopePoint>)>>,
+    /// A send takes one of its plugins' aux outputs (3/4, 5/6), so the
+    /// renderer collects them.
+    pub(crate) aux_taps: bool,
     /// Volume envelope points, sorted by time. Multiplies the
     /// static `volume` field when present.
     pub(crate) volume_env: Option<Vec<EnvelopePoint>>,
@@ -183,6 +186,10 @@ pub(crate) struct SendSnapshot {
     /// ([`crate::plugin::PluginInstance::set_sidechain`]) rather than
     /// being heard.
     pub(crate) to_sidechain: bool,
+    /// Which of the source's pairs it takes: 0 its main output (1/2), 1
+    /// its channels 3/4, 2 its 5/6 — a plugin's
+    /// [`aux_out`](crate::plugin::PluginInstance::aux_out).
+    pub(crate) from_pair: usize,
     pub(crate) volume: f64,
     pub(crate) pan: f64,
     pub(crate) muted: bool,
@@ -429,6 +436,8 @@ fn snapshot_track(
                     Some(SendSnapshot {
                         dest_idx: idx_by_guid.get(dest_guid).copied(),
                         to_sidechain: r.dest_channels.start_channel >= 2,
+                        from_pair: usize::try_from(r.source_channels.start_channel / 2)
+                            .unwrap_or(0),
                         volume: r.volume,
                         pan: r.pan,
                         muted: r.muted,
@@ -726,6 +735,7 @@ fn snapshot_track(
         })
         .unwrap_or_default();
 
+    let aux_taps = sends.iter().any(|s| s.from_pair > 0);
     TrackSnapshot {
         guid: t.guid.clone(),
         name: t.name.clone(),
@@ -760,6 +770,7 @@ fn snapshot_track(
         fx_enabled: fx.enabled,
         fx_params: fx.params,
         fx_envs: fx.envs,
+        aux_taps,
         volume_env: track_env(EnvelopeType::Volume),
         pan_env: track_env(EnvelopeType::Pan),
         mute_env: track_env(EnvelopeType::Mute),

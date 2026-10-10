@@ -783,6 +783,28 @@ fn a_reopened_session_has_the_live_projects_digest() {
     )
     .expect("the built-in adds");
     daw.apply_plugin_state(&fx, b"kit=heavy thwacky").unwrap();
+    // A send from the drums' 5/6 (a plugin's own output there) into the
+    // keys: its source channels reopen with it.
+    let ctx = ProjectContext::Project(guid.clone());
+    let index = daw_proto::Routing::add_send(
+        &daw,
+        ctx.clone(),
+        daw_proto::TrackRef::Guid(DRUMS.to_string()),
+        daw_proto::TrackRef::Guid(KEYS.to_string()),
+    )
+    .expect("a send");
+    daw_proto::Routing::set_source_channels(
+        &daw,
+        ctx,
+        daw_proto::RouteLocation {
+            track: daw_proto::TrackRef::Guid(DRUMS.to_string()),
+            route_type: daw_proto::RouteType::Send,
+            route: daw_proto::RouteRef::Index(index),
+        },
+        4,
+        2,
+    )
+    .expect("from 5/6");
     // A parameter of it automated: a ramp, then a step.
     let at = daw_proto::automation::EnvelopeLocation::new(
         daw_proto::TrackRef::Guid(DRUMS.to_string()),

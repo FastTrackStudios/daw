@@ -237,6 +237,11 @@ pub(super) struct LaneJob {
     pub(super) chain: Vec<(usize, PluginPtr)>,
     /// The track's bus (interleaved stereo), as an address.
     pub(super) bus: usize,
+    /// The track's aux buffer ([`super::AUX_PAIRS`] pairs), as an
+    /// address; 0 when nothing sends from it.
+    pub(super) aux: usize,
+    /// A plugin put something on an aux output.
+    pub(super) aux_ran: bool,
     pub(super) in_l: Vec<f32>,
     pub(super) in_r: Vec<f32>,
     pub(super) out_l: Vec<f32>,
@@ -305,6 +310,16 @@ impl LaneJob {
             for f in 0..frames {
                 bus[f * 2] = self.out_l[f];
                 bus[f * 2 + 1] = self.out_r[f];
+            }
+            if self.aux != 0 {
+                // SAFETY: the caller's contract, as for `bus`.
+                let aux = unsafe {
+                    std::slice::from_raw_parts_mut(
+                        self.aux as *mut f32,
+                        super::AUX_PAIRS * frames * 2,
+                    )
+                };
+                self.aux_ran |= super::add_aux(plugin, aux, frames);
             }
             self.ran = true;
         }

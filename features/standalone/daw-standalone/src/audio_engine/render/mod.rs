@@ -310,6 +310,12 @@ struct RenderScratch {
     sidechains: Vec<Vec<f32>>,
     /// Which tracks' sidechains received this block.
     keyed: Vec<bool>,
+    /// Each track's plugins' outputs beyond the main pair (interleaved,
+    /// [`AUX_PAIRS`] pairs one after another), for a track sending from
+    /// them; sized on first use.
+    aux: Vec<Vec<f32>>,
+    /// Which tracks' aux outputs carry this block's audio.
+    aux_live: Vec<bool>,
     /// De-interleave scratch for a sidechain.
     key_l: Vec<f32>,
     key_r: Vec<f32>,
@@ -373,6 +379,14 @@ impl RenderScratch {
         }
         self.keyed.clear();
         self.keyed.resize(n, false);
+        self.aux.resize_with(n, Vec::new);
+        for (aux, live) in self.aux.iter_mut().zip(&self.aux_live) {
+            if *live {
+                aux.fill(0.0);
+            }
+        }
+        self.aux_live.clear();
+        self.aux_live.resize(n, false);
         self.chain_done.clear();
         self.chain_done.resize(n, false);
         if self.lane_cost.len() != n {
@@ -391,6 +405,43 @@ impl RenderScratch {
             }
         }
     }
+}
+
+/// How many pairs past the main one a track's plugins can put out: 3/4
+/// and 5/6.
+pub(crate) const AUX_PAIRS: usize = 2;
+
+/// A track's aux buffer at its size for `frames` (zeroed when it grows).
+fn aux_sized(aux: &mut Vec<f32>, frames: usize) {
+    if aux.len() != AUX_PAIRS * frames * 2 {
+        aux.clear();
+        aux.resize(AUX_PAIRS * frames * 2, 0.0);
+    }
+}
+
+/// `plugin`'s aux outputs this block, summed into `aux`
+/// ([`AUX_PAIRS`] interleaved pairs, one after another). Whether it had
+/// any.
+pub(crate) fn add_aux(
+    plugin: &dyn crate::plugin::PluginInstance,
+    aux: &mut [f32],
+    frames: usize,
+) -> bool {
+    let mut any = false;
+    for pair in 0..AUX_PAIRS {
+        let Some((l, r)) = plugin.aux_out(pair) else {
+            continue;
+        };
+        let Some(out) = aux.get_mut(pair * frames * 2..(pair + 1) * frames * 2) else {
+            continue;
+        };
+        for ((o, l), r) in out.chunks_exact_mut(2).zip(l).zip(r) {
+            o[0] += *l;
+            o[1] += *r;
+        }
+        any = true;
+    }
+    any
 }
 
 /// Render a stereo master block.
@@ -908,6 +959,8 @@ impl ProjectRenderer {
             pre_fader_tap,
             sidechains,
             keyed,
+            aux,
+            aux_live,
             key_l,
             key_r,
             fx_param_events,
@@ -1149,6 +1202,13 @@ impl ProjectRenderer {
                 job.ti = ti;
                 job.at = start_seconds;
                 job.bus = buses[ti].samples.as_mut_ptr() as usize;
+                job.aux = if t.aux_taps {
+                    aux_sized(&mut aux[ti], frames);
+                    aux[ti].as_mut_ptr() as usize
+                } else {
+                    0
+                };
+                job.aux_ran = false;
                 for v in [&mut job.in_l, &mut job.in_r, &mut job.out_l, &mut job.out_r] {
                     if v.len() != frames {
                         v.resize(frames, 0.0);
@@ -1182,6 +1242,7 @@ impl ProjectRenderer {
                     let ti = job.ti;
                     chain_done[ti] = true;
                     dirty[ti] |= job.ran;
+                    aux_live[ti] |= job.aux_ran;
                     lane_cost[ti] = job.us;
                     fx_us += job.us;
                     if job.us > slowest.1 {
@@ -1299,6 +1360,9 @@ impl ProjectRenderer {
                 } else {
                     t.fx_chain.as_slice()
                 };
+                if t.aux_taps {
+                    aux_sized(&mut aux[ti], frames);
+                }
                 for (i, fx_guid) in chain.iter().enumerate() {
                     if !t.fx_enabled.get(i).copied().unwrap_or(true) {
                         continue;
@@ -1387,6 +1451,9 @@ impl ProjectRenderer {
                     for f in 0..frames {
                         bus.samples[f * 2] = out_l[f];
                         bus.samples[f * 2 + 1] = out_r[f];
+                    }
+                    if t.aux_taps {
+                        aux_live[ti] |= add_aux(&**plugin, &mut aux[ti], frames);
                     }
                     // A plugin ran — it may synthesize (MIDI → audio),
                     // so the bus can carry signal even with no items.
@@ -1582,11 +1649,29 @@ impl ProjectRenderer {
                     continue;
                 }
                 let Some(di) = snd.dest_idx else { continue };
+                // From a plugin's own outputs (3/4, 5/6): taken post-FX,
+                // and through the fader when the send is post-fader — the
+                // track's mute and level, not its envelopes.
+                let mut from_aux = 1.0_f32;
                 // Pick the tap matching the send's chain position.
-                let send_src: &[f32] = match snd.mode {
-                    daw_proto::routing::SendMode::PreFx if has_pre_fx_tap => pre_fx_tap,
-                    daw_proto::routing::SendMode::PostFx if has_pre_fader_tap => pre_fader_tap,
-                    _ => src,
+                let send_src: &[f32] = if snd.from_pair > 0 {
+                    if snd.mode == daw_proto::routing::SendMode::PostFader {
+                        if t.muted {
+                            continue;
+                        }
+                        from_aux = t.volume as f32;
+                    }
+                    let span = (snd.from_pair - 1) * frames * 2..snd.from_pair * frames * 2;
+                    match aux.get(ti).filter(|_| aux_live[ti]).and_then(|a| a.get(span)) {
+                        Some(pair) => pair,
+                        None => continue,
+                    }
+                } else {
+                    match snd.mode {
+                        daw_proto::routing::SendMode::PreFx if has_pre_fx_tap => pre_fx_tap,
+                        daw_proto::routing::SendMode::PostFx if has_pre_fader_tap => pre_fader_tap,
+                        _ => src,
+                    }
                 };
                 let dest_bus: &mut [f32] = if snd.to_sidechain {
                     let sidechain = &mut sidechains[di];
@@ -1621,7 +1706,7 @@ impl ProjectRenderer {
                         .unwrap_or(0.0);
                     let pan = (snd.pan + p_off).clamp(-1.0, 1.0);
                     let (lg, rg) = balance(pan);
-                    let (lg, rg) = ((lg * vol) as f32, (rg * vol) as f32);
+                    let (lg, rg) = ((lg * vol) as f32 * from_aux, (rg * vol) as f32 * from_aux);
                     dest_bus[frame * 2] += send_src[frame * 2] * lg;
                     dest_bus[frame * 2 + 1] += send_src[frame * 2 + 1] * rg;
                 }
