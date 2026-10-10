@@ -330,11 +330,41 @@ impl Midi for Standalone {
 
     /// In the units [`Midi::notes`] hands back — quarter notes, start
     /// and length both — so stored as given: this is the round trip.
+    /// Every note in one pass, the take's count set once: a note at a
+    /// time looked the take up across the whole project per note.
     fn add_notes_ppq(&self, location: MidiTakeLocation, notes: Vec<MidiNoteCreate>) -> Vec<u32> {
-        notes
-            .into_iter()
-            .map(|n| Midi::add_note(self, location.clone(), n))
-            .collect()
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return Vec::new();
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return Vec::new();
+        };
+        self.with_project_mut(&project_guid, |p| {
+            let (added, count) = {
+                let list = p.midi_notes.entry(take_guid.clone()).or_default();
+                let added: Vec<u32> = notes
+                    .into_iter()
+                    .map(|note| {
+                        let idx = list.len() as u32;
+                        list.push(MidiNote {
+                            index: idx,
+                            channel: note.channel & 0x0F,
+                            pitch: note.pitch & 0x7F,
+                            velocity: note.velocity.clamp(1, 127),
+                            start_ppq: note.start_ppq,
+                            length_ppq: note.length_ppq.max(0.0),
+                            selected: false,
+                            muted: false,
+                        });
+                        idx
+                    })
+                    .collect();
+                (added, list.len() as u32)
+            };
+            update_take_note_count(p, &take_guid, count);
+            added
+        })
+        .unwrap_or_default()
     }
 
     fn delete_note(&self, location: MidiTakeLocation, index: u32) {

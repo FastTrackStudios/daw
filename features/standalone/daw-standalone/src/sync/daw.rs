@@ -412,20 +412,13 @@ impl ProjectState {
         }
     }
 
-    /// A new take's GUID, past any already in the project (as
-    /// [`Self::mint_item_guid`]).
+    /// A new take's GUID: a random one, as a MIDI item's take gets, so it
+    /// cannot be any take already in the project. (Counted names had to be
+    /// checked against every take in the project, each time — rebuilding a
+    /// slip-edited kit of thirty thousand slices was quadratic in it.)
     pub fn mint_take_guid(&mut self) -> String {
-        loop {
-            let guid = format!("standalone-take-{}", self.next_take_counter);
-            self.next_take_counter += 1;
-            if !self
-                .takes
-                .values()
-                .any(|list| list.takes.iter().any(|t| t.guid == guid))
-            {
-                return guid;
-            }
-        }
+        self.next_take_counter += 1;
+        uuid::Uuid::new_v4().to_string()
     }
 }
 
