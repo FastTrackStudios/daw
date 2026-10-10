@@ -213,6 +213,13 @@ pub trait PluginInstance: Send {
     /// a plugin without a sidechain input has nowhere to put it.
     fn set_sidechain(&mut self, _left: &[f32], _right: &[f32]) {}
 
+    /// The song's tempo for the next [`process_block`](Self::process_block),
+    /// bpm, from the project's tempo map at the block's start: what a
+    /// plugin's note-valued times read (a synced delay, a reverb's tail or
+    /// pre-delay in notes). A renderer that knows the song calls it before
+    /// every block; a plugin with no use for a tempo ignores it.
+    fn set_tempo(&mut self, _bpm: f64) {}
+
     /// Restore plugin state from a host-defined byte blob. The
     /// blob format is backend-specific — for round-trip safety the
     /// blob must have been produced by [`save_state`] from a plugin

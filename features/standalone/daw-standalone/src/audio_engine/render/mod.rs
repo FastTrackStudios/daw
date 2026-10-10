@@ -1107,6 +1107,9 @@ impl ProjectRenderer {
                 }
             }
             let mut jobs = 0;
+            // The tempo every plugin reads its note values against this
+            // block — told here, on the render thread, before any runs.
+            let tempo = snap.tempo_map.tempo_at(start_seconds);
             for &ti in &snap.order {
                 let t = &tracks[ti];
                 if fed[ti]
@@ -1131,6 +1134,7 @@ impl ProjectRenderer {
                         ok = false;
                         break;
                     }
+                    plugin.set_tempo(tempo);
                     job.chain.push((i, PluginPtr::new(&mut **plugin)));
                 }
                 if !ok || job.chain.is_empty() {
@@ -1341,6 +1345,7 @@ impl ProjectRenderer {
                         plugin.set_sidechain(key_l, key_r);
                     }
                     let param_events = t.fx_params.get(i).map(Vec::as_slice).unwrap_or(&[]);
+                    plugin.set_tempo(snap.tempo_map.tempo_at(start_seconds));
                     let events = crate::plugin::PluginEvents {
                         params: param_events,
                         midi: midi_events.as_slice(),
