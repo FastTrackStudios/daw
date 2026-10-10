@@ -92,18 +92,24 @@ pub struct PitchChain {
 
     divider: FreqDivider,
     pll: PllTracker,
-    granular: GranularShifter,
-    psola: PsolaShifter,
-    wsola: WsolaShifter,
+    // The engines with buffers (seconds of audio, FFT frames), built when
+    // their algorithm is first selected — [`PitchChain::only`] holds one.
+    // A guitar rig carries a pitch block, four chains of it, in every
+    // patch it has prepared: all nine engines each was ~2.6 MB a chain.
+    granular: Option<Box<GranularShifter>>,
+    psola: Option<Box<PsolaShifter>>,
+    wsola: Option<Box<WsolaShifter>>,
     #[cfg(feature = "rubberband")]
-    rubberband: RubberbandShifter,
-    allpass: AllpassShifter,
+    rubberband: Option<Box<RubberbandShifter>>,
+    allpass: Option<Box<AllpassShifter>>,
     pog: PolyOctave,
-    spectral: SpectralShifter,
+    spectral: Option<Box<SpectralShifter>>,
 
     /// Track previous live state to detect changes and reinitialise.
     prev_live: bool,
     sample_rate: f64,
+    /// `update` has run: an engine built after it is updated as it is built.
+    prepared: bool,
 }
 
 impl PitchChain {
@@ -119,17 +125,106 @@ impl PitchChain {
             grain_size: 1024,
             divider: FreqDivider::new(),
             pll: PllTracker::new(),
-            granular: GranularShifter::new(),
-            psola: PsolaShifter::new(),
-            wsola: WsolaShifter::new(),
+            granular: Some(Box::new(GranularShifter::new())),
+            psola: Some(Box::new(PsolaShifter::new())),
+            wsola: Some(Box::new(WsolaShifter::new())),
             #[cfg(feature = "rubberband")]
-            rubberband: RubberbandShifter::new(),
-            allpass: AllpassShifter::new(),
+            rubberband: Some(Box::new(RubberbandShifter::new())),
+            allpass: Some(Box::new(AllpassShifter::new())),
             pog: PolyOctave::new(),
-            spectral: SpectralShifter::new(),
+            spectral: Some(Box::new(SpectralShifter::new())),
             prev_live: false,
             sample_rate: 48000.0,
+            prepared: false,
         }
+    }
+
+    /// A chain holding only `algorithm`'s engine: another is built when it
+    /// is [`select`](Self::select)ed. The memory of one engine, not nine.
+    pub fn only(algorithm: Algorithm) -> Self {
+        let mut c = Self::new();
+        c.granular = None;
+        c.psola = None;
+        c.wsola = None;
+        #[cfg(feature = "rubberband")]
+        {
+            c.rubberband = None;
+        }
+        c.allpass = None;
+        c.spectral = None;
+        c.select(algorithm);
+        c
+    }
+
+    /// Play `algorithm`, building its engine if this chain has none —
+    /// an allocation: call it where a reverb's new algorithm is built (a
+    /// param write on the control thread, or before preparing), never from
+    /// `process`.
+    pub fn select(&mut self, algorithm: Algorithm) {
+        self.algorithm = algorithm;
+        let live = self.live;
+        let (sr, prepared) = (self.sample_rate, self.prepared);
+        match algorithm {
+            Algorithm::Granular if self.granular.is_none() => {
+                let mut e = Box::new(GranularShifter::new());
+                if prepared {
+                    e.update(sr);
+                }
+                self.granular = Some(e);
+            }
+            Algorithm::Psola if self.psola.is_none() => {
+                let mut e = Box::new(PsolaShifter::new());
+                e.base_window_size = if live { 512 } else { 2048 };
+                if prepared {
+                    e.update(sr);
+                }
+                self.psola = Some(e);
+            }
+            #[cfg(not(feature = "rubberband"))]
+            Algorithm::Rubberband | Algorithm::Wsola if self.wsola.is_none() => self.build_wsola(),
+            #[cfg(feature = "rubberband")]
+            Algorithm::Wsola if self.wsola.is_none() => self.build_wsola(),
+            #[cfg(feature = "rubberband")]
+            Algorithm::Rubberband if self.rubberband.is_none() => {
+                let mut e = Box::new(RubberbandShifter::new());
+                e.live = live;
+                if prepared {
+                    e.update(sr);
+                }
+                self.rubberband = Some(e);
+            }
+            Algorithm::Allpass if self.allpass.is_none() => {
+                let mut e = Box::new(AllpassShifter::new());
+                if prepared {
+                    e.update(sr);
+                }
+                self.allpass = Some(e);
+            }
+            Algorithm::Spectral if self.spectral.is_none() => {
+                let mut e = Box::new(Self::spectral_for(sr));
+                e.fft_size = if live { 1024 } else { 2048 };
+                if prepared {
+                    e.update(sr);
+                }
+                self.spectral = Some(e);
+            }
+            _ => {}
+        }
+    }
+
+    /// A spectral engine holding the frames this chain plays at
+    /// `sample_rate` (its non-live frame, the larger), not every frame.
+    fn spectral_for(sample_rate: f64) -> SpectralShifter {
+        SpectralShifter::with_max_frame(SpectralShifter::frame_for(2048, sample_rate))
+    }
+
+    fn build_wsola(&mut self) {
+        let mut e = Box::new(WsolaShifter::new());
+        e.base_grain_size = if self.live { 256 } else { 1024 };
+        if self.prepared {
+            e.update(self.sample_rate);
+        }
+        self.wsola = Some(e);
     }
 
     /// Latency introduced by the currently selected algorithm.
@@ -137,16 +232,16 @@ impl PitchChain {
         match self.algorithm {
             Algorithm::FreqDivider => self.divider.latency(),
             Algorithm::Pll => self.pll.latency(),
-            Algorithm::Granular => self.granular.latency(),
-            Algorithm::Psola => self.psola.latency(),
-            Algorithm::Wsola => self.wsola.latency(),
+            Algorithm::Granular => self.granular.as_ref().map_or(0, |e| e.latency()),
+            Algorithm::Psola => self.psola.as_ref().map_or(0, |e| e.latency()),
+            Algorithm::Wsola => self.wsola.as_ref().map_or(0, |e| e.latency()),
             #[cfg(feature = "rubberband")]
-            Algorithm::Rubberband => self.rubberband.latency(),
+            Algorithm::Rubberband => self.rubberband.as_ref().map_or(0, |e| e.latency()),
             #[cfg(not(feature = "rubberband"))]
-            Algorithm::Rubberband => self.wsola.latency(),
-            Algorithm::Allpass => self.allpass.latency(),
+            Algorithm::Rubberband => self.wsola.as_ref().map_or(0, |e| e.latency()),
+            Algorithm::Allpass => self.allpass.as_ref().map_or(0, |e| e.latency()),
             Algorithm::PolyOctave => self.pog.latency(),
-            Algorithm::Spectral => self.spectral.latency(),
+            Algorithm::Spectral => self.spectral.as_ref().map_or(0, |e| e.latency()),
         }
     }
 
@@ -167,32 +262,32 @@ impl PitchChain {
         if self.live != self.prev_live {
             self.prev_live = self.live;
 
+            let (live, sr) = (self.live, self.sample_rate);
             // PSOLA: smaller analysis window in live mode.
-            self.psola.base_window_size = if self.live { 512 } else { 2048 };
-
+            if let Some(e) = self.psola.as_deref_mut() {
+                e.base_window_size = if live { 512 } else { 2048 };
+                e.update(sr);
+            }
             // WSOLA: smaller grains in live mode.
-            self.wsola.base_grain_size = if self.live { 256 } else { 1024 };
-
+            if let Some(e) = self.wsola.as_deref_mut() {
+                e.base_grain_size = if live { 256 } else { 1024 };
+                e.update(sr);
+            }
             // Rubberband: R2 engine + smaller blocks.
             #[cfg(feature = "rubberband")]
-            {
-                self.rubberband.live = self.live;
+            if let Some(e) = self.rubberband.as_deref_mut() {
+                e.live = live;
+                e.update(sr);
             }
-
             // Allpass: no live mode toggle (not supported).
-            // self.allpass.live = self.live;
-
+            if let Some(e) = self.allpass.as_deref_mut() {
+                e.update(sr);
+            }
             // Spectral: 1024-sample frames live, 2048 otherwise.
-            self.spectral.fft_size = if self.live { 1024 } else { 2048 };
-
-            // Re-initialise engines with new settings.
-            let sr = self.sample_rate;
-            self.spectral.update(sr);
-            self.psola.update(sr);
-            self.wsola.update(sr);
-            #[cfg(feature = "rubberband")]
-            self.rubberband.update(sr);
-            self.allpass.update(sr);
+            if let Some(e) = self.spectral.as_deref_mut() {
+                e.fft_size = if live { 1024 } else { 2048 };
+                e.update(sr);
+            }
         }
 
         let ratio = semitones_to_ratio(self.semitones.clamp(-24.0, 24.0));
@@ -216,21 +311,24 @@ impl PitchChain {
         self.pll.mix = if is_down { self.mix } else { 0.0 };
 
         // Granular: arbitrary ratio. In live mode, cap grain size at 256.
-        self.granular.speed = ratio;
-        self.granular.mix = self.mix;
-        self.granular.grain_size = if self.live {
-            self.grain_size.min(256)
-        } else {
-            self.grain_size
-        };
+        let (mix, live, grain) = (self.mix, self.live, self.grain_size);
+        if let Some(e) = self.granular.as_deref_mut() {
+            e.speed = ratio;
+            e.mix = mix;
+            e.grain_size = if live { grain.min(256) } else { grain };
+        }
 
         // PSOLA: arbitrary ratio.
-        self.psola.speed = ratio;
-        self.psola.mix = self.mix;
+        if let Some(e) = self.psola.as_deref_mut() {
+            e.speed = ratio;
+            e.mix = mix;
+        }
 
         // WSOLA: arbitrary ratio.
-        self.wsola.speed = ratio;
-        self.wsola.mix = self.mix;
+        if let Some(e) = self.wsola.as_deref_mut() {
+            e.speed = ratio;
+            e.mix = mix;
+        }
 
         // Compute effective formant shift.
         // When linked: formant_semitones cancels out the pitch shift so formants stay in place.
@@ -244,20 +342,24 @@ impl PitchChain {
 
         // Rubberband: arbitrary ratio + formant control.
         #[cfg(feature = "rubberband")]
-        {
-            self.rubberband.speed = ratio;
-            self.rubberband.mix = self.mix;
-            self.rubberband.preserve_formants = true;
+        if let Some(e) = self.rubberband.as_deref_mut() {
+            e.speed = ratio;
+            e.mix = mix;
+            e.preserve_formants = true;
         }
         // formant_scale not yet exposed on RubberbandShifter.
 
         // Allpass: arbitrary ratio.
-        self.allpass.speed = ratio;
-        self.allpass.mix = self.mix;
+        if let Some(e) = self.allpass.as_deref_mut() {
+            e.speed = ratio;
+            e.mix = mix;
+        }
 
         // Spectral: arbitrary ratio.
-        self.spectral.speed = ratio;
-        self.spectral.mix = self.mix;
+        if let Some(e) = self.spectral.as_deref_mut() {
+            e.speed = ratio;
+            e.mix = mix;
+        }
 
         // PolyOctave: snap semitones to nearest octave.
         self.pog.shift = OctaveShift::from_semitones(self.semitones);
@@ -275,29 +377,65 @@ impl Processor for PitchChain {
     fn reset(&mut self) {
         self.divider.reset();
         self.pll.reset();
-        self.granular.reset();
-        self.psola.reset();
-        self.wsola.reset();
+        if let Some(e) = self.granular.as_deref_mut() {
+            e.reset();
+        }
+        if let Some(e) = self.psola.as_deref_mut() {
+            e.reset();
+        }
+        if let Some(e) = self.wsola.as_deref_mut() {
+            e.reset();
+        }
         #[cfg(feature = "rubberband")]
-        self.rubberband.reset();
-        self.allpass.reset();
+        if let Some(e) = self.rubberband.as_deref_mut() {
+            e.reset();
+        }
+        if let Some(e) = self.allpass.as_deref_mut() {
+            e.reset();
+        }
         self.pog.reset();
-        self.spectral.reset();
+        if let Some(e) = self.spectral.as_deref_mut() {
+            e.reset();
+        }
     }
 
     fn update(&mut self, config: AudioConfig) {
-        self.sample_rate = config.sample_rate;
-        self.divider.update(config.sample_rate);
-        self.pll.update(config.sample_rate);
-        self.granular.update(config.sample_rate);
-        self.psola.update(config.sample_rate);
-        self.wsola.update(config.sample_rate);
+        let sr = config.sample_rate;
+        self.sample_rate = sr;
+        self.prepared = true;
+        self.divider.update(sr);
+        self.pll.update(sr);
+        if let Some(e) = self.granular.as_deref_mut() {
+            e.update(sr);
+        }
+        if let Some(e) = self.psola.as_deref_mut() {
+            e.update(sr);
+        }
+        if let Some(e) = self.wsola.as_deref_mut() {
+            e.update(sr);
+        }
         #[cfg(feature = "rubberband")]
-        self.rubberband.update(config.sample_rate);
-        self.allpass.update(config.sample_rate);
-        self.pog.update(config.sample_rate);
-        self.spectral.fft_size = if self.live { 1024 } else { 2048 };
-        self.spectral.update(config.sample_rate);
+        if let Some(e) = self.rubberband.as_deref_mut() {
+            e.update(sr);
+        }
+        if let Some(e) = self.allpass.as_deref_mut() {
+            e.update(sr);
+        }
+        self.pog.update(sr);
+        // A rate whose frames outgrow the engine's (44.1 → 96 kHz): a
+        // larger one, here in `update` — preparing, not processing.
+        if let Some(e) = self.spectral.as_deref_mut() {
+            if e.max_frame() < SpectralShifter::frame_for(2048, sr) {
+                let mut bigger = Self::spectral_for(sr);
+                bigger.speed = e.speed;
+                bigger.mix = e.mix;
+                *e = bigger;
+            }
+        }
+        if let Some(e) = self.spectral.as_deref_mut() {
+            e.fft_size = if self.live { 1024 } else { 2048 };
+            e.update(sr);
+        }
     }
 
     fn process(&mut self, left: &mut [f64], right: &mut [f64]) {
@@ -315,37 +453,59 @@ impl Processor for PitchChain {
                 }
             }
             Algorithm::Granular => {
-                for s in left.iter_mut() {
-                    *s = self.granular.tick(*s);
+                // No engine (never selected through `select`): through,
+                // rather than build one here.
+                if let Some(e) = self.granular.as_deref_mut() {
+                    for s in left.iter_mut() {
+                        *s = e.tick(*s);
+                    }
                 }
             }
             Algorithm::Psola => {
-                for s in left.iter_mut() {
-                    *s = self.psola.tick(*s);
+                // No engine (never selected through `select`): through,
+                // rather than build one here.
+                if let Some(e) = self.psola.as_deref_mut() {
+                    for s in left.iter_mut() {
+                        *s = e.tick(*s);
+                    }
                 }
             }
             Algorithm::Wsola => {
-                for s in left.iter_mut() {
-                    *s = self.wsola.tick(*s);
+                // No engine (never selected through `select`): through,
+                // rather than build one here.
+                if let Some(e) = self.wsola.as_deref_mut() {
+                    for s in left.iter_mut() {
+                        *s = e.tick(*s);
+                    }
                 }
             }
             // Without the `rubberband` system library, Rubberband falls
             // back to WSOLA (closest arbitrary-ratio pure-Rust quality).
             #[cfg(feature = "rubberband")]
             Algorithm::Rubberband => {
-                for s in left.iter_mut() {
-                    *s = self.rubberband.tick(*s);
+                if let Some(e) = self.rubberband.as_deref_mut() {
+                    for s in left.iter_mut() {
+                        *s = e.tick(*s);
+                    }
                 }
             }
             #[cfg(not(feature = "rubberband"))]
             Algorithm::Rubberband => {
-                for s in left.iter_mut() {
-                    *s = self.wsola.tick(*s);
+                // No engine (never selected through `select`): through,
+                // rather than build one here.
+                if let Some(e) = self.wsola.as_deref_mut() {
+                    for s in left.iter_mut() {
+                        *s = e.tick(*s);
+                    }
                 }
             }
             Algorithm::Allpass => {
-                for s in left.iter_mut() {
-                    *s = self.allpass.tick(*s);
+                // No engine (never selected through `select`): through,
+                // rather than build one here.
+                if let Some(e) = self.allpass.as_deref_mut() {
+                    for s in left.iter_mut() {
+                        *s = e.tick(*s);
+                    }
                 }
             }
             Algorithm::PolyOctave => {
@@ -354,8 +514,12 @@ impl Processor for PitchChain {
                 }
             }
             Algorithm::Spectral => {
-                for s in left.iter_mut() {
-                    *s = self.spectral.tick(*s);
+                // No engine (never selected through `select`): through,
+                // rather than build one here.
+                if let Some(e) = self.spectral.as_deref_mut() {
+                    for s in left.iter_mut() {
+                        *s = e.tick(*s);
+                    }
                 }
             }
         }
@@ -394,6 +558,72 @@ mod tests {
             sample_rate: SR,
             max_buffer_size: 512,
         }
+    }
+
+    /// A chain holding only one engine — built with it, or switched to it
+    /// later — plays exactly as a chain holding all of them.
+    #[test]
+    fn a_chain_with_one_engine_plays_as_one_with_all() {
+        for algo in all_algorithms() {
+            let render = |c: &mut PitchChain| {
+                c.semitones = 7.0;
+                let mut out = Vec::new();
+                for k in 0..40 {
+                    let mut l = sine_block(220.0, k * 256, 256);
+                    let mut r = l.clone();
+                    c.process(&mut l, &mut r);
+                    out.extend(l);
+                }
+                out
+            };
+            let mut all = PitchChain::new();
+            all.algorithm = algo;
+            all.update(config());
+            all.reset();
+            let mut one = PitchChain::only(algo);
+            one.update(config());
+            one.reset();
+            // Switched to after it was prepared, as a param write does.
+            let mut later = PitchChain::only(Algorithm::PolyOctave);
+            later.update(config());
+            later.select(algo);
+            later.reset();
+            let (a, b, c) = (render(&mut all), render(&mut one), render(&mut later));
+            assert_eq!(a, b, "{algo:?}: built with only it");
+            assert_eq!(a, c, "{algo:?}: selected after preparing");
+        }
+    }
+
+    /// Prepared at a rate whose frames outgrow the engine it was built with
+    /// (96 kHz: 4096-sample frames), the spectral engine grows — and plays
+    /// as one that held every frame from the start.
+    #[test]
+    fn a_spectral_engine_grows_with_the_rate_it_is_prepared_at() {
+        let hi = AudioConfig {
+            sample_rate: 96_000.0,
+            max_buffer_size: 512,
+        };
+        let render = |c: &mut PitchChain| {
+            c.semitones = -5.0;
+            let mut out = Vec::new();
+            for k in 0..60 {
+                let mut l: Vec<f64> = (k * 256..k * 256 + 256)
+                    .map(|i| (2.0 * PI * 220.0 * i as f64 / 96_000.0).sin() * 0.5)
+                    .collect();
+                let mut r = l.clone();
+                c.process(&mut l, &mut r);
+                out.extend(l);
+            }
+            out
+        };
+        let mut all = PitchChain::new();
+        all.algorithm = Algorithm::Spectral;
+        all.update(hi);
+        all.reset();
+        let mut one = PitchChain::only(Algorithm::Spectral);
+        one.update(hi);
+        one.reset();
+        assert_eq!(render(&mut all), render(&mut one));
     }
 
     fn sine_block(freq: f64, offset: usize, len: usize) -> Vec<f64> {

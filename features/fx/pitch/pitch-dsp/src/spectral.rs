@@ -49,6 +49,30 @@ struct Plan {
     inv: Arc<dyn ComplexToReal<f64>>,
 }
 
+/// Every frame size's FFT plans, and the scratch the largest needs — built
+/// once and shared by every shifter. A plan is immutable (each call brings
+/// its own scratch), and a rig holds a hundred shifters: each building its
+/// own twiddle tables was ~0.4 MB apiece.
+fn shared_plans() -> &'static (Vec<Plan>, usize) {
+    static PLANS: std::sync::OnceLock<(Vec<Plan>, usize)> = std::sync::OnceLock::new();
+    PLANS.get_or_init(|| {
+        let mut planner = RealFftPlanner::<f64>::new();
+        let mut plans = Vec::new();
+        let mut n = MIN_FFT;
+        let mut max_scratch = 0;
+        while n <= MAX_FFT {
+            let fwd = planner.plan_fft_forward(n);
+            let inv = planner.plan_fft_inverse(n);
+            max_scratch = max_scratch
+                .max(fwd.get_scratch_len())
+                .max(inv.get_scratch_len());
+            plans.push(Plan { n, fwd, inv });
+            n *= 2;
+        }
+        (plans, max_scratch)
+    })
+}
+
 /// Phase-locked phase-vocoder pitch shifter.
 pub struct SpectralShifter {
     /// Pitch ratio: 0.5 = octave down, 2.0 = octave up.
@@ -72,7 +96,7 @@ pub struct SpectralShifter {
     /// a faint ensemble; the grain shifters it replaces smeared ±20–40 Hz.
     pub line_width_hz: f64,
 
-    plans: Vec<Plan>,
+    plans: &'static [Plan],
     plan_idx: usize,
     n: usize,
     hop: usize,
@@ -108,24 +132,48 @@ pub struct SpectralShifter {
     out_idx: usize,
 
     sample_rate: f64,
+    /// The largest frame the buffers hold (a power of two, `MIN_FFT..=MAX_FFT`);
+    /// a frame asked for beyond it is clamped to it.
+    cap: usize,
 }
 
 impl SpectralShifter {
+    /// Buffers for every frame up to [`MAX_FFT`].
     pub fn new() -> Self {
-        let mut planner = RealFftPlanner::<f64>::new();
-        let mut plans = Vec::new();
+        Self::with_max_frame(MAX_FFT)
+    }
+
+    /// The frame `fft_size` (a 48 kHz length) becomes at `sample_rate`.
+    #[must_use]
+    pub fn frame_for(fft_size: usize, sample_rate: f64) -> usize {
+        let want = (fft_size as f64 * sample_rate / 48000.0).max(1.0);
         let mut n = MIN_FFT;
-        let mut max_scratch = 0;
-        while n <= MAX_FFT {
-            let fwd = planner.plan_fft_forward(n);
-            let inv = planner.plan_fft_inverse(n);
-            max_scratch = max_scratch
-                .max(fwd.get_scratch_len())
-                .max(inv.get_scratch_len());
-            plans.push(Plan { n, fwd, inv });
+        while n < MAX_FFT && (n as f64) * 1.414 < want {
             n *= 2;
         }
-        let bins = MAX_FFT / 2 + 1;
+        n
+    }
+
+    /// The largest frame this shifter's buffers hold.
+    #[must_use]
+    pub const fn max_frame(&self) -> usize {
+        self.cap
+    }
+
+    /// Buffers for frames up to `max` (rounded up to a power of two): a
+    /// shifter that only ever runs 2048-sample frames holds a quarter of what
+    /// `new` does — a guitar rig carries a hundred.
+    pub fn with_max_frame(max: usize) -> Self {
+        let cap = max.clamp(MIN_FFT, MAX_FFT).next_power_of_two().min(MAX_FFT);
+        let (plans, _) = shared_plans();
+        let plans = plans.as_slice();
+        let max_scratch = plans
+            .iter()
+            .filter(|p| p.n <= cap)
+            .map(|p| p.fwd.get_scratch_len().max(p.inv.get_scratch_len()))
+            .max()
+            .unwrap_or(0);
+        let bins = cap / 2 + 1;
         let zero = Complex::new(0.0, 0.0);
         let mut s = Self {
             speed: 2.0,
@@ -139,12 +187,12 @@ impl SpectralShifter {
             n: 4096,
             hop: 512,
             bins: 4096 / 2 + 1,
-            window: vec![0.0; MAX_FFT],
+            window: vec![0.0; cap],
             out_gain: 0.0,
-            in_ring: vec![0.0; MAX_FFT],
+            in_ring: vec![0.0; cap],
             in_pos: 0,
             hop_count: 0,
-            frame: vec![0.0; MAX_FFT],
+            frame: vec![0.0; cap],
             spec: vec![zero; bins],
             out_spec: vec![zero; bins],
             scratch_fwd: vec![zero; max_scratch],
@@ -156,17 +204,19 @@ impl SpectralShifter {
             theta_cur: vec![0.0; bins],
             peaks: Vec::with_capacity(bins),
             rng: 0x9E37_79B9_7F4A_7C15,
-            ola: vec![0.0; MAX_FFT],
-            out_block: vec![0.0; MAX_FFT],
+            ola: vec![0.0; cap],
+            out_block: vec![0.0; cap],
             out_idx: 0,
             sample_rate: 48000.0,
+            cap,
         };
         s.configure();
         s
     }
 
     /// Apply `fft_size` / `overlap` for `sample_rate` and clear state.
-    /// Never allocates (all buffers are sized for `MAX_FFT`).
+    /// Never allocates (the buffers hold [`max_frame`](Self::max_frame), and a
+    /// frame is never larger).
     pub fn update(&mut self, sample_rate: f64) {
         self.sample_rate = sample_rate;
         self.configure();
@@ -174,11 +224,7 @@ impl SpectralShifter {
 
     fn configure(&mut self) {
         // Scale the 48 kHz frame to the running rate, snapped to a power of two.
-        let want = (self.fft_size as f64 * self.sample_rate / 48000.0).max(1.0);
-        let mut n = MIN_FFT;
-        while n < MAX_FFT && (n as f64) * 1.414 < want {
-            n *= 2;
-        }
+        let n = Self::frame_for(self.fft_size, self.sample_rate).min(self.cap);
         self.n = n;
         self.plan_idx = self.plans.iter().position(|p| p.n == n).unwrap_or(0);
         let overlap = if self.overlap >= 8 { 8 } else { 4 };

@@ -49,6 +49,11 @@ pub mod duplex_pw;
 #[cfg(target_os = "macos")]
 pub mod duplex_coreaudio;
 
+/// RemoteIO duplex backend (iOS): one unit, input pulled in the output
+/// render callback.
+#[cfg(target_os = "ios")]
+pub mod duplex_ios;
+
 /// Realtime render workers joined to the device's audio workgroup.
 pub mod rt_workers;
 
@@ -56,7 +61,9 @@ pub mod rt_workers;
 pub mod monitor;
 
 pub use device::{
-    DeviceCaps, DeviceInfo, device_caps, device_name, input_channels, input_devices,
+    DeviceCaps, DeviceInfo, InputAccess, device_caps, device_name, input_access, input_channels,
+    negotiate_sample_rate, session_report,
+    input_devices,
     output_devices, pick_device,
 };
 pub use host::{audio_host, host_is_graph, host_is_jack, host_is_pipewire};

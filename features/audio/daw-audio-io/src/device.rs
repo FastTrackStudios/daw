@@ -22,6 +22,64 @@ pub fn device_name(device: &cpal::Device) -> String {
         .unwrap_or_default()
 }
 
+/// Whether the app may read inputs at all. Only iOS asks the player
+/// (microphone access); everywhere else it is always granted.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum InputAccess {
+    Granted,
+    /// Turned off in Settings: every input is silent.
+    Denied,
+    /// Never asked yet.
+    Undetermined,
+}
+
+/// The rate the device will run at, where the platform decides it (iOS: the
+/// audio session, asked for `requested` first — an interface that only runs
+/// at 44.1 kHz stays there). `None` where the caller picks the rate itself.
+/// An engine builds its renderer at this, so it never meets a device
+/// running at another.
+#[must_use]
+pub fn negotiate_sample_rate(requested: Option<u32>) -> Option<u32> {
+    #[cfg(target_os = "ios")]
+    {
+        Some(crate::ios_session::negotiate_rate(requested)).filter(|r| *r > 0)
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = requested;
+        None
+    }
+}
+
+/// What the audio session says about input, on one line (iOS: its route,
+/// ports, channel counts, rate and access — see `ios_session`). `None`
+/// where there is no session to ask.
+#[must_use]
+pub fn session_report() -> Option<String> {
+    #[cfg(target_os = "ios")]
+    {
+        Some(crate::ios_session::report())
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        None
+    }
+}
+
+/// Whether the app may read inputs (iOS: the microphone access the player
+/// gave, see `ios_session`).
+#[must_use]
+pub fn input_access() -> InputAccess {
+    #[cfg(target_os = "ios")]
+    {
+        crate::ios_session::input_access()
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        InputAccess::Granted
+    }
+}
+
 /// List the host's input devices (name + channel count + native rate). Does not
 /// open any stream. On iOS, the audio session's input ports (see
 /// `ios_session`).

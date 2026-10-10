@@ -179,8 +179,16 @@ impl<'d, D: Tracks + ?Sized> TrackHandle<'d, D> {
 
     /// Arm the track to record/monitor hardware audio input `channel` — what
     /// makes a live engine open an input stream and feed this track's bus.
+    ///
+    /// All three: the record input, armed, and monitoring it. A live engine
+    /// feeds a track its input only when it is armed and monitoring (a
+    /// record input alone is where a take would come from); setting the
+    /// input alone left a guitar rig's track silent while the interface
+    /// delivered the guitar.
     pub fn arm_audio_input(&self, channel: u32) -> DawResult<()> {
-        self.scope.set_record_input(RecordInput::Audio { channel })
+        self.scope.set_record_input(RecordInput::Audio { channel })?;
+        self.scope.set_armed(true)?;
+        self.scope.set_input_monitor(crate::track::InputMonitoringMode::Normal)
     }
 }
 

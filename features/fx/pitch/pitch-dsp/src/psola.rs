@@ -52,7 +52,9 @@ impl PsolaShifter {
 
     pub fn new() -> Self {
         let grain_size = Self::DEFAULT_GRAIN;
-        let buf_len = 48000 * 2 + grain_size + Self::DEFAULT_TOLERANCE * 2;
+        // As `update` sizes it at 48 kHz, so preparing there keeps this one
+        // rather than allocating a second.
+        let buf_len = 48000 * 2 + grain_size + Self::DEFAULT_TOLERANCE * 2 + 64;
         Self {
             speed: 0.5,
             mix: 1.0,
