@@ -157,6 +157,7 @@ fn add(daw: &Standalone, item: &str, name: &str, at: f64) -> Option<u32> {
             name: name.into(),
             source_position_seconds: at,
             color: None,
+            ..Default::default()
         },
     )
 }
@@ -211,6 +212,7 @@ fn a_marker_can_be_renamed_moved_and_recoloured_piecemeal() {
             name: Some("sibilance".into()),
             source_position_seconds: None,
             color: Some(Some(0x00FF00)),
+            ..Default::default()
         },
     )
     .unwrap();
@@ -230,6 +232,7 @@ fn a_marker_can_be_renamed_moved_and_recoloured_piecemeal() {
             name: None,
             source_position_seconds: None,
             color: Some(None),
+            ..Default::default()
         },
     )
     .unwrap();

@@ -154,6 +154,7 @@ fn write_rank_marker(
                     name: Some(name.to_string()),
                     source_position_seconds: Some(source_pos),
                     color: None,
+                    ..Default::default()
                 },
             );
             debug!(
@@ -173,6 +174,7 @@ fn write_rank_marker(
                     name: name.to_string(),
                     source_position_seconds: source_pos,
                     color: None,
+                    ..Default::default()
                 },
             );
             debug!(action = "add", source_pos, name, "[take-rank] Wrote marker");

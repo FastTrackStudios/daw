@@ -354,6 +354,8 @@ impl Takes for crate::Reaper {
                 name: m.name,
                 source_position_seconds: m.source_position_seconds,
                 color: m.color,
+                // REAPER keeps neither an id nor a hit's properties.
+                ..TakeMarker::default()
             })
             .collect()
     }
@@ -413,6 +415,29 @@ impl Takes for crate::Reaper {
             ReaperTake::resolve_take(item_ptr, &take).ok_or_else(|| take_not_found(&take))?;
         let low = ReaperHigh::get().medium_reaper().low();
         item_sw::delete_take_marker(low, take_ptr, index);
+        Ok(())
+    }
+
+    fn set_take_markers(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+        markers: Vec<TakeMarker>,
+    ) -> DawResult<()> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        let take_ptr =
+            ReaperTake::resolve_take(item_ptr, &take).ok_or_else(|| take_not_found(&take))?;
+        let low = ReaperHigh::get().medium_reaper().low();
+        // Last first, so each delete leaves the indices below it alone.
+        let existing = item_sw::list_take_markers(low, take_ptr);
+        for m in existing.iter().rev() {
+            item_sw::delete_take_marker(low, take_ptr, m.index);
+        }
+        for m in &markers {
+            item_sw::add_take_marker(low, take_ptr, &m.name, m.source_position_seconds, m.color);
+        }
         Ok(())
     }
 

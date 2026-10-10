@@ -128,6 +128,17 @@ pub trait Takes {
         index: u32,
     ) -> DawResult<()>;
 
+    /// Replace every marker on the take's source with `markers`, as one
+    /// change — a detection run writes thousands. Each keeps its `id` (an
+    /// empty one is given one); `index` is ignored and renumbered.
+    fn set_take_markers(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+        markers: Vec<TakeMarker>,
+    ) -> DawResult<()>;
+
     fn add_take_marker_at_position(
         &self,
         project: ProjectContext,

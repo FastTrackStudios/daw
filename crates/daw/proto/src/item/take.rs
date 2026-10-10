@@ -137,11 +137,21 @@ impl Default for Take {
 // stamp star-rating markers onto the active take.
 
 /// One marker on a take's source.
-#[derive(Clone, Debug, PartialEq, Facet)]
+///
+/// A marker belongs to the **source** — the recording — at a position in
+/// it, so every item cut from that recording shows it, wherever the
+/// cuts and slips put them. (The standalone engine keys them so; REAPER
+/// keeps them per take.) A marker can be a drum hit ([`HitMark`]): the
+/// detector writes one per stroke, and an edit reads them instead of
+/// detecting again.
+#[derive(Clone, Debug, Default, PartialEq, Facet)]
 pub struct TakeMarker {
     /// Stable enumeration index. REAPER renumbers when markers are inserted
     /// or deleted, so the index is only meaningful within a single read.
     pub index: u32,
+    /// What the marker is, whatever its index: kept through inserts,
+    /// deletes and moves. Empty where a backend keeps none (REAPER).
+    pub id: String,
     /// Display name. Convention for REAPER's built-in rating markers is
     /// e.g. `"5"` / `"4"` / etc. — keyflow / fts treat any leading digit
     /// 1..=5 as a star rating.
@@ -150,19 +160,68 @@ pub struct TakeMarker {
     pub source_position_seconds: f64,
     /// Custom color (0xRRGGBB). `None` falls back to REAPER's default.
     pub color: Option<u32>,
+    /// A drum hit's properties, when the marker is one.
+    pub hit: Option<HitMark>,
+}
+
+/// Who put a hit marker where it is.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Facet)]
+pub enum MarkOrigin {
+    /// A detector run placed it, and nobody has checked it.
+    #[default]
+    Auto = 0,
+    /// A person or an agent placed it (or moved it).
+    Manual = 1,
+    /// A detector placed it and someone checked it.
+    Approved = 2,
+}
+
+/// A drum hit, as a take marker carries it.
+///
+/// The marker's position is the hit's attack start; this is what is
+/// known about it. A detector run replaces only the `Auto` markers in its
+/// range — `Manual` and `Approved` ones are never moved or removed by a
+/// run.
+#[derive(Clone, Debug, Default, PartialEq, Facet)]
+pub struct HitMark {
+    /// The piece it was played on (`Kick`, `Snare`, `Tom 1`…).
+    pub piece: String,
+    pub origin: MarkOrigin,
+    /// The detector run that placed it (empty when placed by hand).
+    pub run: String,
+    /// The attack's peak on the close mic, dBFS.
+    pub peak_db: f64,
+    /// How sure the detector was, 0..=1.
+    pub confidence: f64,
+    /// The piece's trigger reported it.
+    pub from_trigger: bool,
+    /// The piece's close mic reported it.
+    pub from_mic: bool,
+    /// Much quieter than the piece usually is.
+    pub ghost: bool,
+    /// Possibly another drum's bleed rather than a stroke of this one.
+    pub bleed: bool,
+    /// The other stroke of a flam: that marker's id.
+    pub flam_with: Option<String>,
+    /// Anything whoever looked at it wants the next to know.
+    pub note: String,
 }
 
 /// Create-only payload for adding a new take marker.
-#[derive(Clone, Debug, Facet)]
+#[derive(Clone, Debug, Default, Facet)]
 pub struct TakeMarkerCreate {
+    /// Its id; one is made when none is given.
+    pub id: Option<String>,
     pub name: String,
     pub source_position_seconds: f64,
     pub color: Option<u32>,
+    pub hit: Option<HitMark>,
 }
 
 /// Update payload for modifying an existing take marker. `index` selects
 /// the marker; the rest are optional partial updates.
-#[derive(Clone, Debug, Facet)]
+#[derive(Clone, Debug, Default, Facet)]
 pub struct TakeMarkerUpdate {
     pub index: u32,
     pub name: Option<String>,
@@ -170,6 +229,9 @@ pub struct TakeMarkerUpdate {
     /// `Some(Some(c))` sets a color, `Some(None)` clears it, `None` leaves
     /// the existing color untouched.
     pub color: Option<Option<u32>>,
+    /// `Some(Some(h))` makes it a hit with these properties, `Some(None)`
+    /// a plain marker again, `None` leaves it as it is.
+    pub hit: Option<Option<HitMark>>,
 }
 
 /// Place a take marker at a project-timeline position. The service

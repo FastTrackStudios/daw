@@ -607,6 +607,7 @@ async fn every_take_setter_publishes_an_event() -> eyre::Result<()> {
                         name: "hit".into(),
                         source_position_seconds: 0.5,
                         color: None,
+                        ..Default::default()
                     },
                 )
                 .map(|_| ())
@@ -626,6 +627,7 @@ async fn every_take_setter_publishes_an_event() -> eyre::Result<()> {
                         name: Some("hat".into()),
                         source_position_seconds: None,
                         color: None,
+                        ..Default::default()
                     },
                 )
             }),

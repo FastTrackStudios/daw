@@ -43,13 +43,24 @@ fn resolve_take_index(list: &TakeList, take: &TakeRef) -> Option<usize> {
     }
 }
 
+/// Where a marker call lands: the project, the key the take's markers
+/// are kept under, and the take's guid (for the change event).
+struct MarkerTarget {
+    project: String,
+    /// The take's source file — markers belong to the recording, so
+    /// every item cut from it shares them — or, for a take with no file,
+    /// the take's own guid.
+    key: String,
+    take: String,
+}
+
 /// The project and take a marker call addresses.
 fn marker_target(
     daw: &Standalone,
     project: &ProjectContext,
     item: &ItemRef,
     take: &TakeRef,
-) -> Option<(String, String)> {
+) -> Option<MarkerTarget> {
     let proj = resolve_project(daw, project)?;
     let item_guid = resolve_item_guid(item)?;
     let list = daw
@@ -57,7 +68,17 @@ fn marker_target(
         .ok()
         .flatten()?;
     let idx = resolve_take_index(&list, take)?;
-    Some((proj, list.takes.get(idx)?.guid.clone()))
+    let t = list.takes.get(idx)?;
+    Some(MarkerTarget {
+        project: proj,
+        key: t.source_file_path.clone().unwrap_or_else(|| t.guid.clone()),
+        take: t.guid.clone(),
+    })
+}
+
+/// A new marker id.
+fn new_marker_id() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
 }
 
 /// Keep markers in source order and renumber them.
@@ -372,9 +393,8 @@ impl Takes for Standalone {
         .unwrap_or(SourceType::Unknown)
     }
 
-    // Take markers + ratings — standalone doesn't model these yet.
-    // Returning empty / Ok no-ops keeps the surface intact so tests
-    // exercising the trait pass; sibling storage can land later.
+    // Take markers — kept per source (see `MarkerTarget`), with ids and
+    // a drum hit's properties. Ratings are not modelled yet.
 
     fn get_take_markers(
         &self,
@@ -382,11 +402,11 @@ impl Takes for Standalone {
         item: ItemRef,
         take: TakeRef,
     ) -> Vec<TakeMarker> {
-        let Some((proj, take_guid)) = marker_target(self, &project, &item, &take) else {
+        let Some(target) = marker_target(self, &project, &item, &take) else {
             return Vec::new();
         };
-        self.with_project(&proj, |p| {
-            p.take_markers.get(&take_guid).cloned().unwrap_or_default()
+        self.with_project(&target.project, |p| {
+            p.take_markers.get(&target.key).cloned().unwrap_or_default()
         })
         .unwrap_or_default()
     }
@@ -398,28 +418,29 @@ impl Takes for Standalone {
         take: TakeRef,
         marker: TakeMarkerCreate,
     ) -> Option<u32> {
-        let (proj, take_guid) = marker_target(self, &project, &item, &take)?;
+        let target = marker_target(self, &project, &item, &take)?;
+        let id = marker.id.unwrap_or_else(new_marker_id);
         let index = self
-            .with_project_mut(&proj, |p| {
-                let list = p.take_markers.entry(take_guid.clone()).or_default();
+            .with_project_mut(&target.project, |p| {
+                let list = p.take_markers.entry(target.key.clone()).or_default();
                 list.push(TakeMarker {
                     index: 0,
+                    id: id.clone(),
                     name: marker.name,
                     source_position_seconds: marker.source_position_seconds,
                     color: marker.color,
+                    hit: marker.hit,
                 });
                 renumber(list);
                 // The index it landed at, not the one it was pushed to:
                 // markers are kept in source order, so an early marker
                 // added late lands in the middle.
                 list.iter()
-                    .position(|m| {
-                        (m.source_position_seconds - marker.source_position_seconds).abs() < 1e-12
-                    })
+                    .position(|m| m.id == id)
                     .unwrap_or(list.len() - 1) as u32
             })
             .ok()?;
-        self.publish_take_changed(&proj, &item, &take_guid);
+        self.publish_take_changed(&target.project, &item, &target.take);
         Some(index)
     }
 
@@ -430,10 +451,10 @@ impl Takes for Standalone {
         take: TakeRef,
         update: TakeMarkerUpdate,
     ) -> DawResult<()> {
-        let (proj, take_guid) = marker_target(self, &project, &item, &take)
+        let target = marker_target(self, &project, &item, &take)
             .ok_or_else(|| DawError::not_found("Take", "location"))?;
-        self.with_project_mut(&proj, |p| {
-            let list = p.take_markers.entry(take_guid.clone()).or_default();
+        self.with_project_mut(&target.project, |p| {
+            let list = p.take_markers.entry(target.key.clone()).or_default();
             let Some(m) = list.get_mut(update.index as usize) else {
                 return Err(DawError::not_found("TakeMarker", &update.index.to_string()));
             };
@@ -448,10 +469,13 @@ impl Takes for Standalone {
             if let Some(color) = update.color {
                 m.color = color;
             }
+            if let Some(hit) = update.hit {
+                m.hit = hit;
+            }
             renumber(list);
             Ok(())
         })??;
-        self.publish_take_changed(&proj, &item, &take_guid);
+        self.publish_take_changed(&target.project, &item, &target.take);
         Ok(())
     }
 
@@ -462,10 +486,10 @@ impl Takes for Standalone {
         take: TakeRef,
         index: u32,
     ) -> DawResult<()> {
-        let (proj, take_guid) = marker_target(self, &project, &item, &take)
+        let target = marker_target(self, &project, &item, &take)
             .ok_or_else(|| DawError::not_found("Take", "location"))?;
-        self.with_project_mut(&proj, |p| {
-            let list = p.take_markers.entry(take_guid.clone()).or_default();
+        self.with_project_mut(&target.project, |p| {
+            let list = p.take_markers.entry(target.key.clone()).or_default();
             if (index as usize) >= list.len() {
                 return Err(DawError::not_found("TakeMarker", &index.to_string()));
             }
@@ -473,7 +497,37 @@ impl Takes for Standalone {
             renumber(list);
             Ok(())
         })??;
-        self.publish_take_changed(&proj, &item, &take_guid);
+        self.publish_take_changed(&target.project, &item, &target.take);
+        Ok(())
+    }
+
+    fn set_take_markers(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+        markers: Vec<TakeMarker>,
+    ) -> DawResult<()> {
+        let target = marker_target(self, &project, &item, &take)
+            .ok_or_else(|| DawError::not_found("Take", "location"))?;
+        self.with_project_mut(&target.project, |p| {
+            let mut list: Vec<TakeMarker> = markers
+                .into_iter()
+                .map(|mut m| {
+                    if m.id.is_empty() {
+                        m.id = new_marker_id();
+                    }
+                    m
+                })
+                .collect();
+            renumber(&mut list);
+            if list.is_empty() {
+                p.take_markers.remove(&target.key);
+            } else {
+                p.take_markers.insert(target.key.clone(), list);
+            }
+        })?;
+        self.publish_take_changed(&target.project, &item, &target.take);
         Ok(())
     }
 
@@ -497,6 +551,7 @@ impl Takes for Standalone {
                 name: request.name,
                 source_position_seconds: seconds,
                 color: request.color,
+                ..TakeMarkerCreate::default()
             },
         )
     }
