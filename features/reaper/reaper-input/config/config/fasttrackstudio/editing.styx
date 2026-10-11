@@ -12,6 +12,9 @@ bindings (
     {keys q, action "FTS_QUANTIZE_DRUMS", desc "Quantize the kit with the last settings",
      mnemonic "Q for Quantize",
      why "A kit is many mics of one performance: cutting and moving them apart would put it out of phase with itself, so the kit quantizes as one — and once a section's settings are judged, the next is one key."}
+    {keys "<A-q>", action "FTS_REVERT_DRUMS", desc "Put the drums back as played (the edit undone, the hit markers kept)",
+     mnemonic "Alt+Q to un-quantize",
+     why "A fill the quantize made worse goes back to how it was played, its hit markers left to drag into place by hand."}
     {keys "<S-q>", action "FTS_QUANTIZE_PANEL", desc "The Quantize panel: a section on its grid, by its groove",
      mnemonic "Shift+Q for the Quantize settings",
      why "Quantizing drums is judged section by section, so the panel shows the section's groove and previews before anything moves."}
