@@ -76,6 +76,14 @@ impl Analysis {
     pub fn blocks(&self) -> usize {
         self.classes.len()
     }
+
+    /// Whether block `i` is singing: tonal, and above the silence floor.
+    /// What the ride reads, and nothing else — a breath, an "ess" or room
+    /// tone never sets how loud a phrase is.
+    pub fn is_sung(&self, i: usize) -> bool {
+        self.classes.get(i) == Some(&BlockClass::Tonal)
+            && self.rms_db.get(i).is_some_and(|db| *db > self.silence_db)
+    }
 }
 
 /// Run the one shared pass over an item's audio.
@@ -343,6 +351,67 @@ pub fn ride_envelope(
     decimate(&dense, tolerance_db, &[])
 }
 
+/// How loud the phrase around each block is sung, dB: the power mean of
+/// the sung blocks ([`Analysis::is_sung`]) within `window_s` centred on
+/// it; `None` with none that near.
+///
+/// A ride read off single 10 ms blocks evens out every syllable — a
+/// compressor, not a ride. Read off the phrase, it lifts a quiet line
+/// and leaves the shape of the words inside it alone.
+pub fn phrase_levels(analysis: &Analysis, window_s: f64) -> Vec<Option<f64>> {
+    let n = analysis.blocks();
+    let block_s = analysis.block_len as f64 / analysis.sample_rate.max(1.0);
+    let half = ((window_s * 0.5) / block_s.max(1e-9)).round().max(0.0) as usize;
+    // Prefix sums of the sung blocks' power, and of how many there are.
+    let mut power = vec![0.0_f64; n + 1];
+    let mut count = vec![0_usize; n + 1];
+    for i in 0..n {
+        let sung = analysis.is_sung(i);
+        power[i + 1] = power[i] + if sung { 10f64.powf(analysis.rms_db[i] / 10.0) } else { 0.0 };
+        count[i + 1] = count[i] + usize::from(sung);
+    }
+    (0..n)
+        .map(|i| {
+            let (from, to) = (i.saturating_sub(half), (i + half + 1).min(n));
+            let k = count[to] - count[from];
+            (k > 0).then(|| 10.0 * ((power[to] - power[from]) / k as f64).log10())
+        })
+        .collect()
+}
+
+/// Ride each phrase toward `target_db`: on a sung block, the gain that
+/// brings its phrase level (`levels`, from [`phrase_levels`]) `amount`
+/// of the way to the target, within the range; between phrases the last
+/// gain held, so a line does not swell at its edges.
+///
+/// The target comes from outside — one level for a whole song, so a
+/// quiet verse is brought up to where the choruses are sung, not only
+/// evened against itself.
+pub fn phrase_ride(
+    analysis: &Analysis,
+    levels: &[Option<f64>],
+    target_db: f64,
+    amount: f64,
+    (max_gain_db, max_cut_db): (f64, f64),
+    tolerance_db: f64,
+) -> Vec<EnvPoint> {
+    let mut held = 0.0_f64;
+    let dense: Vec<EnvPoint> = (0..analysis.blocks())
+        .map(|i| {
+            if let Some(level) = levels.get(i).copied().flatten().filter(|_| analysis.is_sung(i)) {
+                held = ((target_db - level) * amount.clamp(0.0, 1.0))
+                    .clamp(-max_cut_db.abs(), max_gain_db.abs());
+            }
+            EnvPoint {
+                t_s: analysis.time_of(i),
+                db: held,
+                hold: false,
+            }
+        })
+        .collect();
+    decimate(&dense, tolerance_db, &[])
+}
+
 /// The floor the composite is clamped to, in dB.
 ///
 /// A fully closed gate is -inf dB and a user can drag a curve to zero by
@@ -547,6 +616,51 @@ mod tests {
                 EnvPoint::new(i as f64 * 0.01, from + (to - from) * x)
             })
             .collect()
+    }
+
+    /// An analysis of `levels` (dB), every block sung, 10 ms blocks.
+    fn sung(levels: &[f64]) -> Analysis {
+        Analysis {
+            classes: vec![BlockClass::Tonal; levels.len()],
+            rms_db: levels.to_vec(),
+            silence_db: -70.0,
+            block_len: 480,
+            sample_rate: 48_000.0,
+        }
+    }
+
+    #[test]
+    fn a_quiet_verse_is_brought_up_to_the_chorus() {
+        // Two seconds of verse at -32 dB, two of chorus at -20.
+        let mut levels = vec![-32.0; 200];
+        levels.extend(vec![-20.0; 200]);
+        let a = sung(&levels);
+        let curve = phrase_ride(&a, &phrase_levels(&a, 0.5), -20.0, 1.0, (12.0, 12.0), 0.25);
+        let at = |t: f64| value_at(&curve, t);
+        assert!((at(1.0) - 12.0).abs() < 0.3, "the verse up 12 dB: {}", at(1.0));
+        assert!(at(3.0).abs() < 0.3, "the chorus as it is: {}", at(3.0));
+    }
+
+    #[test]
+    fn a_phrase_keeps_the_shape_of_its_words() {
+        // A word 6 dB down inside a steady line, 60 ms long: the phrase
+        // level barely moves, so the ride leaves the dip where it is.
+        let mut levels = vec![-20.0; 200];
+        for l in &mut levels[100..106] {
+            *l = -26.0;
+        }
+        let a = sung(&levels);
+        let curve = phrase_ride(&a, &phrase_levels(&a, 0.5), -20.0, 1.0, (12.0, 12.0), 0.25);
+        assert!(value_at(&curve, 1.03) < 1.0, "the dip not filled in: {}", value_at(&curve, 1.03));
+    }
+
+    #[test]
+    fn silence_sets_no_phrase_level() {
+        let mut a = sung(&[-20.0; 100]);
+        for c in &mut a.classes[..] {
+            *c = BlockClass::Silence;
+        }
+        assert!(phrase_levels(&a, 0.5).iter().all(Option::is_none));
     }
 
     #[test]
