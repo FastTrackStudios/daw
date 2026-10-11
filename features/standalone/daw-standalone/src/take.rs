@@ -4,6 +4,7 @@
 //! The old async `StandaloneTake` service + per-service locks retire
 //! with the port; everything now goes through canonical project state.
 
+use crate::sync::EnvelopeKey;
 use daw_proto::Takes;
 use daw_proto::event_bus::DawEvent;
 use daw_proto::item::{ItemEvent, TakeEvent};
@@ -338,7 +339,44 @@ impl Takes for Standalone {
         take: TakeRef,
         offset: Duration,
     ) -> DawResult<()> {
-        self.mutate_take_changed(&project, &item, &take, |t| t.start_offset = offset)
+        let mut slipped: Option<(String, String, String, f64)> = None;
+        self.mutate_take_evt(&project, &item, &take, |pg, ig, t| {
+            let by = offset.as_seconds() - t.start_offset.as_seconds();
+            t.start_offset = offset;
+            slipped = Some((pg.to_string(), ig.to_string(), t.guid.clone(), by));
+            TakeEvent::Changed {
+                project_guid: pg.to_string(),
+                item_guid: ig.to_string(),
+                take_guid: t.guid.clone(),
+            }
+        })?;
+        // The take's envelopes stay on its audio: slipped `by` further
+        // into the source, a point that was at a sound is at it still,
+        // `by` earlier in the item.
+        if let Some((project_guid, item_guid, take_guid, by)) = slipped
+            && by != 0.0
+        {
+            self.with_project_mut(&project_guid, |p| {
+                for ((_, key), data) in &mut p.envelopes {
+                    let EnvelopeKey::Take {
+                        item_guid: of_item,
+                        take_guid: of_take,
+                        ..
+                    } = key
+                    else {
+                        continue;
+                    };
+                    if *of_item == item_guid && *of_take == take_guid {
+                        for point in &mut data.points {
+                            point.time = daw_proto::PositionInSeconds::from_seconds(
+                                point.time.as_seconds() - by,
+                            );
+                        }
+                    }
+                }
+            })?;
+        }
+        Ok(())
     }
 
     fn set_source_file(

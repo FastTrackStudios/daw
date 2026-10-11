@@ -5,6 +5,7 @@
 //! `StandaloneItem` async service struct and parallel item state were
 //! retired with the port.
 
+use crate::sync::EnvelopeKey;
 use daw_proto::Items;
 use daw_proto::event_bus::DawEvent;
 use daw_proto::item::ItemEvent;
@@ -349,7 +350,38 @@ impl Items for Standalone {
                     let mut takes = src_takes;
                     for take in &mut takes.takes {
                         let old_guid = take.guid.clone();
-                        take.guid = Uuid::new_v4().to_string();
+                        // Its envelopes are keyed by item and take: the
+                        // copy's are copies, or a split's right half plays
+                        // without the left's volume curve.
+                        let curves: Vec<_> = p
+                            .envelopes
+                            .iter()
+                            .filter_map(|((owner, key), data)| match key {
+                                EnvelopeKey::Take {
+                                    item_guid: of_item,
+                                    take_guid: of_take,
+                                    kind,
+                                } if *of_item == item_guid && *of_take == old_guid => {
+                                    Some((owner.clone(), *kind, data.clone()))
+                                }
+                                _ => None,
+                            })
+                            .collect();
+                        let new_take = Uuid::new_v4().to_string();
+                        for (owner, kind, data) in curves {
+                            p.envelopes.insert(
+                                (
+                                    owner,
+                                    EnvelopeKey::Take {
+                                        item_guid: new_guid.clone(),
+                                        take_guid: new_take.clone(),
+                                        kind,
+                                    },
+                                ),
+                                data,
+                            );
+                        }
+                        take.guid = new_take;
                         take.item_guid = new_guid.clone();
                         // Everything keyed by the take guid comes with
                         // it, or the duplicate is silent and unwarped

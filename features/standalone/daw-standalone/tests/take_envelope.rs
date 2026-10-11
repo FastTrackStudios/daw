@@ -279,3 +279,48 @@ fn two_takes_carry_independent_markers() {
     assert!(markers(&daw, "no-such-item").is_empty());
     assert_eq!(markers(&daw, &item).len(), 1);
 }
+
+/// A take's volume curve stays on its audio through an edit: a copy
+/// carries its own copy, and slipping the take into its source moves the
+/// curve with the sound — a split's right half (a copy slipped to the
+/// cut) plays the left's curve where the left would have.
+#[test]
+fn a_take_envelope_rides_with_its_audio() {
+    use daw_proto::{Items, TakeRef};
+    let (daw, item, take) = project();
+    let env = volume_envelope(&item, &take);
+    daw.add_point(ProjectContext::Current, env.clone(), point(1.0, 0.5));
+    daw.add_point(ProjectContext::Current, env.clone(), point(3.0, 0.25));
+
+    let copy = daw
+        .duplicate_item(ProjectContext::Current, ItemRef::Guid(item.clone()))
+        .expect("a copy");
+    let copy_take =
+        Takes::get_active_take(&daw, ProjectContext::Current, ItemRef::Guid(copy.clone()))
+            .expect("its take")
+            .guid;
+    let copied = volume_envelope(&copy, &copy_take);
+    assert_eq!(
+        daw.points(ProjectContext::Current, copied.clone()).len(),
+        2,
+        "the copy has the curve"
+    );
+
+    // The copy becomes a right half from 2 s: two seconds into its
+    // source, its curve two seconds earlier in it.
+    daw.set_start_offset(
+        ProjectContext::Current,
+        ItemRef::Guid(copy),
+        TakeRef::Active,
+        daw_proto::primitives::Duration::from_seconds(2.0),
+    )
+    .expect("slipped");
+    let got = daw.points(ProjectContext::Current, copied);
+    assert!((got[0].time.as_seconds() + 1.0).abs() < 1e-9, "{got:?}");
+    assert!((got[1].time.as_seconds() - 1.0).abs() < 1e-9, "{got:?}");
+    let original = daw.points(ProjectContext::Current, env);
+    assert!(
+        (original[1].time.as_seconds() - 3.0).abs() < 1e-9,
+        "the original's own is untouched"
+    );
+}
