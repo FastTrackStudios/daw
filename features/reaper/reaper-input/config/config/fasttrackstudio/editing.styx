@@ -3,17 +3,18 @@ bindings (
     {keys s,       action 40757, desc "Split items at cursor"}
     {keys d,       action 40006, desc "Delete selected items"}
 
-    // Drum quantize: `q` opens the Quantize panel — a section, its
-    // groove, the settings, Preview and Apply — and Shift+Q quantizes the
-    // folded kit rows selected at once, with the settings as they stand
-    // (every mic cut before each hit and moved together, the kit kept in
-    // phase). A profile binding `q` has it over macro recording.
-    {keys q, action "FTS_QUANTIZE_PANEL", desc "The Quantize panel: a section on its grid, by its groove",
+    // Drum quantize: `q` quantizes the kit over the folded kit rows
+    // selected (or the time selection) with the settings the Quantize
+    // panel last applied (every mic cut before each hit and moved
+    // together, the kit kept in phase); Shift+Q opens the panel — a
+    // section, its groove, the settings, Preview and Apply. A profile
+    // binding `q` has it over macro recording.
+    {keys q, action "FTS_QUANTIZE_DRUMS", desc "Quantize the kit with the last settings",
      mnemonic "Q for Quantize",
+     why "A kit is many mics of one performance: cutting and moving them apart would put it out of phase with itself, so the kit quantizes as one — and once a section's settings are judged, the next is one key."}
+    {keys "<S-q>", action "FTS_QUANTIZE_PANEL", desc "The Quantize panel: a section on its grid, by its groove",
+     mnemonic "Shift+Q for the Quantize settings",
      why "Quantizing drums is judged section by section, so the panel shows the section's groove and previews before anything moves."}
-    {keys "<S-q>", action "FTS_QUANTIZE_DRUMS", desc "Quantize the kit (folded drum row) to the grid",
-     mnemonic "Shift+Q for Quantize",
-     why "A kit is many mics of one performance: cutting and moving them apart would put it out of phase with itself, so the folded row quantizes them as one."}
 
     // Gain staging — every recorded track at the reference kit's levels
     // (GGD Modern & Massive 2), as item volume: nothing rendered, so
