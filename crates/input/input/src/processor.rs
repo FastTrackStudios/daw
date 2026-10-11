@@ -550,6 +550,17 @@ impl InputProcessor {
         // (e.g. `g q` in a which-key prefix must reach the leaf binding,
         // not be eaten as `q`-record-macro).
         let in_sequence = !self.sequence.is_empty();
+        // The macro keys are vim's defaults, not a claim over the keymap: a
+        // profile that binds `q` or `@` itself has it (a DAW quantizes on
+        // `q`), and macros go without that key.
+        let mode = self.modes.current().clone();
+        let bound = !matches!(
+            self.lookup_in_mode(&mode, ctx, std::slice::from_ref(chord)),
+            TrieLookup::Miss
+        );
+        if bound {
+            return None;
+        }
 
         if ch == 'q' && !in_sequence {
             if self.macro_recorder.is_recording() {
@@ -1178,6 +1189,24 @@ mod tests {
 
         let ids = extract_action_ids(&commands);
         assert_eq!(ids, vec!["cursor.down", "cursor.down", "cursor.down"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn a_bound_q_is_the_bindings_not_a_macro() -> Result<()> {
+        let mut proc = make_processor();
+        let mut normal = KeyTrie::new();
+        normal.bind(chord('q'), ActionId::new("quantize"));
+        normal.bind(chord('j'), ActionId::new("cursor.down"));
+        proc.set_keymap(ModeId::normal(), normal);
+        let ctx = ActionContext::new();
+
+        let commands = proc.process(char_event('q'), &ctx);
+        assert_eq!(extract_action_ids(&commands), vec!["quantize"]);
+        // Nothing is being recorded: the next key is itself.
+        let commands = proc.process(char_event('j'), &ctx);
+        assert_eq!(extract_action_ids(&commands), vec!["cursor.down"]);
 
         Ok(())
     }

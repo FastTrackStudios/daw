@@ -3,10 +3,14 @@ bindings (
     {keys s,       action 40757, desc "Split items at cursor"}
     {keys d,       action 40006, desc "Delete selected items"}
 
-    // Drum quantize — on a folded kit row, cut every mic before each hit
-    // and move the slices onto the sixteenths together (Beat Detective's
-    // two passes, the kit kept in phase). Shifted, because a bare `q`
-    // records a macro (the input processor reserves it).
+    // Drum quantize: `q` opens the Quantize panel — a section, its
+    // groove, the settings, Preview and Apply — and Shift+Q quantizes the
+    // folded kit rows selected at once, with the settings as they stand
+    // (every mic cut before each hit and moved together, the kit kept in
+    // phase). A profile binding `q` has it over macro recording.
+    {keys q, action "FTS_QUANTIZE_PANEL", desc "The Quantize panel: a section on its grid, by its groove",
+     mnemonic "Q for Quantize",
+     why "Quantizing drums is judged section by section, so the panel shows the section's groove and previews before anything moves."}
     {keys "<S-q>", action "FTS_QUANTIZE_DRUMS", desc "Quantize the kit (folded drum row) to the grid",
      mnemonic "Shift+Q for Quantize",
      why "A kit is many mics of one performance: cutting and moving them apart would put it out of phase with itself, so the folded row quantizes them as one."}
