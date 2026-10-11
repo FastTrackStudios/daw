@@ -92,6 +92,98 @@ pub struct AutomationItem {
     pub volume_envelope_max: i32,
 }
 
+/// A pooled automation item's source — a project-level `<POOLEDENV>`: the
+/// curve every instance of the pool (an envelope's `POOLEDENVINST` line
+/// naming its `ID`) plays.
+///
+/// ```text
+/// <POOLEDENV
+///   ID 1
+///   NAME "Chorus"
+///   SRCLEN 8
+///   PT 0 0.5 0
+///   PT 8 0.8 0
+/// >
+/// ```
+///
+/// Point times are seconds into the source; values are the envelope's own
+/// file values. Lines this type does not read (an LFO's settings) are kept
+/// in `other` and written back.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PooledEnvelope {
+    pub id: i32,
+    pub name: String,
+    /// The source's length in seconds — what a looped instance repeats.
+    pub source_length: f64,
+    pub points: Vec<EnvelopePoint>,
+    /// Lines kept as they were, inner indentation stripped.
+    pub other: Vec<String>,
+}
+
+impl PooledEnvelope {
+    /// Every `<POOLEDENV>` directly inside the project in `rpp` text.
+    pub fn all_in(rpp: &str) -> Vec<Self> {
+        let mut out = Vec::new();
+        let mut depth = 0_i32;
+        let mut open: Option<Self> = None;
+        for line in rpp.lines() {
+            let t = line.trim();
+            if let Some(pool) = open.as_mut() {
+                if t == ">" {
+                    out.extend(open.take());
+                } else if let Some(v) = t.strip_prefix("ID ") {
+                    pool.id = v.trim().parse().unwrap_or(0);
+                } else if let Some(v) = t.strip_prefix("NAME ") {
+                    pool.name = v.trim().trim_matches('"').to_string();
+                } else if let Some(v) = t.strip_prefix("SRCLEN ") {
+                    pool.source_length = v.trim().parse().unwrap_or(0.0);
+                } else if t.starts_with("PT ") {
+                    match EnvelopePoint::from_rpp_line(t) {
+                        Ok(p) => pool.points.push(p),
+                        Err(_) => pool.other.push(t.to_string()),
+                    }
+                } else if !t.is_empty() {
+                    pool.other.push(t.to_string());
+                }
+                continue;
+            }
+            if t.starts_with('<') {
+                if depth == 1 && t == "<POOLEDENV" {
+                    open = Some(Self {
+                        id: 0,
+                        name: String::new(),
+                        source_length: 0.0,
+                        points: Vec::new(),
+                        other: Vec::new(),
+                    });
+                    continue;
+                }
+                depth += 1;
+            } else if t == ">" {
+                depth -= 1;
+            }
+        }
+        out
+    }
+}
+
+impl fmt::Display for PooledEnvelope {
+    /// The block at the project's indentation (two spaces).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "  <POOLEDENV")?;
+        writeln!(f, "    ID {}", self.id)?;
+        writeln!(f, "    NAME \"{}\"", self.name.replace('"', "'"))?;
+        writeln!(f, "    SRCLEN {:.6}", self.source_length)?;
+        for line in &self.other {
+            writeln!(f, "    {line}")?;
+        }
+        for p in &self.points {
+            writeln!(f, "    {}", p.to_string().trim_end())?;
+        }
+        writeln!(f, "  >")
+    }
+}
+
 /// Extension-specific persistent data block within an envelope
 ///
 /// These blocks contain arbitrary data that can be added by extensions
@@ -1028,5 +1120,29 @@ my_extension "some data with spaces"
             automation_items.len(),
             points.len()
         );
+    }
+}
+
+#[cfg(test)]
+mod pooled_tests {
+    use super::*;
+
+    /// A pool written out reads back as it was, and only the project's own
+    /// `<POOLEDENV>`s are read — not one nested deeper.
+    #[test]
+    fn a_pool_round_trips() {
+        let pool = PooledEnvelope {
+            id: 3,
+            name: "Chorus".into(),
+            source_length: 8.0,
+            points: vec![
+                EnvelopePoint::from_rpp_line("PT 0 0.5 2").expect("a point"),
+                EnvelopePoint::from_rpp_line("PT 8 0.8 0").expect("a point"),
+            ],
+            other: vec!["LFO 0".into()],
+        };
+        let text = format!("<REAPER_PROJECT 0.1\n{pool}  <TRACK\n    <POOLEDENV\n    >\n  >\n>\n");
+        let read = PooledEnvelope::all_in(&text);
+        assert_eq!(read, vec![pool]);
     }
 }

@@ -18,14 +18,19 @@ use crate::audio_engine::source::AudioSource;
 use crate::sync::{EnvelopeData, EnvelopeKey, ProjectState};
 
 /// Honor `EnvelopeData.automation_mode` at snapshot time: return the
-/// points only when the mode is something other than `Off`.
+/// curve only when the mode is something other than `Off` — its points
+/// with its automation items laid over them ([`daw_proto::automation::played`]),
+/// flattened here, off the audio thread.
 /// `Touch` / `Latch` / `Write` apply at playback like `Read` —
 /// recording is a separate concern (see touch state on `Standalone`).
 fn active_envelope(data: Option<&EnvelopeData>) -> Option<Vec<EnvelopePoint>> {
     let d = data?;
     match d.automation_mode {
         AutomationMode::Off => None,
-        _ => Some(d.points.clone()),
+        _ => Some(daw_proto::automation::played(
+            &d.points,
+            &d.automation_items,
+        )),
     }
 }
 

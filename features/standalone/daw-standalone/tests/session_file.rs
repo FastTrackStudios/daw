@@ -1337,3 +1337,133 @@ fn a_session_keeps_the_history_it_was_saved_with() {
     let fresh = load_session_history(&dir).expect("a plain save still writes a log");
     assert!(fresh.get_text("chart").to_string().is_empty());
 }
+
+/// Automation items reopen where they were, with their curves: on a track's
+/// volume and on a built-in's parameter, and two instances of one pool
+/// still one pool.
+#[test]
+fn automation_items_reopen_with_their_curves() {
+    use daw_proto::automation::{
+        AddAutomationItemParams, EnvelopeLocation, EnvelopePoint, EnvelopeRef, EnvelopeShape,
+        EnvelopeType, SetAutomationItemPointsParams,
+    };
+    use daw_proto::{Automation, TrackRef};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let song = tmp.path().join("Song");
+    let (daw, _, guid) = open_song(&song);
+    prepare(&daw, &guid);
+    let ctx = ProjectContext::Project(guid.clone());
+    let fx = Effects::add(
+        &daw,
+        ctx.clone(),
+        FxChainContext::Track(DRUMS.to_string()),
+        COUNT,
+    )
+    .expect("the built-in adds");
+    let point = |time: f64, value: f64, shape: EnvelopeShape| EnvelopePoint {
+        time: PositionInSeconds::from_seconds(time),
+        value,
+        shape,
+        ..EnvelopePoint::default()
+    };
+    let volume = EnvelopeLocation::new(
+        TrackRef::Guid(DRUMS.to_string()),
+        EnvelopeRef::Type(EnvelopeType::Volume),
+    );
+    let param = EnvelopeLocation::new(
+        TrackRef::Guid(DRUMS.to_string()),
+        EnvelopeRef::FxParam {
+            fx_guid: fx,
+            param_index: 2,
+        },
+    );
+    for at in [volume.clone(), param.clone()] {
+        let _ = Automation::add_point(
+            &daw,
+            ctx.clone(),
+            at.clone(),
+            daw_proto::automation::AddPointParams::new(
+                PositionInSeconds::ZERO,
+                0.5,
+                EnvelopeShape::Linear,
+            ),
+        );
+        let first = Automation::add_automation_item(
+            &daw,
+            ctx.clone(),
+            at.clone(),
+            AddAutomationItemParams::new(
+                PositionInSeconds::from_seconds(2.0),
+                Duration::from_seconds(2.0),
+            ),
+        )
+        .expect("an item");
+        Automation::set_automation_item_points(
+            &daw,
+            ctx.clone(),
+            at.clone(),
+            SetAutomationItemPointsParams {
+                index: first,
+                points: vec![
+                    point(0.0, 0.25, EnvelopeShape::SlowStartEnd),
+                    point(1.0, 0.75, EnvelopeShape::Square),
+                    point(2.0, 0.75, EnvelopeShape::Linear),
+                ],
+            },
+        )
+        .expect("its curve");
+        // A second instance of the same pool, later on.
+        let pool = Automation::automation_items(&daw, ctx.clone(), at.clone())
+            .first()
+            .map(|ai| ai.pool_id)
+            .expect("its pool");
+        Automation::add_automation_item(
+            &daw,
+            ctx.clone(),
+            at,
+            AddAutomationItemParams::pooled(
+                pool,
+                PositionInSeconds::from_seconds(6.0),
+                Duration::from_seconds(2.0),
+            ),
+        )
+        .expect("another instance");
+    }
+    let before = daw_standalone::digest::digest(&daw, &guid).expect("a digest");
+
+    let dir = song.join("Song.session");
+    save_session(&daw, &guid, &dir).unwrap();
+    let text = std::fs::read_to_string(dir.join("Song.RPP")).unwrap_or_default();
+    let (fresh, _) = engine();
+    let loaded = load_session(&fresh, "Song", &dir).unwrap();
+    let after = daw_standalone::digest::digest(&fresh, &loaded.project_guid).expect("a digest");
+    let apart = daw_standalone::digest::differences(&before, &after);
+    assert!(apart.is_empty(), "the same automation: {apart:#?}\n{text}");
+
+    let back = ProjectContext::Project(loaded.project_guid.clone());
+    let reopened = Automation::automation_items(&fresh, back.clone(), volume.clone());
+    assert_eq!(reopened.len(), 2, "{reopened:?}");
+    assert!(
+        reopened.iter().all(|ai| ai.pool_id == reopened[0].pool_id),
+        "still one pool: {reopened:?}"
+    );
+    // What plays reopens too: the S into the item, and the step in it.
+    let at = |t: f64| {
+        Automation::value_at(
+            &fresh,
+            back.clone(),
+            volume.clone(),
+            PositionInSeconds::from_seconds(t),
+        )
+    };
+    assert!((at(1.0) - 0.5).abs() < 1e-6);
+    // A quarter of the way along the S: under the straight line's 0.375.
+    assert!(at(2.25) > 0.25 && at(2.25) < 0.36, "eased: {}", at(2.25));
+    assert!((at(3.5) - 0.75).abs() < 1e-6);
+    assert!((at(5.0) - 0.5).abs() < 1e-6, "the envelope between them");
+    assert!(
+        (at(7.5) - 0.75).abs() < 1e-6,
+        "the second instance plays the pool"
+    );
+}

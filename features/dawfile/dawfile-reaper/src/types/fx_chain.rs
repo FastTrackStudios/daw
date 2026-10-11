@@ -150,6 +150,10 @@ pub struct FxParamEnvelope {
     pub armed: bool,
     /// Automation points
     pub points: Vec<FxEnvelopePoint>,
+    /// Its automation items (`POOLEDENVINST`), each naming a pool's
+    /// project-level `<POOLEDENV>`.
+    #[serde(default)]
+    pub automation_items: Vec<crate::types::envelope::AutomationItem>,
     /// Raw block text for round-trip
     pub raw_block: String,
 }
@@ -1090,6 +1094,7 @@ fn parse_param_envelope(block_lines: &[&str], preserve_raw_block: bool) -> FxPar
         visible: false,
         armed: false,
         points: Vec::new(),
+        automation_items: Vec::new(),
         raw_block,
     };
 
@@ -1107,6 +1112,10 @@ fn parse_param_envelope(block_lines: &[&str], preserve_raw_block: bool) -> FxPar
         } else if let Some(stripped) = line.strip_prefix("ARM ") {
             let val = parse_int(stripped).unwrap_or(0);
             env.armed = val != 0;
+        } else if line.starts_with("POOLEDENVINST ") {
+            if let Ok(item) = crate::types::envelope::AutomationItem::from_rpp_line(line) {
+                env.automation_items.push(item);
+            }
         } else if let Some(stripped) = line.strip_prefix("PT ") {
             let parts: Vec<f64> = stripped
                 .split_whitespace()
@@ -1515,6 +1524,9 @@ impl RppSerialize for FxParamEnvelope {
                 out.push_str(&format!(" {}", f));
             }
             out.push('\n');
+        }
+        for item in &self.automation_items {
+            out.push_str(&format!("{}{}\n", inner, item));
         }
         out.push_str(&format!("{}>\n", indent));
     }

@@ -605,6 +605,38 @@ impl Automation for crate::Reaper {
         Ok(())
     }
 
+    fn set_automation_item_points(
+        &self,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        params: daw_proto::automation::SetAutomationItemPointsParams,
+    ) -> DawResult<()> {
+        let env = resolve_envelope(&project, &location, IfMissing::Decline)
+            .ok_or_else(|| DawError::not_found("envelope", "the location does not resolve"))?;
+        let low = Reaper::get().medium_reaper().low();
+        let item = params.index as i32;
+        // The same times `automation_item_points` reads, so a read
+        // written back is the curve it was.
+        unsafe {
+            low.DeleteEnvelopePointRangeEx(env, item, f64::MIN, f64::MAX);
+            for p in &params.points {
+                let mut no_sort = true;
+                low.InsertEnvelopePointEx(
+                    env,
+                    item,
+                    p.time.as_seconds(),
+                    p.value,
+                    p.shape as i32,
+                    p.tension,
+                    p.selected,
+                    &mut no_sort,
+                );
+            }
+            low.Envelope_SortPointsEx(env, item);
+        }
+        Ok(())
+    }
+
     fn delete_automation_item(
         &self,
         project: ProjectContext,

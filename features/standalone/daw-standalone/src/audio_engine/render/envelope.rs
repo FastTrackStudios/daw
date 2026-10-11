@@ -1,6 +1,6 @@
 //! Per-frame envelope evaluation for the render hot path.
 
-use daw_proto::automation::{EnvelopePoint, EnvelopeShape};
+use daw_proto::automation::EnvelopePoint;
 
 /// Stateful per-frame envelope cursor. `eval_at(t)` advances through
 /// the points list without rescanning from the start each call.
@@ -29,7 +29,7 @@ impl<'a> EnvelopeCursor<'a> {
         }
         // Clamp left of first point.
         let first = &self.points[0];
-        if time_seconds <= first.time.as_seconds() {
+        if time_seconds < first.time.as_seconds() {
             return Some(first.value);
         }
         // Clamp right of last point.
@@ -37,31 +37,21 @@ impl<'a> EnvelopeCursor<'a> {
         if time_seconds >= last.time.as_seconds() {
             return Some(last.value);
         }
-        // Advance `next` while it's still in the past.
+        // Advance `next` past every point at or before `t`: where two
+        // points share a time the later holds from there (a jump).
         while self.next < self.points.len()
-            && self.points[self.next].time.as_seconds() < time_seconds
+            && self.points[self.next].time.as_seconds() <= time_seconds
         {
             self.next += 1;
         }
-        if self.next == 0 {
-            // Shouldn't happen given the clamp above, but be safe.
-            self.next = 1;
-        }
         let a = &self.points[self.next - 1];
         let b = &self.points[self.next];
-        match a.shape {
-            EnvelopeShape::Square => Some(a.value),
-            _ => {
-                let ta = a.time.as_seconds();
-                let tb = b.time.as_seconds();
-                let span = tb - ta;
-                if span <= 0.0 {
-                    return Some(b.value);
-                }
-                let f = (time_seconds - ta) / span;
-                Some(a.value + (b.value - a.value) * f)
-            }
+        let span = b.time.as_seconds() - a.time.as_seconds();
+        if span <= 0.0 {
+            return Some(b.value);
         }
+        let f = (time_seconds - a.time.as_seconds()) / span;
+        Some((b.value - a.value).mul_add(a.shape.ease(f, a.tension), a.value))
     }
 }
 

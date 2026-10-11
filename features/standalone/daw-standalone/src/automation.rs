@@ -3,16 +3,15 @@
 //!
 //! Each envelope is keyed by `(track_guid, EnvelopeKey)` and stores
 //! visibility, arm, automation mode, plus a vec of `EnvelopePoint`s
-//! kept sorted by time. `value_at` interpolates linearly between
-//! adjacent points (or holds for `EnvelopeShape::Square`); non-linear
-//! shapes (SlowStartEnd / FastStart / FastEnd / Bezier) fall back to
-//! linear for now — wire real curves when the audio graph needs them.
+//! kept sorted by time. `value_at` reads the curve the engine plays:
+//! each segment bent by its point's shape, automation items laid over
+//! their windows ([`daw_proto::automation::played`]).
 
 use daw_proto::TrackRef;
 use daw_proto::automation::{
     AddAutomationItemParams, AddPointParams, Automation, AutomationItem, Envelope,
     EnvelopeLocation, EnvelopePoint, EnvelopeShape, LaneParams, SetAutomationItemParams,
-    SetPointParams, TimeRangeParams,
+    SetAutomationItemPointsParams, SetPointParams, TimeRangeParams,
 };
 use daw_proto::primitives::{AutomationMode, PositionInSeconds};
 use daw_proto::project::ProjectContext;
@@ -283,6 +282,44 @@ impl Automation for Standalone {
         Ok(())
     }
 
+    fn set_automation_item_points(
+        &self,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        params: SetAutomationItemPointsParams,
+    ) -> DawResult<()> {
+        let mut points = params.points;
+        points.sort_by(|a, b| a.time.as_seconds().total_cmp(&b.time.as_seconds()));
+        for (i, p) in points.iter_mut().enumerate() {
+            p.index = i as u32;
+        }
+        let mut found = false;
+        mutate_envelope(self, project, location, |e| {
+            let Some(pool) = e
+                .automation_items
+                .get(params.index as usize)
+                .map(|(item, _)| item.pool_id)
+            else {
+                return;
+            };
+            found = true;
+            // Every instance of the pool carries the curve.
+            for (item, curve) in &mut e.automation_items {
+                if item.pool_id == pool {
+                    curve.clone_from(&points);
+                }
+            }
+        });
+        if found {
+            Ok(())
+        } else {
+            Err(DawError::not_found(
+                "automation item",
+                &params.index.to_string(),
+            ))
+        }
+    }
+
     fn delete_automation_item(
         &self,
         project: ProjectContext,
@@ -374,42 +411,16 @@ impl Automation for Standalone {
         location: EnvelopeLocation,
         time: PositionInSeconds,
     ) -> f64 {
-        let points = Automation::points(self, project, location);
-        if points.is_empty() {
-            return 0.0;
-        }
-        let t = time.as_seconds();
-        let first = &points[0];
-        if t <= first.time.as_seconds() {
-            return first.value;
-        }
-        let last = points.last().unwrap();
-        if t >= last.time.as_seconds() {
-            return last.value;
-        }
-        // Find the segment containing `t`.
-        for i in 0..points.len() - 1 {
-            let a = &points[i];
-            let b = &points[i + 1];
-            let ta = a.time.as_seconds();
-            let tb = b.time.as_seconds();
-            if t >= ta && t <= tb {
-                match a.shape {
-                    EnvelopeShape::Square => return a.value,
-                    // Linear (and all other shapes for now — see file
-                    // doc-comment).
-                    _ => {
-                        let span = tb - ta;
-                        if span <= 0.0 {
-                            return b.value;
-                        }
-                        let f = (t - ta) / span;
-                        return a.value + (b.value - a.value) * f;
-                    }
-                }
-            }
-        }
-        0.0
+        // What plays there: the points, bent by their shapes, with the
+        // automation items over them — the engine's own curve.
+        read_envelope(self, &project, &location)
+            .and_then(|e| {
+                daw_proto::automation::value_at(
+                    &daw_proto::automation::played(&e.points, &e.automation_items),
+                    time.as_seconds(),
+                )
+            })
+            .unwrap_or(0.0)
     }
 
     fn add_point(

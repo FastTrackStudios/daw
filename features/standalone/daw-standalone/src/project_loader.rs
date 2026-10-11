@@ -168,6 +168,7 @@ pub fn load_rpp_text(
     populate_tempo(daw, &project_guid, &project, &mut summary);
     populate_routing(daw, &project_guid, &project, &mut summary);
     populate_fx_chains(daw, &project_guid, &project, &mut summary);
+    fill_pools(daw, &project_guid, rpp_text);
     // What did not come in, said once: a project mixed with its plugins
     // missing sounds wrong with nothing on screen to say why.
     if !summary.warnings.is_empty() {
@@ -1134,19 +1135,120 @@ pub(crate) fn convert_track_envelope(
             selected: pt.selected.unwrap_or(false),
         })
         .collect();
-    if points.is_empty() {
+    if points.is_empty() && env.automation_items.is_empty() {
         return None;
     }
     let mut data = crate::sync::EnvelopeData::new();
     data.visible = env.visible;
     data.armed = env.armed;
+    // A track envelope has no mode of its own in the file (the track's
+    // `AUTOMODE` governs it): one that plays opens as a new one is made,
+    // Trim/Read, so a save and a reopen agree.
     data.automation_mode = if env.active {
-        AutomationMode::Read
+        AutomationMode::TrimRead
     } else {
         AutomationMode::Off
     };
     data.points = points;
+    data.automation_items = automation_items(&env.automation_items);
     Some((crate::sync::EnvelopeKey::Track(ty), data))
+}
+
+/// An envelope's `POOLEDENVINST`s as the engine's automation items, their
+/// curves still empty — the pools they name are project-level and are
+/// read in once the whole project is in ([`fill_pools`]).
+pub(crate) fn automation_items(
+    items: &[dawfile_reaper::types::envelope::AutomationItem],
+) -> Vec<(
+    daw_proto::automation::AutomationItem,
+    Vec<daw_proto::automation::EnvelopePoint>,
+)> {
+    use daw_proto::primitives::Duration;
+    items
+        .iter()
+        .enumerate()
+        .map(|(i, ai)| {
+            (
+                daw_proto::automation::AutomationItem {
+                    index: i as u32,
+                    pool_id: ai.pool_index,
+                    name: String::new(),
+                    position: PositionInSeconds::from_seconds(ai.position),
+                    length: Duration::from_seconds(ai.length),
+                    start_offset: Duration::from_seconds(ai.start_offset),
+                    play_rate: ai.play_rate,
+                    baseline: ai.baseline,
+                    amplitude: ai.amplitude,
+                    loop_source: ai.loop_enabled,
+                    selected: ai.selected,
+                },
+                Vec::new(),
+            )
+        })
+        .collect()
+}
+
+/// A file envelope value as the engine's, for an envelope of `key`: pan
+/// −1…1 → 0…1, mute's play flag turned over; everything else as it is.
+pub(crate) fn engine_value(key: &crate::sync::EnvelopeKey, value: f64) -> f64 {
+    use daw_proto::automation::EnvelopeType;
+    match key {
+        crate::sync::EnvelopeKey::Track(EnvelopeType::Pan | EnvelopeType::PanPrefx) => {
+            (value.clamp(-1.0, 1.0) + 1.0) / 2.0
+        }
+        crate::sync::EnvelopeKey::Track(EnvelopeType::Mute) => 1.0 - value.clamp(0.0, 1.0),
+        _ => value,
+    }
+}
+
+/// A file point's shape as the engine's.
+pub(crate) fn engine_shape(
+    shape: dawfile_reaper::types::envelope::EnvelopePointShape,
+) -> daw_proto::automation::EnvelopeShape {
+    use daw_proto::automation::EnvelopeShape;
+    use dawfile_reaper::types::envelope::EnvelopePointShape as PS;
+    match shape {
+        PS::Square => EnvelopeShape::Square,
+        PS::SlowStartEnd => EnvelopeShape::SlowStartEnd,
+        PS::FastStart => EnvelopeShape::FastStart,
+        PS::FastEnd => EnvelopeShape::FastEnd,
+        PS::Bezier => EnvelopeShape::Bezier,
+        PS::Linear | PS::Default => EnvelopeShape::Linear,
+    }
+}
+
+/// Give every automation item in the project its pool's curve: the
+/// `<POOLEDENV>` of the id its instance names, in the engine's values for
+/// its envelope. An instance whose pool is missing keeps an empty curve
+/// (it plays nothing; the envelope plays under it).
+fn fill_pools(daw: &Standalone, project_guid: &str, rpp_text: &str) {
+    let pools = dawfile_reaper::types::envelope::PooledEnvelope::all_in(rpp_text);
+    if pools.is_empty() {
+        return;
+    }
+    let _ = daw.with_project_mut(project_guid, |p| {
+        for ((_, key), data) in &mut p.envelopes {
+            for (item, curve) in &mut data.automation_items {
+                let Some(pool) = pools.iter().find(|pool| pool.id == item.pool_id) else {
+                    continue;
+                };
+                item.name.clone_from(&pool.name);
+                *curve = pool
+                    .points
+                    .iter()
+                    .enumerate()
+                    .map(|(i, pt)| daw_proto::automation::EnvelopePoint {
+                        index: i as u32,
+                        time: PositionInSeconds::from_seconds(pt.position),
+                        value: engine_value(key, pt.value),
+                        shape: engine_shape(pt.shape),
+                        tension: pt.bezier_tension.unwrap_or(0.0),
+                        selected: false,
+                    })
+                    .collect();
+            }
+        }
+    });
 }
 
 fn populate_routing(
@@ -1502,6 +1604,7 @@ fn param_envelope(
             selected: false,
         })
         .collect();
+    data.automation_items = automation_items(&env.automation_items);
     data
 }
 

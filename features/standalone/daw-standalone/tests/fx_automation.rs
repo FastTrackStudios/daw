@@ -133,3 +133,96 @@ fn a_parameters_automation_plays() {
     assert!(told[0].abs() < 1e-6, "0 at the start: {told:?}");
     assert!((told[1] - 0.5).abs() < 1e-6, "halfway at 1 s: {told:?}");
 }
+
+/// An automation item plays over its window instead of the envelope's
+/// own points, and its curve bends the way its points say.
+#[test]
+fn an_automation_item_plays_over_its_window() {
+    use daw_proto::automation::{AddAutomationItemParams, SetAutomationItemPointsParams};
+    use daw_proto::primitives::Duration;
+
+    let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+    let _inside = runtime.enter();
+    let told = Arc::new(Mutex::new(Vec::new()));
+    let daw = Standalone::new();
+    daw.set_fx_factory(Arc::new(Factory(told.clone())));
+    let guid = daw.seed_project(ProjectInfo {
+        guid: "p".into(),
+        name: "p".into(),
+        path: String::new(),
+    });
+    let ctx = ProjectContext::Project(guid.clone());
+    let track = Tracks::add(&daw, ctx.clone(), "Kick", None).expect("a track");
+    let fx = Effects::add(
+        &daw,
+        ctx.clone(),
+        FxChainContext::Track(track.clone()),
+        "Counting",
+    )
+    .expect("the fx");
+    let at = EnvelopeLocation::new(
+        TrackRef::Guid(track),
+        EnvelopeRef::FxParam {
+            fx_guid: fx,
+            param_index: 0,
+        },
+    );
+    // The verse at 0.2 all through.
+    let _ = Automation::add_point(
+        &daw,
+        ctx.clone(),
+        at.clone(),
+        AddPointParams::new(PositionInSeconds::ZERO, 0.2, EnvelopeShape::Linear),
+    );
+    // A chorus from 2 s to 4 s: up to 0.8 along an S over its first second.
+    let index = Automation::add_automation_item(
+        &daw,
+        ctx.clone(),
+        at.clone(),
+        AddAutomationItemParams::new(
+            PositionInSeconds::from_seconds(2.0),
+            Duration::from_seconds(2.0),
+        ),
+    )
+    .expect("the item");
+    let point =
+        |time: f64, value: f64, shape: EnvelopeShape| daw_proto::automation::EnvelopePoint {
+            time: PositionInSeconds::from_seconds(time),
+            value,
+            shape,
+            ..Default::default()
+        };
+    Automation::set_automation_item_points(
+        &daw,
+        ctx.clone(),
+        at.clone(),
+        SetAutomationItemPointsParams {
+            index,
+            points: vec![
+                point(0.0, 0.2, EnvelopeShape::SlowStartEnd),
+                point(1.0, 0.8, EnvelopeShape::Linear),
+                point(2.0, 0.8, EnvelopeShape::Linear),
+            ],
+        },
+    )
+    .expect("its curve");
+
+    let renderer = ProjectRenderer::new(&daw, &guid, 48_000);
+    for seconds in [1.0, 2.25, 2.5, 3.5, 5.0] {
+        let frame = (seconds * 48_000.0) as u64;
+        let _ = renderer.render_block(frame, 512);
+    }
+    let told = told.lock().expect("the log");
+    let [verse, quarter, half, chorus, after] = told.as_slice() else {
+        panic!("told each block: {told:?}");
+    };
+    assert!((verse - 0.2).abs() < 1e-6, "{told:?}");
+    // A quarter of the way along the S: under the straight line's 0.35.
+    assert!(*quarter > 0.2 && *quarter < 0.35, "eased in: {told:?}");
+    assert!((half - 0.5).abs() < 1e-6, "{told:?}");
+    assert!((chorus - 0.8).abs() < 1e-6, "{told:?}");
+    assert!(
+        (after - 0.2).abs() < 1e-6,
+        "the envelope again after: {told:?}"
+    );
+}

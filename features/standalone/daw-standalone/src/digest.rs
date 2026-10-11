@@ -256,7 +256,36 @@ fn of_state(p: &ProjectState) -> Digest {
                 ),
                 k => format!("{k:?}"),
             };
-            format!("{g} {key} {:?} {}", d.automation_mode, pts.join(" "))
+            // Its automation items, each by its window and its curve (a
+            // pool's number is the file's to choose, so not that).
+            let items: Vec<String> = d
+                .automation_items
+                .iter()
+                .map(|(ai, curve)| {
+                    let curve: Vec<String> = curve
+                        .iter()
+                        .map(|pt| {
+                            format!("{:.6}={:.6}:{:?}", pt.time.as_seconds(), pt.value, pt.shape)
+                        })
+                        .collect();
+                    format!(
+                        "[{:.6}+{:.6} x{} {:.3}/{:.3}{} {}]",
+                        ai.position.as_seconds(),
+                        ai.length.as_seconds(),
+                        ai.play_rate,
+                        ai.baseline,
+                        ai.amplitude,
+                        if ai.loop_source { " loop" } else { "" },
+                        curve.join(" ")
+                    )
+                })
+                .collect();
+            format!(
+                "{g} {key} {:?} {} {}",
+                d.automation_mode,
+                pts.join(" "),
+                items.join(" ")
+            )
         })
         .collect();
     envelopes.sort();

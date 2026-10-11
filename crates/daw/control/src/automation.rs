@@ -434,6 +434,23 @@ impl EnvelopeHandle {
         Ok(())
     }
 
+    /// Replace an automation item's curve (every instance of its pool).
+    pub async fn set_automation_item_points(
+        &self,
+        index: u32,
+        points: Vec<EnvelopePoint>,
+    ) -> Result<()> {
+        self.clients
+            .automation
+            .set_automation_item_points(
+                self.context(),
+                self.location(),
+                daw_proto::automation::SetAutomationItemPointsParams { index, points },
+            )
+            .await??;
+        Ok(())
+    }
+
     /// Remove an automation item; the envelope's own points survive.
     pub async fn delete_automation_item(&self, index: u32) -> Result<()> {
         self.clients

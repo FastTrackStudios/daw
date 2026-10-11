@@ -675,6 +675,37 @@ impl EnvMap {
     }
 }
 
+/// Every automation item pool in the engine, numbered from 1 for the file:
+/// one `<POOLEDENV>` per envelope and pool there (standalone pools within
+/// an envelope), in a fixed order so a project saved twice is the same.
+fn file_pools(p: &ProjectState) -> HashMap<(String, EnvelopeKey, i32), i32> {
+    let mut keys: Vec<(String, EnvelopeKey, i32)> = p
+        .envelopes
+        .iter()
+        .flat_map(|((owner, key), data)| {
+            data.automation_items
+                .iter()
+                .map(move |(ai, _)| (owner.clone(), key.clone(), ai.pool_id))
+        })
+        .collect();
+    keys.sort_by_key(|(owner, key, pool)| (owner.clone(), format!("{key:?}"), *pool));
+    keys.dedup();
+    keys.into_iter()
+        .enumerate()
+        .map(|(i, k)| (k, i32::try_from(i + 1).unwrap_or(i32::MAX)))
+        .collect()
+}
+
+/// An engine envelope value as the file's for an envelope of `key`: the
+/// inverse of [`loader::engine_value`].
+fn file_value(key: &EnvelopeKey, value: f64) -> f64 {
+    match key {
+        EnvelopeKey::Track(EnvelopeType::Pan | EnvelopeType::PanPrefx) => value.mul_add(2.0, -1.0),
+        EnvelopeKey::Track(EnvelopeType::Mute) => 1.0 - value,
+        _ => value,
+    }
+}
+
 /// Whether two envelopes read the same to the renderer.
 fn envelope_same(a: Option<&EnvelopeData>, b: Option<&EnvelopeData>) -> bool {
     match (a, b) {
@@ -692,6 +723,11 @@ fn envelope_same(a: Option<&EnvelopeData>, b: Option<&EnvelopeData>) -> bool {
                         && x.tension == y.tension
                         && x.selected == y.selected
                 })
+                && a.automation_items.len() == b.automation_items.len()
+                && a.automation_items
+                    .iter()
+                    .zip(&b.automation_items)
+                    .all(|((x, _), (y, _))| x == y)
         }
         _ => false,
     }
@@ -920,6 +956,9 @@ struct Writer<'a> {
     /// The built-in FX's states, by FX guid ([`builtin_states`]): what the
     /// plugins hold that a project file can carry.
     states: &'a HashMap<String, Vec<u8>>,
+    /// Each automation item pool the engine holds — by envelope and its
+    /// pool there — numbered for the file ([`file_pools`]).
+    pools: HashMap<(String, EnvelopeKey, i32), i32>,
 }
 
 /// No states: a writer given none.
@@ -1046,6 +1085,7 @@ impl<'a> Writer<'a> {
             folder_deltas: folder_deltas(&p.tracks),
             skipped_fx: std::cell::RefCell::new(Vec::new()),
             states: &NO_STATES,
+            pools: file_pools(p),
         }
     }
 
@@ -1086,7 +1126,12 @@ impl<'a> Writer<'a> {
             plans.insert(e.guid.clone(), plan);
         }
 
-        let extra = self.master_and_extstate(&mut owned);
+        let mut extra = self.master_and_extstate(&mut owned);
+        let pooled = self.pooled();
+        if !pooled.is_empty() {
+            owned.key("POOLEDENV");
+            extra.push_str(&pooled);
+        }
         let mut text = project.to_rpp_string();
         if !extra.is_empty() {
             // Before the project's closing `>`.
@@ -1144,6 +1189,96 @@ impl<'a> Writer<'a> {
             out.push('\n');
         }
         Ok(out)
+    }
+
+    // ── automation items ───────────────────────────────────────────
+
+    /// An envelope's automation items as the file's `POOLEDENVINST`s, each
+    /// naming its pool's number in this save.
+    fn instances(
+        &self,
+        owner: &str,
+        key: &EnvelopeKey,
+        data: &EnvelopeData,
+    ) -> Vec<dawfile_reaper::types::envelope::AutomationItem> {
+        data.automation_items
+            .iter()
+            .enumerate()
+            .map(
+                |(i, (ai, _))| dawfile_reaper::types::envelope::AutomationItem {
+                    pool_index: self
+                        .pools
+                        .get(&(owner.to_owned(), key.clone(), ai.pool_id))
+                        .copied()
+                        .unwrap_or(0),
+                    position: ai.position.as_seconds(),
+                    length: ai.length.as_seconds(),
+                    start_offset: ai.start_offset.as_seconds(),
+                    play_rate: ai.play_rate,
+                    selected: ai.selected,
+                    baseline: ai.baseline,
+                    amplitude: ai.amplitude,
+                    loop_enabled: ai.loop_source,
+                    position_qn: 0.0,
+                    length_qn: 0.0,
+                    instance_index: i32::try_from(i + 1).unwrap_or(i32::MAX),
+                    muted: false,
+                    start_offset_qn: 0.0,
+                    transition_time: 0.0,
+                    volume_envelope_max: 0,
+                },
+            )
+            .collect()
+    }
+
+    /// Every pool's curve as a project-level `<POOLEDENV>`, in file
+    /// values; empty when the engine holds no automation items.
+    fn pooled(&self) -> String {
+        let mut numbered: Vec<(&(String, EnvelopeKey, i32), &i32)> = self.pools.iter().collect();
+        numbered.sort_by_key(|(_, id)| **id);
+        let mut out = String::new();
+        for ((owner, key, pool), id) in numbered {
+            let Some(data) = self.p.envelopes.get(&(owner.clone(), key.clone())) else {
+                continue;
+            };
+            let Some((item, curve)) = data
+                .automation_items
+                .iter()
+                .find(|(ai, _)| ai.pool_id == *pool)
+            else {
+                continue;
+            };
+            let block = dawfile_reaper::types::envelope::PooledEnvelope {
+                id: *id,
+                name: if item.name.is_empty() {
+                    format!("Automation item {id}")
+                } else {
+                    item.name.clone()
+                },
+                source_length: curve
+                    .last()
+                    .map_or(item.length.as_seconds(), |p| p.time.as_seconds())
+                    .max(item.length.as_seconds()),
+                points: curve
+                    .iter()
+                    .map(|pt| {
+                        let tension = (pt.tension != 0.0).then_some(pt.tension);
+                        RppEnvelopePoint {
+                            position: pt.time.as_seconds(),
+                            value: file_value(key, pt.value),
+                            shape: envelope_shape_to_rpp(pt.shape),
+                            time_sig: Some(0),
+                            selected: Some(false),
+                            unknown_field_6: tension.map(|_| 0),
+                            bezier_tension: tension,
+                        }
+                    })
+                    .collect(),
+                other: Vec::new(),
+            };
+            out.push_str(&block.to_string());
+        }
+        out
     }
 
     // ── project level ──────────────────────────────────────────────
@@ -1856,7 +1991,7 @@ impl<'a> Writer<'a> {
                 .p
                 .envelopes
                 .get(&(e.guid.clone(), EnvelopeKey::Track(ty)))
-                .filter(|d| !d.points.is_empty());
+                .filter(|d| !d.points.is_empty() || !d.automation_items.is_empty());
             let orig_env = orig.and_then(|o| {
                 o.rt.envelopes
                     .iter()
@@ -1905,9 +2040,10 @@ impl<'a> Writer<'a> {
                         }
                     })
                     .collect();
+                env.automation_items = self.instances(&e.guid, &EnvelopeKey::Track(ty), d);
                 t.envelopes.push(env);
             }
-            owned.sub(&chunk, &["ACT", "VIS", "ARM", "PT"]);
+            owned.sub(&chunk, &["ACT", "VIS", "ARM", "PT", "POOLEDENVINST"]);
         }
     }
 
@@ -1950,6 +2086,7 @@ impl<'a> Writer<'a> {
                                 flags: vec![f64::from(pt.shape as u8)],
                             })
                             .collect(),
+                        automation_items: self.instances(track, key, data),
                         raw_block: String::new(),
                     })
                 }
@@ -2603,7 +2740,17 @@ fn envelope_print(env: &dawfile_reaper::types::fx_chain::FxParamEnvelope) -> Str
     } else {
         "off".to_owned()
     };
-    format!("{} {mode} {}", env.param.index, points.join(" "))
+    let items: Vec<String> = env
+        .automation_items
+        .iter()
+        .map(|ai| format!("{}@{:.6}+{:.6}", ai.pool_index, ai.position, ai.length))
+        .collect();
+    format!(
+        "{} {mode} {} {}",
+        env.param.index,
+        points.join(" "),
+        items.join(" ")
+    )
 }
 
 /// A `<PARMENV>` chunk's lines, header first and `>` last.
