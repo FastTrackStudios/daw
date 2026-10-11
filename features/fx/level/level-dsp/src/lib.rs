@@ -24,6 +24,7 @@ pub mod analyze;
 pub mod classify;
 pub mod debreath;
 pub mod deess;
+pub mod drums;
 pub mod envelope;
 pub mod filter;
 pub mod gate;

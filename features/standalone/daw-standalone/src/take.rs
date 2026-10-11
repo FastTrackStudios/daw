@@ -357,6 +357,7 @@ impl Takes for Standalone {
             && by != 0.0
         {
             self.with_project_mut(&project_guid, |p| {
+                let length = p.items.get(&item_guid).map(|e| e.item.length.as_seconds());
                 for ((_, key), data) in &mut p.envelopes {
                     let EnvelopeKey::Take {
                         item_guid: of_item,
@@ -371,6 +372,12 @@ impl Takes for Standalone {
                             point.time = daw_proto::PositionInSeconds::from_seconds(
                                 point.time.as_seconds() - by,
                             );
+                        }
+                        // A slice keeps the curve over itself: a take cut
+                        // into a thousand slices is not a thousand copies
+                        // of the whole song's curve.
+                        if let Some(length) = length {
+                            keep_over(&mut data.points, length);
                         }
                     }
                 }
@@ -674,5 +681,35 @@ impl Standalone {
         })??;
         self.bus_events.publish(DawEvent::Take(event));
         Ok(())
+    }
+}
+
+/// How far past a take's own span its envelope's points are kept,
+/// seconds: room for a slip back and a reach over a gap.
+const ENVELOPE_PAD: f64 = 1.0;
+
+/// `points` (by time) cut to those over `0..length` and [`ENVELOPE_PAD`]
+/// either side, with the nearest beyond each end kept so the curve is
+/// what it was at the edges.
+fn keep_over(points: &mut Vec<daw_proto::automation::EnvelopePoint>, length: f64) {
+    let (from, to) = (-ENVELOPE_PAD, length + ENVELOPE_PAD);
+    let first = points
+        .iter()
+        .position(|p| p.time.as_seconds() >= from)
+        .unwrap_or(points.len());
+    let last = points
+        .iter()
+        .rposition(|p| p.time.as_seconds() <= to)
+        .map_or(0, |i| i + 1);
+    let keep_from = first.saturating_sub(1);
+    let keep_to = (last + 1).min(points.len());
+    if keep_from >= keep_to {
+        points.truncate(0);
+        return;
+    }
+    points.truncate(keep_to);
+    points.drain(..keep_from);
+    for (i, p) in points.iter_mut().enumerate() {
+        p.index = u32::try_from(i).unwrap_or(u32::MAX);
     }
 }

@@ -324,3 +324,38 @@ fn a_take_envelope_rides_with_its_audio() {
         "the original's own is untouched"
     );
 }
+
+/// A slice keeps only the curve over itself: slipped deep into a take
+/// with a long curve, it holds the points around its own span, and the
+/// curve at its edges is what it was.
+#[test]
+fn a_slice_keeps_the_curve_over_itself() {
+    use daw_proto::{Items, TakeRef};
+    let (daw, item, take) = project();
+    let env = volume_envelope(&item, &take);
+    for s in 0..100 {
+        daw.add_point(
+            ProjectContext::Current,
+            env.clone(),
+            point(f64::from(s), if s % 2 == 0 { 1.0 } else { 0.5 }),
+        );
+    }
+    daw.set_start_offset(
+        ProjectContext::Current,
+        ItemRef::Guid(item),
+        TakeRef::Active,
+        daw_proto::primitives::Duration::from_seconds(50.0),
+    )
+    .expect("slipped");
+    let got = daw.points(ProjectContext::Current, env);
+    // The item is 4 s long: points from 1 s before it to 1 s after, and
+    // one more each side.
+    assert_eq!(
+        got.len(),
+        9,
+        "{:?}",
+        got.iter().map(|p| p.time.as_seconds()).collect::<Vec<_>>()
+    );
+    assert!((got[0].time.as_seconds() + 2.0).abs() < 1e-9);
+    assert!((got[8].time.as_seconds() - 6.0).abs() < 1e-9);
+}
