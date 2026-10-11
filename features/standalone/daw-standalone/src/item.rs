@@ -366,6 +366,18 @@ impl Items for Standalone {
                         if let Some(mode) = p.stretch_modes.get(&old_guid).copied() {
                             p.stretch_modes.insert(take.guid.clone(), mode);
                         }
+                        // A MIDI take's events are keyed by it too: without
+                        // them the copy is an empty MIDI item, and a split —
+                        // a duplicate trimmed to the right half — loses
+                        // every note after the cut.
+                        copy_keyed(&mut p.midi_notes, &old_guid, &take.guid);
+                        copy_keyed(&mut p.midi_ccs, &old_guid, &take.guid);
+                        copy_keyed(&mut p.midi_pitch_bends, &old_guid, &take.guid);
+                        copy_keyed(&mut p.midi_program_changes, &old_guid, &take.guid);
+                        copy_keyed(&mut p.midi_sysex, &old_guid, &take.guid);
+                        copy_keyed(&mut p.midi_channel_pressures, &old_guid, &take.guid);
+                        copy_keyed(&mut p.midi_poly_pressures, &old_guid, &take.guid);
+                        copy_keyed(&mut p.midi_note_expressions, &old_guid, &take.guid);
                     }
                     p.takes.insert(new_guid.clone(), takes);
                 }
@@ -653,5 +665,12 @@ impl Items for Standalone {
             },
         );
         Ok(())
+    }
+}
+
+/// `map[to]` as a copy of `map[from]`, when there is one.
+fn copy_keyed<T: Clone>(map: &mut std::collections::HashMap<String, T>, from: &str, to: &str) {
+    if let Some(value) = map.get(from).cloned() {
+        map.insert(to.to_owned(), value);
     }
 }
