@@ -173,6 +173,14 @@ pub trait PluginInstance: Send {
     /// Inverse of `value_to_text` — parse `"−12 dB"` back to a value.
     fn text_to_value(&mut self, id: u32, text: &str) -> Option<f64>;
 
+    /// A stepped parameter's choices — a mode, a switch, a scene: each
+    /// its value normalized along the parameter's range (0..1) and its
+    /// name. What a host lists to pick from and parses a name against.
+    /// Empty (the default) for a continuous parameter.
+    fn param_choices(&mut self, _id: u32) -> Vec<(f64, String)> {
+        Vec::new()
+    }
+
     /// Reported plugin latency in samples (0 if not reported).
     fn latency(&mut self) -> u32;
 

@@ -196,6 +196,11 @@ impl Standalone {
             let s = SlotInfo { info, plain, text };
             let mut p = FxParameter::new(slot as u32, s.info.name.clone(), s.normalized());
             p.formatted = s.text.clone().unwrap_or_else(|| format!("{:.3}", s.plain));
+            let choices = plugin.param_choices(s.info.id);
+            if !choices.is_empty() {
+                p.step_count = Some(choices.len() as u32);
+                p.step_labels = choices;
+            }
             out.push(p);
         }
         Some(out)
