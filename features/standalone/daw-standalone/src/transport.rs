@@ -62,10 +62,72 @@ fn play_state_repr(s: PlayState) -> PlayStateRepr {
 }
 
 /// Set engine play-state AND mirror into proto `Transport`.
+///
+/// Going into `Recording` starts a recording pass (every armed track's
+/// input captured — `crate::recording`); leaving it by any road (stop,
+/// play/stop, pause, toggle) finishes the pass through
+/// [`finish_recording`], which places each capture as a new take. A pass
+/// that cannot start refuses the record, and the transport stays put.
 fn set_play_state(daw: &Standalone, guid: &str, ps: PlayState) -> DawResult<()> {
     let bundle = daw.transport_engine_for(guid);
+    let was_recording = matches!(bundle.shared.play_state(), PlayStateRepr::Recording);
+    let recording = matches!(ps, PlayState::Recording);
+    if recording && !was_recording {
+        begin_recording(daw, guid, &bundle)?;
+    }
     bundle.shared.set_play_state(play_state_repr(ps));
-    daw.with_project_mut(guid, |p| p.transport.play_state = ps)
+    let mirrored = daw.with_project_mut(guid, |p| p.transport.play_state = ps);
+    if was_recording && !recording {
+        // After the state change, so the audio thread has stopped
+        // capturing by the time the pass is taken.
+        finish_recording(daw, guid)?;
+    }
+    mirrored
+}
+
+/// Start the recording pass for `guid` (see `crate::recording`).
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(feature = "audio", feature = "decode")
+))]
+fn begin_recording(
+    daw: &Standalone,
+    guid: &str,
+    bundle: &crate::transport_engine::TransportBundle,
+) -> DawResult<()> {
+    crate::recording::begin(daw, guid, bundle.shared.clone())
+}
+
+/// Without an audio engine there is no input to capture.
+#[cfg(not(all(
+    not(target_arch = "wasm32"),
+    any(feature = "audio", feature = "decode")
+)))]
+fn begin_recording(
+    _daw: &Standalone,
+    _guid: &str,
+    _bundle: &crate::transport_engine::TransportBundle,
+) -> DawResult<()> {
+    Ok(())
+}
+
+/// Finish the recording pass on `guid`: each armed track's capture put on
+/// it as a new take on a fixed lane ([`Standalone::finish_recording`]).
+/// What it placed is kept for [`Standalone::last_recording`].
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(feature = "audio", feature = "decode")
+))]
+fn finish_recording(daw: &Standalone, guid: &str) -> DawResult<()> {
+    daw.finish_recording(guid).map(|_| ())
+}
+
+#[cfg(not(all(
+    not(target_arch = "wasm32"),
+    any(feature = "audio", feature = "decode")
+)))]
+fn finish_recording(_daw: &Standalone, _guid: &str) -> DawResult<()> {
+    Ok(())
 }
 
 /// Reconcile proto `Transport.playhead_position` from the engine —

@@ -694,6 +694,10 @@ pub struct Standalone {
     #[cfg(all(target_arch = "wasm32", any(feature = "decode", feature = "audio")))]
     pub(crate) live_midi_wasm:
         Arc<Mutex<std::collections::VecDeque<crate::audio_engine::render::LiveMidiEvent>>>,
+    /// Recording: the pass in progress, test inputs, record folders and
+    /// where new takes go (see [`crate::recording`]).
+    #[cfg(all(not(target_arch = "wasm32"), any(feature = "audio", feature = "decode")))]
+    pub(crate) recorder: Arc<crate::recording::Recorder>,
 }
 
 impl Default for Standalone {
@@ -732,6 +736,8 @@ impl Standalone {
             live_midi_tx: Arc::new(Mutex::new(None)),
             #[cfg(all(target_arch = "wasm32", any(feature = "decode", feature = "audio")))]
             live_midi_wasm: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            #[cfg(all(not(target_arch = "wasm32"), any(feature = "audio", feature = "decode")))]
+            recorder: Arc::default(),
         }
     }
 

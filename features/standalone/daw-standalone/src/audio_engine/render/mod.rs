@@ -989,6 +989,25 @@ impl ProjectRenderer {
             if let Some(live) = live_guard.as_mut() {
                 mix_live_input_into_buses(live, &snap.input_channels, passes, buses, dirty, frames);
             }
+            // 0.1) Recording: the armed tracks' input this block, pushed to
+            // the recording pass's rings (lock-free, never waits in
+            // realtime) — see `crate::recording`.
+            crate::recording::capture_block(
+                &self.daw,
+                &crate::recording::Block {
+                    project_guid: &self.project_guid,
+                    // Its snapshot cache's heap address: stable while it lives.
+                    renderer: Arc::as_ptr(&self.cache) as usize,
+                    sample_rate: self.sample_rate,
+                    start_samples,
+                    frames,
+                    rate,
+                    offline: self.realtime.get().is_none(),
+                    live: live_guard
+                        .as_ref()
+                        .map(|l| (l.scratch.as_slice(), l.channels)),
+                },
+            );
         }
 
         // 0.5) Live / programmatic MIDI → per-track scratch buckets.

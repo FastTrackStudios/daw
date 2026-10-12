@@ -88,6 +88,13 @@ pub mod plugin;
 mod plugin_loader;
 mod position_conversion;
 mod project;
+/// Recording: armed tracks' inputs captured to WAV files while the
+/// transport records, each pass placed as a new take on a fixed lane.
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(feature = "audio", feature = "decode")
+))]
+pub mod recording;
 #[cfg(any(feature = "rpp-project", feature = "rpp-project-wasm"))]
 pub mod project_loader;
 mod region;
