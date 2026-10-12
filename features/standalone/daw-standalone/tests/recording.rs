@@ -64,8 +64,13 @@ fn armed_project(dir: &std::path::Path) -> (Standalone, String, String) {
     let ctx = ProjectContext::Project(guid.clone());
     let track = Tracks::add(&daw, ctx.clone(), "Guitar", None).expect("a track");
     let at = TrackRef::Guid(track.clone());
-    Tracks::set_record_input(&daw, ctx.clone(), at.clone(), RecordInput::Audio { channel: 0 })
-        .expect("its input");
+    Tracks::set_record_input(
+        &daw,
+        ctx.clone(),
+        at.clone(),
+        RecordInput::Audio { channel: 0 },
+    )
+    .expect("its input");
     Tracks::set_armed(&daw, ctx, at, true).expect("armed");
     (daw, guid, track)
 }
@@ -166,8 +171,8 @@ fn two_passes_over_one_range_land_on_lanes_one_and_two() {
     );
 
     // It plays: the tone comes back out of the master.
-    let back = ProjectRenderer::new(&daw, &guid, RATE)
-        .render_block((1.5 * f64::from(RATE)) as u64, BLOCK);
+    let back =
+        ProjectRenderer::new(&daw, &guid, RATE).render_block((1.5 * f64::from(RATE)) as u64, BLOCK);
     let peak = back.samples.iter().fold(0.0_f32, |m, s| m.max(s.abs()));
     assert!(peak > 0.1, "the take is heard: peak {peak}");
 
@@ -253,8 +258,7 @@ fn nothing_armed_records_nothing() {
     let dir = TempDir::new();
     let (daw, guid, guitar) = armed_project(&dir.0);
     let ctx = ProjectContext::Project(guid.clone());
-    Tracks::set_armed(&daw, ctx.clone(), TrackRef::Guid(guitar.clone()), false)
-        .expect("disarmed");
+    Tracks::set_armed(&daw, ctx.clone(), TrackRef::Guid(guitar.clone()), false).expect("disarmed");
     Transport::record(&daw, ctx.clone()).expect("recording");
     assert!(!daw.is_capturing(&guid));
     ProjectRenderer::new(&daw, &guid, RATE).render_block(0, BLOCK);

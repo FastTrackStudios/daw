@@ -63,8 +63,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use daw_proto::track::RecordInput;
 use daw_proto::{
-    DawError, DawResult, ItemRef, Items, ProjectContext, Projects, TakeRef, Takes, Track,
-    TrackRef, Tracks,
+    DawError, DawResult, ItemRef, Items, ProjectContext, Projects, TakeRef, Takes, Track, TrackRef,
+    Tracks,
     primitives::{Duration, PositionInSeconds},
 };
 
@@ -871,7 +871,11 @@ fn place_take(
         .iter()
         .map(|i| {
             let start = i.position.as_seconds();
-            (i.fixed_lane.unwrap_or(0), start, start + i.length.as_seconds())
+            (
+                i.fixed_lane.unwrap_or(0),
+                start,
+                start + i.length.as_seconds(),
+            )
         })
         .collect();
     let choice = choose_take_lane(
@@ -960,7 +964,8 @@ mod tests {
     fn lowest_free_takes_the_first_lane_empty_over_the_range() {
         // Lanes 0 and 1 hold the intro (7–21 s); lane 2 is free.
         let occupied = [(0, 7.0, 21.0), (1, 7.0, 21.0)];
-        let pick = |span| choose_take_lane(3, any_lane, &occupied, span, TakeLanePolicy::LowestFree);
+        let pick =
+            |span| choose_take_lane(3, any_lane, &occupied, span, TakeLanePolicy::LowestFree);
         // Over the intro again: lane 2.
         assert_eq!(pick((7.0, 21.0)), LaneChoice::Existing(2));
         // The verse, after it: lane 0, beside the intro's take 1.
@@ -970,7 +975,13 @@ mod tests {
     #[test]
     fn lowest_free_makes_a_lane_when_every_take_lane_is_used() {
         let occupied = [(0, 0.0, 10.0), (1, 5.0, 6.0)];
-        let pick = choose_take_lane(2, any_lane, &occupied, (4.0, 8.0), TakeLanePolicy::LowestFree);
+        let pick = choose_take_lane(
+            2,
+            any_lane,
+            &occupied,
+            (4.0, 8.0),
+            TakeLanePolicy::LowestFree,
+        );
         assert_eq!(pick, LaneChoice::New);
     }
 
@@ -1041,9 +1052,15 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("record-names-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("dir");
         let first = take_path(&dir, "Guitar/Clean", &[]);
-        assert_eq!(first.file_name().and_then(|n| n.to_str()), Some("Guitar_Clean-01.wav"));
+        assert_eq!(
+            first.file_name().and_then(|n| n.to_str()),
+            Some("Guitar_Clean-01.wav")
+        );
         let second = take_path(&dir, "Guitar/Clean", &[first]);
-        assert_eq!(second.file_name().and_then(|n| n.to_str()), Some("Guitar_Clean-02.wav"));
+        assert_eq!(
+            second.file_name().and_then(|n| n.to_str()),
+            Some("Guitar_Clean-02.wav")
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
