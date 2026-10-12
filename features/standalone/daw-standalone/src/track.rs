@@ -1031,6 +1031,9 @@ impl Tracks for Standalone {
                 .entry(track_guid.clone())
                 .or_insert_with(TrackExt::default)
                 .tcp_height_pixels = height_pixels;
+            // The track's own `height` is what a read and a save see; 0
+            // is the default height, which it keeps as `None`.
+            p.tracks[i].height = (height_pixels > 0).then_some(height_pixels);
             Ok::<_, DawError>(vec![TrackEvent::HeightChanged {
                 guid: track_guid,
                 height: Some(height_pixels),
