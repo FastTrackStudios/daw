@@ -1,4 +1,5 @@
-//! `impl AudioAccessors for Standalone` — decode a take's source file.
+//! `impl AudioAccessors for Standalone` — decode a take's source file, or
+//! a track's playing items mixed.
 //!
 //! REAPER's audio accessor is a handle you pull rendered samples from,
 //! at whatever rate and channel count you ask for. Standalone has no
@@ -27,8 +28,158 @@ use daw_proto::{
 
 use crate::sync::Standalone;
 
+/// What an accessor reads: one take (its time from the item's start), or a
+/// track's items as they play into it (project time).
 #[cfg(any(feature = "audio", feature = "decode"))]
-type OpenAccessor = crate::take_reader::TakeReader;
+enum OpenAccessor {
+    Take(crate::take_reader::TakeReader),
+    Track(TrackMix),
+}
+
+#[cfg(any(feature = "audio", feature = "decode"))]
+impl OpenAccessor {
+    fn channels(&self) -> u16 {
+        match self {
+            Self::Take(r) => r.channels(),
+            Self::Track(m) => m.channels,
+        }
+    }
+
+    fn sample_rate(&self) -> u32 {
+        match self {
+            Self::Take(r) => r.sample_rate(),
+            Self::Track(m) => m.sample_rate,
+        }
+    }
+
+    fn sample(&self, t: f64, channel: usize) -> f32 {
+        match self {
+            Self::Take(r) => r.sample(t, channel),
+            Self::Track(m) => m.sample(t, channel),
+        }
+    }
+}
+
+/// One item of a track, as it plays into the track: where, how long, its
+/// gain and fades, and its take's audio — opened the first time a read
+/// reaches it (a slip-edited track is thousands of items, and a read of a
+/// span touches a few).
+#[cfg(any(feature = "audio", feature = "decode"))]
+struct Placed {
+    at: f64,
+    length: f64,
+    gain: f32,
+    fade_in: f64,
+    fade_out: f64,
+    guid: String,
+    reader: OnceLock<Option<crate::take_reader::TakeReader>>,
+}
+
+/// A track's playing items mixed — what they play into the track, before
+/// its FX: each on the lane that plays and not muted, at its place, through
+/// its item volume and its fades (linear). Sorted by start, with the
+/// longest, so a sample looks only at the items near it.
+#[cfg(any(feature = "audio", feature = "decode"))]
+struct TrackMix {
+    daw: Standalone,
+    project: ProjectContext,
+    items: Vec<Placed>,
+    longest: f64,
+    channels: u16,
+    sample_rate: u32,
+}
+
+#[cfg(any(feature = "audio", feature = "decode"))]
+impl TrackMix {
+    /// Item `p`'s take, opened on first use.
+    fn reader<'a>(&self, p: &'a Placed) -> Option<&'a crate::take_reader::TakeReader> {
+        p.reader
+            .get_or_init(|| {
+                crate::take_reader::TakeReader::open_or_decode(
+                    &self.daw,
+                    self.project.clone(),
+                    ItemRef::Guid(p.guid.clone()),
+                    TakeRef::Active,
+                )
+            })
+            .as_ref()
+    }
+
+    fn sample(&self, t: f64, channel: usize) -> f32 {
+        let past = self.items.partition_point(|p| p.at <= t);
+        let mut sum = 0.0_f32;
+        for p in self.items[..past].iter().rev() {
+            if p.at < t - self.longest {
+                break;
+            }
+            let into = t - p.at;
+            if into >= p.length {
+                continue;
+            }
+            let mut gain = p.gain;
+            if p.fade_in > 0.0 && into < p.fade_in {
+                gain *= (into / p.fade_in) as f32;
+            }
+            let left = p.length - into;
+            if p.fade_out > 0.0 && left < p.fade_out {
+                gain *= (left / p.fade_out) as f32;
+            }
+            let Some(reader) = self.reader(p) else {
+                continue;
+            };
+            let ch = channel.min(usize::from(reader.channels().max(1)) - 1);
+            sum += reader.sample(into, ch) * gain;
+        }
+        sum
+    }
+}
+
+/// The track `track`'s playing items, mixed ([`TrackMix`]). `None` when it
+/// has none with audio to read.
+#[cfg(any(feature = "audio", feature = "decode"))]
+fn open_track(daw: &Standalone, project: ProjectContext, track: TrackRef) -> Option<TrackMix> {
+    use daw_proto::Items as _;
+    let lanes = daw_proto::Tracks::get(daw, project.clone(), track.clone())?;
+    let plays = |lane: Option<u32>| {
+        lanes.lane_count <= 1
+            || 1_u64
+                .checked_shl(lane.unwrap_or(0))
+                .is_some_and(|bit| lanes.lane_play_mask & bit != 0)
+    };
+    let mut items: Vec<Placed> = daw
+        .get_items(project.clone(), track)
+        .into_iter()
+        .filter(|i| !i.muted && plays(i.fixed_lane))
+        .map(|i| Placed {
+            at: i.position.as_seconds(),
+            length: i.length.as_seconds(),
+            gain: i.volume as f32,
+            fade_in: i.fade_in_length.as_seconds(),
+            fade_out: i.fade_out_length.as_seconds(),
+            guid: i.guid,
+            reader: OnceLock::new(),
+        })
+        .collect();
+    items.sort_by(|a, b| a.at.total_cmp(&b.at));
+    let longest = items.iter().map(|p| p.length).fold(0.0, f64::max);
+    let mut mix = TrackMix {
+        daw: daw.clone(),
+        project,
+        items,
+        longest,
+        channels: 1,
+        sample_rate: 48_000,
+    };
+    // Its format: the first item with audio says it. None has any: nothing
+    // to read.
+    let (channels, rate) = mix
+        .items
+        .iter()
+        .find_map(|p| mix.reader(p).map(|r| (r.channels(), r.sample_rate())))?;
+    mix.channels = channels;
+    mix.sample_rate = rate;
+    Some(mix)
+}
 
 /// Without a decoder there is no audio to read; the table holds nothing.
 #[cfg(not(any(feature = "audio", feature = "decode")))]
@@ -57,7 +208,7 @@ fn open(
     item: ItemRef,
     take: TakeRef,
 ) -> Option<OpenAccessor> {
-    crate::take_reader::TakeReader::open_or_decode(daw, project, item, take)
+    crate::take_reader::TakeReader::open_or_decode(daw, project, item, take).map(OpenAccessor::Take)
 }
 
 #[cfg(not(any(feature = "audio", feature = "decode")))]
@@ -74,11 +225,19 @@ fn open(
 }
 
 impl AudioAccessors for Standalone {
-    /// Not supported: a track's audio is its items mixed through its
-    /// FX, and standalone models neither the mix nor the FX.
-    ///
-    /// `None` rather than a silent buffer, so a caller finds out here
-    /// instead of concluding the track is empty.
+    /// The track's playing items mixed, before its FX ([`TrackMix`]): read
+    /// in project time. `None` for a track with no audio to read, rather
+    /// than a silent buffer, so a caller finds out here instead of
+    /// concluding the track is empty.
+    #[cfg(any(feature = "audio", feature = "decode"))]
+    fn create_track_accessor(&self, project: ProjectContext, track: TrackRef) -> Option<String> {
+        let open = OpenAccessor::Track(open_track(self, project, track)?);
+        let id = next_id();
+        table().lock().ok()?.insert(id.clone(), Arc::new(open));
+        Some(id)
+    }
+
+    #[cfg(not(any(feature = "audio", feature = "decode")))]
     fn create_track_accessor(&self, _project: ProjectContext, _track: TrackRef) -> Option<String> {
         None
     }

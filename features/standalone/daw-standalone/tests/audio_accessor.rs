@@ -269,13 +269,44 @@ fn a_destroyed_accessor_stops_serving() {
     assert!(got.samples.is_empty(), "a freed handle serves nothing");
 }
 
+/// A track reads as its items play into it: in project time, each item at
+/// its place through its volume — silence where none plays, nothing of a
+/// muted one.
 #[test]
-fn a_track_accessor_declines_because_there_is_no_mix_to_render() {
-    let (daw, _item, _dir) = project_with_audio(0.2);
+fn a_track_reads_its_items_where_they_play_through_their_gain() {
+    use daw_proto::Items as _;
+    let (daw, item, _dir) = project_with_audio(0.5);
+    daw.set_position(
+        ProjectContext::Current,
+        item.clone(),
+        daw_proto::primitives::PositionInSeconds::from_seconds(1.0),
+    )
+    .expect("moved");
+    daw_proto::Items::set_volume(&daw, ProjectContext::Current, item.clone(), 0.5)
+        .expect("its gain");
+    let take = daw
+        .create_take_accessor(ProjectContext::Current, item.clone(), TakeRef::Active)
+        .expect("the take");
+    let track = daw
+        .create_track_accessor(ProjectContext::Current, TrackRef::Index(0))
+        .expect("the track");
+
+    assert!(
+        read(&daw, &track, 0.5, 200).iter().all(|s| *s == 0.0),
+        "silence before the item"
+    );
+    let played = read(&daw, &track, 1.1, 200);
+    let source = read(&daw, &take, 0.1, 200);
+    assert!(source.iter().any(|s| s.abs() > 0.1), "the tone");
+    for (p, s) in played.iter().zip(&source) {
+        assert!((p - s * 0.5).abs() < 1e-6, "the take at half: {p} vs {s}");
+    }
+
+    daw_proto::Items::set_muted(&daw, ProjectContext::Current, item, true).expect("muted");
     assert!(
         daw.create_track_accessor(ProjectContext::Current, TrackRef::Index(0))
             .is_none(),
-        "None, not silence — a caller must not conclude the track is empty"
+        "a track whose only item is muted has nothing to read: None, not silence"
     );
 }
 
