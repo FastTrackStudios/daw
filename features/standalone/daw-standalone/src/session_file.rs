@@ -675,11 +675,13 @@ impl EnvMap {
     }
 }
 
-/// Every automation item pool in the engine, numbered from 1 for the file:
-/// one `<POOLEDENV>` per envelope and pool there (standalone pools within
-/// an envelope), in a fixed order so a project saved twice is the same.
+/// Every automation item pool in the engine, numbered from 1 for the file,
+/// by each instance's envelope and pool. Pools are the project's (an
+/// instance on another track's envelope is the same pool), so every
+/// instance of one pool gets one number; in a fixed order, so a project
+/// saved twice is the same.
 fn file_pools(p: &ProjectState) -> HashMap<(String, EnvelopeKey, i32), i32> {
-    let mut keys: Vec<(String, EnvelopeKey, i32)> = p
+    let instances: Vec<(String, EnvelopeKey, i32)> = p
         .envelopes
         .iter()
         .flat_map(|((owner, key), data)| {
@@ -688,11 +690,15 @@ fn file_pools(p: &ProjectState) -> HashMap<(String, EnvelopeKey, i32), i32> {
                 .map(move |(ai, _)| (owner.clone(), key.clone(), ai.pool_id))
         })
         .collect();
-    keys.sort_by_key(|(owner, key, pool)| (owner.clone(), format!("{key:?}"), *pool));
-    keys.dedup();
-    keys.into_iter()
-        .enumerate()
-        .map(|(i, k)| (k, i32::try_from(i + 1).unwrap_or(i32::MAX)))
+    let mut pools: Vec<i32> = instances.iter().map(|(_, _, pool)| *pool).collect();
+    pools.sort_unstable();
+    pools.dedup();
+    instances
+        .into_iter()
+        .map(|k| {
+            let n = pools.binary_search(&k.2).unwrap_or(0);
+            (k, i32::try_from(n + 1).unwrap_or(i32::MAX))
+        })
         .collect()
 }
 
@@ -1234,8 +1240,11 @@ impl<'a> Writer<'a> {
     /// Every pool's curve as a project-level `<POOLEDENV>`, in file
     /// values; empty when the engine holds no automation items.
     fn pooled(&self) -> String {
+        // One block a pool, from the first of its instances in a fixed
+        // order (its curve is every instance's).
         let mut numbered: Vec<(&(String, EnvelopeKey, i32), &i32)> = self.pools.iter().collect();
-        numbered.sort_by_key(|(_, id)| **id);
+        numbered.sort_by_key(|((owner, key, _), id)| (**id, owner.clone(), format!("{key:?}")));
+        numbered.dedup_by_key(|(_, id)| **id);
         let mut out = String::new();
         for ((owner, key, pool), id) in numbered {
             let Some(data) = self.p.envelopes.get(&(owner.clone(), key.clone())) else {

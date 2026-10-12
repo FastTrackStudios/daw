@@ -1467,3 +1467,98 @@ fn automation_items_reopen_with_their_curves() {
         "the second instance plays the pool"
     );
 }
+
+/// A pool is the project's: an instance on another track's envelope is the
+/// same curve — edited on one, changed on both — and stays one pool through
+/// a save and a reopen.
+#[test]
+fn a_pool_shared_across_tracks_stays_one() {
+    use daw_proto::automation::{
+        AddAutomationItemParams, EnvelopeLocation, EnvelopePoint, EnvelopeRef, EnvelopeType,
+        SetAutomationItemPointsParams,
+    };
+    use daw_proto::{Automation, TrackRef};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let song = tmp.path().join("Song");
+    let (daw, _, guid) = open_song(&song);
+    prepare(&daw, &guid);
+    let ctx = ProjectContext::Project(guid.clone());
+    let volume = |track: &str| {
+        EnvelopeLocation::new(
+            TrackRef::Guid(track.to_string()),
+            EnvelopeRef::Type(EnvelopeType::Volume),
+        )
+    };
+    let point = |time: f64, value: f64| EnvelopePoint {
+        time: PositionInSeconds::from_seconds(time),
+        value,
+        ..EnvelopePoint::default()
+    };
+    let span = |at: f64| {
+        AddAutomationItemParams::new(
+            PositionInSeconds::from_seconds(at),
+            Duration::from_seconds(2.0),
+        )
+    };
+    let first =
+        Automation::add_automation_item(&daw, ctx.clone(), volume(DRUMS), span(2.0)).unwrap();
+    let pool = Automation::automation_items(&daw, ctx.clone(), volume(DRUMS))[0].pool_id;
+    Automation::add_automation_item(
+        &daw,
+        ctx.clone(),
+        volume(KEYS),
+        AddAutomationItemParams::pooled(
+            pool,
+            PositionInSeconds::from_seconds(6.0),
+            Duration::from_seconds(2.0),
+        ),
+    )
+    .unwrap();
+    // Edited on the drums: the keys' instance plays it too.
+    Automation::set_automation_item_points(
+        &daw,
+        ctx.clone(),
+        volume(DRUMS),
+        SetAutomationItemPointsParams {
+            index: first,
+            points: vec![point(0.0, 0.25), point(2.0, 0.25)],
+        },
+    )
+    .unwrap();
+    let keys_curve = Automation::automation_item_points(&daw, ctx.clone(), volume(KEYS), 0);
+    assert_eq!(
+        keys_curve.len(),
+        2,
+        "the keys' instance has the curve: {keys_curve:?}"
+    );
+
+    let dir = song.join("Song.session");
+    save_session(&daw, &guid, &dir).unwrap();
+    let (fresh, _) = engine();
+    let loaded = load_session(&fresh, "Song", &dir).unwrap();
+    let back = ProjectContext::Project(loaded.project_guid.clone());
+    let (drums, keys) = (
+        Automation::automation_items(&fresh, back.clone(), volume(DRUMS)),
+        Automation::automation_items(&fresh, back.clone(), volume(KEYS)),
+    );
+    assert_eq!(
+        drums[0].pool_id, keys[0].pool_id,
+        "one pool still: {drums:?} {keys:?}"
+    );
+    // And edited after the reopen, on the keys: the drums follow.
+    Automation::set_automation_item_points(
+        &fresh,
+        back.clone(),
+        volume(KEYS),
+        SetAutomationItemPointsParams {
+            index: 0,
+            points: vec![point(0.0, 0.5), point(1.0, 0.75), point(2.0, 0.5)],
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        Automation::automation_item_points(&fresh, back, volume(DRUMS), 0).len(),
+        3
+    );
+}

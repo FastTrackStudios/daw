@@ -202,34 +202,33 @@ impl Automation for Standalone {
         location: EnvelopeLocation,
         params: AddAutomationItemParams,
     ) -> DawResult<u32> {
+        let project_guid = resolve_project(self, &project)
+            .ok_or_else(|| DawError::not_found("Project", "context"))?;
+        let id = resolve_envelope_id(self, &project_guid, &location)
+            .ok_or_else(|| DawError::not_found("envelope", "the location does not resolve"))?;
         let mut index = 0u32;
-        // A pooled instance copies its pool-mate's curve, so the two
-        // start identical — which is what pooling means before an edit.
-        let mut seeded: Vec<EnvelopePoint> = Vec::new();
-        if params.pool_id >= 0 {
-            if let Some(e) = read_envelope(self, &project, &location) {
-                if let Some((_, points)) = e
-                    .automation_items
-                    .iter()
-                    .find(|(ai, _)| ai.pool_id == params.pool_id)
-                {
-                    seeded = points.clone();
-                }
-            }
-        }
-        mutate_envelope(self, project, location, |e| {
-            index = e.automation_items.len() as u32;
+        self.with_project_mut(&project_guid, |p| {
+            // Pools are the project's, as REAPER's are: an instance of a
+            // pool on another track's envelope is the same curve.
+            let all = || p.envelopes.values().flat_map(|e| e.automation_items.iter());
+            // A pooled instance copies its pool-mate's curve, so the two
+            // start identical — which is what pooling means before an edit.
+            let seeded = (params.pool_id >= 0)
+                .then(|| {
+                    all()
+                        .find(|(ai, _)| ai.pool_id == params.pool_id)
+                        .map(|(_, points)| points.clone())
+                })
+                .flatten()
+                .unwrap_or_default();
             let pool_id = if params.pool_id >= 0 {
                 params.pool_id
             } else {
-                // A fresh pool: one past the highest in use.
-                e.automation_items
-                    .iter()
-                    .map(|(ai, _)| ai.pool_id)
-                    .max()
-                    .unwrap_or(-1)
-                    + 1
+                // A fresh pool: one past the highest in the project.
+                all().map(|(ai, _)| ai.pool_id).max().unwrap_or(-1) + 1
             };
+            let e = p.envelopes.entry(id).or_insert_with(EnvelopeData::new);
+            index = e.automation_items.len() as u32;
             e.automation_items.push((
                 AutomationItem {
                     index,
@@ -240,7 +239,7 @@ impl Automation for Standalone {
                 },
                 seeded,
             ));
-        });
+        })?;
         Ok(index)
     }
 
@@ -293,20 +292,28 @@ impl Automation for Standalone {
         for (i, p) in points.iter_mut().enumerate() {
             p.index = i as u32;
         }
+        let project_guid = resolve_project(self, &project)
+            .ok_or_else(|| DawError::not_found("Project", "context"))?;
+        let id = resolve_envelope_id(self, &project_guid, &location)
+            .ok_or_else(|| DawError::not_found("envelope", "the location does not resolve"))?;
         let mut found = false;
-        mutate_envelope(self, project, location, |e| {
-            let Some(pool) = e
-                .automation_items
-                .get(params.index as usize)
+        let _ = self.with_project_mut(&project_guid, |p| {
+            let Some(pool) = p
+                .envelopes
+                .get(&id)
+                .and_then(|e| e.automation_items.get(params.index as usize))
                 .map(|(item, _)| item.pool_id)
             else {
                 return;
             };
             found = true;
-            // Every instance of the pool carries the curve.
-            for (item, curve) in &mut e.automation_items {
-                if item.pool_id == pool {
-                    curve.clone_from(&points);
+            // Every instance of the pool carries the curve — on any
+            // envelope of the project.
+            for e in p.envelopes.values_mut() {
+                for (item, curve) in &mut e.automation_items {
+                    if item.pool_id == pool {
+                        curve.clone_from(&points);
+                    }
                 }
             }
         });
