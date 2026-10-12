@@ -712,7 +712,10 @@ fn snapshot_track(
             .is_some_and(|d| {
                 !d.points.is_empty()
                     && !matches!(
-                        d.automation_mode,
+                        crate::automation_touch::effective_mode(
+                            Some(d.automation_mode),
+                            Some(t.automation_mode)
+                        ),
                         AutomationMode::TrimRead | AutomationMode::Off
                     )
             })

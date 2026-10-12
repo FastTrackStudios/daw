@@ -233,6 +233,22 @@ impl TouchableParam {
     }
 }
 
+/// The mode an envelope plays and writes by: its own when it has been
+/// given one (anything but Trim/Read, every new envelope's), else its
+/// track's — REAPER's track envelopes follow the track's mode, so a first
+/// point written in Latch does not leave the envelope it made in
+/// Trim/Read for the rest of the pass.
+#[must_use]
+pub fn effective_mode(
+    envelope: Option<AutomationMode>,
+    track: Option<AutomationMode>,
+) -> AutomationMode {
+    match envelope {
+        Some(own) if own != AutomationMode::TrimRead => own,
+        _ => track.unwrap_or(AutomationMode::TrimRead),
+    }
+}
+
 /// Touch + latch state shared across all bay/automation operations
 /// on a `Standalone`.
 #[derive(Default)]
@@ -303,10 +319,10 @@ impl Standalone {
         // the TRACK's automation mode is the authority (REAPER's
         // I_AUTOMODE) — first write in Write mode must record even
         // though no envelope exists yet.
-        let mode = self
-            .read_envelope_mode(project.clone(), &location)
-            .or_else(|| self.read_track_mode(project.clone(), &param))
-            .unwrap_or(AutomationMode::TrimRead);
+        let mode = effective_mode(
+            self.read_envelope_mode(project.clone(), &location),
+            self.read_track_mode(project.clone(), &param),
+        );
         let should_record = match mode {
             AutomationMode::Off | AutomationMode::TrimRead | AutomationMode::Read => false,
             AutomationMode::Touch => self
