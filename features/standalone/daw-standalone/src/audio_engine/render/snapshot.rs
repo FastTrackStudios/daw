@@ -154,7 +154,7 @@ pub(crate) struct TrackSnapshot {
     /// Per-FX automation, matched 1:1 with `fx_chain`: each automated
     /// parameter's index and its envelope's points (an FX-param envelope
     /// not Off). Evaluated at each block's start ([`super::envelope::params_at`]).
-    pub(crate) fx_envs: Vec<Vec<(u32, Vec<EnvelopePoint>)>>,
+    pub(crate) fx_envs: Vec<Vec<super::envelope::Automated>>,
     /// A send takes one of its plugins' aux outputs (3/4, 5/6), so the
     /// renderer collects them.
     pub(crate) aux_taps: bool,
@@ -182,7 +182,7 @@ pub(crate) struct TrackSnapshot {
 
 #[derive(Default)]
 struct FxChainSnapshot {
-    envs: Vec<Vec<(u32, Vec<EnvelopePoint>)>>,
+    envs: Vec<Vec<super::envelope::Automated>>,
     chain: Vec<String>,
     enabled: Vec<bool>,
     params: Vec<Vec<(u32, f64)>>,
@@ -735,7 +735,7 @@ fn snapshot_track(
                 enabled.push(e.fx.enabled);
                 params.push(e.params.iter().map(|(&id, &value)| (id, value)).collect());
                 // Its parameters' envelopes, those that play.
-                let mut automated: Vec<(u32, Vec<EnvelopePoint>)> = p
+                let mut automated: Vec<super::envelope::Automated> = p
                     .envelopes
                     .iter()
                     .filter_map(|((owner, key), data)| match key {
@@ -745,12 +745,27 @@ fn snapshot_track(
                         } if owner == &t.guid && fx_guid == &e.fx.guid => {
                             active_envelope(Some(data))
                                 .filter(|points| !points.is_empty())
-                                .map(|points| (*param_index, points))
+                                .map(|points| {
+                                    // The slot's id and range, from the
+                                    // live instance; a synthetic FX's slot
+                                    // is its id, 0..1.
+                                    let (id, min, max) = e
+                                        .ranges
+                                        .get(*param_index as usize)
+                                        .copied()
+                                        .unwrap_or((*param_index, 0.0, 1.0));
+                                    super::envelope::Automated {
+                                        id,
+                                        min,
+                                        max,
+                                        points,
+                                    }
+                                })
                         }
                         _ => None,
                     })
                     .collect();
-                automated.sort_by_key(|(index, _)| *index);
+                automated.sort_by_key(|a| a.id);
                 envs.push(automated);
             }
             FxChainSnapshot {

@@ -61,22 +61,34 @@ impl<'a> EnvelopeCursor<'a> {
 /// allocate once it has grown to the chain's size.
 pub(crate) fn params_at(
     fixed: &[(u32, f64)],
-    envelopes: &[(u32, Vec<EnvelopePoint>)],
+    envelopes: &[Automated],
     at: f64,
     out: &mut Vec<(u32, f64)>,
 ) {
     out.clear();
     out.extend_from_slice(fixed);
-    for (index, points) in envelopes {
-        let Some(value) = EnvelopeCursor::new(points).eval_at(at) else {
+    for a in envelopes {
+        let Some(value) = EnvelopeCursor::new(&a.points).eval_at(at) else {
             continue;
         };
-        let value = value.clamp(0.0, 1.0);
-        match out.iter_mut().find(|(i, _)| i == index) {
+        // An envelope is 0..1 along the parameter's range; the plugin
+        // reads its plain value, under its own id.
+        let value = (a.max - a.min).mul_add(value.clamp(0.0, 1.0), a.min);
+        match out.iter_mut().find(|(i, _)| *i == a.id) {
             Some(slot) => slot.1 = value,
-            None => out.push((*index, value)),
+            None => out.push((a.id, value)),
         }
     }
+}
+
+/// One automated parameter of an FX: the id its plugin reads it under, its
+/// plain range, and its envelope (0..1 along that range).
+#[derive(Clone, Debug)]
+pub(crate) struct Automated {
+    pub(crate) id: u32,
+    pub(crate) min: f64,
+    pub(crate) max: f64,
+    pub(crate) points: Vec<EnvelopePoint>,
 }
 
 #[cfg(test)]
@@ -96,7 +108,12 @@ mod params_tests {
     #[test]
     fn an_automated_parameter_follows_its_envelope() {
         let fixed = [(0, 0.2), (1, 0.7)];
-        let envelopes = vec![(1, vec![point(0.0, 0.0), point(2.0, 1.0)])];
+        let envelopes = vec![Automated {
+            id: 1,
+            min: 0.0,
+            max: 1.0,
+            points: vec![point(0.0, 0.0), point(2.0, 1.0)],
+        }];
         let mut out = Vec::new();
         params_at(&fixed, &envelopes, 1.0, &mut out);
         assert_eq!(out[0], (0, 0.2));

@@ -53,6 +53,11 @@ pub struct FxEntry {
     pub fx: Fx,
     pub state_chunk: String,
     pub params: HashMap<u32, f64>,
+    /// The live instance's parameters by slot: each one's id and plain
+    /// range — what turns an automation envelope's 0..1 at a slot into
+    /// the value the plugin reads under its id. Empty for a synthetic FX
+    /// (a slot is its id, its range 0..1).
+    pub ranges: Vec<(u32, f64, f64)>,
 }
 
 /// Per-track properties that aren't carried on the proto `Track` struct.

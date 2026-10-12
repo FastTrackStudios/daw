@@ -248,6 +248,7 @@ impl Effects for Standalone {
             .as_mut()
             .map(|p| p.params().len() as u32)
             .unwrap_or(8);
+        let ranges = param_ranges(real_plugin.as_mut());
         let real_descriptor = real_plugin.as_ref().map(|p| p.descriptor());
         let plugin_format = real_descriptor
             .as_ref()
@@ -287,6 +288,7 @@ impl Effects for Standalone {
                     } else {
                         default_params()
                     },
+                    ranges,
                 });
                 new_guid
             })
@@ -324,6 +326,7 @@ impl Effects for Standalone {
             .as_mut()
             .map(|p| p.params().len() as u32)
             .unwrap_or(8);
+        let ranges = param_ranges(real_plugin.as_mut());
         let real_descriptor = real_plugin.as_ref().map(|p| p.descriptor());
         let has_instance = real_plugin.is_some();
         let new_guid = self
@@ -355,6 +358,7 @@ impl Effects for Standalone {
                         } else {
                             default_params()
                         },
+                        ranges,
                     },
                 );
                 // Renumber.
@@ -1001,4 +1005,17 @@ fn guess_fx_type(name: &str) -> FxType {
     } else {
         FxType::Unknown
     }
+}
+
+/// A live instance's parameters by slot, as an [`FxEntry`] keeps them:
+/// each one's id and plain range. Empty with no instance.
+fn param_ranges(
+    plugin: Option<&mut Box<dyn crate::plugin::PluginInstance>>,
+) -> Vec<(u32, f64, f64)> {
+    plugin.map_or_else(Vec::new, |p| {
+        p.params()
+            .iter()
+            .map(|info| (info.id, info.min, info.max))
+            .collect()
+    })
 }

@@ -79,6 +79,7 @@ impl FxChains for Standalone {
                 fx,
                 state_chunk: String::new(),
                 params: Default::default(),
+                ranges: Vec::new(),
             };
             chain.push(entry);
             chain.len() as u32 - 1
