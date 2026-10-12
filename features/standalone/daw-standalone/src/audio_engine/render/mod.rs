@@ -1551,7 +1551,10 @@ impl ProjectRenderer {
                     let time = start_seconds + frame as f64 * rate * inv_rate;
                     let v_main = c_vol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
                     let v_prefx = c_pvol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
-                    let mut vol = t.volume * v_main * v_prefx;
+                    // Read and the writing modes: the envelope is the
+                    // volume; Trim/Read: the fader trims it.
+                    let fader = if t.volume_replaces { 1.0 } else { t.volume };
+                    let mut vol = fader * v_main * v_prefx;
                     let p_main = c_pan
                         .as_mut()
                         .and_then(|c| c.eval_at(time))
@@ -1562,7 +1565,8 @@ impl ProjectRenderer {
                         .and_then(|c| c.eval_at(time))
                         .map(|v| (v - 0.5) * 2.0)
                         .unwrap_or(0.0);
-                    let mut pan = t.pan + p_main + p_prefx;
+                    let knob = if t.pan_replaces { 0.0 } else { t.pan };
+                    let mut pan = knob + p_main + p_prefx;
                     // VCA leads ride this follower: gain multiplies,
                     // pan offsets, lead mute envelopes gate.
                     let mut vca_env_muted = false;

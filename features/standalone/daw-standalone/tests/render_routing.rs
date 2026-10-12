@@ -1306,3 +1306,41 @@ fn stretch_markers_warp_playback() {
     // After the last marker: rate 1 again, continuing from source 0.25.
     assert!((at(0.75) - 0.5).abs() < 1e-3, "at 0.75 s got {}", at(0.75));
 }
+
+/// Read (and the writing modes) play the volume envelope as the volume:
+/// the fader is not applied on top. Trim/Read keeps it as a trim.
+#[test]
+fn a_read_volume_envelope_is_the_volume_and_trim_read_trims_it() {
+    use daw_proto::Automation;
+    use daw_proto::automation::{AddPointParams, EnvelopeLocation, EnvelopeRef, EnvelopeType};
+    use daw_proto::primitives::{AutomationMode, PositionInSeconds};
+
+    let (daw, guid) = seeded();
+    let ctx = ProjectContext::Project(guid);
+    let t = Tracks::add(&daw, ctx.clone(), "T", None).unwrap();
+    create_item_with_audio(&daw, "p", &t, 0.0, 1.0, const_audio(1.0));
+    // The fader at a quarter, the envelope at a half.
+    Tracks::set_volume(&daw, ctx.clone(), TrackRef::Guid(t.clone()), 0.25).unwrap();
+    let loc = EnvelopeLocation::new(
+        TrackRef::Guid(t.clone()),
+        EnvelopeRef::Type(EnvelopeType::Volume),
+    );
+    Automation::add_point(
+        &daw,
+        ctx.clone(),
+        loc.clone(),
+        AddPointParams::linear(PositionInSeconds::from_seconds(0.0), 0.5),
+    );
+    let level = || {
+        let block =
+            ProjectRenderer::new(&daw, "p", SAMPLE_RATE).render_block(0, SAMPLE_RATE as usize / 10);
+        rms_l(&block) + rms_r(&block)
+    };
+    let trimmed = level();
+    Automation::set_automation_mode(&daw, ctx, loc, AutomationMode::Read);
+    let read = level();
+    assert!(
+        (read / trimmed - 4.0).abs() < 0.05,
+        "Read plays the envelope's half, Trim/Read a half of the fader's quarter: {read} vs {trimmed}"
+    );
+}

@@ -242,6 +242,10 @@ pub(crate) struct AutomationTouchState {
     /// Params that have been touched at least once since transport
     /// started playing (cleared on Stop).
     pub latched: HashSet<TouchableParam>,
+    /// Where each param last laid a point in this pass: the next one
+    /// replaces what the envelope had between them, as a write pass
+    /// over old automation does.
+    pub last_written: std::collections::HashMap<TouchableParam, f64>,
 }
 
 impl Standalone {
@@ -259,11 +263,12 @@ impl Standalone {
     /// Release a previously-touched param. Stays in `latched` until
     /// transport stops (Latch mode keeps recording).
     pub fn release_param(&self, param: TouchableParam) {
-        self.automation_touch
+        let mut s = self
+            .automation_touch
             .lock()
-            .expect("automation_touch poisoned")
-            .touched
-            .remove(&param);
+            .expect("automation_touch poisoned");
+        s.touched.remove(&param);
+        s.last_written.remove(&param);
     }
 
     /// Clear all latched state. Called automatically when transport
@@ -275,6 +280,7 @@ impl Standalone {
             .expect("automation_touch poisoned");
         s.latched.clear();
         s.touched.clear();
+        s.last_written.clear();
     }
 
     /// Write a value to a parameter. Always updates the static
@@ -326,6 +332,25 @@ impl Standalone {
             return Ok(());
         }
         let time_seconds = Transport::get_position(self, project.clone());
+        // What the pass rode over since its last point goes: the new
+        // automation replaces the old, never interleaves with it.
+        let previous = self
+            .automation_touch
+            .lock()
+            .expect("automation_touch poisoned")
+            .last_written
+            .insert(param.clone(), time_seconds);
+        if let Some(from) = previous.filter(|from| *from < time_seconds) {
+            Automation::delete_points_in_range(
+                self,
+                project.clone(),
+                location.clone(),
+                daw_proto::automation::TimeRangeParams::new(
+                    PositionInSeconds::from_seconds(from + 1e-6),
+                    PositionInSeconds::from_seconds(time_seconds),
+                ),
+            );
+        }
         Automation::add_point(
             self,
             project,

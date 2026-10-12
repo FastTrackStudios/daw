@@ -220,3 +220,59 @@ async fn write_param_when_stopped_does_not_record() {
     );
     assert_eq!(pts.len(), 1);
 }
+
+/// A touch pass over old automation replaces it: between the first and
+/// the last point the pass lays, none of the old points is left.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_touch_pass_replaces_what_it_rides_over() {
+    let (daw, _guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let t = Tracks::add(&daw, ctx.clone(), "T", None).unwrap();
+    let at = EnvelopeLocation::new(
+        TrackRef::Guid(t.clone()),
+        EnvelopeRef::Type(EnvelopeType::Volume),
+    );
+    // Old automation: a point every 10 ms for two seconds, all at 0.9.
+    for k in 0..200 {
+        Automation::add_point(
+            &daw,
+            ctx.clone(),
+            at.clone(),
+            daw_proto::automation::AddPointParams::linear(
+                daw_proto::primitives::PositionInSeconds::from_seconds(f64::from(k) * 0.01),
+                0.9,
+            ),
+        );
+    }
+    set_mode(&daw, ctx.clone(), &t, AutomationMode::Touch);
+    Transport::play(&daw, ctx.clone()).unwrap();
+    tokio::time::sleep(Duration::from_millis(40)).await;
+    let param = TouchableParam::TrackVolume {
+        track_guid: t.clone(),
+    };
+    daw.touch_param(param.clone());
+    for value in [0.5, 0.4, 0.3] {
+        daw.write_param(ctx.clone(), param.clone(), value).unwrap();
+        tokio::time::sleep(Duration::from_millis(120)).await;
+    }
+    daw.release_param(param);
+    let pts = Automation::points(&daw, ctx, at);
+    let written: Vec<f64> = pts
+        .iter()
+        .filter(|p| p.value < 0.6)
+        .map(|p| p.time.as_seconds())
+        .collect();
+    let (Some(first), Some(last)) = (written.first(), written.last()) else {
+        panic!("the pass wrote: {pts:?}");
+    };
+    let left = pts
+        .iter()
+        .filter(|p| p.value > 0.8 && p.time.as_seconds() > *first && p.time.as_seconds() < *last)
+        .count();
+    assert_eq!(left, 0, "old points under the pass: {written:?}");
+    assert!(
+        pts.iter()
+            .any(|p| p.value > 0.8 && p.time.as_seconds() > *last),
+        "after it, the old automation"
+    );
+}

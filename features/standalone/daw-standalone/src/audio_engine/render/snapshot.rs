@@ -172,6 +172,12 @@ pub(crate) struct TrackSnapshot {
     /// Pre-FX pan envelope. Blended additively with the static + main
     /// pan envelope, then clamped.
     pub(crate) pan_prefx_env: Option<Vec<EnvelopePoint>>,
+    /// The volume envelope IS the volume — its mode reads or writes it
+    /// (Read, Touch, Latch, Write), as REAPER plays those: the fader is
+    /// not applied on top. Trim/Read leaves the fader as a trim.
+    pub(crate) volume_replaces: bool,
+    /// The same for pan: the envelope's pan, not added to the knob's.
+    pub(crate) pan_replaces: bool,
 }
 
 #[derive(Default)]
@@ -698,6 +704,19 @@ fn snapshot_track(
     let track_env = |ty: EnvelopeType| {
         active_envelope(p.envelopes.get(&(t.guid.clone(), EnvelopeKey::Track(ty))))
     };
+    // A track envelope with points, in a mode that reads it as the value
+    // itself rather than as a trim.
+    let replaces = |ty: EnvelopeType| {
+        p.envelopes
+            .get(&(t.guid.clone(), EnvelopeKey::Track(ty)))
+            .is_some_and(|d| {
+                !d.points.is_empty()
+                    && !matches!(
+                        d.automation_mode,
+                        AutomationMode::TrimRead | AutomationMode::Off
+                    )
+            })
+    };
 
     // FX chain (track-side only — input FX is a future addition).
     let fx = p
@@ -781,6 +800,8 @@ fn snapshot_track(
         mute_env: track_env(EnvelopeType::Mute),
         volume_prefx_env: track_env(EnvelopeType::VolumePrefx),
         pan_prefx_env: track_env(EnvelopeType::PanPrefx),
+        volume_replaces: replaces(EnvelopeType::Volume),
+        pan_replaces: replaces(EnvelopeType::Pan),
     }
 }
 
