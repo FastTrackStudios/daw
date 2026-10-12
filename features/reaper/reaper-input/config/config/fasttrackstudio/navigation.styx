@@ -24,6 +24,10 @@ bindings (
     {keys "<S-j>",   action 40421, desc "Extend selection to next track"}
     {keys "<S-k>",   action 40420, desc "Extend selection to previous track"}
 
+    // A page of bars at a time (FTS Session: SESSION_STEP)
+    {keys "[",       action "FTS_STEP_PREV", desc "View the page of bars before"}
+    {keys "]",       action "FTS_STEP_NEXT", desc "View the next page of bars"}
+
     // Markers
     {keys m,       action 40157, desc "Insert marker at cursor"}
     {keys "<C-m>",   action 40172, desc "Go to previous marker"}
