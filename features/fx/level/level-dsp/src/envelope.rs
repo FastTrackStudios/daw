@@ -507,7 +507,9 @@ fn value_at(points: &[EnvPoint], t: f64) -> f64 {
     if points.is_empty() {
         return 0.0;
     }
-    match points.iter().position(|p| p.t_s >= t) {
+    // The first point after `t`: a held point's value starts AT its own
+    // time, so at a gate's edge this is the gate as it is from there on.
+    match points.iter().position(|p| p.t_s > t) {
         None => points[points.len() - 1].db,
         Some(0) => points[0].db,
         Some(i) => {
@@ -547,15 +549,6 @@ fn span_value_at(spans: &[GainSpan], t: f64) -> f64 {
 /// stage is simply leaving it out of `Contributions`, which is why
 /// bypass is a mix decision rather than a display toggle.
 pub fn composite(parts: &Contributions) -> Vec<EnvPoint> {
-    let mut times: Vec<f64> = Vec::new();
-    for p in parts
-        .gate_pts()
-        .iter()
-        .chain(parts.breath_pts())
-        .chain(parts.ride_pts())
-    {
-        times.push(p.t_s);
-    }
     // A span is a *step*, but the composite's points ramp. Without a
     // point immediately before each edge carrying the pre-edge value,
     // the ramp into the edge starts at the previous breakpoint and the
@@ -563,6 +556,21 @@ pub fn composite(parts: &Contributions) -> Vec<EnvPoint> {
     // the vowel before the "ess", which is the exact failure that made
     // sibilance a span instead of a band-split in the first place.
     const EDGE: f64 = 1e-4;
+    let mut times: Vec<f64> = Vec::new();
+    for p in parts
+        .gate_pts()
+        .iter()
+        .chain(parts.breath_pts())
+        .chain(parts.ride_pts())
+    {
+        // A held point (the gate's) is a step too: the value before it
+        // just before it, or the sum ramps from there across the whole
+        // gap to the next breakpoint — a gate opening over seconds.
+        if p.hold {
+            times.push((p.t_s - EDGE).max(0.0));
+        }
+        times.push(p.t_s);
+    }
     for s in parts.sibilance_spans() {
         times.push((s.from_s - EDGE).max(0.0));
         times.push(s.from_s);
@@ -608,6 +616,25 @@ fn edges(flags: &[bool]) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A gate is a step in the sum, not a ramp to the next breakpoint:
+    /// opened at 1.0 s with nothing else changing until a ride point at
+    /// 3.0 s, the sum is open (the ride's level) from 1.0 s on, and closed
+    /// up to it.
+    #[test]
+    fn a_gate_opens_as_a_step_in_the_sum() {
+        let held = |t_s: f64, db: f64| EnvPoint { t_s, db, hold: true };
+        let parts = Contributions {
+            gate: vec![held(0.0, -30.0), held(1.0, 0.0)],
+            ride: vec![EnvPoint::new(0.0, 2.0), EnvPoint::new(3.0, 2.0)],
+            ..Contributions::default()
+        };
+        let sum = composite(&parts);
+        let at = |t: f64| value_at(&sum, t);
+        assert!((at(0.999) - (-28.0)).abs() < 1e-6, "closed before: {}", at(0.999));
+        assert!((at(1.0) - 2.0).abs() < 1e-6, "open at the edge: {}", at(1.0));
+        assert!((at(2.0) - 2.0).abs() < 1e-6, "and after it: {}", at(2.0));
+    }
 
     fn ramp(n: usize, from: f64, to: f64) -> Vec<EnvPoint> {
         (0..n)
