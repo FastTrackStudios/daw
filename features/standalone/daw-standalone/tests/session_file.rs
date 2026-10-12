@@ -1562,3 +1562,141 @@ fn a_pool_shared_across_tracks_stays_one() {
         3
     );
 }
+
+/// A song saved by an engine that cannot make one of its built-in FX (a
+/// build without that plugin) keeps it: the FX comes back, its state with
+/// it, when an engine that can make it opens the song again.
+#[test]
+fn a_built_in_this_engine_cannot_make_survives_its_save() {
+    let tmp = tempfile::tempdir().unwrap();
+    let song = tmp.path().join("Song");
+    let (daw, _, guid) = open_song(&song);
+    prepare(&daw, &guid);
+    let fx = Effects::add(
+        &daw,
+        ProjectContext::Project(guid.clone()),
+        FxChainContext::Track(DRUMS.to_string()),
+        COUNT,
+    )
+    .expect("the built-in adds");
+    daw.apply_plugin_state(&fx, b"kit=heavy thwacky").unwrap();
+    let dir = song.join("Song.session");
+    save_session(&daw, &guid, &dir).unwrap();
+
+    // Opened and saved by an engine with no such plugin.
+    let without = Standalone::new();
+    let blind = load_session(&without, "Song", &dir).unwrap();
+    save_session(&without, &blind.project_guid, &dir).unwrap();
+
+    // Opened again by one that has it: there, and as it was.
+    let (with, _) = engine();
+    let back = load_session(&with, "Song", &dir).unwrap();
+    let counts: Vec<String> = with
+        .read_project(&back.project_guid, |p| {
+            p.fx_chains
+                .get(&FxChainKey::Track(DRUMS.to_string()))
+                .map(|c| {
+                    c.iter()
+                        .filter(|e| e.fx.name == COUNT)
+                        .map(|e| e.fx.guid.clone())
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+    assert!(
+        !counts.is_empty(),
+        "the built-in survived a save by an engine without it"
+    );
+    assert!(
+        counts.iter().any(|fx| with.save_plugin_state(fx).ok().as_deref() == Some(&b"kit=heavy thwacky"[..])),
+        "and what it held"
+    );
+}
+
+/// A factory that makes only the clicks — an engine built without the
+/// counts, as a desktop build without a plugin feature is.
+struct ClicksOnly(GuideFactory);
+
+impl FxFactory for ClicksOnly {
+    fn installed(&self) -> Vec<InstalledFx> {
+        self.0
+            .installed()
+            .into_iter()
+            .filter(|f| f.name == CLICK)
+            .collect()
+    }
+    fn create(&self, name: &str, sample_rate: f64) -> Option<Box<dyn PluginInstance>> {
+        (name == CLICK)
+            .then(|| self.0.create(name, sample_rate))
+            .flatten()
+    }
+    fn provides(&self, name: &str) -> bool {
+        name == CLICK
+    }
+}
+
+/// The same when the engine without it CHANGES another built-in on the
+/// track: the track's chain is written again, and the one it could not
+/// make is still in it, with what it held.
+#[test]
+fn a_built_in_this_engine_cannot_make_survives_an_edit_beside_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let song = tmp.path().join("Song");
+    let (daw, _, guid) = open_song(&song);
+    prepare(&daw, &guid);
+    let ctx = ProjectContext::Project(guid.clone());
+    let chain = FxChainContext::Track(DRUMS.to_string());
+    let click = Effects::add(&daw, ctx.clone(), chain.clone(), CLICK).expect("a click");
+    daw.apply_plugin_state(&click, b"click=a").unwrap();
+    let count = Effects::add(&daw, ctx, chain, COUNT).expect("a count");
+    daw.apply_plugin_state(&count, b"kit=heavy thwacky")
+        .unwrap();
+    let dir = song.join("Song.session");
+    save_session(&daw, &guid, &dir).unwrap();
+
+    // Opened by an engine that makes the clicks and not the counts, the
+    // click changed, saved.
+    let partial = Standalone::new();
+    partial.set_fx_factory(Arc::new(ClicksOnly(GuideFactory::default())));
+    let opened = load_session(&partial, "Song", &dir).unwrap();
+    let clicks: Vec<String> = partial
+        .read_project(&opened.project_guid, |p| {
+            p.fx_chains
+                .get(&FxChainKey::Track(DRUMS.to_string()))
+                .map(|c| {
+                    c.iter()
+                        .filter(|e| e.fx.name == CLICK)
+                        .map(|e| e.fx.guid.clone())
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+    for fx in &clicks {
+        partial.apply_plugin_state(fx, b"click=b").unwrap();
+    }
+    save_session(&partial, &opened.project_guid, &dir).unwrap();
+
+    let (with, _) = engine();
+    let back = load_session(&with, "Song", &dir).unwrap();
+    let held: Vec<Vec<u8>> = with
+        .read_project(&back.project_guid, |p| {
+            p.fx_chains
+                .get(&FxChainKey::Track(DRUMS.to_string()))
+                .map(|c| c.iter().map(|e| e.fx.guid.clone()).collect::<Vec<_>>())
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|fx| with.save_plugin_state(fx).ok())
+        .collect();
+    assert!(
+        held.iter().any(|s| s == b"click=b"),
+        "the edit kept: {held:?}"
+    );
+    assert!(
+        held.iter().any(|s| s == b"kit=heavy thwacky"),
+        "the count it could not make, kept beside it: {held:?}"
+    );
+}
