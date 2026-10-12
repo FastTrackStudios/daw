@@ -72,7 +72,7 @@ pub enum TakeEnvelopeKind {
 
 /// Reference to an envelope
 #[repr(C)]
-#[derive(Clone, Debug, Facet)]
+#[derive(Clone, Debug, PartialEq, Facet)]
 pub enum EnvelopeRef {
     /// Reference by envelope type (for track envelopes)
     Type(EnvelopeType),
@@ -220,7 +220,7 @@ pub enum EnvelopeShape {
 }
 
 /// A point on an automation envelope
-#[derive(Clone, Debug, Facet)]
+#[derive(Clone, Debug, PartialEq, Facet)]
 pub struct EnvelopePoint {
     /// Index of this point in the envelope
     pub index: u32,
