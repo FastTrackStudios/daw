@@ -611,7 +611,7 @@ impl Daw {
     /// Access the dock host for registering and toggling UI panels.
     ///
     /// Backed by `DockHostService` — the platform-portable trait. The
-    /// REAPER+Dioxus implementation lives in `daw-reaper-dioxus`; tests
+    /// REAPER+Dioxus implementation lives in `reaper-dioxus`; tests
     /// can swap in `MockDockHost` (under `daw-proto`'s `test-utils`
     /// feature) without spinning up REAPER or a GPU.
     pub fn dock_host(&self) -> DockHost {
