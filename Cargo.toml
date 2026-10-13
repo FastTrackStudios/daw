@@ -1,0 +1,40 @@
+[package]
+name = "session-format"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The daw's own project file: `Song.session` (a Loro doc, round-tripping DAWproject and RPP), and its Turso store"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+store = ["dep:pollster", "dep:turso", "dep:zstd"]
+
+[dependencies]
+daw-proto = { workspace = true }
+dawfile-reaper = { workspace = true }
+facet = { workspace = true }
+facet-styx = { workspace = true }
+interchange = { workspace = true, features = ["dawproject"] }
+loro = { workspace = true }
+pollster = { workspace = true, optional = true }
+sha2 = { workspace = true }
+styx-format = { workspace = true }
+thiserror = { workspace = true }
+turso = { version = "0.8.2", default-features = false, optional = true }
+uuid = { workspace = true }
+zstd = { version = "0.13", optional = true }
+
+[dev-dependencies]
+session-format = { path = ".", features = ["store"] }
+interchange = { workspace = true, features = ["aaf", "dawproject"] }
+# required-features): a plain `cargo test` of the workspace builds them all.
+daw-proto = { workspace = true }
+dawfile-reaper = { workspace = true }
+loro = { workspace = true }
+tempfile = { workspace = true }
+uuid = { workspace = true }
