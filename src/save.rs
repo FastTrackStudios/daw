@@ -11,13 +11,13 @@
 //! (numbered up when taken), so the source session stays exactly as
 //! REAPER left it and the experiment is always inspectable next to it.
 //!
-//! Spec: `features/expression-editor/spec/drum-mode.md`, `drums.save.*`.
+//! Spec: `features/editor/spec/drum-mode.md`, `drums.save.*`.
 
 use std::path::{Path, PathBuf};
 
-use formats::session::document::{ItemNode, SourceRef, TakeNode};
-use formats::session::id::EntityId;
-use formats::session::project::DawProject;
+use session_format::document::{ItemNode, SourceRef, TakeNode};
+use session_format::id::EntityId;
+use session_format::project::DawProject;
 
 use crate::sync::{ProjectState, Standalone};
 

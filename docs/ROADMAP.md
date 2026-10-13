@@ -3,7 +3,7 @@
 *2026-08-19. This document is the forward plan for the standalone DAW
 engine and the workstation window built on it. The requirements that
 are already targets live in
-`features/expression-editor/spec/drum-mode.md` (`r[drums.*]`, tracey-
+`features/editor/spec/drum-mode.md` (`r[drums.*]`, tracey-
 tracked); this file is the part that comes after them.*
 
 ## What exists today

@@ -1,7 +1,7 @@
 //! Opening a real multitrack kit session through `Projects::open`.
 //!
 //! The reference project lives outside the repo (`02 LORD OF THE FIGHT`,
-//! the drum-mode target in `features/expression-editor/spec/drum-mode.md`);
+//! the drum-mode target in `features/editor/spec/drum-mode.md`);
 //! the test skips when it is not mounted so CI stays green, and bites when
 //! it is.
 
