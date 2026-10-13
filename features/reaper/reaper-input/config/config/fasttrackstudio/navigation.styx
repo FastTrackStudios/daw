@@ -27,6 +27,9 @@ bindings (
     // A page of bars at a time (FTS Session: SESSION_STEP)
     {keys "[",       action "FTS_STEP_PREV", desc "View the page of bars before"}
     {keys "]",       action "FTS_STEP_NEXT", desc "View the next page of bars"}
+    {keys "<S-{>",   action "FTS_POI_PREV", desc "The point of interest before"}
+    {keys "<S-}>",   action "FTS_POI_NEXT", desc "The next point of interest"}
+    {keys "<S-|>",   action "FTS_POI_TOGGLE", desc "Tick the point of interest off, or open it again"}
 
     // Markers
     {keys m,       action 40157, desc "Insert marker at cursor"}
