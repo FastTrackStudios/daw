@@ -304,41 +304,7 @@ impl TdStretch {
     /// matches `prev_overlap`, with a slight preference for positions near the
     /// centre of the search window to reduce drift.
     fn find_best_offset(&self) -> usize {
-        // Reference energy is constant across all candidates.
-        let e_ref: f64 = self.prev_overlap.iter().map(|s| s * s).sum();
-        if e_ref < 1e-12 {
-            return self.seek_len / 2;
-        }
-
-        let mid = self.seek_len as f64 * 0.5;
-        let inv_mid = 1.0 / mid.max(1.0);
-        let mut best_corr = f64::NEG_INFINITY;
-        let mut best_pos = 0;
-
-        for pos in 0..self.seek_len {
-            let mut corr = 0.0f64;
-            let mut e_cand = 0.0f64;
-
-            for i in 0..self.overlap_len {
-                let c = self.input[pos + i];
-                corr += self.prev_overlap[i] * c;
-                e_cand += c * c;
-            }
-
-            let denom = (e_cand * e_ref).sqrt();
-            let mut norm = if denom > 1e-12 { corr / denom } else { 0.0 };
-
-            // Centre bias: prefer mid-window positions to reduce drift.
-            let d = (pos as f64 - mid) * inv_mid;
-            norm *= 1.0 - 0.25 * d * d;
-
-            if norm > best_corr {
-                best_corr = norm;
-                best_pos = pos;
-            }
-        }
-
-        best_pos
+        best_offset(&self.prev_overlap, &self.input, self.seek_len)
     }
 
     fn reset(&mut self) {
@@ -348,6 +314,147 @@ impl TdStretch {
         self.pending_skip = 0.0;
         self.is_first = true;
     }
+}
+
+/// Normalised cross-correlation search with centre bias (SoundTouch-style).
+///
+/// Scans `seek_len` candidate positions in `input` and returns the offset
+/// whose first `reference.len()` samples best match `reference`, with a
+/// slight preference for positions near the centre of the search window
+/// to reduce drift.
+fn best_offset(reference: &[f64], input: &[f64], seek_len: usize) -> usize {
+    let overlap_len = reference.len();
+    // Reference energy is constant across all candidates.
+    let e_ref: f64 = reference.iter().map(|s| s * s).sum();
+    if e_ref < 1e-12 {
+        return seek_len / 2;
+    }
+
+    let mid = seek_len as f64 * 0.5;
+    let inv_mid = 1.0 / mid.max(1.0);
+    let mut best_corr = f64::NEG_INFINITY;
+    let mut best_pos = 0;
+
+    for pos in 0..seek_len {
+        if pos + overlap_len > input.len() {
+            break;
+        }
+        let mut corr = 0.0f64;
+        let mut e_cand = 0.0f64;
+
+        for i in 0..overlap_len {
+            let c = input[pos + i];
+            corr += reference[i] * c;
+            e_cand += c * c;
+        }
+
+        let denom = (e_cand * e_ref).sqrt();
+        let mut norm = if denom > 1e-12 { corr / denom } else { 0.0 };
+
+        // Centre bias: prefer mid-window positions to reduce drift.
+        let d = (pos as f64 - mid) * inv_mid;
+        norm *= 1.0 - 0.25 * d * d;
+
+        if norm > best_corr {
+            best_corr = norm;
+            best_pos = pos;
+        }
+    }
+
+    best_pos
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Offline time-stretch (multichannel)
+// ═══════════════════════════════════════════════════════════════════
+
+/// Time-stretch planar audio offline with WSOLA — the [`TdStretch`] core
+/// (sequences, centre-biased splice search, linear crossfade), on every
+/// channel at once: the splice points are chosen once, from the channels'
+/// mix, so a stereo pair stays in phase with itself.
+///
+/// `channels` holds the input, `start` the frame the output begins at,
+/// `tempo` how many input frames each output frame advances (0.5 plays
+/// the input at half speed, its pitch kept), `out_len` how many frames to
+/// make. `grain` is the sequence length in frames (1024 at 48 kHz in the
+/// shifter); it shrinks to fit a short input, which only has so much to
+/// splice from. Reads only inside the input.
+pub fn stretch_planar(
+    channels: &[Vec<f32>],
+    start: usize,
+    tempo: f64,
+    out_len: usize,
+    grain: usize,
+) -> Vec<Vec<f32>> {
+    let mut out: Vec<Vec<f32>> = channels.iter().map(|_| vec![0.0; out_len]).collect();
+    let in_len = channels.iter().map(Vec::len).min().unwrap_or(0);
+    if in_len == 0 || out_len == 0 {
+        return out;
+    }
+    let start = start.min(in_len - 1);
+    // Sequence, search and overlap lengths, as `TdStretch::configure`
+    // sets them — shrunk so a sequence and its search fit in the input.
+    let seq_len = grain.min(in_len * 4 / 5).max(8);
+    let seek_len = (seq_len / 4).max(2);
+    let overlap_len = (seq_len / 8).max(2);
+    let hop = seq_len - overlap_len;
+    let mix: Vec<f64> = (0..in_len)
+        .map(|i| channels.iter().map(|c| f64::from(c[i])).sum::<f64>())
+        .collect();
+    let last_start = in_len.saturating_sub(seq_len);
+
+    // The first sequence as it is.
+    let mut at = start.min(last_start);
+    let mut written = 0;
+    let copy = |out: &mut Vec<Vec<f32>>, from: usize, to_out: usize, n: usize| {
+        for (o, c) in out.iter_mut().zip(channels) {
+            for i in 0..n {
+                if let (Some(slot), Some(&s)) = (o.get_mut(to_out + i), c.get(from + i)) {
+                    *slot = s;
+                }
+            }
+        }
+    };
+    copy(&mut out, at, 0, hop);
+    written += hop;
+    let mut k = 1usize;
+    while written < out_len {
+        // Where the input continues naturally from the last sequence, and
+        // where the tempo says it should be by now.
+        let natural = at + hop;
+        let ideal = start as f64 + (k * hop) as f64 * tempo;
+        let lo = (ideal - seek_len as f64 / 2.0).round().max(0.0) as usize;
+        let lo = lo.min(last_start);
+        let reference: Vec<f64> = (0..overlap_len)
+            .map(|i| mix.get(natural + i).copied().unwrap_or(0.0))
+            .collect();
+        let window = &mix[lo..in_len];
+        let seek = seek_len.min(last_start - lo + 1);
+        let best = lo + best_offset(&reference, window, seek);
+        // Crossfade the last sequence's own continuation into the new one,
+        // then the new one's middle as it is.
+        let inv = 1.0 / overlap_len as f64;
+        for (o, c) in out.iter_mut().zip(channels) {
+            for i in 0..overlap_len {
+                let t = (i as f64 * inv) as f32;
+                let from = c.get(natural + i).copied().unwrap_or(0.0);
+                let to = c.get(best + i).copied().unwrap_or(0.0);
+                if let Some(slot) = o.get_mut(written + i) {
+                    *slot = from * (1.0 - t) + to * t;
+                }
+            }
+        }
+        copy(
+            &mut out,
+            best + overlap_len,
+            written + overlap_len,
+            hop - overlap_len,
+        );
+        written += hop;
+        at = best;
+        k += 1;
+    }
+    out
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -625,5 +732,49 @@ mod tests {
             error_cents < 100.0,
             "Octave down should be ~{expected}Hz, got {measured_freq:.1}Hz ({error_cents:.0}c error)"
         );
+    }
+}
+
+#[cfg(test)]
+mod offline_tests {
+    use super::stretch_planar;
+
+    /// Zero crossings a second of `x` at `sr`.
+    fn crossings(x: &[f32], sr: f64) -> f64 {
+        let n = x
+            .windows(2)
+            .filter(|w| (w[0] < 0.0) != (w[1] < 0.0))
+            .count();
+        n as f64 / (x.len() as f64 / sr)
+    }
+
+    #[test]
+    fn a_slowed_stretch_keeps_its_pitch_and_its_stereo() {
+        let sr = 48_000.0;
+        let tone = |f: f64, n: usize| -> Vec<f32> {
+            (0..n)
+                .map(|i| (std::f64::consts::TAU * f * i as f64 / sr).sin() as f32)
+                .collect()
+        };
+        let input = vec![tone(440.0, 9_600), tone(440.0, 9_600)];
+        // 100 ms of source over 250 ms: 0.4 of its speed.
+        let out = stretch_planar(&input, 0, 0.4, 12_000, 1024);
+        assert_eq!(out[0].len(), 12_000, "as long as asked");
+        let rate = crossings(&out[0], sr);
+        assert!(
+            (rate - 880.0).abs() < 880.0 * 0.03,
+            "440 Hz still: {rate:.0} crossings a second"
+        );
+        // The same splices on both channels: still one signal.
+        assert_eq!(out[0], out[1], "the pair stays in phase");
+    }
+
+    #[test]
+    fn a_short_input_is_stretched_from_what_it_has() {
+        // 10 ms of a decay drawn over 50 ms: never reads past it.
+        let input = vec![vec![0.5_f32; 480]];
+        let out = stretch_planar(&input, 0, 0.2, 2_400, 1024);
+        assert_eq!(out[0].len(), 2_400);
+        assert!(out[0].iter().all(|s| (s - 0.5).abs() < 1e-6), "only the input's own audio");
     }
 }

@@ -14,6 +14,9 @@ use daw_proto::automation::{EnvelopePoint, EnvelopeType, SendEnvelopeKind, TakeE
 use daw_proto::primitives::AutomationMode;
 
 use super::graph;
+
+#[path = "stretch_render.rs"]
+mod stretch_render;
 use crate::audio_engine::source::AudioSource;
 use crate::sync::{EnvelopeData, EnvelopeKey, ProjectState};
 
@@ -668,6 +671,22 @@ fn snapshot_track(
                 })
                 .unwrap_or_default();
 
+            // A stretched take plays a render at its own pitch, as an
+            // unstretched one: through the map, the mixer's varispeed
+            // pitched every drawn-out tail down. Only a take played as
+            // recorded otherwise — no rate, pitch or pitch envelope.
+            let plain = (play_rate - 1.0).abs() < 1e-9
+                && take_pitch.abs() < 1e-9
+                && take_pitch_env.is_none();
+            let (audio, start_offset, stretch_markers) = match audio
+                .as_ref()
+                .filter(|_| plain)
+                .and_then(|a| {
+                    stretch_render::rendered(a, &stretch_markers, item.length.as_seconds())
+                }) {
+                Some(render) => (Some(render), 0.0, Vec::new()),
+                None => (audio, start_offset, stretch_markers),
+            };
             items.push(ItemSnapshot {
                 audio,
                 fixed_lane: item.fixed_lane,

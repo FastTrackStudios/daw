@@ -17,6 +17,8 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [dependencies]
 daw-proto = { workspace = true }
+# WSOLA: a stretched take rendered at its own pitch (render/stretch_render).
+pitch-dsp = { workspace = true }
 # `platform` = the portable async-runtime seam (`architect::platform::{spawn,
 # sleep, JoinHandle}` — tokio on native, browser timers/`spawn_local` on wasm),
 # replacing the retired moire.
