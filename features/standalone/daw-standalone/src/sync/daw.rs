@@ -496,6 +496,9 @@ pub struct EditSnapshot {
     midi_notes: HashMap<String, Vec<MidiNote>>,
     midi_ccs: HashMap<String, Vec<daw_proto::midi::MidiCC>>,
     envelopes: HashMap<(String, EnvelopeKey), EnvelopeData>,
+    /// What extensions keep on each track (its markers and regions, a
+    /// leveled vocal's lanes): an edit to them is undone with the rest.
+    track_ext_state: HashMap<(String, String, String), String>,
     #[cfg(any(feature = "audio", feature = "decode"))]
     audio_sources: HashMap<String, std::sync::Arc<crate::audio_engine::AudioSource>>,
     next_item_counter: u64,
@@ -515,6 +518,7 @@ impl EditSnapshot {
             midi_notes: p.midi_notes.clone(),
             midi_ccs: p.midi_ccs.clone(),
             envelopes: p.envelopes.clone(),
+            track_ext_state: p.track_ext_state.clone(),
             #[cfg(any(feature = "audio", feature = "decode"))]
             audio_sources: p.audio_sources.clone(),
             next_item_counter: p.next_item_counter,
@@ -533,6 +537,7 @@ impl EditSnapshot {
         p.midi_notes = self.midi_notes;
         p.midi_ccs = self.midi_ccs;
         p.envelopes = self.envelopes;
+        p.track_ext_state = self.track_ext_state;
         #[cfg(any(feature = "audio", feature = "decode"))]
         {
             p.audio_sources = self.audio_sources;
