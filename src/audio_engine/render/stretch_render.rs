@@ -17,9 +17,11 @@
 //! this before: at a quarter of the speed it repeated its grains — a
 //! buzz on every tail an edit drew out — and it chose its splices from
 //! each mic's own signal, so the kit's mics combed against each other.)
-//! The attacks are the markers' to keep: an edit puts a marker after each
-//! hit's attack and plays that at speed, so the render copies none of its
-//! own. The mixer then plays the render as an unstretched take. Renders
+//! Each stretched stretch starts with its source as recorded (its first
+//! 20 ms): a marker on a hit (the Editor's warp puts them there) keeps
+//! the hit's attack sample-exact; where an edit's markers already keep it
+//! at speed, the copy is the start of the decay, played as it was. The
+//! mixer then plays the render as an unstretched take. Renders
 //! are kept by take, offset and markers, so a replan after an edit
 //! renders only what the edit changed.
 
@@ -112,10 +114,7 @@ fn render(audio: &AudioSource, markers: &[StretchMarker], length: f64) -> AudioS
     cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
     // Only the source the take plays, and a frame's reach either side —
     // a slice of a long take reads its own few hundred milliseconds.
-    let config = stretch::map::MapConfig {
-        attack: 0,
-        ..stretch::map::MapConfig::for_sample_rate(sr)
-    };
+    let config = stretch::map::MapConfig::for_sample_rate(sr);
     let reach = config.vocoder.frame as f64;
     let (lo, hi) = cuts
         .iter()
