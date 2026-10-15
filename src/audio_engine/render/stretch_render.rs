@@ -7,14 +7,21 @@
 //! as a record scratching on every double kick an edit pulled apart, and
 //! the overheads' high end gone wherever a tail was slowed.
 //!
-//! A stretched take is rendered instead, once: between each pair of its
-//! markers, a stretch played at speed is copied from the source as it is
-//! and one played slower or faster is time-stretched with WSOLA
-//! ([`pitch::wsola::stretch_planar`]) — its pitch kept, its timing
-//! the map's — each joined to the next across a short crossfade. The
-//! mixer then plays the render as an unstretched take. Renders are kept
-//! by take, offset and markers, so a replan after an edit renders only
-//! what the edit changed.
+//! A stretched take is rendered instead, once, through its markers as a
+//! stretch map ([`stretch::map`]): between each pair, a stretch played at
+//! speed is copied from the source as it is and one played slower or
+//! faster goes through the phase vocoder — its pitch kept, its timing the
+//! map's, started afresh at each marker so every mic of a kit, rendered
+//! one take at a time through the same markers, stays in phase with the
+//! others — each joined to the next across a short crossfade. (WSOLA did
+//! this before: at a quarter of the speed it repeated its grains — a
+//! buzz on every tail an edit drew out — and it chose its splices from
+//! each mic's own signal, so the kit's mics combed against each other.)
+//! The attacks are the markers' to keep: an edit puts a marker after each
+//! hit's attack and plays that at speed, so the render copies none of its
+//! own. The mixer then plays the render as an unstretched take. Renders
+//! are kept by take, offset and markers, so a replan after an edit
+//! renders only what the edit changed.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -30,9 +37,6 @@ const JOINT: f64 = 0.002;
 
 /// A stretch slower or faster than this is no stretch: copied as it is.
 const AT_SPEED: f64 = 1e-4;
-
-/// The WSOLA sequence at 48 kHz, frames: the shifter's own.
-const GRAIN_48K: f64 = 1024.0;
 
 /// The most renders kept before the cache starts over.
 const KEPT: usize = 8192;
@@ -88,28 +92,15 @@ pub(crate) fn rendered(
     Some(render)
 }
 
-/// The render itself: each stretch between markers copied or stretched,
-/// joined across [`JOINT`].
+/// The render itself: the take's markers as a stretch map over the part
+/// of its source it plays ([`stretch::map::render`]).
 fn render(audio: &AudioSource, markers: &[StretchMarker], length: f64) -> AudioSource {
     let sr = f64::from(audio.sample_rate().max(1));
     let channels = usize::from(audio.channels().max(1));
     let frames = (length * sr).ceil() as usize;
-    let joint = (JOINT * sr).round() as usize;
     let source_frames = audio.frame_count();
-    let read = |ch: usize, from: usize, n: usize| -> Vec<f32> {
-        (from..from + n)
-            .map(|i| {
-                if i < source_frames {
-                    audio.channel_interp(i, i, 0.0, ch)
-                } else {
-                    0.0
-                }
-            })
-            .collect()
-    };
     let map = |t: f64| StretchMarker::source_position_at(markers, t).unwrap_or(t);
-    // The stretches: the playback time from 0 to `length`, cut at every
-    // marker inside it.
+    // The playback time from 0 to `length`, cut at every marker inside it.
     let mut cuts: Vec<f64> = vec![0.0];
     cuts.extend(
         markers
@@ -119,52 +110,37 @@ fn render(audio: &AudioSource, markers: &[StretchMarker], length: f64) -> AudioS
     );
     cuts.push(length);
     cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
-
-    let mut out = vec![vec![0.0_f32; frames + joint]; channels];
-    let grain = (GRAIN_48K * sr / 48_000.0).round() as usize;
-    let last = cuts.len().saturating_sub(2);
-    for (k, pair) in cuts.windows(2).enumerate() {
-        let (p0, p1) = (pair[0], pair[1]);
-        let (at, until) = ((p0 * sr).round() as usize, (p1 * sr).round() as usize);
-        let n = until.saturating_sub(at);
-        if n == 0 {
-            continue;
-        }
-        // Each but the last runs on a joint past its end, to fade out
-        // under the next one fading in.
-        let more = if k < last { joint } else { 0 };
-        let (s0, s1) = (map(p0).max(0.0), map(p1).max(0.0));
-        let rate = (s1 - s0) / (p1 - p0);
-        let from = (s0 * sr).round() as usize;
-        let piece: Vec<Vec<f32>> = if (rate - 1.0).abs() <= AT_SPEED {
-            (0..channels).map(|ch| read(ch, from, n + more)).collect()
-        } else {
-            // Only this stretch of the source: past its end is the next
-            // hit's attack, not this decay's.
-            let span = ((s1 - s0) * sr).round().max(1.0) as usize;
-            let input: Vec<Vec<f32>> = (0..channels).map(|ch| read(ch, from, span)).collect();
-            pitch::wsola::stretch_planar(&input, 0, rate, n + more, grain)
-        };
-        for (ch, samples) in piece.iter().enumerate() {
-            let Some(dest) = out.get_mut(ch) else {
-                continue;
-            };
-            for (i, s) in samples.iter().enumerate() {
-                let Some(slot) = dest.get_mut(at + i) else {
-                    break;
-                };
-                // Fading in over the joint the one before fades out on.
-                let gain = if k > 0 && i < joint {
-                    (i as f32 + 0.5) / joint as f32
-                } else if i >= n {
-                    1.0 - ((i - n) as f32 + 0.5) / joint.max(1) as f32
-                } else {
-                    1.0
-                };
-                *slot += s * gain;
-            }
-        }
-    }
+    // Only the source the take plays, and a frame's reach either side —
+    // a slice of a long take reads its own few hundred milliseconds.
+    let config = stretch::map::MapConfig {
+        attack: 0,
+        ..stretch::map::MapConfig::for_sample_rate(sr)
+    };
+    let reach = config.vocoder.frame as f64;
+    let (lo, hi) = cuts
+        .iter()
+        .map(|&t| map(t) * sr)
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), s| {
+            (lo.min(s), hi.max(s))
+        });
+    let from = (lo - reach).floor().max(0.0) as usize;
+    let to = ((hi + reach).ceil().max(0.0) as usize).min(source_frames);
+    let planar: Vec<Vec<f32>> = (0..channels)
+        .map(|ch| {
+            (from..to.max(from))
+                .map(|i| audio.channel_interp(i, i, 0.0, ch))
+                .collect()
+        })
+        .collect();
+    let anchors: Vec<stretch::map::Anchor> = cuts
+        .iter()
+        .map(|&t| stretch::map::Anchor {
+            out: t * sr,
+            src: map(t).max(0.0) * sr - from as f64,
+        })
+        .collect();
+    let input: Vec<&[f32]> = planar.iter().map(Vec::as_slice).collect();
+    let out = stretch::map::render(&input, &anchors, frames, &config);
     let mut interleaved = Vec::with_capacity(frames * channels);
     for i in 0..frames {
         for ch in &out {
@@ -222,6 +198,48 @@ mod tests {
             let want = src.channel_interp(9_600 + i, 9_600 + i, 0.0, 0);
             assert!((out.channel_interp(i, i, 0.0, 0) - want).abs() < 1e-5);
         }
+    }
+
+    /// A noisy tail — a cymbal's wash, a room — drawn out to a quarter of
+    /// its speed is not its own grains played over and over: no echo of
+    /// itself a grain later (the buzz WSOLA made of Unbreakable's bar 56),
+    /// and its level where the source's is.
+    #[test]
+    fn a_tail_drawn_out_to_a_quarter_does_not_buzz() {
+        let sr = 48_000_u32;
+        // Noise, steady: xorshift, so the test is the same every run.
+        let mut state = 0x9e37_79b9_u32;
+        let samples: Vec<f32> = (0..sr)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                0.3 * (2.0 * (state as f32 / u32::MAX as f32) - 1.0)
+            })
+            .collect();
+        let noise = Arc::new(AudioSource::Memory(DecodedAudio::new(samples, 1, sr)));
+        // 30 ms as played, then 100 ms of source over 400 ms.
+        let markers = [marker(0.0, 0.2), marker(0.03, 0.23), marker(0.43, 0.33)];
+        let out = rendered(&noise, &markers, 0.43).expect("rendered");
+        let x: Vec<f64> = (4_800..19_200)
+            .map(|i| f64::from(out.channel_interp(i, i, 0.0, 0)))
+            .collect();
+        let energy: f64 = x.iter().map(|v| v * v).sum();
+        let rms = (energy / x.len() as f64).sqrt();
+        let source_rms = 0.3 / 3f64.sqrt();
+        assert!(
+            (rms / source_rms - 1.0).abs() < 0.3,
+            "the tail's level kept: {rms:.3} against {source_rms:.3}"
+        );
+        // Its likeness to itself at any lag a grain could repeat at.
+        let worst = (200..2_000)
+            .step_by(8)
+            .map(|lag| {
+                let dot: f64 = x.iter().zip(&x[lag..]).map(|(a, b)| a * b).sum();
+                dot / energy
+            })
+            .fold(0.0_f64, f64::max);
+        assert!(worst < 0.25, "no grain repeated: {worst:.3}");
     }
 
     #[test]
