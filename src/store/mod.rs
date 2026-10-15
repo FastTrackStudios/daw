@@ -489,8 +489,16 @@ impl Store {
             }
             StoreResult::Ok(out)
         })?;
-        for packed in updates {
-            import(&doc, &packed)?;
+        // All at once: imported one by one, each update had the doc's
+        // whole state worked out again — 377 of them, 17 s to open a song.
+        // A batch decodes them all and works the state out once.
+        let bytes = updates
+            .iter()
+            .map(|packed| zstd::decode_all(packed.as_slice()))
+            .collect::<Result<Vec<Vec<u8>>, _>>()?;
+        if !bytes.is_empty() {
+            doc.import_batch(&bytes)
+                .map_err(|e| StoreError::Loro(e.to_string()))?;
         }
         Ok(doc)
     }
