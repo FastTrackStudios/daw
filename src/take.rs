@@ -138,6 +138,19 @@ impl Takes for Standalone {
         .flatten()
     }
 
+    fn get_all_active_takes(&self, project: ProjectContext) -> Vec<Take> {
+        let Some(guid) = resolve_project(self, &project) else {
+            return Vec::new();
+        };
+        self.with_project(&guid, |p| {
+            p.takes
+                .values()
+                .filter_map(|tl| tl.takes.get(tl.active_idx as usize).cloned())
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
     fn take_count(&self, project: ProjectContext, item: ItemRef) -> u32 {
         let Some(guid) = resolve_project(self, &project) else {
             return 0;
