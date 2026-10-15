@@ -18,6 +18,11 @@ pub trait Takes {
 
     fn get_active_take(&self, project: ProjectContext, item: ItemRef) -> Option<Take>;
 
+    /// Every item's active take, in one call (each carries its
+    /// `item_guid`): what a read of the whole song asks, rather than a
+    /// call per item — 27 000 of them on a sliced kit.
+    fn get_all_active_takes(&self, project: ProjectContext) -> Vec<Take>;
+
     fn take_count(&self, project: ProjectContext, item: ItemRef) -> u32;
 
     fn add_take(&self, project: ProjectContext, item: ItemRef) -> Option<String>;
