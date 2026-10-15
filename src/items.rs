@@ -227,6 +227,16 @@ impl ProjectItems {
     }
 
     /// Get all items in the project
+    /// Every item's active take, in one call — each with its
+    /// `item_guid`.
+    pub async fn active_takes(&self) -> Result<Vec<daw_proto::Take>> {
+        Ok(self
+            .clients
+            .take
+            .get_all_active_takes(self.context())
+            .await?)
+    }
+
     pub async fn all(&self) -> Result<Vec<Item>> {
         let items = self.clients.item.get_all_items(self.context()).await?;
         Ok(items)
