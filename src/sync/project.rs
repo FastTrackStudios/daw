@@ -264,12 +264,17 @@ impl Projects for Standalone {
         let Ok(mut s) = self.state.lock() else {
             return;
         };
-        let Some(p) = s.projects.get(&guid) else {
+        let Some(p) = s.projects.get_mut(&guid) else {
             return;
         };
+        // From here each per-item map keeps what it held before the step
+        // first writes a key: the step is its changes, not a copy.
+        p.record();
         let step = crate::sync::daw::UndoStep {
             label: label.to_string(),
-            snapshot: crate::sync::daw::EditSnapshot::capture(p),
+            deltas: crate::sync::daw::Deltas::default(),
+            before: crate::sync::daw::EditSnapshot::capture(p),
+            after: None,
         };
         // A begin with no end is abandoned, not stacked.
         s.pending_undo.insert(guid, step);
@@ -287,6 +292,10 @@ impl Projects for Standalone {
         };
         if !label.is_empty() {
             step.label = label.to_string();
+        }
+        if let Some(p) = s.projects.get_mut(&guid) {
+            step.deltas = p.recorded();
+            step.after = Some(crate::sync::daw::EditSnapshot::capture(p));
         }
         let named = step.label.clone();
         let stack = s.undo.entry(guid.clone()).or_default();
@@ -314,14 +323,11 @@ impl Projects for Standalone {
         let Some(p) = s.projects.get_mut(&guid) else {
             return false;
         };
-        let redo_step = crate::sync::daw::UndoStep {
-            label: step.label.clone(),
-            snapshot: crate::sync::daw::EditSnapshot::capture(p),
-        };
-        step.snapshot.restore(p);
-        s.redo.entry(guid.clone()).or_default().push(redo_step);
+        step.put_back(p, crate::journal::Side::Before);
+        let label = step.label.clone();
+        s.redo.entry(guid.clone()).or_default().push(step);
         drop(s);
-        crate::steps::finished(&guid, &format!("Undo {}", step.label));
+        crate::steps::finished(&guid, &format!("Undo {label}"));
         true
     }
 
@@ -338,14 +344,11 @@ impl Projects for Standalone {
         let Some(p) = s.projects.get_mut(&guid) else {
             return false;
         };
-        let undo_step = crate::sync::daw::UndoStep {
-            label: step.label.clone(),
-            snapshot: crate::sync::daw::EditSnapshot::capture(p),
-        };
-        step.snapshot.restore(p);
-        s.undo.entry(guid.clone()).or_default().push(undo_step);
+        step.put_back(p, crate::journal::Side::After);
+        let label = step.label.clone();
+        s.undo.entry(guid.clone()).or_default().push(step);
         drop(s);
-        crate::steps::finished(&guid, &format!("Redo {}", step.label));
+        crate::steps::finished(&guid, &format!("Redo {label}"));
         true
     }
 

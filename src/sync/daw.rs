@@ -390,7 +390,7 @@ pub struct ProjectState {
     /// Items keyed by item guid.
     pub items: crate::journal::Journaled<String, ItemEntry>,
     /// Per-track item ordering. `track_guid -> [item_guid, ...]`.
-    pub items_by_track: HashMap<String, Vec<String>>,
+    pub items_by_track: crate::journal::Journaled<String, Vec<String>>,
     /// Takes keyed by item guid.
     pub takes: crate::journal::Journaled<String, TakeList>,
     /// Sends keyed by source track guid.
@@ -478,7 +478,7 @@ impl ProjectState {
             fx_preset_index: HashMap::new(),
             fx_named_config: HashMap::new(),
             items: crate::journal::Journaled::default(),
-            items_by_track: HashMap::new(),
+            items_by_track: crate::journal::Journaled::default(),
             takes: crate::journal::Journaled::default(),
             sends: HashMap::new(),
             receives: HashMap::new(),
@@ -493,25 +493,67 @@ impl ProjectState {
         }
     }
 }
+/// The per-item maps an undo step records as deltas
+/// ([`crate::journal::Journaled::record`]), each `field: (key, value)`.
+macro_rules! journaled_maps {
+    ($m:ident) => {
+        $m! {
+            items: (String, ItemEntry),
+            items_by_track: (String, Vec<String>),
+            takes: (String, TakeList),
+            stretch_markers: (String, Vec<daw_proto::StretchMarker>),
+            stretch_modes: (String, daw_proto::StretchMode),
+            take_markers: (String, Vec<daw_proto::TakeMarker>),
+            midi_notes: (String, Vec<MidiNote>),
+            midi_ccs: (String, Vec<daw_proto::midi::MidiCC>),
+            midi_pitch_bends: (String, Vec<daw_proto::midi::MidiPitchBend>),
+            midi_program_changes: (String, Vec<daw_proto::midi::MidiProgramChange>),
+            midi_sysex: (String, Vec<daw_proto::midi::MidiSysEx>),
+            midi_channel_pressures: (String, Vec<daw_proto::midi::MidiChannelPressure>),
+            midi_poly_pressures: (String, Vec<daw_proto::midi::MidiPolyPressure>),
+            midi_note_expressions: (String, Vec<daw_proto::midi::MidiNoteExpression>),
+            envelopes: ((String, EnvelopeKey), EnvelopeData),
+        }
+    };
+}
 
-/// The part of a project an *edit* touches, cloned whole for undo.
-///
-/// Not the whole [`ProjectState`]: transport, FX chains, routing and the
-/// bay are not edit targets and some of them are not `Clone`. Everything
-/// here is maps of plain data plus `Arc`s, so a snapshot is cheap — the
-/// audio itself is refcounted, never copied.
-#[derive(Clone)]
+macro_rules! deltas_struct {
+    ($($field:ident: ($k:ty, $v:ty)),* $(,)?) => {
+        /// What an undo step changed in the per-item maps: each key it
+        /// wrote, as it was and as it left it — the step's size, not the
+        /// song's.
+        #[derive(Default)]
+        pub struct Deltas {
+            $(pub $field: Vec<crate::journal::Delta<$k, $v>>,)*
+        }
+
+        impl ProjectState {
+            /// Open an undo step on every per-item map.
+            pub fn record(&mut self) {
+                $(self.$field.record();)*
+            }
+
+            /// Close the undo step: what each per-item map changed.
+            #[must_use]
+            pub fn recorded(&mut self) -> Deltas {
+                Deltas { $($field: self.$field.recorded(),)* }
+            }
+
+            /// Put an undo step's changes back to one side of it.
+            pub fn put_back(&mut self, deltas: &Deltas, side: crate::journal::Side) {
+                $(self.$field.put_back(&deltas.$field, side);)*
+            }
+        }
+    };
+}
+
+journaled_maps!(deltas_struct);
+
+/// What a project holds besides its per-item maps, as an undo step found
+/// or left it: small — the tracks, what extensions keep on them, the
+/// counters — so it is copied whole.
 pub struct EditSnapshot {
     tracks: Vec<Track>,
-    items: HashMap<String, ItemEntry>,
-    items_by_track: HashMap<String, Vec<String>>,
-    takes: HashMap<String, TakeList>,
-    stretch_markers: HashMap<String, Vec<daw_proto::StretchMarker>>,
-    stretch_modes: HashMap<String, daw_proto::StretchMode>,
-    take_markers: HashMap<String, Vec<daw_proto::TakeMarker>>,
-    midi_notes: HashMap<String, Vec<MidiNote>>,
-    midi_ccs: HashMap<String, Vec<daw_proto::midi::MidiCC>>,
-    envelopes: HashMap<(String, EnvelopeKey), EnvelopeData>,
     /// What extensions keep on each track (its markers and regions, a
     /// leveled vocal's lanes): an edit to them is undone with the rest.
     track_ext_state: HashMap<(String, String, String), String>,
@@ -522,18 +564,10 @@ pub struct EditSnapshot {
 }
 
 impl EditSnapshot {
+    #[must_use]
     pub fn capture(p: &ProjectState) -> Self {
         Self {
             tracks: p.tracks.clone(),
-            items: (*p.items).clone(),
-            items_by_track: p.items_by_track.clone(),
-            takes: (*p.takes).clone(),
-            stretch_markers: (*p.stretch_markers).clone(),
-            stretch_modes: (*p.stretch_modes).clone(),
-            take_markers: (*p.take_markers).clone(),
-            midi_notes: (*p.midi_notes).clone(),
-            midi_ccs: (*p.midi_ccs).clone(),
-            envelopes: (*p.envelopes).clone(),
             track_ext_state: p.track_ext_state.clone(),
             #[cfg(any(feature = "audio", feature = "decode"))]
             audio_sources: p.audio_sources.clone(),
@@ -542,36 +576,43 @@ impl EditSnapshot {
         }
     }
 
-    pub fn restore(self, p: &mut ProjectState) {
-        p.tracks = self.tracks;
-        // Each map put back whole: to any reader, everything in it changed
-        // (`Journaled::from`).
-        p.items = self.items.into();
-        p.items_by_track = self.items_by_track;
-        p.takes = self.takes.into();
-        p.stretch_markers = self.stretch_markers.into();
-        p.stretch_modes = self.stretch_modes.into();
-        p.take_markers = self.take_markers.into();
-        p.midi_notes = self.midi_notes.into();
-        p.midi_ccs = self.midi_ccs.into();
-        p.envelopes = self.envelopes.into();
-        p.track_ext_state = self.track_ext_state;
+    pub fn restore(&self, p: &mut ProjectState) {
+        p.tracks.clone_from(&self.tracks);
+        p.track_ext_state.clone_from(&self.track_ext_state);
         #[cfg(any(feature = "audio", feature = "decode"))]
-        {
-            p.audio_sources = self.audio_sources;
-        }
+        p.audio_sources.clone_from(&self.audio_sources);
         p.next_item_counter = self.next_item_counter;
         p.next_take_counter = self.next_take_counter;
+    }
+}
+
+/// One undo step: what it changed, and the small rest of the project as
+/// it found and left it. Undone, the changes go back to their `before`;
+/// redone, to their `after` — nothing is copied either way.
+pub struct UndoStep {
+    pub label: String,
+    pub deltas: Deltas,
+    pub before: EditSnapshot,
+    /// `None` until the step closes.
+    pub after: Option<EditSnapshot>,
+}
+
+impl UndoStep {
+    /// Put the project back to one side of this step.
+    pub fn put_back(&self, p: &mut ProjectState, side: crate::journal::Side) {
+        p.put_back(&self.deltas, side);
+        match side {
+            crate::journal::Side::Before => self.before.restore(p),
+            crate::journal::Side::After => {
+                if let Some(after) = &self.after {
+                    after.restore(p);
+                }
+            }
+        }
         // The renderer caches against the revision; a restore is a
         // mutation like any other.
         p.revision = p.revision.wrapping_add(1);
     }
-}
-
-/// One undo step: what the project looked like before the block ran.
-pub struct UndoStep {
-    pub label: String,
-    pub snapshot: EditSnapshot,
 }
 
 /// Undo depth per project. An edit session is drags and applies, not a

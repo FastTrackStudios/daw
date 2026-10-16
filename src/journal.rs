@@ -33,7 +33,9 @@ fn next() -> u64 {
 /// a reader behind that is told everything changed.
 const REMEMBERED: usize = 1 << 18;
 
-/// A `HashMap` that notes each key written.
+/// A `HashMap` that notes each key written — and, while an undo step is
+/// open ([`Self::record`]), what each key held before the step first wrote
+/// it: an undo step is what it changed, never a copy of the song.
 #[derive(Clone, Debug)]
 pub struct Journaled<K, V> {
     map: HashMap<K, V>,
@@ -42,6 +44,34 @@ pub struct Journaled<K, V> {
     /// Writes numbered below this are not in the log: a reader whose
     /// cursor is older cannot be told what they were.
     floor: u64,
+    /// The open undo step's record, if one is open.
+    recording: Option<Box<Recording<K, V>>>,
+}
+
+/// What an open undo step has written: each key once, with what it held
+/// before (`None`: it was not there).
+#[derive(Clone, Debug)]
+struct Recording<K, V> {
+    seen: std::collections::HashSet<K>,
+    before: Vec<(K, Option<V>)>,
+}
+
+/// One key an undo step changed: what it held before and after (`None`:
+/// not there).
+#[derive(Clone, Debug)]
+pub struct Delta<K, V> {
+    pub key: K,
+    pub before: Option<V>,
+    pub after: Option<V>,
+}
+
+/// Which side of an undo step to put back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Side {
+    /// As it was before the step: an undo.
+    Before,
+    /// As the step left it: a redo.
+    After,
 }
 
 impl<K, V> Default for Journaled<K, V> {
@@ -50,6 +80,7 @@ impl<K, V> Default for Journaled<K, V> {
             map: HashMap::new(),
             log: Vec::new(),
             floor: 0,
+            recording: None,
         }
     }
 }
@@ -78,6 +109,7 @@ impl<K: Hash + Eq, V> From<HashMap<K, V>> for Journaled<K, V> {
             map,
             log: Vec::new(),
             floor: next() + 1,
+            recording: None,
         }
     }
 }
@@ -88,7 +120,84 @@ impl<K: Hash + Eq, V> FromIterator<(K, V)> for Journaled<K, V> {
     }
 }
 
-impl<K: Hash + Eq + Clone, V> Journaled<K, V> {
+impl<K: Hash + Eq + Clone, V: Clone> Journaled<K, V> {
+    /// Before `key` is written: what it holds, kept for the open undo step
+    /// the first time the step touches it.
+    fn keep_before(&mut self, key: &K) {
+        let Some(rec) = self.recording.as_mut() else {
+            return;
+        };
+        if rec.seen.insert(key.clone()) {
+            rec.before.push((key.clone(), self.map.get(key).cloned()));
+        }
+    }
+
+    /// Before every key is written: each kept that the step has not yet.
+    fn keep_all_before(&mut self) {
+        let Some(rec) = self.recording.as_mut() else {
+            return;
+        };
+        for (key, value) in &self.map {
+            if rec.seen.insert(key.clone()) {
+                rec.before.push((key.clone(), Some(value.clone())));
+            }
+        }
+    }
+
+    /// Open an undo step: from now, what each key held before its first
+    /// write is kept. One already open is dropped.
+    pub fn record(&mut self) {
+        self.recording = Some(Box::new(Recording {
+            seen: std::collections::HashSet::new(),
+            before: Vec::new(),
+        }));
+    }
+
+    /// Close the undo step: each key it wrote, as it was and as it is.
+    /// Empty when none was open or it wrote nothing.
+    #[must_use]
+    pub fn recorded(&mut self) -> Vec<Delta<K, V>> {
+        let Some(rec) = self.recording.take() else {
+            return Vec::new();
+        };
+        rec.before
+            .into_iter()
+            .map(|(key, before)| {
+                let after = self.map.get(&key).cloned();
+                Delta { key, before, after }
+            })
+            .collect()
+    }
+
+    /// Put `deltas` back as they were (`Side::Before`, an undo) or as the
+    /// step left them (`Side::After`, a redo): each key written and noted,
+    /// so a reader re-reads what changed and nothing else.
+    pub fn put_back(&mut self, deltas: &[Delta<K, V>], side: Side) {
+        for delta in deltas {
+            let value = match side {
+                Side::Before => &delta.before,
+                Side::After => &delta.after,
+            };
+            match value {
+                Some(value) => {
+                    self.insert(delta.key.clone(), value.clone());
+                }
+                None => {
+                    self.remove_key(&delta.key);
+                }
+            }
+        }
+    }
+
+    fn remove_key(&mut self, key: &K) -> Option<V> {
+        self.keep_before(key);
+        let removed = self.map.remove(key);
+        if removed.is_some() {
+            self.note(key.clone());
+        }
+        removed
+    }
+
     fn note(&mut self, key: K) {
         if self.log.len() >= REMEMBERED {
             let keep = self.log.split_off(REMEMBERED / 2);
@@ -102,6 +211,7 @@ impl<K: Hash + Eq + Clone, V> Journaled<K, V> {
     /// back whole (an undo's snapshot) says, since its own journal is the
     /// one it was copied with.
     pub fn note_all(&mut self) {
+        self.keep_all_before();
         self.log.clear();
         // This write is numbered too: a reader at it is told everything.
         self.floor = next() + 1;
@@ -124,12 +234,15 @@ impl<K: Hash + Eq + Clone, V> Journaled<K, V> {
         Q: Hash + Eq + ToOwned<Owned = K> + ?Sized,
     {
         if self.map.contains_key(key) {
-            self.note(key.to_owned());
+            let owned = key.to_owned();
+            self.keep_before(&owned);
+            self.note(owned);
         }
         self.map.get_mut(key)
     }
 
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
+        self.keep_before(&key);
         self.note(key.clone());
         self.map.insert(key, value)
     }
@@ -139,36 +252,39 @@ impl<K: Hash + Eq + Clone, V> Journaled<K, V> {
         K: Borrow<Q>,
         Q: Hash + Eq + ToOwned<Owned = K> + ?Sized,
     {
-        let removed = self.map.remove(key);
-        if removed.is_some() {
-            self.note(key.to_owned());
-        }
-        removed
+        self.remove_key(&key.to_owned())
     }
 
     pub fn entry(&mut self, key: K) -> Entry<'_, K, V> {
+        self.keep_before(&key);
         self.note(key.clone());
         self.map.entry(key)
     }
 
     /// Keep only what `keep` says to, each key it drops noted.
     pub fn retain(&mut self, mut keep: impl FnMut(&K, &mut V) -> bool) {
+        let recording = self.recording.is_some();
         let mut dropped = Vec::new();
         self.map.retain(|k, v| {
             let kept = keep(k, v);
             if !kept {
-                dropped.push(k.clone());
+                dropped.push((k.clone(), recording.then(|| v.clone())));
             }
             kept
         });
-        for key in dropped {
+        for (key, value) in dropped {
+            if let Some(rec) = self.recording.as_mut()
+                && rec.seen.insert(key.clone())
+            {
+                rec.before.push((key.clone(), value));
+            }
             self.note(key);
         }
     }
 
     pub fn clear(&mut self) {
-        self.map.clear();
         self.note_all();
+        self.map.clear();
     }
 
     pub fn extend(&mut self, items: impl IntoIterator<Item = (K, V)>) {
@@ -192,7 +308,7 @@ impl<K: Hash + Eq + Clone, V> Journaled<K, V> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Journaled, now};
+    use super::{Journaled, Side, now};
 
     #[test]
     fn a_reader_is_told_what_was_written_since_it_looked() {
@@ -225,5 +341,43 @@ mod tests {
         }
         assert!(map.written_since(cursor).is_none(), "everything changed");
         assert!(map.written_since(now()).is_some());
+    }
+
+    #[test]
+    fn an_undo_step_is_what_it_changed() {
+        let mut map: Journaled<String, u32> = [
+            ("a".to_owned(), 1),
+            ("b".to_owned(), 2),
+            ("c".to_owned(), 3),
+        ]
+        .into_iter()
+        .collect();
+        map.record();
+        if let Some(a) = map.get_mut("a") {
+            *a = 10;
+        }
+        if let Some(a) = map.get_mut("a") {
+            *a = 11;
+        }
+        map.remove("b");
+        map.insert("d".into(), 4);
+        let step = map.recorded();
+        assert_eq!(step.len(), 3, "each key once: {step:?}");
+        let state = |m: &Journaled<String, u32>| {
+            let mut all: Vec<(String, u32)> = m.iter().map(|(k, v)| (k.clone(), *v)).collect();
+            all.sort();
+            all
+        };
+        let after = state(&map);
+        let cursor = now();
+        map.put_back(&step, Side::Before);
+        assert_eq!(
+            state(&map),
+            [("a".into(), 1), ("b".into(), 2), ("c".into(), 3)]
+        );
+        let told: Vec<&String> = map.written_since(cursor).expect("remembered").collect();
+        assert_eq!(told.len(), 3, "a reader is told only the step's keys");
+        map.put_back(&step, Side::After);
+        assert_eq!(state(&map), after);
     }
 }
