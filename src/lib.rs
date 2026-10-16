@@ -43,6 +43,7 @@ pub mod fx_params;
 pub mod groups;
 pub mod handle;
 pub mod health;
+pub mod id;
 pub mod input;
 pub mod item;
 pub mod live_midi;

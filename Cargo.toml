@@ -41,6 +41,12 @@ vox = []
 #   daw-proto = { workspace = true, features = ["test-utils"] }
 test-utils = []
 
+[dependencies.uuid]
+# Ids a caller mints for what it is about to make (`id::ItemId::new`); `js`
+# gives browser builds their randomness, as `daw-utils` does.
+workspace = true
+features = ["js"]
+
 [dev-dependencies]
 # Locks the externally-tagged JSON wire shape of the batch op enums.
 facet-json = { workspace = true }
