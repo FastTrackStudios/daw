@@ -13,7 +13,7 @@ use daw_proto::{
     SourceType, Take, TakeMarker, TakeMarkerCreate, TakeMarkerUpdate, TakeRef,
 };
 
-use crate::sync::{Standalone, TakeList};
+use crate::sync::{ProjectState, Standalone, TakeList};
 
 fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
     match ctx {
@@ -363,40 +363,11 @@ impl Takes for Standalone {
                 take_guid: t.guid.clone(),
             }
         })?;
-        // The take's envelopes stay on its audio: slipped `by` further
-        // into the source, a point that was at a sound is at it still,
-        // `by` earlier in the item.
         if let Some((project_guid, item_guid, take_guid, by)) = slipped
             && by != 0.0
         {
             self.with_project_mut(&project_guid, |p| {
-                let length = p.items.get(&item_guid).map(|e| e.item.length.as_seconds());
-                // This take's envelopes, by key: written one by one, each
-                // noted, not every envelope in the song.
-                let keys: Vec<(String, EnvelopeKey)> = p
-                    .envelopes
-                    .keys()
-                    .filter(|(_, key)| {
-                        matches!(key, EnvelopeKey::Take { item_guid: of_item, take_guid: of_take, .. }
-                            if *of_item == item_guid && *of_take == take_guid)
-                    })
-                    .cloned()
-                    .collect();
-                for key in keys {
-                    if let Some(data) = p.envelopes.get_mut(&key) {
-                        for point in &mut data.points {
-                            point.time = daw_proto::PositionInSeconds::from_seconds(
-                                point.time.as_seconds() - by,
-                            );
-                        }
-                        // A slice keeps the curve over itself: a take cut
-                        // into a thousand slices is not a thousand copies
-                        // of the whole song's curve.
-                        if let Some(length) = length {
-                            keep_over(&mut data.points, length);
-                        }
-                    }
-                }
+                slip_envelopes_in(p, &item_guid, &take_guid, by);
             })?;
         }
         Ok(())
@@ -707,6 +678,50 @@ const ENVELOPE_PAD: f64 = 1.0;
 /// `points` (by time) cut to those over `0..length` and [`ENVELOPE_PAD`]
 /// either side, with the nearest beyond each end kept so the curve is
 /// what it was at the edges.
+/// The active take of `item` played from `offset` into its source: its
+/// envelopes slipped with it. The take's guid, or `None` with no item or
+/// take. The body of an [`crate::item_ops::ItemOp::Place`].
+pub(crate) fn slip_take_in(p: &mut ProjectState, item: &str, offset: f64) -> Option<String> {
+    let list = p.takes.get_mut(item)?;
+    let index = usize::try_from(list.active_idx).ok()?;
+    let take = list.takes.get_mut(index)?;
+    let by = offset - take.start_offset.as_seconds();
+    take.start_offset = Duration::from_seconds(offset);
+    let guid = take.guid.clone();
+    if by != 0.0 {
+        slip_envelopes_in(p, item, &guid, by);
+    }
+    Some(guid)
+}
+
+/// The take's envelopes stay on its audio: slipped `by` further into the
+/// source, a point that was at a sound is at it still, `by` earlier in the
+/// item — found by their keys, not a search of every envelope in the song.
+/// A slice keeps the curve over itself only: a take cut into a thousand
+/// slices is not a thousand copies of the whole song's curve.
+pub(crate) fn slip_envelopes_in(p: &mut ProjectState, item: &str, take: &str, by: f64) {
+    let length = p.items.get(item).map(|e| e.item.length.as_seconds());
+    for kind in daw_proto::TakeEnvelopeKind::ALL {
+        let key = (
+            String::new(),
+            EnvelopeKey::Take {
+                item_guid: item.to_owned(),
+                take_guid: take.to_owned(),
+                kind,
+            },
+        );
+        let Some(data) = p.envelopes.get_mut(&key) else {
+            continue;
+        };
+        for point in &mut data.points {
+            point.time = daw_proto::PositionInSeconds::from_seconds(point.time.as_seconds() - by);
+        }
+        if let Some(length) = length {
+            keep_over(&mut data.points, length);
+        }
+    }
+}
+
 fn keep_over(points: &mut Vec<daw_proto::automation::EnvelopePoint>, length: f64) {
     let (from, to) = (-ENVELOPE_PAD, length + ENVELOPE_PAD);
     let first = points

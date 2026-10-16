@@ -67,6 +67,7 @@ mod fx_params;
 mod health;
 mod input;
 mod item;
+pub mod item_ops;
 pub mod journal;
 mod live_midi;
 mod marker;

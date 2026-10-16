@@ -20,7 +20,7 @@ use crate::sync::{ItemEntry, ProjectState, Standalone};
 /// Publish an item change onto the cross-domain event bus so subscribers
 /// (the sync engine, inspectors) see it. Item events carry `project_guid`
 /// per variant, so no separate envelope is needed.
-fn publish_item_event(daw: &Standalone, event: ItemEvent) {
+pub(crate) fn publish_item_event(daw: &Standalone, event: ItemEvent) {
     daw.bus_events.publish(DawEvent::Item(event));
 }
 
@@ -298,19 +298,8 @@ impl Items for Standalone {
         let (item_guid, track_guid) = self.with_project_mut(&guid, |p| {
             let item_guid = item_guid_from_ref(p, &item)
                 .ok_or_else(|| DawError::not_found("Item", &format!("{item:?}")))?;
-            let entry = p
-                .items
-                .remove(&item_guid)
-                .ok_or_else(|| DawError::not_found("Item", &item_guid))?;
-            let track_guid = entry.item.track_guid.clone();
-            // The others keep their indices: they stay in order, and an
-            // index is only ever the tiebreak between two items at one
-            // place. Renumbering wrote every item on the track for each
-            // delete — the whole kit, for a comp's clear.
-            if let Some(order) = p.items_by_track.get_mut(&entry.item.track_guid) {
-                order.retain(|g| g != &item_guid);
-            }
-            p.takes.remove(&item_guid);
+            let track_guid =
+                delete_in(p, &item_guid).ok_or_else(|| DawError::not_found("Item", &item_guid))?;
             Ok::<(String, String), DawError>((item_guid, track_guid))
         })??;
         publish_item_event(
@@ -328,108 +317,14 @@ impl Items for Standalone {
         let guid = resolve_project(self, &project)?;
         let created = self
             .with_project_mut(&guid, |p| {
-                let item_guid = item_guid_from_ref(p, &item)?;
-                let src = p.items.get(&item_guid)?.clone();
-                let new_guid = p.mint_item_guid();
-                let new_index = next_index(p, &src.item.track_guid);
-                p.items_by_track
-                    .entry(src.item.track_guid.clone())
-                    .or_default()
-                    .push(new_guid.clone());
-                let mut new_item = src.item.clone();
-                new_item.guid = new_guid.clone();
-                new_item.index = new_index;
-                p.items.insert(
-                    new_guid.clone(),
-                    ItemEntry {
-                        item: new_item.clone(),
-                    },
-                );
-
-                // The takes come with it. An item without them is not a
-                // duplicate of anything: `item.take_count` was copied
-                // and says 1, so the copy *claims* a take, and every
-                // take call on it then fails with "item not found" —
-                // which reads as the item being missing rather than as
-                // its takes never having been made.
-                //
-                // Take guids are minted fresh. Two takes sharing a guid
-                // means `TakeRef::Guid` resolves to whichever comes
-                // first, so an edit aimed at the copy lands on the
-                // original.
-                if let Some(src_takes) = p.takes.get(&item_guid).cloned() {
-                    let mut takes = src_takes;
-                    for take in &mut takes.takes {
-                        let old_guid = take.guid.clone();
-                        // Its envelopes are keyed by item and take: the
-                        // copy's are copies, or a split's right half plays
-                        // without the left's volume curve.
-                        let curves: Vec<_> = p
-                            .envelopes
-                            .iter()
-                            .filter_map(|((owner, key), data)| match key {
-                                EnvelopeKey::Take {
-                                    item_guid: of_item,
-                                    take_guid: of_take,
-                                    kind,
-                                } if *of_item == item_guid && *of_take == old_guid => {
-                                    Some((owner.clone(), *kind, data.clone()))
-                                }
-                                _ => None,
-                            })
-                            .collect();
-                        let new_take = Uuid::new_v4().to_string();
-                        for (owner, kind, data) in curves {
-                            p.envelopes.insert(
-                                (
-                                    owner,
-                                    EnvelopeKey::Take {
-                                        item_guid: new_guid.clone(),
-                                        take_guid: new_take.clone(),
-                                        kind,
-                                    },
-                                ),
-                                data,
-                            );
-                        }
-                        take.guid = new_take;
-                        take.item_guid = new_guid.clone();
-                        // Everything keyed by the take guid comes with
-                        // it, or the duplicate is silent and unwarped
-                        // where the original plays: the materialized
-                        // source (an `Arc`, so this is a refcount, not a
-                        // copy), the stretch markers, and the mode.
-                        #[cfg(any(feature = "audio", feature = "decode"))]
-                        if let Some(audio) = p.audio_sources.get(&old_guid).cloned() {
-                            p.audio_sources.insert(take.guid.clone(), audio);
-                        }
-                        if let Some(markers) = p.stretch_markers.get(&old_guid).cloned() {
-                            p.stretch_markers.insert(take.guid.clone(), markers);
-                        }
-                        if let Some(mode) = p.stretch_modes.get(&old_guid).copied() {
-                            p.stretch_modes.insert(take.guid.clone(), mode);
-                        }
-                        // A MIDI take's events are keyed by it too: without
-                        // them the copy is an empty MIDI item, and a split —
-                        // a duplicate trimmed to the right half — loses
-                        // every note after the cut.
-                        copy_keyed(&mut p.midi_notes, &old_guid, &take.guid);
-                        copy_keyed(&mut p.midi_ccs, &old_guid, &take.guid);
-                        copy_keyed(&mut p.midi_pitch_bends, &old_guid, &take.guid);
-                        copy_keyed(&mut p.midi_program_changes, &old_guid, &take.guid);
-                        copy_keyed(&mut p.midi_sysex, &old_guid, &take.guid);
-                        copy_keyed(&mut p.midi_channel_pressures, &old_guid, &take.guid);
-                        copy_keyed(&mut p.midi_poly_pressures, &old_guid, &take.guid);
-                        copy_keyed(&mut p.midi_note_expressions, &old_guid, &take.guid);
-                    }
-                    p.takes.insert(new_guid.clone(), takes);
-                }
-
-                Some((new_guid, new_item))
+                let source = item_guid_from_ref(p, &item)?;
+                let into = p.mint_item_guid();
+                copy_item_in(p, &source, into)
             })
             .ok()
             .flatten();
-        let (new_guid, new_item) = created?;
+        let new_item = created?;
+        let new_guid = new_item.guid.clone();
         publish_item_event(
             self,
             ItemEvent::Created {
@@ -717,6 +612,90 @@ impl Items for Standalone {
         );
         Ok(())
     }
+}
+
+/// Item `source` copied as `into` on its own track and lane, with its takes
+/// and everything kept per take — each take under a fresh guid. The copy,
+/// or `None` with no such item. The body of `duplicate_item` and of an
+/// [`crate::item_ops::ItemOp::Copy`].
+pub(crate) fn copy_item_in(p: &mut ProjectState, source: &str, into: String) -> Option<Item> {
+    let src = p.items.get(source)?.item.clone();
+    let index = next_index(p, &src.track_guid);
+    p.items_by_track
+        .entry(src.track_guid.clone())
+        .or_default()
+        .push(into.clone());
+    let mut copy = src;
+    copy.guid = into.clone();
+    copy.index = index;
+    copy.selected = false;
+    p.items
+        .insert(into.clone(), ItemEntry { item: copy.clone() });
+    // The takes come with it. An item without them is not a duplicate of
+    // anything: `take_count` was copied and says 1, so the copy *claims* a
+    // take, and every take call on it then fails with "item not found".
+    if let Some(mut takes) = p.takes.get(source).cloned() {
+        for take in &mut takes.takes {
+            // Take guids are minted fresh: two takes sharing one means
+            // `TakeRef::Guid` resolves to whichever comes first, and an
+            // edit aimed at the copy lands on the original.
+            let old = std::mem::replace(&mut take.guid, Uuid::new_v4().to_string());
+            take.item_guid = into.clone();
+            copy_take_in(p, (source, &old), (&into, &take.guid));
+        }
+        p.takes.insert(into, takes);
+    }
+    Some(copy)
+}
+
+/// Everything kept per take, copied from take `old` of item `source` to
+/// take `new` of item `into`: its envelopes (by their keys, not a search of
+/// every envelope in the song), its audio source (an `Arc`), its stretch
+/// markers and mode, its MIDI — or a split's right half plays silent,
+/// unwarped, without the left's volume curve, or loses every note.
+fn copy_take_in(p: &mut ProjectState, (source, old): (&str, &str), (into, new): (&str, &str)) {
+    for kind in daw_proto::TakeEnvelopeKind::ALL {
+        let key = |item: &str, take: &str| {
+            (
+                String::new(),
+                EnvelopeKey::Take {
+                    item_guid: item.to_owned(),
+                    take_guid: take.to_owned(),
+                    kind,
+                },
+            )
+        };
+        if let Some(curve) = p.envelopes.get(&key(source, old)).cloned() {
+            p.envelopes.insert(key(into, new), curve);
+        }
+    }
+    #[cfg(any(feature = "audio", feature = "decode"))]
+    if let Some(audio) = p.audio_sources.get(old).cloned() {
+        p.audio_sources.insert(new.to_owned(), audio);
+    }
+    copy_keyed(&mut p.stretch_markers, old, new);
+    copy_keyed(&mut p.stretch_modes, old, new);
+    copy_keyed(&mut p.midi_notes, old, new);
+    copy_keyed(&mut p.midi_ccs, old, new);
+    copy_keyed(&mut p.midi_pitch_bends, old, new);
+    copy_keyed(&mut p.midi_program_changes, old, new);
+    copy_keyed(&mut p.midi_sysex, old, new);
+    copy_keyed(&mut p.midi_channel_pressures, old, new);
+    copy_keyed(&mut p.midi_poly_pressures, old, new);
+    copy_keyed(&mut p.midi_note_expressions, old, new);
+}
+
+/// Item `guid` gone, with its takes: its track, or `None` with no such
+/// item. The others on the track keep their indices — they stay in order,
+/// and an index is only the tiebreak between two items at one place.
+pub(crate) fn delete_in(p: &mut ProjectState, guid: &str) -> Option<String> {
+    let entry = p.items.remove(guid)?;
+    let track = entry.item.track_guid;
+    if let Some(order) = p.items_by_track.get_mut(&track) {
+        order.retain(|g| g != guid);
+    }
+    p.takes.remove(guid);
+    Some(track)
 }
 
 /// `map[to]` as a copy of `map[from]`, when there is one.
