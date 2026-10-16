@@ -70,6 +70,11 @@ pub enum TakeEnvelopeKind {
     Pitch = 3,
 }
 
+impl TakeEnvelopeKind {
+    /// Every kind a take can have an envelope of.
+    pub const ALL: [Self; 4] = [Self::Volume, Self::Pan, Self::Mute, Self::Pitch];
+}
+
 /// Reference to an envelope
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq, Facet)]
