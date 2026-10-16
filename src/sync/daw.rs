@@ -285,6 +285,18 @@ impl RulerLane {
     pub const DEFAULT_MARKER: u32 = 4;
 }
 
+/// What changed in a project's items since a reader last looked
+/// ([`Standalone::item_changes_since`]).
+#[derive(Debug, Clone)]
+pub struct ItemChanges {
+    /// Where the reader has now read up to: its next cursor.
+    pub cursor: u64,
+    /// The items written, removed or made; `None` when the journal cannot
+    /// say (a song loaded, an undo put back whole, a reader too far
+    /// behind): read every item.
+    pub items: Option<std::collections::HashSet<String>>,
+}
+
 /// Per-project in-memory state.
 pub struct ProjectState {
     pub info: ProjectInfo,
@@ -306,40 +318,44 @@ pub struct ProjectState {
     /// Notes are stored in insertion order; the `index` field on
     /// each `MidiNote` mirrors its position in the vec (rewritten on
     /// add/delete to keep references stable within a single read).
-    pub midi_notes: HashMap<String, Vec<MidiNote>>,
+    pub midi_notes: crate::journal::Journaled<String, Vec<MidiNote>>,
     /// Per-take MIDI Control Change events, keyed by take guid.
     /// CC streams feed plugins per-block alongside note events.
-    pub midi_ccs: HashMap<String, Vec<daw_proto::midi::MidiCC>>,
+    pub midi_ccs: crate::journal::Journaled<String, Vec<daw_proto::midi::MidiCC>>,
     /// Per-take MIDI Pitch Bend events.
-    pub midi_pitch_bends: HashMap<String, Vec<daw_proto::midi::MidiPitchBend>>,
+    pub midi_pitch_bends: crate::journal::Journaled<String, Vec<daw_proto::midi::MidiPitchBend>>,
     /// Per-take MIDI Program Change events.
-    pub midi_program_changes: HashMap<String, Vec<daw_proto::midi::MidiProgramChange>>,
+    pub midi_program_changes:
+        crate::journal::Journaled<String, Vec<daw_proto::midi::MidiProgramChange>>,
     /// Per-take MIDI System Exclusive events (full F0..F7 frames).
-    pub midi_sysex: HashMap<String, Vec<daw_proto::midi::MidiSysEx>>,
+    pub midi_sysex: crate::journal::Journaled<String, Vec<daw_proto::midi::MidiSysEx>>,
     /// Stretch markers per take guid, kept sorted by position.
     ///
     /// Keyed by take rather than item because a take is what carries
     /// timing: two takes of one item are two performances and warp
     /// independently.
-    pub stretch_markers: HashMap<String, Vec<daw_proto::StretchMarker>>,
+    pub stretch_markers: crate::journal::Journaled<String, Vec<daw_proto::StretchMarker>>,
     /// Per-take stretch algorithm.
-    pub stretch_modes: HashMap<String, daw_proto::StretchMode>,
+    pub stretch_modes: crate::journal::Journaled<String, daw_proto::StretchMode>,
     /// Take markers per take guid, kept sorted by source position.
     ///
     /// Annotations on the audio itself — a breath here, a sibilant
     /// there, a rating on a comp take. Anchored in *source* time so
     /// they stay on the sound when the item is trimmed or moved.
-    pub take_markers: HashMap<String, Vec<daw_proto::TakeMarker>>,
+    pub take_markers: crate::journal::Journaled<String, Vec<daw_proto::TakeMarker>>,
     /// Per-take channel-pressure (mono aftertouch) events.
-    pub midi_channel_pressures: HashMap<String, Vec<daw_proto::midi::MidiChannelPressure>>,
+    pub midi_channel_pressures:
+        crate::journal::Journaled<String, Vec<daw_proto::midi::MidiChannelPressure>>,
     /// Per-take poly-pressure (per-note aftertouch) events.
-    pub midi_poly_pressures: HashMap<String, Vec<daw_proto::midi::MidiPolyPressure>>,
+    pub midi_poly_pressures:
+        crate::journal::Journaled<String, Vec<daw_proto::midi::MidiPolyPressure>>,
     /// Per-take MPE-style note-expression events (volume/pan/tuning/
     /// vibrato/expression/brightness/pressure per voice).
-    pub midi_note_expressions: HashMap<String, Vec<daw_proto::midi::MidiNoteExpression>>,
+    pub midi_note_expressions:
+        crate::journal::Journaled<String, Vec<daw_proto::midi::MidiNoteExpression>>,
     /// Automation envelopes keyed by `(track_guid, EnvelopeKey)`. Points
     /// are kept sorted by time within each envelope.
-    pub envelopes: HashMap<(String, EnvelopeKey), EnvelopeData>,
+    pub envelopes: crate::journal::Journaled<(String, EnvelopeKey), EnvelopeData>,
     /// Global automation override (`None` = no override active).
     pub global_automation_override: Option<AutomationMode>,
     /// Project Media/FX Bay persistent state (retained paths +
@@ -372,11 +388,11 @@ pub struct ProjectState {
     /// stash plugin-specific metadata can round-trip through standalone.
     pub fx_named_config: HashMap<(String, String), String>,
     /// Items keyed by item guid.
-    pub items: HashMap<String, ItemEntry>,
+    pub items: crate::journal::Journaled<String, ItemEntry>,
     /// Per-track item ordering. `track_guid -> [item_guid, ...]`.
     pub items_by_track: HashMap<String, Vec<String>>,
     /// Takes keyed by item guid.
-    pub takes: HashMap<String, TakeList>,
+    pub takes: crate::journal::Journaled<String, TakeList>,
     /// Sends keyed by source track guid.
     pub sends: HashMap<String, Vec<TrackRoute>>,
     /// Receives keyed by destination track guid.
@@ -438,18 +454,18 @@ impl ProjectState {
             tempo_points: Vec::new(),
             tracks: Vec::new(),
             track_ext: HashMap::new(),
-            midi_notes: HashMap::new(),
-            midi_ccs: HashMap::new(),
-            midi_pitch_bends: HashMap::new(),
-            midi_program_changes: HashMap::new(),
-            midi_sysex: HashMap::new(),
-            stretch_markers: HashMap::new(),
-            stretch_modes: HashMap::new(),
-            take_markers: HashMap::new(),
-            midi_channel_pressures: HashMap::new(),
-            midi_poly_pressures: HashMap::new(),
-            midi_note_expressions: HashMap::new(),
-            envelopes: HashMap::new(),
+            midi_notes: crate::journal::Journaled::default(),
+            midi_ccs: crate::journal::Journaled::default(),
+            midi_pitch_bends: crate::journal::Journaled::default(),
+            midi_program_changes: crate::journal::Journaled::default(),
+            midi_sysex: crate::journal::Journaled::default(),
+            stretch_markers: crate::journal::Journaled::default(),
+            stretch_modes: crate::journal::Journaled::default(),
+            take_markers: crate::journal::Journaled::default(),
+            midi_channel_pressures: crate::journal::Journaled::default(),
+            midi_poly_pressures: crate::journal::Journaled::default(),
+            midi_note_expressions: crate::journal::Journaled::default(),
+            envelopes: crate::journal::Journaled::default(),
             global_automation_override: None,
             bay_state: None,
             #[cfg(any(feature = "audio", feature = "decode"))]
@@ -461,9 +477,9 @@ impl ProjectState {
             fx_chains: HashMap::new(),
             fx_preset_index: HashMap::new(),
             fx_named_config: HashMap::new(),
-            items: HashMap::new(),
+            items: crate::journal::Journaled::default(),
             items_by_track: HashMap::new(),
-            takes: HashMap::new(),
+            takes: crate::journal::Journaled::default(),
             sends: HashMap::new(),
             receives: HashMap::new(),
             hw_outputs: HashMap::new(),
@@ -509,15 +525,15 @@ impl EditSnapshot {
     pub fn capture(p: &ProjectState) -> Self {
         Self {
             tracks: p.tracks.clone(),
-            items: p.items.clone(),
+            items: (*p.items).clone(),
             items_by_track: p.items_by_track.clone(),
-            takes: p.takes.clone(),
-            stretch_markers: p.stretch_markers.clone(),
-            stretch_modes: p.stretch_modes.clone(),
-            take_markers: p.take_markers.clone(),
-            midi_notes: p.midi_notes.clone(),
-            midi_ccs: p.midi_ccs.clone(),
-            envelopes: p.envelopes.clone(),
+            takes: (*p.takes).clone(),
+            stretch_markers: (*p.stretch_markers).clone(),
+            stretch_modes: (*p.stretch_modes).clone(),
+            take_markers: (*p.take_markers).clone(),
+            midi_notes: (*p.midi_notes).clone(),
+            midi_ccs: (*p.midi_ccs).clone(),
+            envelopes: (*p.envelopes).clone(),
             track_ext_state: p.track_ext_state.clone(),
             #[cfg(any(feature = "audio", feature = "decode"))]
             audio_sources: p.audio_sources.clone(),
@@ -528,15 +544,17 @@ impl EditSnapshot {
 
     pub fn restore(self, p: &mut ProjectState) {
         p.tracks = self.tracks;
-        p.items = self.items;
+        // Each map put back whole: to any reader, everything in it changed
+        // (`Journaled::from`).
+        p.items = self.items.into();
         p.items_by_track = self.items_by_track;
-        p.takes = self.takes;
-        p.stretch_markers = self.stretch_markers;
-        p.stretch_modes = self.stretch_modes;
-        p.take_markers = self.take_markers;
-        p.midi_notes = self.midi_notes;
-        p.midi_ccs = self.midi_ccs;
-        p.envelopes = self.envelopes;
+        p.takes = self.takes.into();
+        p.stretch_markers = self.stretch_markers.into();
+        p.stretch_modes = self.stretch_modes.into();
+        p.take_markers = self.take_markers.into();
+        p.midi_notes = self.midi_notes.into();
+        p.midi_ccs = self.midi_ccs.into();
+        p.envelopes = self.envelopes.into();
         p.track_ext_state = self.track_ext_state;
         #[cfg(any(feature = "audio", feature = "decode"))]
         {
@@ -1403,6 +1421,75 @@ impl Standalone {
     pub fn audio_source_count(&self, project_guid: &str) -> usize {
         self.with_project(project_guid, |p| p.audio_sources.len())
             .unwrap_or(0)
+    }
+
+    /// Which of project `guid`'s items changed since `cursor` (a number
+    /// from [`crate::journal::now`], or the `cursor` an earlier answer gave):
+    /// any item written, its takes, anything kept per take (stretch
+    /// markers, take markers, MIDI) or its take envelopes. `None` for no
+    /// such project.
+    ///
+    /// What a reader of the song asks after an edit, to read only what
+    /// changed instead of every item.
+    #[must_use]
+    pub fn item_changes_since(&self, guid: &str, cursor: u64) -> Option<ItemChanges> {
+        let s = self.state.lock().ok()?;
+        let p = s.projects.get(guid)?;
+        // Read under the lock every write takes: nothing lands between.
+        let now = crate::journal::now();
+        let everything = ItemChanges {
+            cursor: now,
+            items: None,
+        };
+        let mut items: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut takes: std::collections::HashSet<&String> = std::collections::HashSet::new();
+        let (Some(i), Some(t)) = (p.items.written_since(cursor), p.takes.written_since(cursor))
+        else {
+            return Some(everything);
+        };
+        items.extend(i.chain(t).cloned());
+        macro_rules! per_take {
+            ($($map:ident),*) => {$(
+                let Some(keys) = p.$map.written_since(cursor) else {
+                    return Some(everything);
+                };
+                takes.extend(keys);
+            )*};
+        }
+        per_take!(
+            stretch_markers,
+            stretch_modes,
+            take_markers,
+            midi_notes,
+            midi_ccs,
+            midi_pitch_bends,
+            midi_program_changes,
+            midi_sysex,
+            midi_channel_pressures,
+            midi_poly_pressures,
+            midi_note_expressions
+        );
+        let Some(envelopes) = p.envelopes.written_since(cursor) else {
+            return Some(everything);
+        };
+        for (_, key) in envelopes {
+            if let EnvelopeKey::Take { item_guid, .. } = key {
+                items.insert(item_guid.clone());
+            }
+        }
+        // A take's write is its item's: found through the takes (a take
+        // removed was its item's takes written, noted there).
+        if !takes.is_empty() {
+            for (item, list) in p.takes.iter() {
+                if list.takes.iter().any(|t| takes.contains(&t.guid)) {
+                    items.insert(item.clone());
+                }
+            }
+        }
+        Some(ItemChanges {
+            cursor: now,
+            items: Some(items),
+        })
     }
 
     /// Visit a project's state via a read-only closure. Test/debug

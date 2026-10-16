@@ -371,16 +371,19 @@ impl Takes for Standalone {
         {
             self.with_project_mut(&project_guid, |p| {
                 let length = p.items.get(&item_guid).map(|e| e.item.length.as_seconds());
-                for ((_, key), data) in &mut p.envelopes {
-                    let EnvelopeKey::Take {
-                        item_guid: of_item,
-                        take_guid: of_take,
-                        ..
-                    } = key
-                    else {
-                        continue;
-                    };
-                    if *of_item == item_guid && *of_take == take_guid {
+                // This take's envelopes, by key: written one by one, each
+                // noted, not every envelope in the song.
+                let keys: Vec<(String, EnvelopeKey)> = p
+                    .envelopes
+                    .keys()
+                    .filter(|(_, key)| {
+                        matches!(key, EnvelopeKey::Take { item_guid: of_item, take_guid: of_take, .. }
+                            if *of_item == item_guid && *of_take == take_guid)
+                    })
+                    .cloned()
+                    .collect();
+                for key in keys {
+                    if let Some(data) = p.envelopes.get_mut(&key) {
                         for point in &mut data.points {
                             point.time = daw_proto::PositionInSeconds::from_seconds(
                                 point.time.as_seconds() - by,

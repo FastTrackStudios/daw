@@ -92,6 +92,17 @@ fn with_start_offset(p: &ProjectState, guid: &str, item: &Item) -> Item {
     item
 }
 
+/// The index a new item on `track` takes: past the last one there, so a
+/// track's indices stay in its order and never repeat (a delete leaves a
+/// gap rather than renumbering the rest).
+fn next_index(p: &ProjectState, track: &str) -> u32 {
+    p.items_by_track
+        .get(track)
+        .and_then(|order| order.last())
+        .and_then(|g| p.items.get(g))
+        .map_or(0, |e| e.item.index.saturating_add(1))
+}
+
 fn item_guid_from_ref(p: &ProjectState, item: &ItemRef) -> Option<String> {
     match item {
         ItemRef::Guid(g) => Some(g.clone()),
@@ -148,9 +159,11 @@ fn insert_item(
             Some(g) => g,
             None => p.mint_item_guid(),
         };
-        let order = p.items_by_track.entry(track_guid.clone()).or_default();
-        let index = order.len() as u32;
-        order.push(item_guid.clone());
+        let index = next_index(p, &track_guid);
+        p.items_by_track
+            .entry(track_guid.clone())
+            .or_default()
+            .push(item_guid.clone());
         let mut item = Item::default();
         item.guid = item_guid.clone();
         item.track_guid = track_guid.clone();
@@ -290,13 +303,12 @@ impl Items for Standalone {
                 .remove(&item_guid)
                 .ok_or_else(|| DawError::not_found("Item", &item_guid))?;
             let track_guid = entry.item.track_guid.clone();
+            // The others keep their indices: they stay in order, and an
+            // index is only ever the tiebreak between two items at one
+            // place. Renumbering wrote every item on the track for each
+            // delete — the whole kit, for a comp's clear.
             if let Some(order) = p.items_by_track.get_mut(&entry.item.track_guid) {
                 order.retain(|g| g != &item_guid);
-                for (i, g) in order.iter().enumerate() {
-                    if let Some(e) = p.items.get_mut(g) {
-                        e.item.index = i as u32;
-                    }
-                }
             }
             p.takes.remove(&item_guid);
             Ok::<(String, String), DawError>((item_guid, track_guid))
@@ -319,12 +331,11 @@ impl Items for Standalone {
                 let item_guid = item_guid_from_ref(p, &item)?;
                 let src = p.items.get(&item_guid)?.clone();
                 let new_guid = p.mint_item_guid();
-                let order = p
-                    .items_by_track
+                let new_index = next_index(p, &src.item.track_guid);
+                p.items_by_track
                     .entry(src.item.track_guid.clone())
-                    .or_default();
-                let new_index = order.len() as u32;
-                order.push(new_guid.clone());
+                    .or_default()
+                    .push(new_guid.clone());
                 let mut new_item = src.item.clone();
                 new_item.guid = new_guid.clone();
                 new_item.index = new_index;
@@ -488,9 +499,11 @@ impl Items for Standalone {
                 order.retain(|g| g != &item_guid);
             }
             // Insert into new track.
-            let order = p.items_by_track.entry(track_guid.clone()).or_default();
-            let new_index = order.len() as u32;
-            order.push(item_guid.clone());
+            let new_index = next_index(p, &track_guid);
+            p.items_by_track
+                .entry(track_guid.clone())
+                .or_default()
+                .push(item_guid.clone());
             if let Some(e) = p.items.get_mut(&item_guid) {
                 e.item.track_guid = track_guid.clone();
                 e.item.index = new_index;
@@ -554,11 +567,17 @@ impl Items for Standalone {
         // One event per item whose selection actually flipped: the ones
         // already in that state did not change.
         let flipped = self.with_project_mut(&guid, |p| {
-            let mut flipped = Vec::new();
-            for (item_guid, entry) in p.items.iter_mut() {
-                if entry.item.selected != selected {
+            // Only those that flip are written (each noted in the
+            // journal): a deselect is not every item in the song changed.
+            let flipped: Vec<String> = p
+                .items
+                .iter()
+                .filter(|(_, entry)| entry.item.selected != selected)
+                .map(|(item_guid, _)| item_guid.clone())
+                .collect();
+            for item_guid in &flipped {
+                if let Some(entry) = p.items.get_mut(item_guid) {
                     entry.item.selected = selected;
-                    flipped.push(item_guid.clone());
                 }
             }
             flipped
@@ -701,7 +720,7 @@ impl Items for Standalone {
 }
 
 /// `map[to]` as a copy of `map[from]`, when there is one.
-fn copy_keyed<T: Clone>(map: &mut std::collections::HashMap<String, T>, from: &str, to: &str) {
+fn copy_keyed<T: Clone>(map: &mut crate::journal::Journaled<String, T>, from: &str, to: &str) {
     if let Some(value) = map.get(from).cloned() {
         map.insert(to.to_owned(), value);
     }

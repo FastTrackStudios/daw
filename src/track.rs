@@ -280,8 +280,14 @@ impl Tracks for Standalone {
             // The track mode IS the envelopes' mode — propagate so the
             // existing touch/latch/write machinery records (or stops
             // recording) immediately. REAPER's I_AUTOMODE semantics.
-            for (key, data) in p.envelopes.iter_mut() {
-                if key.0 == track_guid {
+            let keys: Vec<_> = p
+                .envelopes
+                .keys()
+                .filter(|key| key.0 == track_guid)
+                .cloned()
+                .collect();
+            for key in keys {
+                if let Some(data) = p.envelopes.get_mut(&key) {
                     data.automation_mode = mode;
                 }
             }

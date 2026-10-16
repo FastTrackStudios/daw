@@ -67,6 +67,7 @@ mod fx_params;
 mod health;
 mod input;
 mod item;
+pub mod journal;
 mod live_midi;
 mod marker;
 pub mod media_bay;
@@ -128,7 +129,7 @@ mod window_manager;
 // Old `Standalone*` per-service structs retired.
 pub use project::project_guids;
 pub use shared_state::SharedProjectState;
-pub use sync::Standalone;
+pub use sync::{ItemChanges, Standalone};
 
 /// REAPER `.reapeaks` peak-cache reading (the `reapeaks` feature) — draw
 /// waveforms from REAPER's own peak mipmaps.

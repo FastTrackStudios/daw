@@ -1227,7 +1227,7 @@ fn fill_pools(daw: &Standalone, project_guid: &str, rpp_text: &str) {
         return;
     }
     let _ = daw.with_project_mut(project_guid, |p| {
-        for ((_, key), data) in &mut p.envelopes {
+        for ((_, key), data) in p.envelopes.iter_mut() {
             for (item, curve) in &mut data.automation_items {
                 let Some(pool) = pools.iter().find(|pool| pool.id == item.pool_id) else {
                     continue;
