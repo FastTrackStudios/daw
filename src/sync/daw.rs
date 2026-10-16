@@ -297,6 +297,69 @@ pub struct ItemChanges {
     pub items: Option<std::collections::HashSet<String>>,
 }
 
+impl ProjectState {
+    /// Which items changed since `cursor` ([`Standalone::item_changes_since`]),
+    /// for a reader already looking at the state under its lock.
+    #[must_use]
+    pub fn item_changes_since(&self, cursor: u64) -> ItemChanges {
+        let p = self;
+        let now = crate::journal::now();
+        let everything = ItemChanges {
+            cursor: now,
+            items: None,
+        };
+        let mut items: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut takes: std::collections::HashSet<&String> = std::collections::HashSet::new();
+        let (Some(i), Some(t)) = (p.items.written_since(cursor), p.takes.written_since(cursor))
+        else {
+            return everything;
+        };
+        items.extend(i.chain(t).cloned());
+        macro_rules! per_take {
+            ($($map:ident),*) => {$(
+                let Some(keys) = p.$map.written_since(cursor) else {
+                    return everything;
+                };
+                takes.extend(keys);
+            )*};
+        }
+        per_take!(
+            stretch_markers,
+            stretch_modes,
+            take_markers,
+            midi_notes,
+            midi_ccs,
+            midi_pitch_bends,
+            midi_program_changes,
+            midi_sysex,
+            midi_channel_pressures,
+            midi_poly_pressures,
+            midi_note_expressions
+        );
+        let Some(envelopes) = p.envelopes.written_since(cursor) else {
+            return everything;
+        };
+        for (_, key) in envelopes {
+            if let EnvelopeKey::Take { item_guid, .. } = key {
+                items.insert(item_guid.clone());
+            }
+        }
+        // A take's write is its item's: found through the takes (a take
+        // removed was its item's takes written, noted there).
+        if !takes.is_empty() {
+            for (item, list) in p.takes.iter() {
+                if list.takes.iter().any(|t| takes.contains(&t.guid)) {
+                    items.insert(item.clone());
+                }
+            }
+        }
+        ItemChanges {
+            cursor: now,
+            items: Some(items),
+        }
+    }
+}
+
 /// Per-project in-memory state.
 pub struct ProjectState {
     pub info: ProjectInfo,
@@ -1475,62 +1538,8 @@ impl Standalone {
     #[must_use]
     pub fn item_changes_since(&self, guid: &str, cursor: u64) -> Option<ItemChanges> {
         let s = self.state.lock().ok()?;
-        let p = s.projects.get(guid)?;
         // Read under the lock every write takes: nothing lands between.
-        let now = crate::journal::now();
-        let everything = ItemChanges {
-            cursor: now,
-            items: None,
-        };
-        let mut items: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let mut takes: std::collections::HashSet<&String> = std::collections::HashSet::new();
-        let (Some(i), Some(t)) = (p.items.written_since(cursor), p.takes.written_since(cursor))
-        else {
-            return Some(everything);
-        };
-        items.extend(i.chain(t).cloned());
-        macro_rules! per_take {
-            ($($map:ident),*) => {$(
-                let Some(keys) = p.$map.written_since(cursor) else {
-                    return Some(everything);
-                };
-                takes.extend(keys);
-            )*};
-        }
-        per_take!(
-            stretch_markers,
-            stretch_modes,
-            take_markers,
-            midi_notes,
-            midi_ccs,
-            midi_pitch_bends,
-            midi_program_changes,
-            midi_sysex,
-            midi_channel_pressures,
-            midi_poly_pressures,
-            midi_note_expressions
-        );
-        let Some(envelopes) = p.envelopes.written_since(cursor) else {
-            return Some(everything);
-        };
-        for (_, key) in envelopes {
-            if let EnvelopeKey::Take { item_guid, .. } = key {
-                items.insert(item_guid.clone());
-            }
-        }
-        // A take's write is its item's: found through the takes (a take
-        // removed was its item's takes written, noted there).
-        if !takes.is_empty() {
-            for (item, list) in p.takes.iter() {
-                if list.takes.iter().any(|t| takes.contains(&t.guid)) {
-                    items.insert(item.clone());
-                }
-            }
-        }
-        Some(ItemChanges {
-            cursor: now,
-            items: Some(items),
-        })
+        Some(s.projects.get(guid)?.item_changes_since(cursor))
     }
 
     /// Visit a project's state via a read-only closure. Test/debug
