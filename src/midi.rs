@@ -1260,11 +1260,22 @@ fn mutate_note(
 }
 
 fn update_take_note_count(p: &mut crate::sync::ProjectState, take_guid: &str, count: u32) {
-    if let Some(list) = p
+    // The item the take is on, found by looking; then that one entry
+    // written. Through `values_mut` every take of the song was written as
+    // far as the journal could tell, and every reader of it read the whole
+    // song again after each MIDI edit.
+    let Some(item) = p
         .takes
-        .values_mut()
-        .find(|tl| tl.takes.iter().any(|t| t.guid == take_guid))
-        && let Some(t) = list.takes.iter_mut().find(|t| t.guid == take_guid)
+        .iter()
+        .find(|(_, list)| list.takes.iter().any(|t| t.guid == take_guid))
+        .map(|(item, _)| item.clone())
+    else {
+        return;
+    };
+    if let Some(t) = p
+        .takes
+        .get_mut(&item)
+        .and_then(|list| list.takes.iter_mut().find(|t| t.guid == take_guid))
     {
         t.midi_note_count = Some(count);
     }

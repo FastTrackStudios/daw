@@ -270,9 +270,13 @@ impl Projects for Standalone {
         // From here each per-item map keeps what it held before the step
         // first writes a key: the step is its changes, not a copy.
         p.record();
+        #[cfg(any(feature = "audio", feature = "decode"))]
+        p.audio_sources.record();
         let step = crate::sync::daw::UndoStep {
             label: label.to_string(),
             deltas: crate::sync::daw::Deltas::default(),
+            #[cfg(any(feature = "audio", feature = "decode"))]
+            audio: Vec::new(),
             before: crate::sync::daw::EditSnapshot::capture(p),
             after: None,
         };
@@ -295,6 +299,10 @@ impl Projects for Standalone {
         }
         if let Some(p) = s.projects.get_mut(&guid) {
             step.deltas = p.recorded();
+            #[cfg(any(feature = "audio", feature = "decode"))]
+            {
+                step.audio = p.audio_sources.recorded();
+            }
             step.after = Some(crate::sync::daw::EditSnapshot::capture(p));
         }
         let named = step.label.clone();

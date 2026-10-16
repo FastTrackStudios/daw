@@ -429,7 +429,8 @@ pub struct ProjectState {
     /// directly via `attach_audio_source`). Read by the mixer during
     /// playback. Wrapped in `Arc` so the mixer can hold cheap refs.
     #[cfg(any(feature = "audio", feature = "decode"))]
-    pub audio_sources: HashMap<String, std::sync::Arc<crate::audio_engine::AudioSource>>,
+    pub audio_sources:
+        crate::journal::Journaled<String, std::sync::Arc<crate::audio_engine::AudioSource>>,
     pub next_region_id: u32,
     pub next_marker_id: u32,
     /// Per-track ext state keyed by `(track_guid, section, key)`.
@@ -532,7 +533,7 @@ impl ProjectState {
             global_automation_override: None,
             bay_state: None,
             #[cfg(any(feature = "audio", feature = "decode"))]
-            audio_sources: HashMap::new(),
+            audio_sources: crate::journal::Journaled::default(),
             next_region_id: 0,
             next_marker_id: 0,
             track_ext_state: HashMap::new(),
@@ -612,7 +613,7 @@ macro_rules! deltas_struct {
 
 journaled_maps!(deltas_struct);
 
-/// What a project holds besides its per-item maps, as an undo step found
+/// What a project holds besides its journaled maps, as an undo step found
 /// or left it: small — the tracks, what extensions keep on them, the
 /// counters — so it is copied whole.
 pub struct EditSnapshot {
@@ -620,8 +621,6 @@ pub struct EditSnapshot {
     /// What extensions keep on each track (its markers and regions, a
     /// leveled vocal's lanes): an edit to them is undone with the rest.
     track_ext_state: HashMap<(String, String, String), String>,
-    #[cfg(any(feature = "audio", feature = "decode"))]
-    audio_sources: HashMap<String, std::sync::Arc<crate::audio_engine::AudioSource>>,
     next_item_counter: u64,
     next_take_counter: u64,
 }
@@ -632,8 +631,6 @@ impl EditSnapshot {
         Self {
             tracks: p.tracks.clone(),
             track_ext_state: p.track_ext_state.clone(),
-            #[cfg(any(feature = "audio", feature = "decode"))]
-            audio_sources: p.audio_sources.clone(),
             next_item_counter: p.next_item_counter,
             next_take_counter: p.next_take_counter,
         }
@@ -642,8 +639,6 @@ impl EditSnapshot {
     pub fn restore(&self, p: &mut ProjectState) {
         p.tracks.clone_from(&self.tracks);
         p.track_ext_state.clone_from(&self.track_ext_state);
-        #[cfg(any(feature = "audio", feature = "decode"))]
-        p.audio_sources.clone_from(&self.audio_sources);
         p.next_item_counter = self.next_item_counter;
         p.next_take_counter = self.next_take_counter;
     }
@@ -655,6 +650,9 @@ impl EditSnapshot {
 pub struct UndoStep {
     pub label: String,
     pub deltas: Deltas,
+    /// What the step changed in the decoded audio kept per take.
+    #[cfg(any(feature = "audio", feature = "decode"))]
+    pub audio: Vec<crate::journal::Delta<String, std::sync::Arc<crate::audio_engine::AudioSource>>>,
     pub before: EditSnapshot,
     /// `None` until the step closes.
     pub after: Option<EditSnapshot>,
@@ -664,6 +662,8 @@ impl UndoStep {
     /// Put the project back to one side of this step.
     pub fn put_back(&self, p: &mut ProjectState, side: crate::journal::Side) {
         p.put_back(&self.deltas, side);
+        #[cfg(any(feature = "audio", feature = "decode"))]
+        p.audio_sources.put_back(&self.audio, side);
         match side {
             crate::journal::Side::Before => self.before.restore(p),
             crate::journal::Side::After => {
