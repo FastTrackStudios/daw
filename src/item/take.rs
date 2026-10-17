@@ -206,6 +206,10 @@ pub struct HitMark {
     pub flam_with: Option<String>,
     /// Anything whoever looked at it wants the next to know.
     pub note: String,
+    /// Its velocity as set by hand (a note's, edited in the kit's MIDI),
+    /// 1..=127: what its sample plays at instead of the one its peak
+    /// gives. None until someone sets it.
+    pub velocity: Option<u8>,
 }
 
 /// Create-only payload for adding a new take marker.
