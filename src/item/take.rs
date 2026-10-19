@@ -162,6 +162,12 @@ pub struct TakeMarker {
     pub color: Option<u32>,
     /// A drum hit's properties, when the marker is one.
     pub hit: Option<HitMark>,
+    /// Anything said about the take here (a rank's why, a reminder).
+    pub note: String,
+    /// Where it ends, seconds into the source: a take *region* — its rank
+    /// and note hold from `source_position_seconds` to here only. `None`:
+    /// a point, as REAPER's take markers are.
+    pub end_seconds: Option<f64>,
 }
 
 /// Who put a hit marker where it is.
