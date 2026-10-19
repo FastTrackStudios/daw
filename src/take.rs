@@ -462,6 +462,7 @@ impl Takes for Standalone {
                     source_position_seconds: marker.source_position_seconds,
                     color: marker.color,
                     hit: marker.hit,
+                    ..TakeMarker::default()
                 });
                 renumber(list);
                 // The index it landed at, not the one it was pushed to:
