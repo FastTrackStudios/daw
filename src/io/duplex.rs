@@ -231,6 +231,17 @@ pub struct EngineStats {
     /// together, its cost per frame against realtime.
     pub ahead_render_ns: AtomicU64,
     pub ahead_frames: AtomicU64,
+    /// Times an edit to a track rendered ahead had the render ahead start
+    /// again a little past the playhead, what it had rendered past there
+    /// stale.
+    pub ahead_rewinds: AtomicU64,
+    /// Frames played from what was rendered before an edit because what
+    /// was rendered after it had not come yet: the edit heard late, never
+    /// a gap.
+    pub ahead_stale_frames: AtomicU64,
+    /// How far ahead the render ahead aims to be now, frames: its depth,
+    /// or less while edits come in.
+    pub ahead_depth_frames: AtomicU64,
 }
 
 impl EngineStats {
