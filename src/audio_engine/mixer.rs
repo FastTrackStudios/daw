@@ -561,6 +561,8 @@ impl AudioEngine {
                 stream_error.clone(),
                 #[cfg(not(target_arch = "wasm32"))]
                 stats.clone(),
+                #[cfg(not(target_arch = "wasm32"))]
+                super::ahead::AheadPrefs::chosen(prefs),
             )?,
             SampleFormat::I16 => Self::build_project_stream::<i16>(
                 &out.device,
@@ -572,6 +574,8 @@ impl AudioEngine {
                 stream_error.clone(),
                 #[cfg(not(target_arch = "wasm32"))]
                 stats.clone(),
+                #[cfg(not(target_arch = "wasm32"))]
+                super::ahead::AheadPrefs::chosen(prefs),
             )?,
             SampleFormat::U16 => Self::build_project_stream::<u16>(
                 &out.device,
@@ -583,6 +587,8 @@ impl AudioEngine {
                 stream_error.clone(),
                 #[cfg(not(target_arch = "wasm32"))]
                 stats.clone(),
+                #[cfg(not(target_arch = "wasm32"))]
+                super::ahead::AheadPrefs::chosen(prefs),
             )?,
             format => return Err(format!("Unsupported sample format: {format:?}")),
         };
@@ -725,8 +731,14 @@ impl AudioEngine {
         soft_clock_enabled: Arc<AtomicBool>,
         stream_error: Arc<AtomicBool>,
         #[cfg(not(target_arch = "wasm32"))] stats: Arc<audio::io::duplex::EngineStats>,
+        #[cfg(not(target_arch = "wasm32"))] ahead: Option<super::ahead::AheadPrefs>,
     ) -> Result<Stream, String> {
         let channels = config.channels as usize;
+        // The tracks nobody plays live render ahead, on a thread of their
+        // own; the callback renders the live ones (see `ahead`).
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut dual =
+            super::ahead::DualRender::new(renderer.clone(), shared.clone(), ahead, stats.clone());
         // Publish the device's real channel count so the metronome UI can
         // offer every output pair, and default the routing pairs sensibly.
         routing::MixerRouting::shared().set_channel_count(channels);
@@ -812,6 +824,8 @@ impl AudioEngine {
                     let use_stage = num_samples <= stage.len();
 
                     if !playing {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        dual.rest();
                         // Meters fall to silence instead of freezing
                         // at the last rendered block's peaks.
                         let meters = daw.meters();
@@ -850,6 +864,9 @@ impl AudioEngine {
                     // edit). Future work: lock-free RCU snapshot so the
                     // callback never blocks. Varispeed + a landing locate
                     // are in the plan.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let block = dual.render(&plan, false);
+                    #[cfg(target_arch = "wasm32")]
                     let block = renderer.render_plan(&plan, false);
 
                     // Interleave the stereo block (handle channel-count

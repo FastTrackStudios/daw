@@ -707,6 +707,10 @@ pub struct ProjectRenderer {
     /// Realtime mode: the worker threads independent tracks render on.
     #[cfg(not(target_arch = "wasm32"))]
     lanes: std::sync::OnceLock<parallel::LanePool>,
+    /// The live set of the snapshot the last block rendered with
+    /// ([`graph::live_print`]): what a dual-buffer engine checks the feeds
+    /// it hands over against.
+    live_print: std::sync::atomic::AtomicU64,
 }
 
 /// Builds render snapshots off the audio thread, for a realtime renderer.
@@ -762,6 +766,7 @@ impl ProjectRenderer {
             realtime: std::sync::OnceLock::new(),
             #[cfg(not(target_arch = "wasm32"))]
             lanes: std::sync::OnceLock::new(),
+            live_print: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -772,10 +777,25 @@ impl ProjectRenderer {
     /// and see every edit on the very next block. Idempotent.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn set_realtime(&self) {
+        self.go_realtime("render-lane", 0);
+    }
+
+    /// [`set_realtime`](Self::set_realtime) for the renderer of a render
+    /// ahead: its lane pool its own, named for it and running below the
+    /// audio callback.
+    #[cfg(all(not(target_arch = "wasm32"), feature = "audio"))]
+    pub(crate) fn set_realtime_ahead(&self) {
+        self.go_realtime("render-ahead", audio::io::realtime::AHEAD_PRIORITY);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn go_realtime(&self, pool_name: &str, priority: i32) {
         use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
         let threads = parallel::default_threads();
         if threads > 0 {
-            let pool = self.lanes.get_or_init(|| parallel::LanePool::new(threads));
+            let pool = self
+                .lanes
+                .get_or_init(|| parallel::LanePool::named(threads, pool_name, priority));
             tracing::debug!(workers = pool.threads(), "render: lane pool");
         }
         self.realtime.get_or_init(|| {
@@ -875,10 +895,20 @@ impl ProjectRenderer {
         current.as_ref().map(|(_, s)| s.clone())
     }
 
+    /// The live set of the snapshot the last block rendered with.
+    pub(crate) fn live_print(&self) -> u64 {
+        self.live_print.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// The backend this renderer reads its project from. Lets the cpal
     /// callback reach the shared `Meters` bank without a second handle.
     pub(crate) fn daw(&self) -> &Standalone {
         &self.daw
+    }
+
+    /// The song this renderer renders.
+    pub(crate) fn project_guid(&self) -> &str {
+        &self.project_guid
     }
 
     /// Install the live hardware-input ring consumer (project mode).
@@ -1078,6 +1108,8 @@ impl ProjectRenderer {
         let passes = |i: usize| -> bool { pass(i).passes() };
         let live = snap.live.as_slice();
         let covers = |i: usize| side.covers(live, i);
+        self.live_print
+            .store(snap.live_print, std::sync::atomic::Ordering::Relaxed);
         if let Some(feed) = ahead.as_deref_mut() {
             feed.reset(frames, snap.live_print, n);
         }
@@ -2517,7 +2549,7 @@ mod poison_recovery_tests {
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-mod folder_routing_tests {
+pub(crate) mod folder_routing_tests {
     use super::*;
     use crate::audio_engine::decoder::DecodedAudio;
     use crate::audio_engine::materialize::attach_audio_source;
@@ -2568,7 +2600,7 @@ mod folder_routing_tests {
         (daw, guid)
     }
 
-    fn guid_of(daw: &Standalone, guid: &str, name: &str) -> String {
+    pub(crate) fn guid_of(daw: &Standalone, guid: &str, name: &str) -> String {
         daw.read_project(guid, |p| {
             p.tracks
                 .iter()
@@ -2848,7 +2880,7 @@ mod folder_routing_tests {
     /// Vocals and Kick keying Lead's sidechain (ahead tracks feeding live
     /// ones), a stateful plugin on Lead, Kick and the Drums folder, BGV
     /// muted and master turned down. `solo` solos that track too.
-    fn split_song(solo: Option<&str>) -> (Standalone, String) {
+    pub(crate) fn split_song(solo: Option<&str>) -> (Standalone, String) {
         use daw_proto::fx::{Effects, FxChainContext};
         use daw_proto::track::{InputMonitoringMode, RecordInput};
         use daw_proto::{RouteLocation, RouteRef, RouteType, Routing};

@@ -38,6 +38,8 @@ pub struct DuplexAudioEngine {
     _backend: Backend,
     _renderer: Arc<ProjectRenderer>,
     stats: Arc<EngineStats>,
+    /// The render ahead's own counters (the backend makes the block's).
+    ahead_stats: Arc<EngineStats>,
     sample_rate: u32,
     /// Hardware `(input, output)` latency in frames, when the backend knows.
     latency: Option<(u32, u32)>,
@@ -198,7 +200,15 @@ impl DuplexAudioEngine {
         let (mut prod, cons) = rtrb::RingBuffer::<f32>::new(capacity);
         renderer.set_live_input(cons, in_channels);
 
-        let r = renderer.clone();
+        // The tracks nobody plays live render ahead (see `ahead`); a rig,
+        // played live through and through, asks for none.
+        let ahead_stats = Arc::new(EngineStats::default());
+        let mut dual = super::ahead::DualRender::new(
+            renderer.clone(),
+            shared.clone(),
+            super::ahead::AheadPrefs::chosen(prefs),
+            ahead_stats.clone(),
+        );
         let sh = shared.clone();
         // Output routing: master lands on `main_out`; an optional phones bus
         // (master × self-mix + an external monitor-mix input pair, × volume)
@@ -277,7 +287,7 @@ impl DuplexAudioEngine {
                 // Render this block (drains exactly what we just pushed).
                 // Stopped runs still render (live input + FX), at the
                 // frozen playhead.
-                let block = r.render_plan(&plan, true);
+                let block = dual.render(&plan, true);
                 let outs = b.outputs.len();
                 let (vol, self_mix) = ph.levels();
                 let blend = ph.blends_mix();
@@ -359,11 +369,17 @@ impl DuplexAudioEngine {
             shared,
             _backend: backend,
             _renderer: renderer,
+            ahead_stats,
             stats,
             sample_rate,
             latency,
             linker_stop,
         })
+    }
+
+    /// The render ahead's counters: its fill, underruns, restarts, cost.
+    pub fn ahead_stats(&self) -> Arc<EngineStats> {
+        self.ahead_stats.clone()
     }
 
     pub fn sample_rate(&self) -> u32 {

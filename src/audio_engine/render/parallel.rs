@@ -106,6 +106,13 @@ unsafe impl Sync for LanePool {}
 impl LanePool {
     /// `threads` workers (the render thread makes one more).
     pub(crate) fn new(threads: usize) -> Self {
+        Self::named(threads, "render-lane", 0)
+    }
+
+    /// `threads` workers called `{name}-{i}`, realtime at `priority` (0:
+    /// the audio callback's) — the render ahead's own pool runs below the
+    /// callback.
+    pub(crate) fn named(threads: usize, name: &str, priority: i32) -> Self {
         let shared = Arc::new(Shared {
             state: AtomicU64::new(0),
             done: AtomicUsize::new(0),
@@ -116,8 +123,8 @@ impl LanePool {
             .filter_map(|i| {
                 let shared = shared.clone();
                 std::thread::Builder::new()
-                    .name(format!("render-lane-{i}"))
-                    .spawn(move || worker(&shared))
+                    .name(format!("{name}-{i}"))
+                    .spawn(move || worker(&shared, priority))
                     .ok()
             })
             .collect();
@@ -175,9 +182,11 @@ impl Drop for LanePool {
     }
 }
 
-fn worker(shared: &Shared) {
+fn worker(shared: &Shared, priority: i32) {
     #[cfg(feature = "audio")]
-    let mut seat = audio::io::rt_workers::WorkerSeat::default();
+    let mut seat = audio::io::rt_workers::WorkerSeat::at(priority);
+    #[cfg(not(feature = "audio"))]
+    let _ = priority;
     let mut seen = unpack(shared.state.load(Ordering::Acquire)).0;
     let mut idle_since = Instant::now();
     loop {

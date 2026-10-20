@@ -27,6 +27,9 @@
 //!                    └────────────────────────────┘
 //! ```
 
+/// The render ahead: the dual-buffer engine (ASIO-Guard, anticipative FX).
+#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
+pub mod ahead;
 /// Post-render aux hook (guide/click overlays) for project-mode engines.
 #[cfg(feature = "audio")]
 pub mod aux_render;

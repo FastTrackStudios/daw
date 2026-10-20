@@ -116,6 +116,19 @@ impl Feed {
         self.peaks.resize(tracks, None);
     }
 
+    /// Empty, as a live block's window over the feeds rendered ahead —
+    /// nothing freed (the audio thread fills it), its lanes kept for the
+    /// next window, silent until filled.
+    pub(crate) fn clear_window(&mut self) {
+        self.frames = 0;
+        self.print = 0;
+        self.master.clear();
+        for lane in self.buses.iter_mut().chain(self.sidechains.iter_mut()) {
+            lane.samples.clear();
+        }
+        self.peaks.fill(None);
+    }
+
     /// Frames in it.
     #[must_use]
     pub fn frames(&self) -> usize {
@@ -140,6 +153,9 @@ impl Feed {
         }
         append_lanes(&mut self.buses, &src.buses, span.clone(), at, self.frames);
         append_lanes(&mut self.sidechains, &src.sidechains, span, at, self.frames);
+        if self.peaks.len() < src.peaks.len() {
+            self.peaks.resize(src.peaks.len(), None);
+        }
         for (mine, theirs) in self.peaks.iter_mut().zip(&src.peaks) {
             if let Some((l, r)) = theirs {
                 let (ml, mr) = mine.get_or_insert((0.0, 0.0));
