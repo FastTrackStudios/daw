@@ -7,8 +7,11 @@
 //! On macOS a worker takes a realtime time-constraint policy sized to the
 //! IO period and joins the IO thread's workgroup
 //! (`kAudioDevicePropertyIOThreadOSWorkgroup`), which the CoreAudio backend
-//! publishes here when a device starts. Elsewhere both are no-ops (PipeWire
-//! workers take their priority from the process's RT limits).
+//! publishes here when a device starts. On Linux a worker goes `SCHED_FIFO`
+//! at the audio thread's priority ([`super::realtime`]) on its first batch:
+//! nothing hands it the callback's priority, and an ordinary worker
+//! pre-empted mid-job by a build or a browser held the callback, which
+//! spins until every job it handed out is done, past its deadline.
 
 use std::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
 
@@ -33,6 +36,8 @@ pub(crate) fn publish(workgroup: *mut std::ffi::c_void, period_ns: u64) {
 pub struct WorkerSeat {
     #[cfg(target_os = "macos")]
     joined: Option<(usize, macos::JoinToken)>,
+    #[cfg(target_os = "linux")]
+    realtime: bool,
     period_ns: u64,
 }
 
@@ -40,6 +45,13 @@ impl WorkerSeat {
     /// Follow the running device: realtime policy for its period, member of
     /// its workgroup. Cheap when nothing changed (two atomic loads).
     pub fn sync(&mut self) {
+        #[cfg(target_os = "linux")]
+        if !self.realtime {
+            // Once, taken or not: refused, it said why, and asking again
+            // every block would only say it again.
+            self.realtime = true;
+            let _ = super::realtime::promote_current_thread();
+        }
         let period = IO_PERIOD_NS.load(Ordering::Relaxed);
         if period != 0 && period != self.period_ns {
             self.period_ns = period;
@@ -168,5 +180,35 @@ mod macos {
     pub fn leave(wg: *mut c_void, mut token: JoinToken) {
         // SAFETY: joined on this thread with this token.
         unsafe { os_workgroup_leave(wg, &mut token) };
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    /// A worker seated for its first batch runs at the audio thread's
+    /// policy where the user may (the `audio` group), as it was otherwise.
+    #[test]
+    fn a_seated_worker_is_as_realtime_as_the_callback() {
+        let (callback, worker) = std::thread::spawn(|| {
+            let callback = super::super::realtime::promote_current_thread();
+            let worker = std::thread::spawn(|| {
+                let mut seat = super::WorkerSeat::default();
+                seat.sync();
+                seat.sync();
+                // SAFETY: reads the calling thread's policy.
+                (unsafe { libc::sched_getscheduler(0) }) & !libc::SCHED_RESET_ON_FORK
+            })
+            .join()
+            .expect("the worker");
+            (callback, worker)
+        })
+        .join()
+        .expect("the callback");
+        let expected = if callback {
+            libc::SCHED_FIFO
+        } else {
+            libc::SCHED_OTHER
+        };
+        assert_eq!(worker, expected);
     }
 }
