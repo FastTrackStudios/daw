@@ -245,6 +245,25 @@ pub struct EngineStats {
 }
 
 impl EngineStats {
+    /// The render ahead's counters copied from `ahead`, where a render
+    /// ahead built before these stats existed keeps its own: once a block,
+    /// so whatever reads these reads it too. Stores only — no allocation,
+    /// no lock.
+    pub fn mirror_ahead(&self, ahead: &EngineStats) {
+        for (to, from) in [
+            (&self.ahead_fill_frames, &ahead.ahead_fill_frames),
+            (&self.ahead_underruns, &ahead.ahead_underruns),
+            (&self.ahead_restarts, &ahead.ahead_restarts),
+            (&self.ahead_render_ns, &ahead.ahead_render_ns),
+            (&self.ahead_frames, &ahead.ahead_frames),
+            (&self.ahead_rewinds, &ahead.ahead_rewinds),
+            (&self.ahead_stale_frames, &ahead.ahead_stale_frames),
+            (&self.ahead_depth_frames, &ahead.ahead_depth_frames),
+        ] {
+            to.store(from.load(Ordering::Relaxed), Ordering::Relaxed);
+        }
+    }
+
     /// Record a block's render time (updates last + peak).
     pub fn record_render(&self, ns: u64) {
         self.render_ns.store(ns, Ordering::Relaxed);
