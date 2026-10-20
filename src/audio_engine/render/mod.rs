@@ -38,6 +38,7 @@ mod item_mix;
 mod midi;
 mod parallel;
 mod part;
+mod print;
 mod snapshot;
 
 use std::sync::Arc;
@@ -711,6 +712,19 @@ pub struct ProjectRenderer {
     /// ([`graph::live_print`]): what a dual-buffer engine checks the feeds
     /// it hands over against.
     live_print: std::sync::atomic::AtomicU64,
+    /// Realtime mode, held: the snapshot moves on only when
+    /// [`refresh`](Self::refresh) says so, never in the middle of a run of
+    /// renders — the render ahead's renderer, which must know which
+    /// snapshot each frame it renders was made from.
+    held: std::sync::atomic::AtomicBool,
+}
+
+/// Which tracks a snapshot renders live, and what its tracks ahead are, as
+/// numbers ([`RenderSnapshot::live_print`], [`RenderSnapshot::ahead_print`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Prints {
+    pub(crate) live: u64,
+    pub(crate) ahead: u64,
 }
 
 /// Builds render snapshots off the audio thread, for a realtime renderer.
@@ -767,6 +781,7 @@ impl ProjectRenderer {
             #[cfg(not(target_arch = "wasm32"))]
             lanes: std::sync::OnceLock::new(),
             live_print: std::sync::atomic::AtomicU64::new(0),
+            held: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -785,7 +800,27 @@ impl ProjectRenderer {
     /// audio callback.
     #[cfg(all(not(target_arch = "wasm32"), feature = "audio"))]
     pub(crate) fn set_realtime_ahead(&self) {
+        self.held.store(true, std::sync::atomic::Ordering::Relaxed);
         self.go_realtime("render-ahead", audio::io::realtime::AHEAD_PRIORITY);
+    }
+
+    /// A held renderer's snapshot moved on to the newest built (and a newer
+    /// one asked for when the project has moved on): the
+    /// [ahead print](RenderSnapshot::ahead_print) and the live print of
+    /// the snapshot its renders use from here on. `None` before realtime
+    /// mode, or with no song.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn refresh(&self) -> Option<Prints> {
+        let b = self.realtime.get()?;
+        let mut scratch = self
+            .scratch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let snap = self.snapshot_rt(b, &mut scratch.current)?;
+        Some(Prints {
+            ahead: snap.ahead_print,
+            live: snap.live_print,
+        })
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1083,6 +1118,20 @@ impl ProjectRenderer {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         #[cfg(not(target_arch = "wasm32"))]
         let snap = match self.realtime.get() {
+            Some(_) if self.held.load(std::sync::atomic::Ordering::Relaxed) => {
+                match scratch.current.as_ref() {
+                    Some((_, s)) => Some(s.clone()),
+                    None => {
+                        drop(scratch);
+                        let _ = self.refresh();
+                        scratch = self
+                            .scratch
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        scratch.current.as_ref().map(|(_, s)| s.clone())
+                    }
+                }
+            }
             Some(b) => self.snapshot_rt(b, &mut scratch.current),
             None => self.snapshot(),
         };

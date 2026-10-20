@@ -70,6 +70,10 @@ pub(crate) struct RenderSnapshot {
     /// Which tracks are [`live`](Self::live), as one number: an ahead
     /// render's feeds fit a live render only when the two agree.
     pub(crate) live_print: u64,
+    /// Everything a render of the tracks ahead reads, as one number
+    /// ([`super::print::ahead_print`]): when it moves, what was rendered
+    /// ahead is stale.
+    pub(crate) ahead_print: u64,
     /// Live hardware-input channel per track, indexed like `tracks`.
     /// `Some(ch)` when the track's `RecordInput::Audio { channel }` taps
     /// input-device channel `ch`; `None` otherwise. Read by render
@@ -98,6 +102,8 @@ impl RenderSnapshot {
         let input_channels = tracks.iter().map(|t| t.input_channel).collect();
         let live = graph::live_set(&tracks);
         let live_print = graph::live_print(&tracks, &live);
+        let ahead_print =
+            super::print::ahead_print(&tracks, &live, solo_pass.as_deref(), &tempo_map);
         Arc::new(Self {
             tracks,
             order,
@@ -110,6 +116,7 @@ impl RenderSnapshot {
             master_muted: p.master_muted,
             live,
             live_print,
+            ahead_print,
             input_channels,
         })
     }
@@ -362,6 +369,17 @@ impl TempoMap {
             });
         }
         Self { segments }
+    }
+
+    /// Its segments, into a fingerprint.
+    pub(crate) fn print_segments(&self, h: &mut super::print::Fx) {
+        use super::print::Print;
+        self.segments.len().print(h);
+        for s in &self.segments {
+            s.start_seconds.print(h);
+            s.start_beat.print(h);
+            s.bpm.print(h);
+        }
     }
 
     /// Convert seconds to project-time beats (inverse of `beat_to_seconds`).

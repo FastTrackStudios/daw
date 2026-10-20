@@ -165,6 +165,43 @@ impl Feed {
         }
     }
 
+    /// Frames `at..at + frames` of this one faded in over `old`'s frames
+    /// `from..`: each frame `k` is `old · (1 − g) + this · g`, `g =
+    /// gain(k)` — a switch from what was rendered before an edit to what
+    /// was rendered after it, without a click. Linear: the two are the
+    /// same song a fader's move apart, so they add up in phase and a
+    /// linear fade keeps the level where an equal-power one would swell
+    /// by 3 dB at its middle. A lane only one side has fades against
+    /// silence.
+    pub(crate) fn fade_from(
+        &mut self,
+        at: usize,
+        old: &Feed,
+        from: usize,
+        frames: usize,
+        gain: impl Fn(usize) -> f32,
+    ) {
+        fade_samples(&mut self.master, at, &old.master, from, frames, &gain);
+        fade_lanes(
+            &mut self.buses,
+            at,
+            &old.buses,
+            from,
+            frames,
+            self.frames,
+            &gain,
+        );
+        fade_lanes(
+            &mut self.sidechains,
+            at,
+            &old.sidechains,
+            from,
+            frames,
+            self.frames,
+            &gain,
+        );
+    }
+
     /// Silence for `frames` more frames: what a live block hears of the
     /// tracks ahead where no feed was ready.
     pub(crate) fn append_silence(&mut self, frames: usize) {
@@ -207,9 +244,74 @@ fn append_lanes(
     }
 }
 
+/// `new`'s interleaved frames `at..at + frames` faded in over `old`'s from
+/// `from` (`old` silence where it is short).
+fn fade_samples(
+    new: &mut [f32],
+    at: usize,
+    old: &[f32],
+    from: usize,
+    frames: usize,
+    gain: &impl Fn(usize) -> f32,
+) {
+    for k in 0..frames {
+        let g = gain(k);
+        for c in 0..2 {
+            let o = old.get((from + k) * 2 + c).copied().unwrap_or(0.0);
+            if let Some(n) = new.get_mut((at + k) * 2 + c) {
+                *n = o * (1.0 - g) + *n * g;
+            }
+        }
+    }
+}
+
+/// [`fade_samples`] lane by lane, matched by track: a lane `old` has and
+/// `new` does not is added (`new` silent there), sized to `len` frames.
+fn fade_lanes(
+    new: &mut Vec<Lane>,
+    at: usize,
+    old: &[Lane],
+    from: usize,
+    frames: usize,
+    len: usize,
+    gain: &impl Fn(usize) -> f32,
+) {
+    for lane in new.iter_mut() {
+        let theirs = old
+            .iter()
+            .find(|o| o.track == lane.track)
+            .map_or(&[][..], |o| o.samples.as_slice());
+        fade_samples(&mut lane.samples, at, theirs, from, frames, gain);
+    }
+    for lane in old {
+        if new.iter().any(|n| n.track == lane.track) {
+            continue;
+        }
+        let mut samples = vec![0.0; len * 2];
+        fade_samples(&mut samples, at, &lane.samples, from, frames, gain);
+        new.push(Lane {
+            track: lane.track,
+            samples,
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Halfway through a fade the frame is half each; a bus only the old
+    /// side carries fades out against silence.
+    #[test]
+    fn a_fade_is_linear_between_the_two() {
+        let old = feed(4, 1.0, Some((2, 4.0)));
+        let mut new = feed(4, 3.0, None);
+        new.fade_from(0, &old, 0, 4, |k| k as f32 / 4.0);
+        assert_eq!(new.master[..2], [1.0, 1.0], "all old at the start");
+        assert_eq!(new.master[4..6], [2.0, 2.0], "half each at the middle");
+        assert_eq!(new.buses.len(), 1);
+        assert_eq!(new.buses[0].samples[4], 2.0, "half the old bus");
+    }
 
     fn feed(frames: usize, master: f32, bus: Option<(usize, f32)>) -> Feed {
         let mut f = Feed::default();
