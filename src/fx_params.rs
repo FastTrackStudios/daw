@@ -74,28 +74,21 @@ impl Standalone {
     /// Resolve `(fx guid, slot)` against the live plugin instance.
     /// `None` when the FX has no loaded instance (synthetic FX).
     fn plugin_slot(&self, fx_guid: &str, slot: u32, stored: Option<f64>) -> Option<SlotInfo> {
-        let mut plugins = self
-            .plugin_instances
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let plugin = plugins.get_mut(fx_guid)?;
-        let info = plugin.params().into_iter().nth(slot as usize)?;
-        let plain = stored
-            .or_else(|| plugin.param_value(info.id))
-            .unwrap_or(info.default);
-        let text = plugin.value_to_text(info.id, plain);
-        Some(SlotInfo { info, plain, text })
+        self.plugin_instances.with(fx_guid, |plugin| {
+            let info = plugin.params().into_iter().nth(slot as usize)?;
+            let plain = stored
+                .or_else(|| plugin.param_value(info.id))
+                .unwrap_or(info.default);
+            let text = plugin.value_to_text(info.id, plain);
+            Some(SlotInfo { info, plain, text })
+        })?
     }
 
     /// Number of parameters the live instance exposes (`None` =
     /// synthetic FX).
     fn plugin_param_count(&self, fx_guid: &str) -> Option<u32> {
-        let mut plugins = self
-            .plugin_instances
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let plugin = plugins.get_mut(fx_guid)?;
-        Some(plugin.params().len() as u32)
+        self.plugin_instances
+            .with(fx_guid, |plugin| plugin.params().len() as u32)
     }
 
     /// Recount a track's two chains, store the result, and tell the track
@@ -179,11 +172,8 @@ impl Standalone {
         fx_guid: &str,
         stored: &std::collections::HashMap<u32, f64>,
     ) -> Option<Vec<FxParameter>> {
-        let mut plugins = self
-            .plugin_instances
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let plugin = plugins.get_mut(fx_guid)?;
+        let plugins = self.plugin_instances.read();
+        let mut plugin = plugins.cell(fx_guid)?.lock();
         let infos = plugin.params();
         let mut out = Vec::with_capacity(infos.len());
         for (slot, info) in infos.into_iter().enumerate() {

@@ -217,16 +217,17 @@ pub(crate) fn default_threads() -> usize {
     (cores / 3).clamp(0, 3)
 }
 
-/// A plugin on a lane job — the map's entry, reached from a worker.
-pub(super) struct PluginPtr(*mut dyn crate::plugin::PluginInstance);
+/// A plugin on a lane job — the map's cell, reached from a worker, which
+/// takes the plugin's own lock to run it.
+pub(super) struct PluginPtr(*const crate::plugin::PluginCell);
 
 impl PluginPtr {
-    pub(super) fn new(p: &mut (dyn crate::plugin::PluginInstance + 'static)) -> Self {
-        Self(p)
+    pub(super) fn new(cell: &crate::plugin::PluginCell) -> Self {
+        Self(cell)
     }
 }
-// SAFETY: plugins are `Send`; a job's pointers are its own track's, used by
-// one thread at a time while the render thread holds the map's lock.
+// SAFETY: a cell is `Sync` (a `Mutex`); the pointer is read only while the
+// render thread holds the map for reading, so the cell outlives it.
 unsafe impl Send for PluginPtr {}
 
 /// One independent track's FX chain, to run on any render thread: its own
@@ -257,6 +258,8 @@ pub(super) struct LaneJob {
     pub(super) ran: bool,
     /// The chain index of a plugin that panicked.
     pub(super) panicked: Option<usize>,
+    /// Plugins bypassed this block: a control thread held them.
+    pub(super) busy: u32,
     pub(super) us: u32,
 }
 
@@ -264,8 +267,8 @@ impl LaneJob {
     /// Run the chain. `context` is the render thread's render frame.
     ///
     /// # Safety
-    /// `bus` and every plugin pointer are live and used by no other thread
-    /// for the duration.
+    /// `bus` is live and used by no other thread for the duration; every
+    /// plugin cell outlives it (the map held for reading).
     unsafe fn run(&mut self, t: &TrackSnapshot, frames: usize, context: Option<(u64, u64)>) {
         let started = Stamp::now();
         let _frame = (crate::plugin::RenderFrameGuard::current() != context)
@@ -273,9 +276,14 @@ impl LaneJob {
         let _muted = crate::plugin::TrackMutedGuard::enter(t.muted);
         // SAFETY: the caller's contract.
         let bus = unsafe { std::slice::from_raw_parts_mut(self.bus as *mut f32, frames * 2) };
-        for (i, PluginPtr(plugin)) in &self.chain {
+        for (i, PluginPtr(cell)) in &self.chain {
             // SAFETY: the caller's contract.
-            let plugin = unsafe { &mut **plugin };
+            let cell = unsafe { &**cell };
+            let Some(mut plugin) = cell.try_lock_spinning(super::PLUGIN_LOCK_SPINS) else {
+                self.busy += 1;
+                continue;
+            };
+            let plugin = &mut **plugin;
             for f in 0..frames {
                 self.in_l[f] = bus[f * 2];
                 self.in_r[f] = bus[f * 2 + 1];
@@ -336,7 +344,8 @@ impl LanePool {
         self.run(jobs.len(), &|k| {
             // SAFETY: job `k` runs once, on one thread; its bus and plugins
             // are its own track's (a track's plugins are its own), and the
-            // caller holds the scratch and the plugin map until this returns.
+            // caller holds the scratch and the plugin map (for reading) until
+            // this returns.
             let job = unsafe { &mut *(base as *mut LaneJob).add(k) };
             unsafe { job.run(&tracks[job.ti], frames, context) };
         });

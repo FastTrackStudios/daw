@@ -296,8 +296,7 @@ impl Effects for Standalone {
         // Stash the loaded plugin instance for the renderer to find.
         if let Some(plugin) = real_plugin {
             self.plugin_instances
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .write()
                 .insert(new_guid.clone(), plugin);
         }
         let added = self
@@ -390,10 +389,8 @@ impl Effects for Standalone {
             Ok::<String, DawError>(removed.fx.guid)
         })??;
         // Drop any loaded plugin instance backing this FX entry.
-        self.plugin_instances
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&removed_guid);
+        let removed = self.plugin_instances.write().remove(&removed_guid);
+        drop(removed);
         self.republish_fx_counts(&guid, &target.context);
         self.publish_fx_event(
             &guid,
@@ -559,11 +556,8 @@ impl Effects for Standalone {
 
     fn open_ui(&self, project: ProjectContext, target: FxTarget) -> DawResult<()> {
         if let Some(fx_guid) = resolve_fx_guid(self, &project, &target) {
-            let mut plugins = self
-                .plugin_instances
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let Some(plugin) = plugins.get_mut(&fx_guid) {
+            let plugins = self.plugin_instances.read();
+            if let Some(mut plugin) = plugins.cell(&fx_guid).map(crate::plugin::PluginCell::lock) {
                 plugin
                     .open_gui()
                     .map_err(|e| DawError::operation_failed(e.to_string()))?;
@@ -573,11 +567,8 @@ impl Effects for Standalone {
     }
     fn close_ui(&self, project: ProjectContext, target: FxTarget) -> DawResult<()> {
         if let Some(fx_guid) = resolve_fx_guid(self, &project, &target) {
-            let mut plugins = self
-                .plugin_instances
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let Some(plugin) = plugins.get_mut(&fx_guid) {
+            let plugins = self.plugin_instances.read();
+            if let Some(mut plugin) = plugins.cell(&fx_guid).map(crate::plugin::PluginCell::lock) {
                 plugin
                     .close_gui()
                     .map_err(|e| DawError::operation_failed(e.to_string()))?;
@@ -776,11 +767,8 @@ impl Effects for Standalone {
     }
     fn latency(&self, project: ProjectContext, target: FxTarget) -> Option<FxLatency> {
         if let Some(fx_guid) = resolve_fx_guid(self, &project, &target) {
-            let mut plugins = self
-                .plugin_instances
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let Some(plugin) = plugins.get_mut(&fx_guid) {
+            let plugins = self.plugin_instances.read();
+            if let Some(mut plugin) = plugins.cell(&fx_guid).map(crate::plugin::PluginCell::lock) {
                 let samples = plugin.latency() as i32;
                 return Some(FxLatency {
                     pdc_samples: samples,

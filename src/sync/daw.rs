@@ -735,17 +735,12 @@ pub struct Standalone {
     pub(crate) automation_touch: Arc<Mutex<crate::automation_touch::AutomationTouchState>>,
     /// Loaded plugin instances keyed by `fx_guid`. Separate from
     /// `ProjectState.fx_chains` (which carries proto-serializable
-    /// `FxEntry` metadata only) so the renderer can `lock()` plugins
-    /// independently of project state mutations.
-    ///
-    /// Locks on this mutex are poison-TOLERANT everywhere
-    /// (`unwrap_or_else(PoisonError::into_inner)`): the audio callback takes
-    /// it every block, and a control-thread panic while holding it must not
-    /// cascade into a panic inside the extern "C" audio callback (which would
-    /// abort the process). The guarded map stays structurally valid across a
-    /// panic — worst case one entry holds a half-updated plugin state.
-    pub(crate) plugin_instances:
-        Arc<Mutex<std::collections::HashMap<String, Box<dyn crate::plugin::PluginInstance>>>>,
+    /// `FxEntry` metadata only) so the renderer reaches plugins
+    /// independently of project state mutations. Renders hold the map for
+    /// reading over a block and each plugin by its own lock
+    /// ([`crate::plugin::Plugins`]); every lock is poison-tolerant, so a
+    /// control-thread panic never cascades into the audio callback.
+    pub(crate) plugin_instances: Arc<crate::plugin::Plugins>,
     /// Plugin binaries that have been explicitly loaded/validated via
     /// the PluginLoading service. Actual per-track DSP instances live
     /// in `plugin_instances` after an FX is inserted.
@@ -849,7 +844,7 @@ impl Standalone {
             automation_touch: Arc::new(Mutex::new(
                 crate::automation_touch::AutomationTouchState::default(),
             )),
-            plugin_instances: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            plugin_instances: Arc::new(crate::plugin::Plugins::default()),
             loaded_plugins: Arc::new(Mutex::new(std::collections::HashMap::new())),
             fx_factory: Arc::new(Mutex::new(None)),
             track_events: architect::PubSub::sliding(1024),
@@ -1188,10 +1183,7 @@ impl Standalone {
     /// Whether a loaded plugin instance is backing the given FX
     /// guid. `false` for synthetic / failed-to-load entries.
     pub fn has_plugin_instance(&self, fx_guid: &str) -> bool {
-        self.plugin_instances
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .contains_key(fx_guid)
+        self.plugin_instances.read().contains_key(fx_guid)
     }
 
     /// Register a **native** (built-in Rust DSP) FX instance under `fx_guid`, so
@@ -1225,8 +1217,7 @@ impl Standalone {
         instance: Box<dyn crate::plugin::PluginInstance>,
     ) -> Option<Box<dyn crate::plugin::PluginInstance>> {
         self.plugin_instances
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .write()
             .insert(fx_guid.into(), instance)
     }
 
@@ -1394,9 +1385,9 @@ impl Standalone {
         )
     }
 
-    /// Run `f` against the live FX instance backing `fx_guid`, under the
-    /// `plugin_instances` lock (the same lock the renderer takes per block), and
-    /// return its result. `None` if no instance is loaded under that guid.
+    /// Run `f` against the live FX instance backing `fx_guid`, under that
+    /// plugin's own lock (the one a render takes to run it), and return its
+    /// result. `None` if no instance is loaded under that guid.
     ///
     /// This is the in-place control seam for native FX instances whose
     /// parameters are NOT exposed as host params (e.g. Signal's NAM amp trims):
@@ -1408,15 +1399,12 @@ impl Standalone {
         fx_guid: &str,
         f: impl FnOnce(&mut dyn crate::plugin::PluginInstance) -> R,
     ) -> Option<R> {
-        let mut plugins = self
-            .plugin_instances
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        plugins.get_mut(fx_guid).map(|p| f(p.as_mut()))
+        self.plugin_instances.with(fx_guid, f)
     }
 
     /// Run `f` against every live FX instance at once, under one hold of the
-    /// `plugin_instances` lock — the lock the renderer takes per block.
+    /// `plugin_instances` map for writing — no render is inside a block
+    /// meanwhile.
     ///
     /// For a change that must land between two blocks as a whole: swapping a
     /// whole chain one `insert_plugin_instance` at a time is a lock window per
@@ -1425,15 +1413,9 @@ impl Standalone {
     /// dropping instances (return them and drop them after).
     pub fn with_plugin_instances<R>(
         &self,
-        f: impl FnOnce(
-            &mut std::collections::HashMap<String, Box<dyn crate::plugin::PluginInstance>>,
-        ) -> R,
+        f: impl FnOnce(&mut crate::plugin::PluginMap) -> R,
     ) -> R {
-        let mut plugins = self
-            .plugin_instances
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        f(&mut plugins)
+        f(&mut self.plugin_instances.write())
     }
 
     /// Remove the FX instance backing `fx_guid`, returning it (e.g. to drop off
@@ -1442,10 +1424,7 @@ impl Standalone {
         &self,
         fx_guid: &str,
     ) -> Option<Box<dyn crate::plugin::PluginInstance>> {
-        self.plugin_instances
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(fx_guid)
+        self.plugin_instances.write().remove(fx_guid)
     }
 
     /// Whether the plugin backing `fx_guid` is currently activated
@@ -1453,10 +1432,7 @@ impl Standalone {
     /// missing entries.
     pub fn plugin_is_prepared(&self, fx_guid: &str) -> bool {
         self.plugin_instances
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(fx_guid)
-            .map(|p| p.is_prepared())
+            .with(fx_guid, |p| p.is_prepared())
             .unwrap_or(false)
     }
 
@@ -1473,31 +1449,25 @@ impl Standalone {
         fx_guid: &str,
         state: &[u8],
     ) -> Result<(), crate::plugin::PluginError> {
-        let mut plugins = self
-            .plugin_instances
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        match plugins.get_mut(fx_guid) {
-            Some(p) => p.load_state(state),
-            None => Err(crate::plugin::PluginError::LoadFailed(format!(
-                "no plugin instance for fx_guid {fx_guid}"
-            ))),
-        }
+        self.plugin_instances
+            .with(fx_guid, |p| p.load_state(state))
+            .unwrap_or_else(|| {
+                Err(crate::plugin::PluginError::LoadFailed(format!(
+                    "no plugin instance for fx_guid {fx_guid}"
+                )))
+            })
     }
 
     /// Save the current state of the FX backing `fx_guid`. Returns
     /// `Err` if there's no loaded plugin or its `save_state` failed.
     pub fn save_plugin_state(&self, fx_guid: &str) -> Result<Vec<u8>, crate::plugin::PluginError> {
-        let mut plugins = self
-            .plugin_instances
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        match plugins.get_mut(fx_guid) {
-            Some(p) => p.save_state(),
-            None => Err(crate::plugin::PluginError::LoadFailed(format!(
-                "no plugin instance for fx_guid {fx_guid}"
-            ))),
-        }
+        self.plugin_instances
+            .with(fx_guid, |p| p.save_state())
+            .unwrap_or_else(|| {
+                Err(crate::plugin::PluginError::LoadFailed(format!(
+                    "no plugin instance for fx_guid {fx_guid}"
+                )))
+            })
     }
 
     /// Project Media/FX Bay handle. Cheap to construct — clones an

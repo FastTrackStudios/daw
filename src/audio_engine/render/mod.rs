@@ -451,9 +451,9 @@ pub(crate) fn add_aux(
 /// rebuild on change" model — and the per-block working buffers are
 /// recycled. A throwaway renderer still works, it just re-snapshots
 /// and re-allocates every call.
-/// How many times the renderer retries the plugin-instance lock before
-/// rendering a block without its FX stage — on the order of 10–50 µs.
-const PLUGIN_LOCK_SPINS: usize = 2_000;
+/// How many times the renderer retries the plugin map, or one plugin's
+/// lock, before going on without it — on the order of 10–50 µs.
+pub(super) const PLUGIN_LOCK_SPINS: usize = 2_000;
 
 /// Blocks rendered WITHOUT their plugin stage because a control thread held
 /// the plugin map (see the try-lock in `render_block_varispeed`). For an
@@ -464,6 +464,16 @@ static PLUGIN_STAGE_SKIPS: std::sync::atomic::AtomicU64 = std::sync::atomic::Ato
 #[must_use]
 pub fn plugin_stage_skips() -> u64 {
     PLUGIN_STAGE_SKIPS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Plugins bypassed for a block because a control thread held that one
+/// plugin (a parameter write, its state saved) past the spin.
+static PLUGIN_BUSY_SKIPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How many plugin runs were bypassed that way (process-wide).
+#[must_use]
+pub fn plugin_busy_skips() -> u64 {
+    PLUGIN_BUSY_SKIPS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// A point in time for the block profile — a no-op on wasm, where
@@ -1140,20 +1150,10 @@ impl ProjectRenderer {
         // raw DI at full level. Bounded, never parked: a hold that outlasts
         // the spin still costs one dry block, not an underrun.
         let t_lock = Stamp::now();
-        let mut plugins = None;
-        for _ in 0..PLUGIN_LOCK_SPINS {
-            match self.daw.plugin_instances.try_lock() {
-                Ok(guard) => {
-                    plugins = Some(guard);
-                    break;
-                }
-                Err(std::sync::TryLockError::Poisoned(p)) => {
-                    plugins = Some(p.into_inner());
-                    break;
-                }
-                Err(std::sync::TryLockError::WouldBlock) => std::hint::spin_loop(),
-            }
-        }
+        let plugins = self
+            .daw
+            .plugin_instances
+            .try_read_spinning(PLUGIN_LOCK_SPINS);
 
         if plugins.is_none() {
             PLUGIN_STAGE_SKIPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1168,7 +1168,7 @@ impl ProjectRenderer {
         // plugin is `parallel_safe` and prepared go; anything else waits for
         // the loop, exactly as before.
         #[cfg(not(target_arch = "wasm32"))]
-        if let (Some(pool), Some(map)) = (self.lanes.get(), plugins.as_mut()) {
+        if let (Some(pool), Some(map)) = (self.lanes.get(), plugins.as_ref()) {
             fed.clear();
             fed.resize(n, false);
             for t in tracks.iter() {
@@ -1210,15 +1210,22 @@ impl ProjectRenderer {
                     {
                         continue;
                     }
-                    let Some(plugin) = map.get_mut(fx_guid) else {
+                    let Some(cell) = map.cell(fx_guid) else {
                         continue;
+                    };
+                    // Looked at here, run on a worker: the lock is taken
+                    // twice, both times uncontended but for a control write.
+                    let Some(mut plugin) = cell.try_lock_spinning(PLUGIN_LOCK_SPINS) else {
+                        ok = false;
+                        break;
                     };
                     if !plugin.is_prepared() || !plugin.parallel_safe() {
                         ok = false;
                         break;
                     }
                     plugin.set_tempo(tempo);
-                    job.chain.push((i, PluginPtr::new(&mut **plugin)));
+                    drop(plugin);
+                    job.chain.push((i, PluginPtr::new(cell)));
                 }
                 if !ok || job.chain.is_empty() {
                     job.chain.clear();
@@ -1262,6 +1269,7 @@ impl ProjectRenderer {
                 );
                 job.ran = false;
                 job.panicked = None;
+                job.busy = 0;
                 jobs += 1;
             }
             if jobs >= 2 {
@@ -1274,6 +1282,10 @@ impl ProjectRenderer {
                     dirty[ti] |= job.ran;
                     aux_live[ti] |= job.aux_ran;
                     lane_cost[ti] = job.us;
+                    if job.busy > 0 {
+                        PLUGIN_BUSY_SKIPS
+                            .fetch_add(u64::from(job.busy), std::sync::atomic::Ordering::Relaxed);
+                    }
                     fx_us += job.us;
                     if job.us > slowest.1 {
                         slowest = (ti as u32, job.us);
@@ -1398,10 +1410,15 @@ impl ProjectRenderer {
                         continue;
                     }
                     // `None` = the map was busy this block (see the
-                    // try_lock above): render dry rather than block.
-                    let Some(plugin) = plugins.as_mut().and_then(|p| p.get_mut(fx_guid)) else {
+                    // try_read above): render dry rather than block.
+                    let Some(cell) = plugins.as_ref().and_then(|p| p.cell(fx_guid)) else {
                         continue; // synthetic / not loaded / map busy
                     };
+                    let Some(mut plugin) = cell.try_lock_spinning(PLUGIN_LOCK_SPINS) else {
+                        PLUGIN_BUSY_SKIPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        continue; // a control thread has it: this block dry
+                    };
+                    let plugin = &mut **plugin;
                     if panicked_fx.contains(fx_guid) {
                         continue; // panicked earlier — permanently bypassed
                     }
@@ -1483,7 +1500,7 @@ impl ProjectRenderer {
                         bus.samples[f * 2 + 1] = out_r[f];
                     }
                     if t.aux_taps {
-                        aux_live[ti] |= add_aux(&**plugin, &mut aux[ti], frames);
+                        aux_live[ti] |= add_aux(&*plugin, &mut aux[ti], frames);
                     }
                     // A plugin ran — it may synthesize (MIDI → audio),
                     // so the bus can carry signal even with no items.
@@ -2270,13 +2287,13 @@ mod poison_recovery_tests {
         // Poison the shared map: panic on another thread while holding it.
         let map = daw.plugin_instances.clone();
         let _ = std::thread::spawn(move || {
-            let _guard = map.lock().unwrap();
+            let _guard = map.write();
             panic!("poison plugin_instances");
         })
         .join();
         assert!(
-            daw.plugin_instances.lock().is_err(),
-            "mutex should be poisoned"
+            daw.plugin_instances.is_poisoned(),
+            "lock should be poisoned"
         );
 
         // Control seams recover in place of panicking…

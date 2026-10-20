@@ -504,3 +504,262 @@ impl Drop for TrackMutedGuard {
         TRACK_MUTED.with(|c| c.set(false));
     }
 }
+
+/// One loaded plugin, behind a lock of its own: a render takes it for the
+/// plugin's `process_block`, a control thread for a parameter or its state.
+/// Two renders running disjoint tracks — the ahead render and the realtime
+/// one — never meet on a lock, where one lock over every plugin made them
+/// take turns.
+pub struct PluginCell(std::sync::Mutex<Box<dyn PluginInstance>>);
+
+impl PluginCell {
+    #[must_use]
+    pub fn new(plugin: Box<dyn PluginInstance>) -> Self {
+        Self(std::sync::Mutex::new(plugin))
+    }
+
+    /// The plugin back out of its cell.
+    #[must_use]
+    pub fn into_inner(self) -> Box<dyn PluginInstance> {
+        self.0
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The plugin, through a cell nobody else can reach (the map held for
+    /// writing): no lock taken.
+    pub fn get_mut(&mut self) -> &mut Box<dyn PluginInstance> {
+        self.0
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The plugin, waiting for whoever has it. Control threads only — a
+    /// render never waits ([`PluginCell::try_lock_spinning`]).
+    pub fn lock(&self) -> std::sync::MutexGuard<'_, Box<dyn PluginInstance>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The plugin, trying `spins` times (a control thread's hold is a
+    /// parameter write, microseconds) — `None` while it is still held: the
+    /// render bypasses it for the block rather than wait.
+    pub fn try_lock_spinning(
+        &self,
+        spins: usize,
+    ) -> Option<std::sync::MutexGuard<'_, Box<dyn PluginInstance>>> {
+        for _ in 0..spins.max(1) {
+            match self.0.try_lock() {
+                Ok(guard) => return Some(guard),
+                Err(std::sync::TryLockError::Poisoned(p)) => return Some(p.into_inner()),
+                Err(std::sync::TryLockError::WouldBlock) => std::hint::spin_loop(),
+            }
+        }
+        None
+    }
+}
+
+/// The loaded plugins by FX guid. Its methods trade in plugins, so whoever
+/// holds the map for writing moves them in and out as before plugins had
+/// cells of their own.
+#[derive(Default)]
+pub struct PluginMap(std::collections::HashMap<String, PluginCell>);
+
+impl PluginMap {
+    /// Put `plugin` under `fx_guid`; the one it replaces, if any.
+    pub fn insert(
+        &mut self,
+        fx_guid: String,
+        plugin: Box<dyn PluginInstance>,
+    ) -> Option<Box<dyn PluginInstance>> {
+        self.0
+            .insert(fx_guid, PluginCell::new(plugin))
+            .map(PluginCell::into_inner)
+    }
+
+    pub fn remove(&mut self, fx_guid: &str) -> Option<Box<dyn PluginInstance>> {
+        self.0.remove(fx_guid).map(PluginCell::into_inner)
+    }
+
+    pub fn get_mut(&mut self, fx_guid: &str) -> Option<&mut Box<dyn PluginInstance>> {
+        self.0.get_mut(fx_guid).map(PluginCell::get_mut)
+    }
+
+    /// The cell under `fx_guid`, for a holder of the map for reading.
+    #[must_use]
+    pub fn cell(&self, fx_guid: &str) -> Option<&PluginCell> {
+        self.0.get(fx_guid)
+    }
+
+    #[must_use]
+    pub fn contains_key(&self, fx_guid: &str) -> bool {
+        self.0.contains_key(fx_guid)
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// Every loaded plugin. Renders hold the map for reading over a block —
+/// two at once, the ahead render and the realtime one — and each plugin
+/// by its own cell; a structural change (an insert, a removal, a chain
+/// swapped whole) holds it for writing, between blocks.
+#[derive(Default)]
+pub struct Plugins(std::sync::RwLock<PluginMap>);
+
+/// How long a writer rests between tries for the map. It never queues for
+/// it: a queued writer turns the next reader away, and a reader is an audio
+/// callback.
+const WRITER_REST: std::time::Duration = std::time::Duration::from_micros(50);
+
+impl Plugins {
+    /// The map for reading, waiting while a writer has it. Control threads.
+    pub fn read(&self) -> std::sync::RwLockReadGuard<'_, PluginMap> {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The map for reading, trying `spins` times — a render's way in:
+    /// `None` while a writer still has it.
+    pub fn try_read_spinning(
+        &self,
+        spins: usize,
+    ) -> Option<std::sync::RwLockReadGuard<'_, PluginMap>> {
+        for _ in 0..spins.max(1) {
+            match self.0.try_read() {
+                Ok(guard) => return Some(guard),
+                Err(std::sync::TryLockError::Poisoned(p)) => return Some(p.into_inner()),
+                Err(std::sync::TryLockError::WouldBlock) => std::hint::spin_loop(),
+            }
+        }
+        None
+    }
+
+    /// The map for writing. Tries rather than queues (see [`WRITER_REST`]);
+    /// a render holds it a block, so this waits about a block at most.
+    pub fn write(&self) -> std::sync::RwLockWriteGuard<'_, PluginMap> {
+        loop {
+            match self.0.try_write() {
+                Ok(guard) => return guard,
+                Err(std::sync::TryLockError::Poisoned(p)) => return p.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => std::thread::sleep(WRITER_REST),
+            }
+        }
+    }
+
+    /// Whether a holder panicked (every way in recovers from it).
+    #[must_use]
+    pub fn is_poisoned(&self) -> bool {
+        self.0.is_poisoned()
+    }
+
+    /// Run `f` on the plugin under `fx_guid`, if there is one: its own lock
+    /// taken, the map only read — a render of other tracks goes on.
+    pub fn with<R>(
+        &self,
+        fx_guid: &str,
+        f: impl FnOnce(&mut dyn PluginInstance) -> R,
+    ) -> Option<R> {
+        let map = self.read();
+        let mut plugin = map.cell(fx_guid)?.lock();
+        Some(f(plugin.as_mut()))
+    }
+}
+
+#[cfg(test)]
+mod plugins_tests {
+    use super::*;
+
+    /// Counts its blocks.
+    struct Probe(u32);
+
+    impl PluginInstance for Probe {
+        fn descriptor(&self) -> PluginDescriptor {
+            PluginDescriptor {
+                id: "probe".into(),
+                name: "Probe".into(),
+                vendor: String::new(),
+                version: String::new(),
+                format: PluginFormat::Synthetic,
+            }
+        }
+        fn params(&mut self) -> Vec<PluginParamInfo> {
+            Vec::new()
+        }
+        fn param_value(&mut self, _: u32) -> Option<f64> {
+            Some(f64::from(self.0))
+        }
+        fn value_to_text(&mut self, _: u32, _: f64) -> Option<String> {
+            None
+        }
+        fn text_to_value(&mut self, _: u32, _: &str) -> Option<f64> {
+            None
+        }
+        fn latency(&mut self) -> u32 {
+            0
+        }
+        fn prepare(&mut self, _: f64, _: u32) -> Result<(), PluginError> {
+            Ok(())
+        }
+        fn is_prepared(&self) -> bool {
+            true
+        }
+        fn process_block(
+            &mut self,
+            _: &[f32],
+            _: &[f32],
+            _: &mut [f32],
+            _: &mut [f32],
+            _: &PluginEvents<'_>,
+        ) -> Result<(), PluginError> {
+            self.0 += 1;
+            Ok(())
+        }
+        fn deactivate(&mut self) {}
+    }
+
+    /// Two readers hold the map at once and each runs its own plugin: the
+    /// ahead render and the realtime one never take turns. A plugin in use
+    /// is turned away, not waited for.
+    #[test]
+    fn two_renders_read_the_map_and_run_their_own_plugins() {
+        let plugins = Plugins::default();
+        plugins.write().insert("a".into(), Box::new(Probe(0)));
+        plugins.write().insert("b".into(), Box::new(Probe(0)));
+        let first = plugins.try_read_spinning(1).expect("a reader");
+        let second = plugins
+            .try_read_spinning(1)
+            .expect("a second reader beside it");
+        let a = first.cell("a").and_then(|c| c.try_lock_spinning(1));
+        let b = second.cell("b").and_then(|c| c.try_lock_spinning(1));
+        assert!(a.is_some() && b.is_some());
+        assert!(
+            second
+                .cell("a")
+                .and_then(|c| c.try_lock_spinning(1))
+                .is_none()
+        );
+    }
+
+    /// A plugin run through its cell and taken back out is the same one.
+    #[test]
+    fn a_plugin_comes_back_out_as_it_went_in() {
+        let plugins = Plugins::default();
+        plugins.write().insert("a".into(), Box::new(Probe(41)));
+        plugins.with("a", |p| {
+            let _ = p.process_block(&[], &[], &mut [], &mut [], &PluginEvents::EMPTY);
+        });
+        let mut back = plugins.write().remove("a").expect("the plugin");
+        assert_eq!(back.param_value(0), Some(42.0));
+        assert!(!plugins.read().contains_key("a"));
+    }
+}
