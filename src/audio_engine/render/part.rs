@@ -92,6 +92,9 @@ pub struct Feed {
     pub(crate) sidechains: Vec<Lane>,
     /// Each track's post-fader peaks where the ahead render metered it.
     pub(crate) peaks: Vec<Option<(f32, f32)>>,
+    /// Lanes of an earlier fill, kept for their buffers: a feed refilled
+    /// on the audio thread allocates only as it grows.
+    spare: Vec<Lane>,
 }
 
 /// One live track's share of a [`Feed`].
@@ -110,10 +113,39 @@ impl Feed {
         self.print = print;
         self.master.clear();
         self.master.resize(frames * 2, 0.0);
-        self.buses.clear();
-        self.sidechains.clear();
+        self.spare.append(&mut self.buses);
+        self.spare.append(&mut self.sidechains);
         self.peaks.clear();
         self.peaks.resize(tracks, None);
+    }
+
+    /// Room for `frames` frames and `lanes` lanes of them without
+    /// allocating — for a feed filled on the audio thread.
+    pub(crate) fn reserve(&mut self, frames: usize, lanes: usize) {
+        self.master.reserve(frames * 2);
+        self.buses.reserve(lanes);
+        self.sidechains.reserve(lanes);
+        self.spare.reserve(lanes * 2);
+        while self.spare.len() < lanes {
+            self.spare.push(Lane {
+                track: 0,
+                samples: Vec::with_capacity(frames * 2),
+            });
+        }
+    }
+
+    /// `samples` as track `track`'s bus (or, `sidechain`, its sidechain),
+    /// in a spare lane's buffer.
+    pub(crate) fn give_lane(&mut self, track: usize, samples: &[f32], sidechain: bool) {
+        let mut lane = self.spare.pop().unwrap_or_default();
+        lane.track = track;
+        lane.samples.clear();
+        lane.samples.extend_from_slice(samples);
+        if sidechain {
+            self.sidechains.push(lane);
+        } else {
+            self.buses.push(lane);
+        }
     }
 
     /// Empty, as a live block's window over the feeds rendered ahead —

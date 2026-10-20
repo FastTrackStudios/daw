@@ -33,6 +33,19 @@
 //! editing keeps that stretch short (tens of ms, inside the tail), and the
 //! crossfade keeps the switch itself click-free.
 //!
+//! **A run starts without a gap.** At play, a locate or a changed live set
+//! (a track armed or disarmed), nothing is rendered ahead yet. The thread
+//! is told to rest, and once it does the callback renders the tracks ahead
+//! itself, with the same renderer and so the same plugins, this block and
+//! — while the blocks leave time — the next. Once it is a few blocks
+//! ahead it hands the run over and the thread goes on from that very frame.
+//! Each plugin hears every frame once, in order. Until that renderer is
+//! free (the thread finishing a chunk), or its snapshot is of the new live
+//! set, the callback renders every track as it did before the render
+//! ahead. The plugins ahead of a locate or a new live set, having heard
+//! past where the run starts again, hear it from there: the same jump an
+//! edit makes.
+//!
 //! The two sides agree on where the song is by *run*: every chunk says
 //! which run of the transport it belongs to (its generation), which frame
 //! of the run it starts at, and where that is on the timeline. Anything
@@ -246,8 +259,18 @@ struct Control {
     restart_at: AtomicU64,
     block: AtomicUsize,
     into_block: AtomicUsize,
-    /// The callback renders whole meanwhile: render nothing.
+    /// The callback renders whole meanwhile, or renders ahead itself:
+    /// render nothing.
     paused: AtomicBool,
+    /// The render ahead has seen it paused and rests: its renderer is the
+    /// callback's to use until it is told to go on.
+    idle: AtomicBool,
+    /// The frame of the run the render ahead goes on from, and the
+    /// fingerprint of the tracks ahead the frames before it were rendered
+    /// with (`has_print` false: none).
+    restart_frame: AtomicU64,
+    run_print: AtomicU64,
+    has_print: AtomicBool,
     /// Frames of the run the callback has played.
     played: AtomicU64,
     /// The newest edition, and each edition's cut — the frame of the run it
@@ -265,6 +288,10 @@ impl Default for Control {
             block: AtomicUsize::new(0),
             into_block: AtomicUsize::new(0),
             paused: AtomicBool::new(true),
+            idle: AtomicBool::new(true),
+            restart_frame: AtomicU64::new(0),
+            run_print: AtomicU64::new(0),
+            has_print: AtomicBool::new(false),
             played: AtomicU64::new(0),
             edition: AtomicU64::new(0),
             cuts: std::array::from_fn(|_| AtomicU64::new(0)),
@@ -346,7 +373,52 @@ pub(crate) struct Player {
     playing: Option<u64>,
     fade: Option<Fade>,
     fade_len: u64,
+    /// The live set of the feed the last block played.
+    print: Option<u64>,
+    /// A run's start, rendered ahead here until the render ahead takes
+    /// over; and the chunks kept for it, their buffers ready.
+    prime: Option<Prime>,
+    own: Vec<Box<Chunk>>,
     stats: Arc<EngineStats>,
+}
+
+/// A run's first blocks, the tracks ahead rendered by the callback itself:
+/// the next frame of the run it renders ahead and where that is, the
+/// fingerprint it rendered them with, blocks so far, and whether the last
+/// one left time to render past its own block.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Prime {
+    course: Course,
+    produced: u64,
+    print: Option<u64>,
+    blocks: u32,
+    extra: bool,
+}
+
+/// Chunks the callback keeps for a run's start.
+const OWN: usize = 16;
+
+/// The most frames a chunk the callback renders holds without allocating
+/// (two device blocks of 2048), and live lanes.
+const OWN_FRAMES: usize = 4096;
+const OWN_LANES: usize = 16;
+
+/// How far ahead the callback renders a run's start before the render
+/// ahead takes over, device blocks: enough for its first chunk in time.
+const HANDOVER: u64 = 3;
+
+/// Blocks a run's start may take before the render ahead takes over
+/// whatever it is given (about 170 ms at 128 frames).
+const MAX_PRIME: u32 = 64;
+
+/// What a block heard of the tracks ahead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Heard {
+    /// The window holds them (or silence where there were none).
+    Took(Took),
+    /// What was rendered ahead is for somewhere else from this very
+    /// block's start: nothing taken; a new run from here.
+    Elsewhere,
 }
 
 /// The tracks a block's feed came from: all the chunks it took were of one
@@ -378,27 +450,73 @@ impl Player {
             playing: None,
             fade: None,
             fade_len: fade_len.max(1) as u64,
+            print: None,
+            prime: None,
+            own: (0..OWN)
+                .map(|_| {
+                    let mut chunk = Box::<Chunk>::default();
+                    chunk.feed.reserve(OWN_FRAMES, OWN_LANES);
+                    chunk
+                })
+                .collect(),
             stats,
         }
     }
 
-    /// Start the render ahead again at `at`, `into_block` frames into a
-    /// device block of `block`.
-    fn restart(&mut self, at: f64, block: usize, into_block: usize) {
+    /// A new run at `at`, `into_block` frames into a device block of
+    /// `block`: the render ahead stops, and the callback renders the run's
+    /// start itself ([`Prime`]) until it hands over.
+    fn begin_run(&mut self, at: f64, block: usize, into_block: usize) {
         self.recycle_all();
         self.generation = self.generation.wrapping_add(1);
         self.block = block;
         self.at = 0;
         self.playing = None;
         self.fade = None;
-        let c = &self.control;
-        c.played.store(0, Ordering::Relaxed);
-        c.restart_at.store(at.to_bits(), Ordering::Relaxed);
-        c.block.store(block, Ordering::Relaxed);
-        c.into_block.store(into_block, Ordering::Relaxed);
-        c.paused.store(false, Ordering::Relaxed);
-        c.generation.store(self.generation, Ordering::Release);
+        self.print = None;
+        self.prime = Some(Prime {
+            course: Course {
+                at,
+                block,
+                into_block,
+            },
+            produced: 0,
+            print: None,
+            blocks: 0,
+            extra: true,
+        });
+        self.control.played.store(0, Ordering::Relaxed);
+        self.control.paused.store(true, Ordering::SeqCst);
         self.stats.ahead_restarts.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// The render ahead goes on from where the run's start, rendered here,
+    /// left off: the same frames, the same plugins, each heard once.
+    fn hand_over(&mut self) {
+        let Some(prime) = self.prime.take() else {
+            return;
+        };
+        let c = &self.control;
+        c.played.store(self.at, Ordering::Relaxed);
+        c.restart_at
+            .store(prime.course.at.to_bits(), Ordering::Relaxed);
+        c.block.store(prime.course.block, Ordering::Relaxed);
+        c.into_block
+            .store(prime.course.into_block, Ordering::Relaxed);
+        c.restart_frame.store(prime.produced, Ordering::Relaxed);
+        c.run_print
+            .store(prime.print.unwrap_or(0), Ordering::Relaxed);
+        c.has_print.store(prime.print.is_some(), Ordering::Relaxed);
+        c.generation.store(self.generation, Ordering::Release);
+        c.paused.store(false, Ordering::SeqCst);
+    }
+
+    /// [`begin_run`](Self::begin_run) handed over at once: the render ahead
+    /// renders the run from its first frame, and the first blocks find
+    /// nothing until it has.
+    fn restart(&mut self, at: f64, block: usize, into_block: usize) {
+        self.begin_run(at, block, into_block);
+        self.hand_over();
     }
 
     /// The callback renders whole for now: the render ahead rests, and its
@@ -406,14 +524,25 @@ impl Player {
     fn pause(&mut self) {
         if self.block != 0 {
             self.block = 0;
-            self.control.paused.store(true, Ordering::Relaxed);
+            self.prime = None;
+            self.control.paused.store(true, Ordering::SeqCst);
             self.recycle_all();
+        }
+    }
+
+    /// A chunk given back: kept for a run's start while the callback has
+    /// too few, else to the render ahead.
+    fn give_back(&mut self, chunk: Box<Chunk>) {
+        if self.own.len() < OWN {
+            self.own.push(chunk);
+        } else {
+            let _ = self.spent.push(chunk);
         }
     }
 
     fn recycle_all(&mut self) {
         while let Some(chunk) = self.pending.pop() {
-            let _ = self.spent.push(chunk);
+            self.give_back(chunk);
         }
     }
 
@@ -424,8 +553,50 @@ impl Player {
             if chunk.generation == self.generation && self.pending.len() < POOL {
                 self.pending.push(chunk);
             } else {
-                let _ = self.spent.push(chunk);
+                self.give_back(chunk);
             }
+        }
+    }
+
+    /// Frames of the run's start played whole by the callback — every
+    /// track, the tracks ahead too, or silence for them: the run goes on
+    /// past them.
+    fn skip_whole(&mut self, frames: usize, wrap: Option<Wrap>) {
+        let end = self.at + frames as u64;
+        if let Some(prime) = self.prime.as_mut() {
+            if prime.produced < end {
+                prime.course = prime.course.skip((end - prime.produced) as usize, wrap);
+                prime.produced = end;
+            }
+            prime.blocks += 1;
+        }
+        self.at = end;
+        self.control.played.store(end, Ordering::Relaxed);
+    }
+
+    /// The tracks ahead rendered here, by `ahead`, up to frame `to` of the
+    /// run, into chunks of the callback's own; `print` the fingerprint they
+    /// are rendered with.
+    fn render_ahead(&mut self, ahead: &ProjectRenderer, to: u64, print: u64, wrap: Option<Wrap>) {
+        let edition = self.control.edition.load(Ordering::Acquire);
+        while let Some(prime) = self.prime.as_mut()
+            && prime.produced < to
+        {
+            let Some(mut chunk) = self.own.pop() else {
+                return;
+            };
+            let want = ((to - prime.produced) as usize).min(OWN_FRAMES);
+            let (frames, next) = prime.course.next(want, wrap);
+            let _ = ahead.render_part(prime.course.at, frames, 1.0, Part::Ahead(&mut chunk.feed));
+            chunk.generation = self.generation;
+            chunk.edition = edition;
+            chunk.first = prime.produced;
+            chunk.start = prime.course.at;
+            chunk.frames = frames;
+            prime.course = next;
+            prime.produced += frames as u64;
+            prime.print = Some(print);
+            self.pending.push(chunk);
         }
     }
 
@@ -507,7 +678,7 @@ impl Player {
 
     /// The feed for a live block of `frames` at `start`: the frames
     /// rendered ahead for it, freshest first, silence where there are none.
-    fn window(&mut self, start: f64, frames: usize) -> Took {
+    fn window(&mut self, start: f64, frames: usize) -> Heard {
         if self.block != frames {
             self.restart(start, frames, 0);
         }
@@ -537,10 +708,13 @@ impl Player {
             if elsewhere || other_set {
                 // On another course (a locate, a loop not foreseen), or of
                 // another live set from here on: a new run from here.
-                let rest = end - frame;
-                self.restart(expected, frames, frames - rest as usize);
-                self.at = rest;
-                return self.finish(frames, print);
+                if frame == self.at {
+                    return Heard::Elsewhere;
+                }
+                let rest = (end - frame) as usize;
+                self.begin_run(expected, frames, frames - rest);
+                self.skip_whole(rest, None);
+                return Heard::Took(self.finish(frames, print));
             }
             print = Some(its_print);
             let take = (pick.until.min(end) - frame) as usize;
@@ -562,7 +736,7 @@ impl Player {
         self.at = end;
         let took = self.finish(frames, print);
         self.recycle_passed();
-        took
+        Heard::Took(took)
     }
 
     /// The block's window padded to `frames` with silence, the frames
@@ -573,6 +747,9 @@ impl Player {
             self.window.append_silence(short);
         }
         self.window.print = print.unwrap_or(0);
+        if print.is_some() {
+            self.print = print;
+        }
         self.control.played.store(self.at, Ordering::Relaxed);
         Took(print)
     }
@@ -630,7 +807,7 @@ impl Player {
                 });
             if passed || replaced {
                 let chunk = self.pending.swap_remove(slot);
-                let _ = self.spent.push(chunk);
+                self.give_back(chunk);
             } else {
                 slot += 1;
             }
@@ -642,6 +819,10 @@ impl Player {
 /// callback calls in place of `ProjectRenderer::render_plan`.
 pub struct DualRender {
     live: Arc<ProjectRenderer>,
+    /// The render ahead's renderer: the thread's, and the callback's while
+    /// it renders a run's start.
+    ahead: Option<Arc<ProjectRenderer>>,
+    shared: Option<Arc<TransportShared>>,
     player: Option<Player>,
     _ahead: Option<Ahead>,
 }
@@ -652,6 +833,8 @@ impl DualRender {
     pub fn whole(live: Arc<ProjectRenderer>) -> Self {
         Self {
             live,
+            ahead: None,
+            shared: None,
             player: None,
             _ahead: None,
         }
@@ -677,6 +860,8 @@ impl DualRender {
             sample_rate,
         ));
         ahead.set_realtime_ahead();
+        // Which live set a block is of is known before it is rendered.
+        live.hold();
         // Live MIDI for a track rendered ahead goes on to its renderer.
         let (to_ahead, from_live) = rtrb::RingBuffer::new(1024);
         live.set_midi_forward(to_ahead);
@@ -689,8 +874,8 @@ impl DualRender {
         let depth = frames(prefs.depth_ms).max(1);
         let worker = Worker {
             control: control.clone(),
-            renderer: ahead,
-            shared,
+            renderer: ahead.clone(),
+            shared: shared.clone(),
             filled: filled_tx,
             spent: spent_rx,
             depth,
@@ -710,6 +895,8 @@ impl DualRender {
         }
         Self {
             live,
+            ahead: Some(ahead),
+            shared: Some(shared),
             player: Some(Player::new(
                 control.clone(),
                 filled_rx,
@@ -742,31 +929,129 @@ impl DualRender {
         let Some(player) = self.player.as_mut() else {
             return self.live.render_plan(plan, render_stopped);
         };
-        match plan.segments() {
-            [seg] if seg.playing && seg.rate == 1.0 && seg.frames > 0 => {
-                let took = player.window(seg.start_samples, seg.frames);
-                let out = self.live.render_part(
-                    seg.start_samples,
-                    seg.frames,
-                    1.0,
-                    Part::Live(&player.window),
-                );
-                // The feed was of another live set than the song's now:
-                // start again, so the render ahead renders the new one.
-                if let Took(Some(print)) = took
-                    && print != self.live.live_print()
-                {
-                    let next = seg.start_samples + seg.frames as f64;
-                    player.restart(next, seg.frames, 0);
+        // The live renderer's snapshot for this block, and its live set.
+        let live_set = self.live.refresh().map(|p| p.live);
+        let [seg] = plan.segments() else {
+            player.pause();
+            return self.live.render_plan(plan, render_stopped);
+        };
+        if !(seg.playing && seg.rate == 1.0 && seg.frames > 0) {
+            player.pause();
+            return self.live.render_plan(plan, render_stopped);
+        }
+        let (start, frames) = (seg.start_samples, seg.frames);
+        // A run starts with play, a new block size, or a changed live set:
+        // what was rendered ahead was for other buses.
+        let changed_set = player.print.is_some() && player.print != live_set;
+        if player.block != frames || changed_set {
+            player.begin_run(start, frames, 0);
+        }
+        if player.prime.is_none() {
+            match player.window(start, frames) {
+                Heard::Took(_) => {
+                    return self
+                        .live
+                        .render_part(start, frames, 1.0, Part::Live(&player.window));
                 }
-                out
+                // A locate, a loop the render ahead did not foresee.
+                Heard::Elsewhere => player.begin_run(start, frames, 0),
             }
-            _ => {
-                player.pause();
-                self.live.render_plan(plan, render_stopped)
+        }
+        self.prime(start, frames, live_set)
+    }
+
+    /// A block of a run's start: the tracks ahead rendered here, by the
+    /// render ahead's renderer while its thread rests, this block and — if
+    /// the last left time — the next; handed over once a few blocks are
+    /// ready. Until that renderer can be used (its thread finishing a chunk,
+    /// its snapshot not yet of this live set) every track is rendered here,
+    /// as before the render ahead: each frame of each plugin heard once, in
+    /// order, and never a block of silence.
+    fn prime(&mut self, start: f64, frames: usize, live_set: Option<u64>) -> StereoBuffer {
+        let wrap = self.shared.as_deref().and_then(wrap_of);
+        let budget = self
+            .shared
+            .as_deref()
+            .map_or(0.0, |s| frames as f64 / f64::from(s.sample_rate()));
+        let began = Instant::now();
+        let from_ahead = {
+            let (Some(player), Some(ahead)) = (self.player.as_mut(), self.ahead.as_ref()) else {
+                return self.live.render_part(start, frames, 1.0, Part::Whole);
+            };
+            let at = player.at;
+            let ready = player.control.idle.load(Ordering::SeqCst) && !player.own.is_empty();
+            let prints = if ready { ahead.refresh() } else { None };
+            match prints.filter(|p| live_set == Some(p.live)) {
+                Some(prints) => {
+                    let extra = player.prime.is_some_and(|p| p.extra);
+                    let to = at + frames as u64 * if extra { 2 } else { 1 };
+                    player.render_ahead(ahead, to, prints.ahead, wrap);
+                    true
+                }
+                // Ahead of the playhead already, from blocks before: play
+                // that.
+                None => player.prime.map_or(0, |p| p.produced.saturating_sub(at)) >= frames as u64,
+            }
+        };
+        let out = if from_ahead {
+            self.live_from_ahead(start, frames)
+        } else {
+            let out = self.live.render_part(start, frames, 1.0, Part::Whole);
+            if let Some(player) = self.player.as_mut() {
+                player.skip_whole(frames, wrap);
+            }
+            out
+        };
+        let Some(player) = self.player.as_mut() else {
+            return out;
+        };
+        if let Some(prime) = player.prime.as_mut() {
+            // Room for the next block's next block, if this one left half
+            // its time.
+            prime.extra = began.elapsed().as_secs_f64() < budget * 0.5;
+            let ahead_by = prime.produced.saturating_sub(player.at);
+            let ready = ahead_by >= HANDOVER * frames as u64 && prime.print.is_some();
+            if ready || prime.blocks >= MAX_PRIME {
+                player.hand_over();
+            }
+        }
+        out
+    }
+
+    /// The live tracks rendered here over what was rendered ahead for this
+    /// block.
+    fn live_from_ahead(&mut self, start: f64, frames: usize) -> StereoBuffer {
+        let Some(player) = self.player.as_mut() else {
+            return self.live.render_part(start, frames, 1.0, Part::Whole);
+        };
+        if let Some(prime) = player.prime.as_mut() {
+            prime.blocks += 1;
+        }
+        match player.window(start, frames) {
+            Heard::Took(_) => self
+                .live
+                .render_part(start, frames, 1.0, Part::Live(&player.window)),
+            Heard::Elsewhere => {
+                // What the callback rendered ahead is for its own course, so
+                // this is a transport that moved meanwhile: start again.
+                player.begin_run(start, frames, 0);
+                let out = self.live.render_part(start, frames, 1.0, Part::Whole);
+                player.skip_whole(frames, self.shared.as_deref().and_then(wrap_of));
+                out
             }
         }
     }
+}
+
+/// The loop the transport wraps at now, if it loops.
+fn wrap_of(shared: &TransportShared) -> Option<Wrap> {
+    if !shared.is_looping() {
+        return None;
+    }
+    shared.loop_region().map(|r| Wrap {
+        start: r.start.0 as f64,
+        end: r.end.0 as f64,
+    })
 }
 
 /// The render ahead's thread.
@@ -854,7 +1139,7 @@ impl Worker {
             into_block: 0,
         });
         let mut edition = self.control.edition.load(Ordering::Relaxed);
-        let mut prints: Option<Prints> = None;
+        let mut ahead_print: Option<u64> = None;
         let mut edited: Option<Instant> = None;
         loop {
             if self.control.stop.load(Ordering::Acquire) {
@@ -863,28 +1148,41 @@ impl Worker {
             while let Ok(chunk) = self.spent.pop() {
                 spare.push(chunk);
             }
-            if self.control.paused.load(Ordering::Relaxed) {
+            if self.control.paused.load(Ordering::SeqCst) {
+                // Resting: the renderer is the callback's meanwhile.
+                self.control.idle.store(true, Ordering::SeqCst);
                 self.stats.ahead_fill_frames.store(0, Ordering::Relaxed);
                 std::thread::park_timeout(REST);
                 continue;
             }
+            self.control.idle.store(false, Ordering::SeqCst);
+            // Told to rest between the look and the word: rest.
+            if self.control.paused.load(Ordering::SeqCst) {
+                continue;
+            }
             let now = self.control.generation.load(Ordering::Acquire);
             if now != generation {
+                // A new run, its start rendered by the callback up to here.
                 generation = now;
                 place = Place::new(Course {
                     at: f64::from_bits(self.control.restart_at.load(Ordering::Relaxed)),
                     block: self.control.block.load(Ordering::Relaxed).max(1),
                     into_block: self.control.into_block.load(Ordering::Relaxed),
                 });
+                place.produced = self.control.restart_frame.load(Ordering::Relaxed);
+                edition = self.control.edition.load(Ordering::Relaxed);
+                if self.control.has_print.load(Ordering::Relaxed) {
+                    ahead_print = Some(self.control.run_print.load(Ordering::Relaxed));
+                }
             }
             let played = self.control.played.load(Ordering::Relaxed);
             place.catch_up(played, self.wrap());
 
             // An edit to what is rendered ahead: what was rendered past
             // the guard is stale — a new edition from there.
-            let fresh = self.renderer.refresh();
-            if let (Some(was), Some(now)) = (prints, fresh)
-                && was.ahead != now.ahead
+            let fresh = self.renderer.refresh().map(|p: Prints| p.ahead);
+            if let (Some(was), Some(now)) = (ahead_print, fresh)
+                && was != now
             {
                 edited = Some(Instant::now());
                 let cut = played + (place.course.block + self.guard) as u64;
@@ -895,7 +1193,7 @@ impl Worker {
                     self.stats.ahead_rewinds.fetch_add(1, Ordering::Relaxed);
                 }
             }
-            prints = fresh.or(prints);
+            ahead_print = fresh.or(ahead_print);
 
             // Shallow while edits come in: each throws away little.
             let depth = match edited {
@@ -958,13 +1256,7 @@ impl Worker {
 
     /// The loop the transport wraps at now, if it loops.
     fn wrap(&self) -> Option<Wrap> {
-        if !self.shared.is_looping() {
-            return None;
-        }
-        self.shared.loop_region().map(|r| Wrap {
-            start: r.start.0 as f64,
-            end: r.end.0 as f64,
-        })
+        wrap_of(&self.shared)
     }
 }
 
@@ -1126,15 +1418,19 @@ mod tests {
     fn a_block_plays_the_chunks_for_where_it_is() {
         let stats = Arc::new(EngineStats::default());
         let (mut p, mut tx, _) = player(&stats, 4);
-        assert_eq!(p.window(0.0, 4), Took(None), "nothing ready yet");
+        assert_eq!(
+            p.window(0.0, 4),
+            Heard::Took(Took(None)),
+            "nothing ready yet"
+        );
         assert_eq!(stats.ahead_underruns.load(Ordering::Relaxed), 0);
         assert_eq!(p.window.master, vec![0.0; 8]);
         let generation = p.generation;
         let _ = tx.push(chunk(generation, 0, 4, 6, 1.0));
         let _ = tx.push(chunk(generation, 0, 10, 6, 2.0));
-        assert_eq!(p.window(4.0, 4), Took(Some(5)));
+        assert_eq!(p.window(4.0, 4), Heard::Took(Took(Some(5))));
         assert_eq!(p.window.master, vec![1.0; 8]);
-        assert_eq!(p.window(8.0, 4), Took(Some(5)));
+        assert_eq!(p.window(8.0, 4), Heard::Took(Took(Some(5))));
         assert_eq!(
             p.window.master,
             vec![1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0]
@@ -1147,23 +1443,36 @@ mod tests {
     }
 
     /// A chunk of an older run is passed over; one for another place on
-    /// the timeline starts the render ahead again from where the block is.
+    /// the timeline from the block's start says so, taking nothing; from
+    /// within the block, it starts a new run from that frame.
     #[test]
-    fn a_chunk_for_elsewhere_starts_the_render_ahead_again() {
+    fn a_chunk_for_elsewhere_starts_a_new_run() {
         let stats = Arc::new(EngineStats::default());
-        let (mut p, mut tx, control) = player(&stats, 4);
+        let (mut p, mut tx, _) = player(&stats, 4);
         let _ = p.window(0.0, 4);
         let generation = p.generation;
         let _ = tx.push(chunk(generation.wrapping_sub(1), 0, 4, 4, 9.0));
         let mut far = chunk(generation, 0, 4, 4, 7.0);
         far.start = 50_000.0;
         let _ = tx.push(far);
-        assert_eq!(p.window(4.0, 4), Took(None));
-        assert_ne!(p.generation, generation, "a new run");
+        assert_eq!(p.window(4.0, 4), Heard::Elsewhere);
+        assert_eq!(p.generation, generation, "the caller starts it");
+
+        let (mut p, mut tx, _) = player(&stats, 4);
+        let _ = p.window(0.0, 4);
+        let generation = p.generation;
+        let _ = tx.push(chunk(generation, 0, 4, 2, 1.0));
+        let mut far = chunk(generation, 0, 6, 2, 7.0);
+        far.start = 50_000.0;
+        let _ = tx.push(far);
+        assert_eq!(p.window(4.0, 4), Heard::Took(Took(Some(5))));
         assert_eq!(
-            f64::from_bits(control.restart_at.load(Ordering::Relaxed)),
-            4.0
+            p.window.master,
+            vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0]
         );
+        assert_ne!(p.generation, generation, "a new run from frame 6");
+        let prime = p.prime.expect("its start rendered here");
+        assert_eq!((prime.course.at, prime.produced, p.at), (8.0, 2, 2));
     }
 
     /// After an edit the new edition takes over at its cut, faded in over
@@ -1246,6 +1555,14 @@ mod tests {
         }
     }
 
+    /// What a test does to the song between blocks: the song, and its
+    /// transport.
+    struct Song<'a> {
+        daw: &'a Standalone,
+        guid: &'a str,
+        transport: &'a TransportShared,
+    }
+
     /// The song as the transport plays it, block by block — paced like a
     /// device, so the render ahead keeps up: rendered whole in the callback
     /// (`prefs` `None`), or with a render ahead. `looped` loops the
@@ -1255,7 +1572,7 @@ mod tests {
         prefs: Option<AheadPrefs>,
         looped: Option<(i64, i64)>,
         blocks: usize,
-        mut edit: impl FnMut(&Standalone, &str, usize),
+        mut edit: impl FnMut(&Song<'_>, usize),
     ) -> Played {
         use crate::transport_engine::{InstantSamples, LoopRegionSamples, PlayStateRepr};
         let runtime = tokio::runtime::Runtime::new().expect("a runtime");
@@ -1307,7 +1624,12 @@ mod tests {
         let period = Duration::from_secs_f64(128.0 / 48_000.0);
         let began = Instant::now();
         for b in 0..blocks {
-            edit(&daw, &guid, b);
+            let song = Song {
+                daw: &daw,
+                guid: &guid,
+                transport: &shared,
+            };
+            edit(&song, b);
             let stamp = b as f64 * period.as_secs_f64() * 1e6;
             let plan = shared.begin_block(128, stamp, period.as_secs_f64() * 1e6);
             out.extend(render.render(&plan, false).samples);
@@ -1319,7 +1641,7 @@ mod tests {
         Played { out, stats }
     }
 
-    fn no_edit(_: &Standalone, _: &str, _: usize) {}
+    fn no_edit(_: &Song<'_>, _: usize) {}
 
     fn track(daw: &Standalone, guid: &str, name: &str) -> daw_proto::TrackRef {
         daw_proto::TrackRef::Guid(crate::audio_engine::render::folder_routing_tests::guid_of(
@@ -1410,9 +1732,9 @@ mod tests {
     #[test]
     fn an_edit_ahead_is_heard_at_once() {
         const AT: usize = 120;
-        let turn_down = |daw: &Standalone, guid: &str, b: usize| {
+        let turn_down = |s: &Song<'_>, b: usize| {
             if b == AT {
-                set_volume(daw, guid, "Kick", 0.25);
+                set_volume(s.daw, s.guid, "Kick", 0.25);
             }
         };
         let prefs = Some(AheadPrefs::default());
@@ -1443,12 +1765,12 @@ mod tests {
     /// name — throws nothing away.
     #[test]
     fn a_change_nothing_ahead_hears_throws_nothing_away() {
-        let edit = |daw: &Standalone, guid: &str, b: usize| {
+        let edit = |s: &Song<'_>, b: usize| {
             if b == 80 {
-                set_volume(daw, guid, "Lead", 0.5);
+                set_volume(s.daw, s.guid, "Lead", 0.5);
             }
             if b == 100 {
-                daw.write_project(guid, |p| {
+                s.daw.write_project(s.guid, |p| {
                     if let Some(t) = p.tracks.iter_mut().find(|t| t.name == "Kick") {
                         t.name = "Kick In".into();
                     }
@@ -1465,9 +1787,9 @@ mod tests {
     fn a_storm_of_edits_never_plays_short() {
         let stop = Arc::new(AtomicBool::new(false));
         let mut storm = None;
-        let edit = |daw: &Standalone, guid: &str, b: usize| {
+        let edit = |s: &Song<'_>, b: usize| {
             if b == 40 {
-                let (daw, guid, stop) = (daw.clone(), guid.to_string(), stop.clone());
+                let (daw, guid, stop) = (s.daw.clone(), s.guid.to_string(), stop.clone());
                 storm = Some(std::thread::spawn(move || {
                     let mut i = 0u32;
                     while !stop.load(Ordering::Relaxed) {
@@ -1505,5 +1827,73 @@ mod tests {
             played.count(|s| &s.ahead_rewinds) > 10,
             "edits were heard as they came"
         );
+    }
+
+    /// The blocks from `from` to `to` that are silent.
+    fn silent_blocks(out: &[f32], from: usize, to: usize) -> Vec<usize> {
+        (from..to)
+            .filter(|b| out[b * 256..(b + 1) * 256].iter().all(|s| s.abs() < 1e-3))
+            .collect()
+    }
+
+    fn set_armed(daw: &Standalone, guid: &str, name: &str, armed: bool) {
+        use daw_proto::Tracks;
+        let ctx = daw_proto::ProjectContext::Project(guid.to_string());
+        Tracks::set_armed(daw, ctx, track(daw, guid, name), armed).expect("the arm");
+    }
+
+    /// Play from stop: the callback renders the run's start itself until
+    /// the render ahead has caught up, so the song is the same song from
+    /// its very first block — not one frame of silence.
+    #[test]
+    fn a_run_starts_without_a_gap() {
+        let whole = play(None, None, 100, no_edit);
+        let dual = play(Some(AheadPrefs::default()), None, 100, no_edit);
+        assert_same_from(&whole.out, &dual.out, 0);
+        assert_eq!(dual.count(|s| &s.ahead_underruns), 0);
+        assert_eq!(dual.count(|s| &s.ahead_restarts), 1);
+    }
+
+    /// A locate while playing: the next block plays the new place, with
+    /// every track, and the song is the same song once the plugins on the
+    /// tracks ahead (which had heard past the locate) have settled.
+    #[test]
+    fn a_locate_starts_again_without_a_gap() {
+        use crate::transport_engine::InstantSamples;
+        const AT: usize = 100;
+        let locate = |s: &Song<'_>, b: usize| {
+            if b == AT {
+                s.transport.set_playhead(InstantSamples(30_000));
+            }
+        };
+        let whole = play(None, None, 160, locate);
+        let dual = play(Some(AheadPrefs::default()), None, 160, locate);
+        assert_eq!(silent_blocks(&dual.out, 0, 160), Vec::<usize>::new());
+        assert_eq!(dual.count(|s| &s.ahead_underruns), 0);
+        assert_eq!(dual.count(|s| &s.ahead_restarts), 2, "play, and the locate");
+        assert_same_from(&whole.out[..AT * 256], &dual.out[..AT * 256], 0);
+        assert_same_from(&whole.out, &dual.out, AT + 10);
+    }
+
+    /// Disarming the live track and arming it again: the tracks ahead play
+    /// on through both, the new live set's run started by the callback.
+    #[test]
+    fn arming_and_disarming_play_on_without_a_gap() {
+        let arm = |s: &Song<'_>, b: usize| match b {
+            80 => set_armed(s.daw, s.guid, "Lead", false),
+            160 => set_armed(s.daw, s.guid, "Lead", true),
+            _ => {}
+        };
+        let whole = play(None, None, 260, arm);
+        let dual = play(Some(AheadPrefs::default()), None, 260, arm);
+        assert_eq!(silent_blocks(&dual.out, 0, 260), Vec::<usize>::new());
+        assert_eq!(dual.count(|s| &s.ahead_underruns), 0);
+        assert_eq!(
+            dual.count(|s| &s.ahead_restarts),
+            3,
+            "play, and each change"
+        );
+        assert_same_from(&whole.out[..150 * 256], &dual.out[..150 * 256], 110);
+        assert_same_from(&whole.out, &dual.out, 200);
     }
 }

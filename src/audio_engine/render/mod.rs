@@ -541,16 +541,10 @@ fn give_feed(
     feed.master.copy_from_slice(master);
     for (ti, _) in live.iter().enumerate().filter(|(_, l)| **l) {
         if dirty.get(ti).copied().unwrap_or(false) {
-            feed.buses.push(part::Lane {
-                track: ti,
-                samples: buses[ti].samples.clone(),
-            });
+            feed.give_lane(ti, &buses[ti].samples, false);
         }
         if keyed.get(ti).copied().unwrap_or(false) {
-            feed.sidechains.push(part::Lane {
-                track: ti,
-                samples: sidechains[ti].clone(),
-            });
+            feed.give_lane(ti, &sidechains[ti], true);
         }
     }
 }
@@ -802,6 +796,14 @@ impl ProjectRenderer {
     pub(crate) fn set_realtime_ahead(&self) {
         self.held.store(true, std::sync::atomic::Ordering::Relaxed);
         self.go_realtime("render-ahead", audio::io::realtime::AHEAD_PRIORITY);
+    }
+
+    /// Hold this realtime renderer's snapshot: it moves on only at
+    /// [`refresh`](Self::refresh) — for a dual render, which must know which
+    /// live set the block it renders is of before it renders it.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn hold(&self) {
+        self.held.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// A held renderer's snapshot moved on to the newest built (and a newer
