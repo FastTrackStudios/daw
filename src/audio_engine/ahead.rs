@@ -1262,7 +1262,8 @@ impl Worker {
 
 /// How much to render next with `ahead_by` frames ready: one device block
 /// while there is less than two, doubling from there up to `chunk`, never
-/// past the depth.
+/// past the depth — whole device blocks, so a block's frames, and the
+/// meter peaks kept for them, start where a chunk's do.
 fn chunk_size(ahead_by: usize, block: usize, chunk: usize, depth: usize) -> usize {
     let block = block.max(1);
     let grown = if ahead_by < 2 * block {
@@ -1270,7 +1271,8 @@ fn chunk_size(ahead_by: usize, block: usize, chunk: usize, depth: usize) -> usiz
     } else {
         ahead_by.next_power_of_two().min(chunk)
     };
-    grown.min(depth.saturating_sub(ahead_by).max(block)).max(1)
+    let frames = grown.min(depth.saturating_sub(ahead_by).max(block));
+    (frames / block).max(1) * block
 }
 
 #[cfg(test)]
@@ -1543,9 +1545,11 @@ mod tests {
         assert!(p.pending.is_empty(), "all passed");
     }
 
-    /// What the dual render played, and its counters.
+    /// What the dual render played, Kick's meter after each block, and its
+    /// counters.
     struct Played {
         out: Vec<f32>,
+        meter: Vec<f32>,
         stats: Arc<EngineStats>,
     }
 
@@ -1616,11 +1620,19 @@ mod tests {
             }));
         }
         shared.set_play_state(PlayStateRepr::Playing);
+        let (tracks, kick) = daw
+            .read_project(&guid, |p| {
+                let kick = p.tracks.iter().position(|t| t.name == "Kick");
+                (p.tracks.len(), kick.unwrap_or(0))
+            })
+            .unwrap_or_default();
+        daw.set_meters(crate::metering::Meters::new(tracks));
         let live = Arc::new(ProjectRenderer::new(&daw, &guid, 48_000));
         live.set_realtime();
         let stats = Arc::new(EngineStats::default());
         let mut render = DualRender::new(live, shared.clone(), prefs, stats.clone());
         let mut out = Vec::new();
+        let mut meter = Vec::new();
         let period = Duration::from_secs_f64(128.0 / 48_000.0);
         let began = Instant::now();
         for b in 0..blocks {
@@ -1633,12 +1645,13 @@ mod tests {
             let stamp = b as f64 * period.as_secs_f64() * 1e6;
             let plan = shared.begin_block(128, stamp, period.as_secs_f64() * 1e6);
             out.extend(render.render(&plan, false).samples);
+            meter.push(daw.meters().cell(kick).map_or(-1.0, |c| c.peak(0)));
             // Like a device: the next block comes a block's time later.
             if let Some(rest) = (period * (b as u32 + 1)).checked_sub(began.elapsed()) {
                 std::thread::sleep(rest);
             }
         }
-        Played { out, stats }
+        Played { out, meter, stats }
     }
 
     fn no_edit(_: &Song<'_>, _: usize) {}
@@ -1705,6 +1718,25 @@ mod tests {
             "one run, from the first block"
         );
         assert_same_from(&whole.out, &dual.out, 60);
+    }
+
+    /// A meter on a track rendered ahead moves with what is heard, block by
+    /// block, as it does when everything renders in the callback — not
+    /// when its frames were rendered.
+    #[test]
+    fn a_meter_ahead_moves_with_what_is_heard() {
+        let whole = play(None, None, 160, no_edit);
+        let dual = play(Some(AheadPrefs::default()), None, 160, no_edit);
+        assert!(
+            whole.meter[60..].iter().any(|m| *m > 0.01),
+            "Kick is metered"
+        );
+        let worst = whole.meter[20..]
+            .iter()
+            .zip(&dual.meter[20..])
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(worst < 1e-6, "the meters part by {worst}");
     }
 
     /// The same over a loop: the render ahead wraps where the transport

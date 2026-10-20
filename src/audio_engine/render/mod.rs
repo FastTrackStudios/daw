@@ -471,24 +471,20 @@ pub(crate) fn add_aux(
 /// A track's post-fader peaks this block: onto its meter — or, rendered
 /// ahead, into the feed, for the live render to put there when the block
 /// plays.
-fn meter(
-    meters: &crate::metering::Meters,
-    ahead: Option<&mut Feed>,
-    ti: usize,
-    left: f32,
-    right: f32,
-) {
+fn meter(meters: &crate::metering::Meters, ahead: Option<&mut Feed>, ti: usize, post: &[f32]) {
     match ahead {
-        Some(feed) => {
-            if let Some(slot) = feed.peaks.get_mut(ti) {
-                *slot = Some((left, right));
-            }
-        }
+        Some(feed) => feed.meter(ti, post),
         None => {
-            if let Some(cell) = meters.cell(ti) {
-                cell.write(left, right, crate::metering::HOLD_DECAY);
-            }
+            let (left, right) = part::peak(post);
+            meter_peaks(meters, ti, left, right);
         }
+    }
+}
+
+/// Track `ti`'s peaks this block onto its meter.
+fn meter_peaks(meters: &crate::metering::Meters, ti: usize, left: f32, right: f32) {
+    if let Some(cell) = meters.cell(ti) {
+        cell.write(left, right, crate::metering::HOLD_DECAY);
     }
 }
 
@@ -1234,7 +1230,7 @@ impl ProjectRenderer {
             );
             for (ti, peaks) in feed.peaks.iter().enumerate() {
                 if let (Some((l, r)), false) = (peaks, covers(ti)) {
-                    meter(&meters, None, ti, *l, *r);
+                    meter_peaks(&meters, ti, *l, *r);
                 }
             }
         }
@@ -1591,7 +1587,7 @@ impl ProjectRenderer {
             }
             if !passes(ti) {
                 // Solo-skipped tracks meter as silence.
-                meter(&meters, ahead.as_deref_mut(), ti, 0.0, 0.0);
+                meter(&meters, ahead.as_deref_mut(), ti, &[]);
                 continue;
             }
             // Clean bus = all zeros: gain scales nothing, sends add
@@ -1599,7 +1595,7 @@ impl ProjectRenderer {
             // work entirely; only active tracks cost CPU. (A track
             // with FX must still run — synths generate from MIDI.)
             if !dirty[ti] && t.fx_chain.is_empty() {
-                meter(&meters, ahead.as_deref_mut(), ti, 0.0, 0.0);
+                meter(&meters, ahead.as_deref_mut(), ti, &[]);
                 continue;
             }
 
@@ -1781,7 +1777,7 @@ impl ProjectRenderer {
                 }
             }
             if !dirty[ti] {
-                meter(&meters, ahead.as_deref_mut(), ti, 0.0, 0.0);
+                meter(&meters, ahead.as_deref_mut(), ti, &[]);
                 continue;
             }
 
@@ -1928,14 +1924,7 @@ impl ProjectRenderer {
 
             // Meter the post-fader signal (folder children already
             // summed in — topo order guarantees the bus is complete).
-            {
-                let (mut pl, mut pr) = (0.0f32, 0.0f32);
-                for fr in src.chunks_exact(2) {
-                    pl = pl.max(fr[0].abs());
-                    pr = pr.max(fr[1].abs());
-                }
-                meter(&meters, ahead.as_deref_mut(), ti, pl, pr);
-            }
+            meter(&meters, ahead.as_deref_mut(), ti, src);
 
             if debug {
                 let v = (src.iter().map(|s| (*s as f64) * (*s as f64)).sum::<f64>()

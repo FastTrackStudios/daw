@@ -92,9 +92,25 @@ pub struct Feed {
     pub(crate) sidechains: Vec<Lane>,
     /// Each track's post-fader peaks where the ahead render metered it.
     pub(crate) peaks: Vec<Option<(f32, f32)>>,
+    /// The same every [`PEAK_GRAIN`] frames (`grains` of them a track,
+    /// `grain_peaks[track * grains + g]`): a live block takes the peaks of
+    /// its own frames, not of the whole chunk it falls in, so a meter on a
+    /// track rendered ahead moves with what is heard.
+    grains: usize,
+    grain_peaks: Vec<(f32, f32)>,
     /// Lanes of an earlier fill, kept for their buffers: a feed refilled
     /// on the audio thread allocates only as it grows.
     spare: Vec<Lane>,
+}
+
+/// Frames a feed's meter peaks are kept by: a little under 1.5 ms at 48 kHz.
+pub(crate) const PEAK_GRAIN: usize = 64;
+
+/// The peaks of interleaved stereo `samples`, left and right.
+pub(crate) fn peak(samples: &[f32]) -> (f32, f32) {
+    samples.chunks_exact(2).fold((0.0, 0.0), |(l, r), fr| {
+        (f32::max(l, fr[0].abs()), f32::max(r, fr[1].abs()))
+    })
 }
 
 /// One live track's share of a [`Feed`].
@@ -117,6 +133,44 @@ impl Feed {
         self.spare.append(&mut self.sidechains);
         self.peaks.clear();
         self.peaks.resize(tracks, None);
+        self.grains = frames.div_ceil(PEAK_GRAIN);
+        self.grain_peaks.clear();
+        self.grain_peaks.resize(tracks * self.grains, (0.0, 0.0));
+    }
+
+    /// Track `track`'s post-fader signal over the feed's frames (`post`,
+    /// interleaved; empty: silence), metered: its peaks over all of them,
+    /// and grain by grain.
+    pub(crate) fn meter(&mut self, track: usize, post: &[f32]) {
+        if let Some(slot) = self.peaks.get_mut(track) {
+            *slot = Some(peak(post));
+        }
+        let grains = self.grains;
+        let Some(cells) = self
+            .grain_peaks
+            .get_mut(track * grains..(track + 1) * grains)
+        else {
+            return;
+        };
+        for (g, cell) in cells.iter_mut().enumerate() {
+            let span = g * PEAK_GRAIN * 2..((g + 1) * PEAK_GRAIN * 2).min(post.len());
+            *cell = post.get(span).map_or((0.0, 0.0), peak);
+        }
+    }
+
+    /// Track `track`'s peaks over frames `from..from + frames`, to the
+    /// grain; `None` where it was not metered.
+    fn peaks_over(&self, track: usize, from: usize, frames: usize) -> Option<(f32, f32)> {
+        let whole = (*self.peaks.get(track)?)?;
+        if self.grains == 0 {
+            return Some(whole);
+        }
+        let first = track * self.grains + from / PEAK_GRAIN;
+        let last = track * self.grains + (from + frames).div_ceil(PEAK_GRAIN).min(self.grains);
+        let cells = self.grain_peaks.get(first..last)?;
+        Some(cells.iter().fold((0.0, 0.0), |(l, r), (a, b)| {
+            (f32::max(l, *a), f32::max(r, *b))
+        }))
     }
 
     /// Room for `frames` frames and `lanes` lanes of them without
@@ -188,11 +242,11 @@ impl Feed {
         if self.peaks.len() < src.peaks.len() {
             self.peaks.resize(src.peaks.len(), None);
         }
-        for (mine, theirs) in self.peaks.iter_mut().zip(&src.peaks) {
-            if let Some((l, r)) = theirs {
-                let (ml, mr) = mine.get_or_insert((0.0, 0.0));
-                *ml = ml.max(*l);
-                *mr = mr.max(*r);
+        for track in 0..src.peaks.len() {
+            if let Some((l, r)) = src.peaks_over(track, from, frames) {
+                let (ml, mr) = self.peaks[track].get_or_insert((0.0, 0.0));
+                *ml = ml.max(l);
+                *mr = mr.max(r);
             }
         }
     }
@@ -371,6 +425,26 @@ mod tests {
         assert_eq!(w.master, vec![1.0, 1.0, 2.0, 2.0, 2.0, 2.0]);
         assert_eq!(w.buses.len(), 1);
         assert_eq!(w.buses[0].samples, vec![0.0, 0.0, 5.0, 5.0, 5.0, 5.0]);
+    }
+
+    /// A block that takes the start of a chunk meters its own frames: a
+    /// peak late in the chunk is not on its meter until its frames play.
+    #[test]
+    fn a_window_meters_its_own_frames() {
+        let mut chunk = Feed::default();
+        chunk.reset(512, 7, 2);
+        let mut post = vec![0.1; 512 * 2];
+        post[450 * 2] = 0.9;
+        chunk.meter(1, &post);
+        assert_eq!(chunk.peaks[1], Some((0.9, 0.1)), "the chunk's own peak");
+        let mut w = Feed::default();
+        w.reset(0, 7, 2);
+        w.append(&chunk, 0, 128);
+        assert_eq!(w.peaks[1], Some((0.1, 0.1)), "not yet");
+        assert_eq!(w.peaks[0], None, "not metered");
+        w.clear_window();
+        w.append(&chunk, 384, 128);
+        assert_eq!(w.peaks[1], Some((0.9, 0.1)), "as its frames play");
     }
 
     #[test]
