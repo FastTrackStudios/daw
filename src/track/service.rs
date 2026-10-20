@@ -97,6 +97,22 @@ pub trait Tracks {
         inverted: bool,
     ) -> DawResult<()>;
 
+    /// Whether `track` always renders live — at the device's block, in the
+    /// audio callback — rather than ahead of the playhead whenever nothing
+    /// plays it now: REAPER's "prevent anticipative FX" (`I_PERFFLAGS & 2`).
+    /// A track live this way hears a change to it at once, and costs the
+    /// callback its render.
+    fn render_live(&self, project: ProjectContext, track: TrackRef) -> bool;
+
+    /// Render `track` live always (`live`), or ahead of the playhead
+    /// whenever nothing plays it now.
+    fn set_render_live(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        live: bool,
+    ) -> DawResult<()>;
+
     // ── Track groups ────────────────────────────────────────────────
     //
     // The DAW's fixed set of track-group slots (REAPER 7: 128, addressed
