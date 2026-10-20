@@ -348,6 +348,39 @@ impl Tracks for Standalone {
         Ok(())
     }
 
+    fn render_live(&self, project: ProjectContext, track: TrackRef) -> bool {
+        let Some(guid) = resolve_project(self, &project) else {
+            return false;
+        };
+        self.with_project(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track)?;
+            p.track_ext
+                .get(&p.tracks[i].guid)
+                .map(crate::sync::TrackExt::renders_live)
+        })
+        .ok()
+        .flatten()
+        .unwrap_or(false)
+    }
+
+    fn set_render_live(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        live: bool,
+    ) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let track_guid = p.tracks[i].guid.clone();
+            p.track_ext
+                .entry(track_guid)
+                .or_default()
+                .set_render_live(live);
+            Ok::<(), DawError>(())
+        })?
+    }
+
     fn set_muted(&self, project: ProjectContext, track: TrackRef, muted: bool) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
         let events = self.with_project_mut(&guid, |p| {

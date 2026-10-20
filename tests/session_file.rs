@@ -1014,6 +1014,29 @@ fn item_labels_survive_save_and_load() {
     assert_eq!(labels, [Some("4add2".to_owned()), Some("#D".to_owned())]);
 }
 
+/// A track kept rendering live (REAPER's "prevent anticipative FX") is
+/// saved as its `PERF` line and opens back so; the others stay as they were.
+#[test]
+fn a_track_kept_live_survives_save_and_load() {
+    use daw_proto::{TrackRef, Tracks};
+    let tmp = tempfile::tempdir().unwrap();
+    let song = tmp.path().join("Song");
+    let (daw, _, guid) = open_song(&song);
+    let ctx = ProjectContext::Project(guid.clone());
+    Tracks::set_render_live(&daw, ctx, TrackRef::Guid(KEYS.into()), true).unwrap();
+
+    let dir = song.join("Song.session");
+    save_session(&daw, &guid, &dir).unwrap();
+    let text = session_rpp_text(&dir).unwrap();
+    assert!(text.contains("PERF 2"), "{text}");
+    let (fresh, _) = engine();
+    let loaded = load_session(&fresh, "Song", &dir).unwrap();
+    let ctx = ProjectContext::Project(loaded.project_guid);
+    let live = |g: &str| Tracks::render_live(&fresh, ctx.clone(), TrackRef::Guid(g.into()));
+    assert!(live(KEYS));
+    assert!(!live(DRUMS) && !live(BASS));
+}
+
 /// Tracks, items, markers and regions made with a caller's GUID (a peer
 /// re-creating what another engine made) come back from a `.session` save
 /// under exactly that GUID, whatever its spelling — the shared session keys

@@ -1741,6 +1741,10 @@ impl<'a> Writer<'a> {
             });
             owned.key("MAINSEND");
         }
+        if differs(vext.map(|x| x.perf_flags == ext.perf_flags)) {
+            t.perf = Some(i32::try_from(ext.perf_flags).unwrap_or(0));
+            owned.key("PERF");
+        }
         if differs(vext.map(|x| x.num_channels == ext.num_channels)) {
             t.channel_count = ext.num_channels.clamp(1, 128);
             owned.key("NCHAN");

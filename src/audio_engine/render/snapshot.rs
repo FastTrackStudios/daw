@@ -83,6 +83,12 @@ pub(crate) struct RenderSnapshot {
 
 impl RenderSnapshot {
     pub(crate) fn build(p: &ProjectState) -> Arc<Self> {
+        Self::build_hinted(p, &[])
+    }
+
+    /// [`build`](Self::build), the tracks `played_live` (played over live
+    /// MIDI lately) rendered live.
+    pub(crate) fn build_hinted(p: &ProjectState, played_live: &[String]) -> Arc<Self> {
         let tempo_map = TempoMap::from_state(p);
         let idx_by_guid: HashMap<&str, usize> = p
             .tracks
@@ -93,7 +99,7 @@ impl RenderSnapshot {
         let tracks: Vec<TrackSnapshot> = p
             .tracks
             .iter()
-            .map(|t| snapshot_track(p, t, &tempo_map, &idx_by_guid))
+            .map(|t| snapshot_track(p, t, &tempo_map, &idx_by_guid, played_live))
             .collect();
         let order = graph::topo_order(&tracks);
         let solo_pass = graph::solo_pass(&tracks);
@@ -430,6 +436,7 @@ fn snapshot_track(
     t: &daw_proto::Track,
     tempo_map: &TempoMap,
     idx_by_guid: &HashMap<&str, usize>,
+    played_live: &[String],
 ) -> TrackSnapshot {
     let parent_send = p
         .track_ext
@@ -450,12 +457,24 @@ fn snapshot_track(
         Some(daw_proto::track::RecordInput::Audio { channel }) if monitoring => Some(channel),
         _ => None,
     };
+    // Rendered live too: a track set to (REAPER's "no anticipative FX"),
+    // one whose plugin's window is open — a knob turned in it is heard at
+    // once — and one just played over live MIDI.
+    let editor_open = p
+        .fx_chains
+        .get(&crate::sync::FxChainKey::Track(t.guid.clone()))
+        .is_some_and(|chain| chain.iter().any(|e| e.fx.window_open));
     let plays_live = input_channel.is_some()
         || (t.armed
             && matches!(
                 record_input,
                 Some(daw_proto::track::RecordInput::Midi { .. })
-            ));
+            ))
+        || p.track_ext
+            .get(&t.guid)
+            .is_some_and(crate::sync::TrackExt::renders_live)
+        || editor_open
+        || played_live.iter().any(|g| *g == t.guid);
 
     // Sends: only the Send variant matters (Receives mirror; HW out
     // for v0 also routes to master via parent_send equivalent).

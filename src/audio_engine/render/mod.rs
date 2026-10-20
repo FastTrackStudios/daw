@@ -857,8 +857,10 @@ impl ProjectRenderer {
                         if w.swap(NO_REVISION, Ordering::AcqRel) == NO_REVISION {
                             continue;
                         }
-                        let built =
-                            daw.read_project(&guid, |p| (p.revision, RenderSnapshot::build(p)));
+                        let played = daw.played_live();
+                        let built = daw.read_project(&guid, |p| {
+                            (p.revision, RenderSnapshot::build_hinted(p, &played))
+                        });
                         if let Some(built) = built {
                             // A snapshot the audio thread never took is
                             // dropped here, on this thread.
@@ -922,8 +924,9 @@ impl ProjectRenderer {
             }
             (None, _) => {
                 // Nothing to play yet: the first snapshot is built here.
+                let played = self.daw.played_live();
                 let built = self.daw.read_project(&self.project_guid, |p| {
-                    (p.revision, RenderSnapshot::build(p))
+                    (p.revision, RenderSnapshot::build_hinted(p, &played))
                 })?;
                 *current = Some(built);
             }
@@ -3037,6 +3040,54 @@ pub(crate) mod folder_routing_tests {
         assert!(live("Lead") && live("Vocals"));
         for n in ["BGV", "Kick", "Snare", "Drums", "Loop"] {
             assert!(!live(n), "{n} renders ahead");
+        }
+    }
+
+    /// A track set to render live (REAPER's "no anticipative FX"), one
+    /// with a plugin's window open and one just played over live MIDI are
+    /// live — with what they feed — and go back to rendering ahead after.
+    #[test]
+    fn a_track_is_live_when_it_is_worked_on() {
+        use crate::sync::FxChainKey;
+        let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+        let _inside = runtime.enter();
+        let (daw, guid) = split_song(None);
+        let ctx = ProjectContext::Project(guid.clone());
+        let kick = guid_of(&daw, &guid, "Kick");
+        let live = |name: &str| {
+            let played = daw.played_live();
+            let snap = daw
+                .read_project(&guid, |p| RenderSnapshot::build_hinted(p, &played))
+                .unwrap();
+            snap.live[snap.tracks.iter().position(|t| t.name == name).unwrap()]
+        };
+        assert!(!live("Kick") && !live("Drums"));
+
+        Tracks::set_render_live(&daw, ctx.clone(), TrackRef::Guid(kick.clone()), true).unwrap();
+        assert!(Tracks::render_live(
+            &daw,
+            ctx.clone(),
+            TrackRef::Guid(kick.clone())
+        ));
+        assert!(live("Kick") && live("Drums"), "it, and the folder it feeds");
+        Tracks::set_render_live(&daw, ctx, TrackRef::Guid(kick.clone()), false).unwrap();
+        assert!(!live("Kick"));
+
+        let window = |open: bool| {
+            daw.write_project(&guid, |p| {
+                let chain = p.fx_chains.get_mut(&FxChainKey::Track(kick.clone()));
+                chain.expect("Kick's plugin")[0].fx.window_open = open;
+            });
+        };
+        window(true);
+        assert!(live("Kick"), "a plugin's window open");
+        window(false);
+        assert!(!live("Kick"));
+
+        #[cfg(feature = "audio")]
+        {
+            daw.note_played_live(&kick);
+            assert!(live("Kick"), "played over live MIDI");
         }
     }
 

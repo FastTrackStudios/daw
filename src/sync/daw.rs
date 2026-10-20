@@ -78,6 +78,30 @@ pub struct TrackExt {
     /// Fixed-lane comping: record / comping lanes and comp areas. Beside
     /// the `Track` because the facade serves it from a getter of its own.
     pub comping: daw_proto::track::LaneComping,
+    /// REAPER's performance options (`PERF`, `I_PERFFLAGS`): 1 no media
+    /// buffering, 2 no anticipative FX — [rendered live](Self::renders_live)
+    /// always. Kept whole, so a bit this engine does not use survives.
+    pub perf_flags: u32,
+}
+
+impl TrackExt {
+    /// The [`perf_flags`](Self::perf_flags) bit for "no anticipative FX".
+    pub const NO_ANTICIPATIVE_FX: u32 = 2;
+
+    /// Whether the track always renders live, never ahead of the playhead.
+    #[must_use]
+    pub fn renders_live(&self) -> bool {
+        self.perf_flags & Self::NO_ANTICIPATIVE_FX != 0
+    }
+
+    /// Render the track live always, or ahead whenever nothing plays it.
+    pub fn set_render_live(&mut self, live: bool) {
+        if live {
+            self.perf_flags |= Self::NO_ANTICIPATIVE_FX;
+        } else {
+            self.perf_flags &= !Self::NO_ANTICIPATIVE_FX;
+        }
+    }
 }
 
 /// Stable hashable identity for an envelope on a track. Lifts
@@ -264,6 +288,7 @@ impl Default for TrackExt {
             parent_send_enabled: true,
             tcp_height_pixels: 0,
             comping: daw_proto::track::LaneComping::default(),
+            perf_flags: 0,
         }
     }
 }
@@ -826,6 +851,10 @@ pub struct Standalone {
         any(feature = "audio", feature = "decode")
     ))]
     pub(crate) recorder: Arc<crate::recording::Recorder>,
+    /// Tracks played over live MIDI, and when last: rendered live for a
+    /// while after (see [`played_live`](Self::played_live)).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) played_live: Arc<Mutex<HashMap<String, std::time::Instant>>>,
 }
 
 impl Default for Standalone {
@@ -870,6 +899,66 @@ impl Standalone {
                 any(feature = "audio", feature = "decode")
             ))]
             recorder: Arc::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            played_live: Arc::default(),
+        }
+    }
+
+    /// How long a track played over live MIDI stays rendered live after
+    /// the last note.
+    #[cfg(not(target_arch = "wasm32"))]
+    const PLAYED_LIVE_HOLD: std::time::Duration = std::time::Duration::from_secs(10);
+
+    /// The tracks played over live MIDI lately: a render ahead renders them
+    /// live, as it does an armed track, so a note played into one is heard
+    /// at once rather than when the playhead reaches where it was rendered.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[must_use]
+    pub(crate) fn played_live(&self) -> Vec<String> {
+        let played = self
+            .played_live
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        played
+            .iter()
+            .filter(|(_, at)| at.elapsed() < Self::PLAYED_LIVE_HOLD)
+            .map(|(track, _)| track.clone())
+            .collect()
+    }
+
+    /// `track` was played over live MIDI now. The first note in a while
+    /// moves its projects' revision on, so their next snapshot renders it
+    /// live.
+    #[cfg(all(not(target_arch = "wasm32"), feature = "audio"))]
+    pub(crate) fn note_played_live(&self, track: &str) {
+        let now = std::time::Instant::now();
+        let fresh = {
+            let mut played = self
+                .played_live
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match played.get_mut(track) {
+                Some(at) => {
+                    let lapsed = at.elapsed() >= Self::PLAYED_LIVE_HOLD;
+                    *at = now;
+                    lapsed
+                }
+                None => {
+                    played.insert(track.to_owned(), now);
+                    true
+                }
+            }
+        };
+        if !fresh {
+            return;
+        }
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        for project in state.projects.values_mut() {
+            if project.tracks.iter().any(|t| t.guid == track) {
+                project.revision = project.revision.wrapping_add(1);
+            }
         }
     }
 
@@ -1253,12 +1342,18 @@ impl Standalone {
         let Some(prod) = guard.as_mut() else {
             return false;
         };
-        prod.push(crate::audio_engine::render::LiveMidiEvent {
-            track: track_guid.to_string(),
-            offset: 0,
-            message,
-        })
-        .is_ok()
+        let pushed = prod
+            .push(crate::audio_engine::render::LiveMidiEvent {
+                track: track_guid.to_string(),
+                offset: 0,
+                message,
+            })
+            .is_ok();
+        drop(guard);
+        if pushed {
+            self.note_played_live(track_guid);
+        }
+        pushed
     }
 
     /// wasm32 variant of [`push_live_midi`](Self::push_live_midi): queue a

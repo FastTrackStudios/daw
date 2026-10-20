@@ -509,6 +509,7 @@ pub(crate) fn track_from_rpp(
         parent_send_enabled: track.parent_send,
         tcp_height_pixels: 0,
         comping: rt.lane_comping(),
+        perf_flags: rt.perf.map_or(0, |f| u32::try_from(f).unwrap_or(0)),
     };
     (track, ext)
 }
