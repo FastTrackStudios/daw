@@ -69,6 +69,16 @@ pub struct AudioIoPrefs {
     /// See [`input_guard`](crate::io::input_guard).
     #[facet(default)]
     pub allow_builtin_mic: bool,
+    /// How far ahead of the playhead a project engine renders the tracks
+    /// nobody plays live, ms (Cubase's ASIO-Guard, REAPER's anticipative
+    /// FX): the slack a busy machine is absorbed in, and how late a change
+    /// to such a track is heard. `0` = the engine's default.
+    #[facet(default)]
+    pub render_ahead_ms: u32,
+    /// Render every track in the audio callback, at the device's block, as
+    /// before the render ahead.
+    #[facet(default)]
+    pub no_render_ahead: bool,
 }
 
 impl AudioIoPrefs {

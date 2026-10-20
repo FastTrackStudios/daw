@@ -12,16 +12,29 @@
 /// which must never wait on us.
 pub const AUDIO_PRIORITY: i32 = 60;
 
+/// The priority of the threads that render ahead of the playhead (a
+/// dual-buffer engine): above every ordinary thread, so a busy machine
+/// does not starve them, and below the audio callback, which they must
+/// never hold up.
+pub const AHEAD_PRIORITY: i32 = 50;
+
 /// Make the calling thread realtime (`SCHED_FIFO` at [`AUDIO_PRIORITY`],
 /// reset on fork). Call it from the audio callback's own thread — once,
 /// on its first block. `true` when it took; refused (no `RLIMIT_RTPRIO`,
 /// no `audio` group), it says so once and the thread stays as it was.
 #[must_use]
 pub fn promote_current_thread() -> bool {
+    promote_current_thread_at(AUDIO_PRIORITY)
+}
+
+/// [`promote_current_thread`] at `priority` ([`AHEAD_PRIORITY`] for a
+/// thread rendering ahead).
+#[must_use]
+pub fn promote_current_thread_at(priority: i32) -> bool {
     #[cfg(target_os = "linux")]
     {
         let param = libc::sched_param {
-            sched_priority: AUDIO_PRIORITY,
+            sched_priority: priority,
         };
         // SAFETY: pid 0 is the calling thread; `param` outlives the call,
         // which only reads it.
@@ -33,10 +46,7 @@ pub fn promote_current_thread() -> bool {
             )
         };
         if result == 0 {
-            tracing::info!(
-                priority = AUDIO_PRIORITY,
-                "daw-audio-io: audio thread is realtime"
-            );
+            tracing::info!(priority, "daw-audio-io: audio thread is realtime");
             true
         } else {
             let error = std::io::Error::last_os_error();
@@ -46,6 +56,7 @@ pub fn promote_current_thread() -> bool {
     }
     #[cfg(not(target_os = "linux"))]
     {
+        let _ = priority;
         false
     }
 }

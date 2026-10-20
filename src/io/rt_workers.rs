@@ -38,10 +38,22 @@ pub struct WorkerSeat {
     joined: Option<(usize, macos::JoinToken)>,
     #[cfg(target_os = "linux")]
     realtime: bool,
+    /// The priority it asks for on Linux; 0: the audio callback's.
+    priority: i32,
     period_ns: u64,
 }
 
 impl WorkerSeat {
+    /// A seat at `priority` rather than the callback's — a worker of the
+    /// render ahead ([`super::realtime::AHEAD_PRIORITY`]).
+    #[must_use]
+    pub fn at(priority: i32) -> Self {
+        Self {
+            priority,
+            ..Self::default()
+        }
+    }
+
     /// Follow the running device: realtime policy for its period, member of
     /// its workgroup. Cheap when nothing changed (two atomic loads).
     pub fn sync(&mut self) {
@@ -50,7 +62,12 @@ impl WorkerSeat {
             // Once, taken or not: refused, it said why, and asking again
             // every block would only say it again.
             self.realtime = true;
-            let _ = super::realtime::promote_current_thread();
+            let priority = if self.priority > 0 {
+                self.priority
+            } else {
+                super::realtime::AUDIO_PRIORITY
+            };
+            let _ = super::realtime::promote_current_thread_at(priority);
         }
         let period = IO_PERIOD_NS.load(Ordering::Relaxed);
         if period != 0 && period != self.period_ns {

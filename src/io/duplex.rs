@@ -218,6 +218,19 @@ pub struct EngineStats {
     pub stream_state: AtomicI32,
     /// Every drop, timestamped, for a drop log (see [`DropRing`]).
     pub drops: DropRing,
+    /// The render ahead (a dual-buffer engine): frames rendered ahead of
+    /// the playhead now, waiting to be played.
+    pub ahead_fill_frames: AtomicU64,
+    /// Blocks that found less rendered ahead than they needed and played
+    /// silence for the tracks ahead in its place.
+    pub ahead_underruns: AtomicU64,
+    /// Times the render ahead started again from where the playhead is (a
+    /// locate, play after stop, a changed live set).
+    pub ahead_restarts: AtomicU64,
+    /// Time the render ahead spent on its frames, ns, and the frames —
+    /// together, its cost per frame against realtime.
+    pub ahead_render_ns: AtomicU64,
+    pub ahead_frames: AtomicU64,
 }
 
 impl EngineStats {
