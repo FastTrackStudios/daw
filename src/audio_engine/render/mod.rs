@@ -692,9 +692,10 @@ pub struct ProjectRenderer {
     #[cfg(not(target_arch = "wasm32"))]
     midi_forward: std::sync::Mutex<Option<rtrb::Producer<LiveMidiEvent>>>,
     /// Realtime mode (see [`set_realtime`](Self::set_realtime)): the
-    /// snapshot builder the audio thread hands project changes to.
+    /// snapshot builder the audio thread hands project changes to — shared
+    /// by a dual render's two renderers, so an edit is built once.
     #[cfg(not(target_arch = "wasm32"))]
-    realtime: std::sync::OnceLock<SnapshotBuilder>,
+    realtime: std::sync::OnceLock<Arc<SnapshotBuilder>>,
     /// Realtime mode: the worker threads independent tracks render on.
     #[cfg(not(target_arch = "wasm32"))]
     lanes: std::sync::OnceLock<parallel::LanePool>,
@@ -743,12 +744,10 @@ struct SnapshotBuilder {
 const NO_REVISION: u64 = u64::MAX;
 
 #[cfg(not(target_arch = "wasm32"))]
-impl Drop for ProjectRenderer {
+impl Drop for SnapshotBuilder {
     fn drop(&mut self) {
-        if let Some(b) = self.realtime.get() {
-            b.stop.store(true, std::sync::atomic::Ordering::Release);
-            b.thread.unpark();
-        }
+        self.stop.store(true, std::sync::atomic::Ordering::Release);
+        self.thread.unpark();
     }
 }
 
@@ -792,6 +791,16 @@ impl ProjectRenderer {
     pub(crate) fn set_realtime_ahead(&self) {
         self.held.store(true, std::sync::atomic::Ordering::Relaxed);
         self.go_realtime("render-ahead", audio::io::realtime::AHEAD_PRIORITY);
+    }
+
+    /// Take snapshots from `from`'s builder (it in realtime mode already):
+    /// an edit is built once for both, and both see the same snapshot.
+    /// Before this one goes realtime.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn share_snapshots(&self, from: &ProjectRenderer) {
+        if let Some(builder) = from.realtime.get() {
+            let _ = self.realtime.set(builder.clone());
+        }
     }
 
     /// Hold this realtime renderer's snapshot: it moves on only at
@@ -858,21 +867,21 @@ impl ProjectRenderer {
                             (p.revision, RenderSnapshot::build_hinted(p, &played))
                         });
                         if let Some(built) = built {
-                            // A snapshot the audio thread never took is
-                            // dropped here, on this thread.
+                            // The one it replaces is dropped here, on this
+                            // thread, unless a renderer still plays it.
                             let stale = r.lock().ok().and_then(|mut slot| slot.replace(built));
                             drop(stale);
                         }
                     }
                 })
                 .expect("spawn render-snapshot thread");
-            SnapshotBuilder {
+            Arc::new(SnapshotBuilder {
                 wanted,
                 ready,
                 retired,
                 stop,
                 thread: handle.thread().clone(),
-            }
+            })
         });
     }
 
@@ -887,9 +896,13 @@ impl ProjectRenderer {
         current: &mut Option<(u64, Arc<RenderSnapshot>)>,
     ) -> Option<Arc<RenderSnapshot>> {
         use std::sync::atomic::Ordering;
-        // Take a handed-over snapshot.
+        // Take the newest snapshot built, if newer than the one played
+        // (the builder may serve two renderers: it is copied, not taken).
         let handed = match b.ready.try_lock() {
-            Ok(mut slot) => slot.take(),
+            Ok(slot) => slot
+                .as_ref()
+                .filter(|(rev, _)| current.as_ref().is_none_or(|(now, _)| rev > now))
+                .cloned(),
             Err(_) => None,
         };
         if let Some(new) = handed {
@@ -1068,6 +1081,30 @@ impl ProjectRenderer {
         }
     }
 
+    /// [`render_plan`](Self::render_plan) into `out`, its buffer kept:
+    /// a single run — every plan but a locate landing mid-buffer —
+    /// allocates nothing once `out` has held a block this size.
+    pub fn render_plan_into(
+        &self,
+        plan: &crate::transport_engine::BlockPlan,
+        render_stopped: bool,
+        out: &mut StereoBuffer,
+    ) {
+        match plan.segments() {
+            [seg] if seg.playing => {
+                self.render_part_into(seg.start_samples, seg.frames, seg.rate, Part::Whole, out);
+            }
+            [seg] if render_stopped => self.render_part_into(
+                seg.start_samples.max(0.0).floor(),
+                seg.frames,
+                1.0,
+                Part::Whole,
+                out,
+            ),
+            _ => *out = self.render_plan(plan, render_stopped),
+        }
+    }
+
     /// Render `frames` stereo frames of the timeline from `start_samples`
     /// (output-rate samples, fractional allowed) at transport `rate`:
     /// output frame `i` is the timeline at `start_samples + i * rate` —
@@ -1099,6 +1136,22 @@ impl ProjectRenderer {
         rate: f64,
         part: Part<'_>,
     ) -> StereoBuffer {
+        let mut out = StereoBuffer::zeroed(0, self.sample_rate);
+        self.render_part_into(start_samples, frames, rate, part, &mut out);
+        out
+    }
+
+    /// [`render_part`](Self::render_part) into `out`, its buffer kept: a
+    /// render on the audio thread allocates nothing for its output once it
+    /// has held a block this size.
+    pub(crate) fn render_part_into(
+        &self,
+        start_samples: f64,
+        frames: usize,
+        rate: f64,
+        part: Part<'_>,
+        out: &mut StereoBuffer,
+    ) {
         let side = part.side();
         let (mut ahead, from_ahead) = part.feeds();
         let rate = if rate.is_finite() && rate > 0.0 {
@@ -1107,9 +1160,13 @@ impl ProjectRenderer {
             1.0
         };
         let _frame = crate::plugin::RenderFrameGuard::enter(start_samples.max(0.0).floor() as u64);
-        let mut master = StereoBuffer::zeroed(frames, self.sample_rate);
+        let master = out;
+        master.frames = frames;
+        master.sample_rate = self.sample_rate;
+        master.samples.clear();
+        master.samples.resize(frames * 2, 0.0);
         if frames == 0 {
-            return master;
+            return;
         }
 
         let t_start = Stamp::now();
@@ -1139,7 +1196,7 @@ impl ProjectRenderer {
         #[cfg(target_arch = "wasm32")]
         let snap = self.snapshot();
         let Some(snap) = snap else {
-            return master;
+            return;
         };
         let snapshot_us = t_start.us();
         let tracks = &snap.tracks;
@@ -2072,7 +2129,7 @@ impl ProjectRenderer {
         // feed; the live render finishes the block.
         if let Some(feed) = ahead {
             give_feed(feed, &master.samples, buses, dirty, sidechains, keyed, live);
-            return master;
+            return;
         }
 
         // Metronome click: short sine bursts on the beat grid,
@@ -2153,7 +2210,6 @@ impl ProjectRenderer {
         }
         #[cfg(target_arch = "wasm32")]
         let _ = (snapshot_us, plugin_lock_us, fx_us, slowest);
-        master
     }
 
     /// Transport-derived clock info at `seconds` for the aux post-render

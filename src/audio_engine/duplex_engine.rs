@@ -209,6 +209,11 @@ impl DuplexAudioEngine {
             super::ahead::AheadPrefs::chosen(prefs),
             ahead_stats.clone(),
         );
+        // The backend's own stats, once it has made them: the render
+        // ahead's counters are copied there every block, so the health log
+        // reads them with the rest.
+        let block_stats: Arc<std::sync::OnceLock<Arc<EngineStats>>> = Arc::default();
+        let (mirror_to, mirror_from) = (block_stats.clone(), ahead_stats.clone());
         let sh = shared.clone();
         // Output routing: master lands on `main_out`; an optional phones bus
         // (master × self-mix + an external monitor-mix input pair, × volume)
@@ -288,6 +293,9 @@ impl DuplexAudioEngine {
                 // Stopped runs still render (live input + FX), at the
                 // frozen playhead.
                 let block = dual.render(&plan, true);
+                if let Some(stats) = mirror_to.get() {
+                    stats.mirror_ahead(&mirror_from);
+                }
                 let outs = b.outputs.len();
                 let (vol, self_mix) = ph.levels();
                 let blend = ph.blends_mix();
@@ -344,6 +352,7 @@ impl DuplexAudioEngine {
             }),
         )?;
         let stats = backend.stats();
+        let _ = block_stats.set(stats.clone());
         let latency = backend.latency_frames();
         if backend.sample_rate() != sample_rate {
             return Err(format!(

@@ -73,6 +73,9 @@ pub mod web;
 #[cfg(feature = "audio")]
 pub mod test_tone;
 
+/// The device and engine choices an engine opens with.
+#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
+pub use audio::io::AudioIoPrefs;
 /// Realtime metrics both engines report (block size, render time, xruns).
 #[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
 pub use audio::io::duplex::EngineStats;

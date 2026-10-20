@@ -84,6 +84,9 @@ pub struct AheadPrefs {
     /// The crossfade from what was rendered before an edit to what was
     /// rendered after it, ms.
     pub fade_ms: f64,
+    /// The least it aims to be ahead by, ms, while it keeps up with time to
+    /// spare; it aims deeper, up to the depth, when the machine gets busy.
+    pub floor_ms: f64,
 }
 
 impl Default for AheadPrefs {
@@ -95,6 +98,7 @@ impl Default for AheadPrefs {
             edit_depth_ms: 25.0,
             quiet_ms: 300.0,
             fade_ms: 5.0,
+            floor_ms: 60.0,
         }
     }
 }
@@ -436,6 +440,7 @@ impl Player {
     ) -> Self {
         let mut window = Feed::default();
         window.reset(0, 0, 0);
+        window.reserve(OWN_FRAMES, OWN_LANES);
         Self {
             control,
             filled,
@@ -825,6 +830,8 @@ pub struct DualRender {
     shared: Option<Arc<TransportShared>>,
     player: Option<Player>,
     _ahead: Option<Ahead>,
+    /// The block rendered, its buffer kept from block to block.
+    out: StereoBuffer,
 }
 
 impl DualRender {
@@ -837,6 +844,7 @@ impl DualRender {
             shared: None,
             player: None,
             _ahead: None,
+            out: StereoBuffer::zeroed(0, 0),
         }
     }
 
@@ -859,6 +867,8 @@ impl DualRender {
             live.project_guid(),
             sample_rate,
         ));
+        // One snapshot an edit, for both.
+        ahead.share_snapshots(&live);
         ahead.set_realtime_ahead();
         // Which live set a block is of is known before it is rendered.
         live.hold();
@@ -879,6 +889,7 @@ impl DualRender {
             filled: filled_tx,
             spent: spent_rx,
             depth,
+            floor: frames(prefs.floor_ms).clamp(1, depth),
             edit_depth: frames(prefs.edit_depth_ms).clamp(1, depth),
             guard: frames(prefs.guard_ms),
             quiet: Duration::from_secs_f64(prefs.quiet_ms.max(0.0) / 1000.0),
@@ -905,6 +916,7 @@ impl DualRender {
                 stats,
             )),
             _ahead: Some(Ahead { control, thread }),
+            out: StereoBuffer::zeroed(0, sample_rate),
         }
     }
 
@@ -924,22 +936,28 @@ impl DualRender {
     /// Render one audio buffer as the transport planned it: the live tracks
     /// from the feed rendered ahead when the plan is plain playback, the
     /// whole song otherwise (see `ProjectRenderer::render_plan` for
-    /// `render_stopped`).
-    pub fn render(&mut self, plan: &BlockPlan, render_stopped: bool) -> StereoBuffer {
+    /// `render_stopped`). The buffer is the dual render's own, kept from
+    /// block to block.
+    pub fn render(&mut self, plan: &BlockPlan, render_stopped: bool) -> &StereoBuffer {
         let Some(player) = self.player.as_mut() else {
-            return self.live.render_plan(plan, render_stopped);
+            self.live
+                .render_plan_into(plan, render_stopped, &mut self.out);
+            return &self.out;
         };
         // The live renderer's snapshot for this block, and its live set.
         let live_set = self.live.refresh().map(|p| p.live);
-        let [seg] = plan.segments() else {
-            player.pause();
-            return self.live.render_plan(plan, render_stopped);
+        let plain = match plan.segments() {
+            [seg] if seg.playing && seg.rate == 1.0 && seg.frames > 0 => {
+                Some((seg.start_samples, seg.frames))
+            }
+            _ => None,
         };
-        if !(seg.playing && seg.rate == 1.0 && seg.frames > 0) {
+        let Some((start, frames)) = plain else {
             player.pause();
-            return self.live.render_plan(plan, render_stopped);
-        }
-        let (start, frames) = (seg.start_samples, seg.frames);
+            self.live
+                .render_plan_into(plan, render_stopped, &mut self.out);
+            return &self.out;
+        };
         // A run starts with play, a new block size, or a changed live set:
         // what was rendered ahead was for other buses.
         let changed_set = player.print.is_some() && player.print != live_set;
@@ -949,15 +967,27 @@ impl DualRender {
         if player.prime.is_none() {
             match player.window(start, frames) {
                 Heard::Took(_) => {
-                    return self
-                        .live
-                        .render_part(start, frames, 1.0, Part::Live(&player.window));
+                    self.live.render_part_into(
+                        start,
+                        frames,
+                        1.0,
+                        Part::Live(&player.window),
+                        &mut self.out,
+                    );
+                    return &self.out;
                 }
                 // A locate, a loop the render ahead did not foresee.
                 Heard::Elsewhere => player.begin_run(start, frames, 0),
             }
         }
-        self.prime(start, frames, live_set)
+        self.prime(start, frames, live_set);
+        &self.out
+    }
+
+    /// Every track rendered here, into the dual render's buffer.
+    fn whole_block(&mut self, start: f64, frames: usize) {
+        self.live
+            .render_part_into(start, frames, 1.0, Part::Whole, &mut self.out);
     }
 
     /// A block of a run's start: the tracks ahead rendered here, by the
@@ -967,7 +997,7 @@ impl DualRender {
     /// its snapshot not yet of this live set) every track is rendered here,
     /// as before the render ahead: each frame of each plugin heard once, in
     /// order, and never a block of silence.
-    fn prime(&mut self, start: f64, frames: usize, live_set: Option<u64>) -> StereoBuffer {
+    fn prime(&mut self, start: f64, frames: usize, live_set: Option<u64>) {
         let wrap = self.shared.as_deref().and_then(wrap_of);
         let budget = self
             .shared
@@ -976,7 +1006,7 @@ impl DualRender {
         let began = Instant::now();
         let from_ahead = {
             let (Some(player), Some(ahead)) = (self.player.as_mut(), self.ahead.as_ref()) else {
-                return self.live.render_part(start, frames, 1.0, Part::Whole);
+                return self.whole_block(start, frames);
             };
             let at = player.at;
             let ready = player.control.idle.load(Ordering::SeqCst) && !player.own.is_empty();
@@ -993,17 +1023,16 @@ impl DualRender {
                 None => player.prime.map_or(0, |p| p.produced.saturating_sub(at)) >= frames as u64,
             }
         };
-        let out = if from_ahead {
-            self.live_from_ahead(start, frames)
+        if from_ahead {
+            self.live_from_ahead(start, frames);
         } else {
-            let out = self.live.render_part(start, frames, 1.0, Part::Whole);
+            self.whole_block(start, frames);
             if let Some(player) = self.player.as_mut() {
                 player.skip_whole(frames, wrap);
             }
-            out
-        };
+        }
         let Some(player) = self.player.as_mut() else {
-            return out;
+            return;
         };
         if let Some(prime) = player.prime.as_mut() {
             // Room for the next block's next block, if this one left half
@@ -1015,29 +1044,34 @@ impl DualRender {
                 player.hand_over();
             }
         }
-        out
     }
 
     /// The live tracks rendered here over what was rendered ahead for this
     /// block.
-    fn live_from_ahead(&mut self, start: f64, frames: usize) -> StereoBuffer {
+    fn live_from_ahead(&mut self, start: f64, frames: usize) {
         let Some(player) = self.player.as_mut() else {
-            return self.live.render_part(start, frames, 1.0, Part::Whole);
+            return self.whole_block(start, frames);
         };
         if let Some(prime) = player.prime.as_mut() {
             prime.blocks += 1;
         }
         match player.window(start, frames) {
-            Heard::Took(_) => self
-                .live
-                .render_part(start, frames, 1.0, Part::Live(&player.window)),
+            Heard::Took(_) => self.live.render_part_into(
+                start,
+                frames,
+                1.0,
+                Part::Live(&player.window),
+                &mut self.out,
+            ),
             Heard::Elsewhere => {
                 // What the callback rendered ahead is for its own course, so
                 // this is a transport that moved meanwhile: start again.
                 player.begin_run(start, frames, 0);
-                let out = self.live.render_part(start, frames, 1.0, Part::Whole);
-                player.skip_whole(frames, self.shared.as_deref().and_then(wrap_of));
-                out
+                let wrap = self.shared.as_deref().and_then(wrap_of);
+                self.whole_block(start, frames);
+                if let Some(player) = self.player.as_mut() {
+                    player.skip_whole(frames, wrap);
+                }
             }
         }
     }
@@ -1062,6 +1096,8 @@ struct Worker {
     filled: rtrb::Producer<Box<Chunk>>,
     spent: rtrb::Consumer<Box<Chunk>>,
     depth: usize,
+    /// The least it aims at, steady ([`Aim`]).
+    floor: usize,
     edit_depth: usize,
     guard: usize,
     quiet: Duration,
@@ -1071,6 +1107,70 @@ struct Worker {
 
 /// How long the render ahead rests when it is far enough ahead, or paused.
 const REST: Duration = Duration::from_millis(1);
+
+/// How far ahead the render ahead aims, between a floor and its depth
+/// (the pref): deeper the moment its fill dips — the machine took its time
+/// from it —, shallower again, a step at a time, after a while of keeping
+/// well ahead with time to spare. Shallow, an edit throws away less and
+/// the plugins ahead hear less of it twice; deep, a busy machine has more
+/// to eat into.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Aim {
+    target: usize,
+    floor: usize,
+    depth: usize,
+    /// The least it was ahead by in this window, and windows in a row it
+    /// kept well ahead.
+    low: usize,
+    calm: u32,
+}
+
+/// Windows (of [`AIM_WINDOW`]) the fill must stay above half the aim before
+/// it is lowered a step.
+const CALM_WINDOWS: u32 = 5;
+
+/// How often the aim is looked at.
+const AIM_WINDOW: Duration = Duration::from_secs(1);
+
+impl Aim {
+    fn new(floor: usize, depth: usize) -> Self {
+        Self {
+            target: depth,
+            floor: floor.min(depth),
+            depth,
+            low: usize::MAX,
+            calm: 0,
+        }
+    }
+
+    /// Ahead by `ahead_by` frames now.
+    fn saw(&mut self, ahead_by: usize) {
+        self.low = self.low.min(ahead_by);
+    }
+
+    /// A window over, which rendered at `load` of realtime: up at once if
+    /// the fill fell under a quarter of the aim, down a step after
+    /// [`CALM_WINDOWS`] above half of it with the render ahead under half
+    /// a core.
+    fn settle(&mut self, load: f64) {
+        let low = std::mem::replace(&mut self.low, usize::MAX);
+        if low == usize::MAX {
+            return;
+        }
+        if low < self.target / 4 {
+            self.target = (self.target * 2).min(self.depth);
+            self.calm = 0;
+        } else if low > self.target / 2 && load < 0.5 {
+            self.calm += 1;
+            if self.calm >= CALM_WINDOWS {
+                self.target = (self.target * 3 / 4).max(self.floor);
+                self.calm = 0;
+            }
+        } else {
+            self.calm = 0;
+        }
+    }
+}
 
 /// The render ahead's place in a run: the next frame it renders, where
 /// that is, and where each chunk still ahead of the playhead began — so an
@@ -1141,6 +1241,9 @@ impl Worker {
         let mut edition = self.control.edition.load(Ordering::Relaxed);
         let mut ahead_print: Option<u64> = None;
         let mut edited: Option<Instant> = None;
+        let mut aim = Aim::new(self.floor, self.depth);
+        let mut filled = false;
+        let (mut window, mut window_frames, mut window_ns) = (Instant::now(), 0, 0);
         loop {
             if self.control.stop.load(Ordering::Acquire) {
                 return;
@@ -1170,6 +1273,8 @@ impl Worker {
                     into_block: self.control.into_block.load(Ordering::Relaxed),
                 });
                 place.produced = self.control.restart_frame.load(Ordering::Relaxed);
+                aim.low = usize::MAX;
+                filled = false;
                 edition = self.control.edition.load(Ordering::Relaxed);
                 if self.control.has_print.load(Ordering::Relaxed) {
                     ahead_print = Some(self.control.run_print.load(Ordering::Relaxed));
@@ -1196,14 +1301,35 @@ impl Worker {
             ahead_print = fresh.or(ahead_print);
 
             // Shallow while edits come in: each throws away little.
-            let depth = match edited {
-                Some(at) if at.elapsed() < self.quiet => self.edit_depth,
-                _ => self.depth,
+            if window.elapsed() >= AIM_WINDOW {
+                let frames = self.stats.ahead_frames.load(Ordering::Relaxed);
+                let ns = self.stats.ahead_render_ns.load(Ordering::Relaxed);
+                let audio_ns = (frames - window_frames.min(frames)) as f64 * 1e9
+                    / f64::from(self.shared.sample_rate().max(1));
+                let load = if audio_ns > 0.0 {
+                    (ns - window_ns.min(ns)) as f64 / audio_ns
+                } else {
+                    0.0
+                };
+                aim.settle(load);
+                (window, window_frames, window_ns) = (Instant::now(), frames, ns);
+            }
+            let editing = edited.is_some_and(|at| at.elapsed() < self.quiet);
+            let depth = if editing {
+                self.edit_depth.min(aim.target)
+            } else {
+                aim.target
             };
             self.stats
                 .ahead_depth_frames
                 .store(depth as u64, Ordering::Relaxed);
             let ahead_by = place.produced.saturating_sub(played) as usize;
+            // (Kept shallow on purpose while editing, and filling at a
+            // run's start: no dip.)
+            filled |= ahead_by >= depth / 2;
+            if filled && !editing {
+                aim.saw(ahead_by);
+            }
             self.stats
                 .ahead_fill_frames
                 .store(ahead_by as u64, Ordering::Relaxed);
@@ -1362,6 +1488,34 @@ mod tests {
             ahead,
             "and on to where it was"
         );
+    }
+
+    /// The aim goes deep the moment the fill dips, and back down a step at
+    /// a time after windows of keeping well ahead, never under its floor.
+    #[test]
+    fn the_aim_follows_the_machine() {
+        let mut aim = Aim::new(2_000, 9_600);
+        assert_eq!(aim.target, 9_600, "deep to start");
+        for _ in 0..CALM_WINDOWS {
+            aim.saw(9_000);
+            aim.settle(0.2);
+        }
+        assert_eq!(aim.target, 7_200, "a step down, calm");
+        aim.saw(7_000);
+        aim.settle(0.8);
+        aim.saw(7_000);
+        aim.settle(0.8);
+        assert_eq!(aim.target, 7_200, "busy: not lower");
+        aim.saw(1_000);
+        aim.settle(0.2);
+        assert_eq!(aim.target, 9_600, "a dip: deep at once");
+        for _ in 0..CALM_WINDOWS * 20 {
+            aim.saw(aim.target);
+            aim.settle(0.1);
+        }
+        assert_eq!(aim.target, 2_000, "no lower than the floor");
+        aim.settle(0.1);
+        assert_eq!(aim.target, 2_000, "a window unseen changes nothing");
     }
 
     #[test]
@@ -1644,7 +1798,7 @@ mod tests {
             edit(&song, b);
             let stamp = b as f64 * period.as_secs_f64() * 1e6;
             let plan = shared.begin_block(128, stamp, period.as_secs_f64() * 1e6);
-            out.extend(render.render(&plan, false).samples);
+            out.extend_from_slice(&render.render(&plan, false).samples);
             meter.push(daw.meters().cell(kick).map_or(-1.0, |c| c.peak(0)));
             // Like a device: the next block comes a block's time later.
             if let Some(rest) = (period * (b as u32 + 1)).checked_sub(began.elapsed()) {
