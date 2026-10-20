@@ -63,6 +63,13 @@ pub(crate) struct RenderSnapshot {
     /// Master pan (−1…1).
     pub(crate) master_pan: f64,
     pub(crate) master_muted: bool,
+    /// Per track: rendered live — at the device's block, in the audio
+    /// callback — because it plays something played now or feeds what
+    /// does ([`graph::live_set`]). The rest can be rendered ahead.
+    pub(crate) live: Vec<bool>,
+    /// Which tracks are [`live`](Self::live), as one number: an ahead
+    /// render's feeds fit a live render only when the two agree.
+    pub(crate) live_print: u64,
     /// Live hardware-input channel per track, indexed like `tracks`.
     /// `Some(ch)` when the track's `RecordInput::Audio { channel }` taps
     /// input-device channel `ch`; `None` otherwise. Read by render
@@ -89,6 +96,8 @@ impl RenderSnapshot {
         let beats_per_measure = p.transport.time_signature.numerator().max(1);
         let time_sig_den = p.transport.time_signature.denominator().max(1);
         let input_channels = tracks.iter().map(|t| t.input_channel).collect();
+        let live = graph::live_set(&tracks);
+        let live_print = graph::live_print(&tracks, &live);
         Arc::new(Self {
             tracks,
             order,
@@ -99,6 +108,8 @@ impl RenderSnapshot {
             master_volume: p.master_volume,
             master_pan: p.master_pan,
             master_muted: p.master_muted,
+            live,
+            live_print,
             input_channels,
         })
     }
@@ -120,6 +131,9 @@ pub(crate) struct TrackSnapshot {
     /// Live hardware-input channel this track records/monitors from
     /// (`RecordInput::Audio { channel }`). `None` for non-audio inputs.
     pub(crate) input_channel: Option<u32>,
+    /// Plays what is played now: armed and monitoring an audio input, or
+    /// armed for MIDI (an instrument played live).
+    pub(crate) plays_live: bool,
     /// Fixed-lane play mask (bit n = lane n audible). `0` when the
     /// track has no fixed lanes — every item plays.
     pub(crate) lane_play_mask: u64,
@@ -413,10 +427,17 @@ fn snapshot_track(
     // through every track to the speakers, and a phone playing it fed
     // back without end.
     let monitoring = t.armed && t.input_monitor != daw_proto::track::InputMonitoringMode::Off;
-    let input_channel = match p.track_ext.get(&t.guid).map(|e| e.record_input) {
+    let record_input = p.track_ext.get(&t.guid).map(|e| e.record_input);
+    let input_channel = match record_input {
         Some(daw_proto::track::RecordInput::Audio { channel }) if monitoring => Some(channel),
         _ => None,
     };
+    let plays_live = input_channel.is_some()
+        || (t.armed
+            && matches!(
+                record_input,
+                Some(daw_proto::track::RecordInput::Midi { .. })
+            ));
 
     // Sends: only the Send variant matters (Receives mirror; HW out
     // for v0 also routes to master via parent_send equivalent).
@@ -805,6 +826,7 @@ fn snapshot_track(
         soloed: t.soloed,
         parent_send,
         input_channel,
+        plays_live,
         lane_play_mask: if t.lane_count > 0 {
             t.lane_play_mask
         } else {

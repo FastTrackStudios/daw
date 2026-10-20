@@ -37,6 +37,7 @@ mod graph;
 mod item_mix;
 mod midi;
 mod parallel;
+mod part;
 mod snapshot;
 
 use std::sync::Arc;
@@ -47,6 +48,8 @@ use item_mix::mix_item_into_bus;
 use midi::collect_midi_events;
 use midi::{collect_midi_events_into, collect_note_expressions};
 use parallel::{LaneJob, PluginPtr};
+pub use part::Feed;
+pub(crate) use part::Part;
 use snapshot::{RenderSnapshot, TrackSnapshot};
 
 use crate::sync::Standalone;
@@ -218,12 +221,33 @@ pub(crate) fn drain_live_midi(
     idx_of: impl Fn(&str) -> Option<usize>,
     buckets: &mut [Vec<crate::plugin::PluginMidiEvent>],
 ) {
+    drain_live_midi_routed(queue, idx_of, buckets, |_| true, None);
+}
+
+/// [`drain_live_midi`] for a render covering only some tracks: an event
+/// for a track it does not `cover` goes on to `forward` — the render
+/// that does (the ahead render, for a note played into a track rendered
+/// ahead) — or is dropped when there is none.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn drain_live_midi_routed(
+    queue: &mut LiveMidiQueue,
+    idx_of: impl Fn(&str) -> Option<usize>,
+    buckets: &mut [Vec<crate::plugin::PluginMidiEvent>],
+    covers: impl Fn(usize) -> bool,
+    mut forward: Option<&mut rtrb::Producer<LiveMidiEvent>>,
+) {
     let avail = queue.cons.slots();
     for _ in 0..avail {
         let Ok(ev) = queue.cons.pop() else { break };
         let Some(ti) = idx_of(&ev.track) else {
             continue;
         };
+        if !covers(ti) {
+            if let Some(out) = forward.as_deref_mut() {
+                let _ = out.push(ev);
+            }
+            continue;
+        }
         let Some(bucket) = buckets.get_mut(ti) else {
             continue;
         };
@@ -443,6 +467,93 @@ pub(crate) fn add_aux(
     any
 }
 
+/// A track's post-fader peaks this block: onto its meter — or, rendered
+/// ahead, into the feed, for the live render to put there when the block
+/// plays.
+fn meter(
+    meters: &crate::metering::Meters,
+    ahead: Option<&mut Feed>,
+    ti: usize,
+    left: f32,
+    right: f32,
+) {
+    match ahead {
+        Some(feed) => {
+            if let Some(slot) = feed.peaks.get_mut(ti) {
+                *slot = Some((left, right));
+            }
+        }
+        None => {
+            if let Some(cell) = meters.cell(ti) {
+                cell.write(left, right, crate::metering::HOLD_DECAY);
+            }
+        }
+    }
+}
+
+/// A live render's start: what the tracks rendered ahead summed into
+/// master and into the live tracks' buses and sidechains, added in.
+fn take_feed(
+    feed: &Feed,
+    master: &mut [f32],
+    buses: &mut [StereoBuffer],
+    dirty: &mut [bool],
+    sidechains: &mut [Vec<f32>],
+    keyed: &mut [bool],
+    frames: usize,
+) {
+    for (m, f) in master.iter_mut().zip(&feed.master) {
+        *m += *f;
+    }
+    for lane in &feed.buses {
+        if let Some(bus) = buses.get_mut(lane.track) {
+            for (b, f) in bus.samples.iter_mut().zip(&lane.samples) {
+                *b += *f;
+            }
+            dirty[lane.track] = true;
+        }
+    }
+    for lane in &feed.sidechains {
+        if let Some(sidechain) = sidechains.get_mut(lane.track) {
+            if sidechain.len() != frames * 2 {
+                sidechain.resize(frames * 2, 0.0);
+            }
+            for (s, f) in sidechain.iter_mut().zip(&lane.samples) {
+                *s += *f;
+            }
+            keyed[lane.track] = true;
+        }
+    }
+}
+
+/// An ahead render's end: what its tracks summed into master and into the
+/// live tracks' buses and sidechains, into the feed.
+fn give_feed(
+    feed: &mut Feed,
+    master: &[f32],
+    buses: &[StereoBuffer],
+    dirty: &[bool],
+    sidechains: &[Vec<f32>],
+    keyed: &[bool],
+    live: &[bool],
+) {
+    feed.master.copy_from_slice(master);
+    for (ti, _) in live.iter().enumerate().filter(|(_, l)| **l) {
+        if dirty.get(ti).copied().unwrap_or(false) {
+            feed.buses.push(part::Lane {
+                track: ti,
+                samples: buses[ti].samples.clone(),
+            });
+        }
+        if keyed.get(ti).copied().unwrap_or(false) {
+            feed.sidechains.push(part::Lane {
+                track: ti,
+                samples: sidechains[ti].clone(),
+            });
+        }
+    }
+}
+
 /// Render a stereo master block.
 ///
 /// Keep one renderer alive across blocks: the track snapshot is cached
@@ -585,6 +696,10 @@ pub struct ProjectRenderer {
     /// the target track's per-block MIDI events. `None` until installed.
     #[cfg(not(target_arch = "wasm32"))]
     live_midi: std::sync::Mutex<Option<LiveMidiQueue>>,
+    /// Where a live render sends live MIDI aimed at a track it does not
+    /// cover: the ahead render's queue.
+    #[cfg(not(target_arch = "wasm32"))]
+    midi_forward: std::sync::Mutex<Option<rtrb::Producer<LiveMidiEvent>>>,
     /// Realtime mode (see [`set_realtime`](Self::set_realtime)): the
     /// snapshot builder the audio thread hands project changes to.
     #[cfg(not(target_arch = "wasm32"))]
@@ -641,6 +756,8 @@ impl ProjectRenderer {
             live_input: std::sync::Mutex::new(None),
             #[cfg(not(target_arch = "wasm32"))]
             live_midi: std::sync::Mutex::new(None),
+            #[cfg(not(target_arch = "wasm32"))]
+            midi_forward: std::sync::Mutex::new(None),
             #[cfg(not(target_arch = "wasm32"))]
             realtime: std::sync::OnceLock::new(),
             #[cfg(not(target_arch = "wasm32"))]
@@ -791,6 +908,15 @@ impl ProjectRenderer {
         }
     }
 
+    /// Send the live MIDI a [`Part::Live`] render drains for a track it
+    /// does not cover to `to` (the ahead render's queue).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn set_midi_forward(&self, to: rtrb::Producer<LiveMidiEvent>) {
+        if let Ok(mut slot) = self.midi_forward.lock() {
+            *slot = Some(to);
+        }
+    }
+
     /// Wire a fresh live-MIDI ring between this renderer and its backend —
     /// the headless-native path (no `AudioEngine`): after this,
     /// `Standalone::push_live_midi` feeds this renderer's per-block drain,
@@ -892,6 +1018,23 @@ impl ProjectRenderer {
         frames: usize,
         rate: f64,
     ) -> StereoBuffer {
+        self.render_part(start_samples, frames, rate, Part::Whole)
+    }
+
+    /// [`render_block_varispeed`](Self::render_block_varispeed) over the
+    /// tracks `part` covers — the dual-buffer engine's two halves (see
+    /// [`part`]). A [`Part::Ahead`] render returns master unfinished and
+    /// leaves what it hands the live tracks in its feed; a [`Part::Live`]
+    /// render starts from the feed and finishes the block.
+    pub(crate) fn render_part(
+        &self,
+        start_samples: f64,
+        frames: usize,
+        rate: f64,
+        part: Part<'_>,
+    ) -> StereoBuffer {
+        let side = part.side();
+        let (mut ahead, from_ahead) = part.feeds();
         let rate = if rate.is_finite() && rate > 0.0 {
             rate
         } else {
@@ -933,6 +1076,13 @@ impl ProjectRenderer {
             }
         };
         let passes = |i: usize| -> bool { pass(i).passes() };
+        let live = snap.live.as_slice();
+        let covers = |i: usize| side.covers(live, i);
+        if let Some(feed) = ahead.as_deref_mut() {
+            feed.reset(frames, snap.live_print, n);
+        }
+        // A feed of another live set lands on the wrong buses: none then.
+        let from_ahead = from_ahead.filter(|f| f.print == snap.live_print && f.frames == frames);
 
         // Poison-tolerant lock: a control-thread panic while holding one of
         // these mutexes must NOT take down the audio callback (a panic here
@@ -984,6 +1134,25 @@ impl ProjectRenderer {
             ..
         } = &mut *scratch;
 
+        // What the tracks rendered ahead handed over: their sums onto the
+        // live buses and master, their meters as of these frames.
+        if let Some(feed) = from_ahead {
+            take_feed(
+                feed,
+                &mut master.samples,
+                buses,
+                dirty,
+                sidechains,
+                keyed,
+                frames,
+            );
+            for (ti, peaks) in feed.peaks.iter().enumerate() {
+                if let (Some((l, r)), false) = (peaks, covers(ti)) {
+                    meter(&meters, None, ti, *l, *r);
+                }
+            }
+        }
+
         // 0) Live hardware input → per-track buses. Tracks whose
         // `RecordInput::Audio { channel }` taps a valid input channel
         // get that channel's mono sample broadcast to L+R of their bus
@@ -991,7 +1160,7 @@ impl ProjectRenderer {
         // process it like any other source. No-op when no input stream
         // is installed or no track taps a channel.
         #[cfg(not(target_arch = "wasm32"))]
-        {
+        if side.finishes() {
             let mut live_guard = self
                 .live_input
                 .lock()
@@ -1048,7 +1217,18 @@ impl ProjectRenderer {
                 // guid → index over the snapshot (built lazily on demand).
                 let idx_of =
                     |guid: &str| -> Option<usize> { tracks.iter().position(|t| t.guid == guid) };
-                drain_live_midi(queue, idx_of, live_midi_buckets);
+                let mut forward = self
+                    .midi_forward
+                    .try_lock()
+                    .ok()
+                    .filter(|_| side == part::Side::Live);
+                drain_live_midi_routed(
+                    queue,
+                    idx_of,
+                    live_midi_buckets,
+                    covers,
+                    forward.as_mut().and_then(|f| f.as_mut()),
+                );
             }
         }
         #[cfg(target_arch = "wasm32")]
@@ -1071,7 +1251,7 @@ impl ProjectRenderer {
             // flag: soloing a folder must keep its children audible (they pass
             // as descendants) and soloing a leaf keeps its folder ancestors as
             // pass-through. `passes(ti)` is the same predicate stage 0 uses.
-            if any_soloed && !passes(ti) {
+            if !covers(ti) || (any_soloed && !passes(ti)) {
                 continue;
             }
             let bus = &mut buses[ti];
@@ -1190,6 +1370,7 @@ impl ProjectRenderer {
             for &ti in &snap.order {
                 let t = &tracks[ti];
                 if fed[ti]
+                    || !covers(ti)
                     || !passes(ti)
                     || t.fx_chain.is_empty()
                     || t.sends
@@ -1319,11 +1500,12 @@ impl ProjectRenderer {
         let inv_rate = 1.0 / self.sample_rate as f64;
         for &ti in &snap.order {
             let t = &tracks[ti];
+            if !covers(ti) {
+                continue;
+            }
             if !passes(ti) {
                 // Solo-skipped tracks meter as silence.
-                if let Some(cell) = meters.cell(ti) {
-                    cell.write(0.0, 0.0, crate::metering::HOLD_DECAY);
-                }
+                meter(&meters, ahead.as_deref_mut(), ti, 0.0, 0.0);
                 continue;
             }
             // Clean bus = all zeros: gain scales nothing, sends add
@@ -1331,9 +1513,7 @@ impl ProjectRenderer {
             // work entirely; only active tracks cost CPU. (A track
             // with FX must still run — synths generate from MIDI.)
             if !dirty[ti] && t.fx_chain.is_empty() {
-                if let Some(cell) = meters.cell(ti) {
-                    cell.write(0.0, 0.0, crate::metering::HOLD_DECAY);
-                }
+                meter(&meters, ahead.as_deref_mut(), ti, 0.0, 0.0);
                 continue;
             }
 
@@ -1515,9 +1695,7 @@ impl ProjectRenderer {
                 }
             }
             if !dirty[ti] {
-                if let Some(cell) = meters.cell(ti) {
-                    cell.write(0.0, 0.0, crate::metering::HOLD_DECAY);
-                }
+                meter(&meters, ahead.as_deref_mut(), ti, 0.0, 0.0);
                 continue;
             }
 
@@ -1664,13 +1842,13 @@ impl ProjectRenderer {
 
             // Meter the post-fader signal (folder children already
             // summed in — topo order guarantees the bus is complete).
-            if let Some(cell) = meters.cell(ti) {
+            {
                 let (mut pl, mut pr) = (0.0f32, 0.0f32);
                 for fr in src.chunks_exact(2) {
                     pl = pl.max(fr[0].abs());
                     pr = pr.max(fr[1].abs());
                 }
-                cell.write(pl, pr, crate::metering::HOLD_DECAY);
+                meter(&meters, ahead.as_deref_mut(), ti, pl, pr);
             }
 
             if debug {
@@ -1813,6 +1991,13 @@ impl ProjectRenderer {
                     }
                 }
             }
+        }
+
+        // Rendered ahead: what reached the live tracks and master is the
+        // feed; the live render finishes the block.
+        if let Some(feed) = ahead {
+            give_feed(feed, &master.samples, buses, dirty, sidechains, keyed, live);
+            return master;
         }
 
         // Metronome click: short sine bursts on the beat grid,
@@ -2576,5 +2761,246 @@ mod folder_routing_tests {
                 "folder solo must isolate to exactly the folder's children"
             );
         }
+    }
+
+    /// A test plugin with memory: a one-pole lowpass of its input, plus
+    /// half its sidechain — so a block rendered with the wrong state, the
+    /// wrong input or the wrong key shows.
+    struct Smear {
+        state: [f32; 2],
+        key: Vec<f32>,
+    }
+
+    impl crate::plugin::PluginInstance for Smear {
+        fn descriptor(&self) -> crate::plugin::PluginDescriptor {
+            crate::plugin::PluginDescriptor::default()
+        }
+        fn params(&mut self) -> Vec<crate::plugin::PluginParamInfo> {
+            Vec::new()
+        }
+        fn param_value(&mut self, _: u32) -> Option<f64> {
+            None
+        }
+        fn value_to_text(&mut self, _: u32, _: f64) -> Option<String> {
+            None
+        }
+        fn text_to_value(&mut self, _: u32, _: &str) -> Option<f64> {
+            None
+        }
+        fn latency(&mut self) -> u32 {
+            0
+        }
+        fn prepare(&mut self, _: f64, _: u32) -> Result<(), crate::plugin::PluginError> {
+            Ok(())
+        }
+        fn is_prepared(&self) -> bool {
+            true
+        }
+        fn parallel_safe(&self) -> bool {
+            true
+        }
+        fn set_sidechain(&mut self, left: &[f32], _right: &[f32]) {
+            self.key.clear();
+            self.key.extend_from_slice(left);
+        }
+        fn process_block(
+            &mut self,
+            in_l: &[f32],
+            in_r: &[f32],
+            out_l: &mut [f32],
+            out_r: &mut [f32],
+            _: &crate::plugin::PluginEvents<'_>,
+        ) -> Result<(), crate::plugin::PluginError> {
+            for f in 0..in_l.len() {
+                self.state[0] += 0.05 * (in_l[f] - self.state[0]);
+                self.state[1] += 0.05 * (in_r[f] - self.state[1]);
+                let key = self.key.get(f).copied().unwrap_or(0.0) * 0.5;
+                out_l[f] = self.state[0] + key;
+                out_r[f] = self.state[1] - key;
+            }
+            self.key.clear();
+            Ok(())
+        }
+        fn deactivate(&mut self) {}
+    }
+
+    struct Smears;
+
+    impl crate::plugin::FxFactory for Smears {
+        fn installed(&self) -> Vec<daw_proto::fx::InstalledFx> {
+            Vec::new()
+        }
+        fn provides(&self, name: &str) -> bool {
+            name == "Smear"
+        }
+        fn create(&self, name: &str, _: f64) -> Option<Box<dyn crate::plugin::PluginInstance>> {
+            self.provides(name).then(|| {
+                Box::new(Smear {
+                    state: [0.0; 2],
+                    key: Vec::new(),
+                }) as Box<dyn crate::plugin::PluginInstance>
+            })
+        }
+    }
+
+    /// The seeded song, made to need both halves: Lead armed and
+    /// monitoring (live, and so its Vocals folder), Loop sending into
+    /// Vocals and Kick keying Lead's sidechain (ahead tracks feeding live
+    /// ones), a stateful plugin on Lead, Kick and the Drums folder, BGV
+    /// muted and master turned down. `solo` solos that track too.
+    fn split_song(solo: Option<&str>) -> (Standalone, String) {
+        use daw_proto::fx::{Effects, FxChainContext};
+        use daw_proto::track::{InputMonitoringMode, RecordInput};
+        use daw_proto::{RouteLocation, RouteRef, RouteType, Routing};
+        let (daw, guid) = seeded();
+        daw.set_fx_factory(Arc::new(Smears));
+        let ctx = ProjectContext::Project(guid.clone());
+        let track = |n: &str| TrackRef::Guid(guid_of(&daw, &guid, n));
+        Tracks::set_record_input(
+            &daw,
+            ctx.clone(),
+            track("Lead"),
+            RecordInput::Audio { channel: 0 },
+        )
+        .unwrap();
+        Tracks::set_input_monitor(
+            &daw,
+            ctx.clone(),
+            track("Lead"),
+            InputMonitoringMode::Normal,
+        )
+        .unwrap();
+        Tracks::set_armed(&daw, ctx.clone(), track("Lead"), true).unwrap();
+        for n in ["Lead", "Kick", "Drums"] {
+            Effects::add(
+                &daw,
+                ctx.clone(),
+                FxChainContext::Track(guid_of(&daw, &guid, n)),
+                "Smear",
+            )
+            .expect("the fx");
+        }
+        Routing::add_send(&daw, ctx.clone(), track("Loop"), track("Vocals")).expect("a send");
+        let key =
+            Routing::add_send(&daw, ctx.clone(), track("Kick"), track("Lead")).expect("a send");
+        Routing::set_dest_channels(
+            &daw,
+            ctx.clone(),
+            RouteLocation {
+                track: track("Kick"),
+                route_type: RouteType::Send,
+                route: RouteRef::Index(key),
+            },
+            2,
+            2,
+        )
+        .expect("the key");
+        Tracks::set_muted(&daw, ctx.clone(), track("BGV"), true).unwrap();
+        daw.write_project(&guid, |p| p.master_volume = 0.8);
+        if let Some(n) = solo {
+            Tracks::set_soloed(&daw, ctx, track(n), true).unwrap();
+        }
+        (daw, guid)
+    }
+
+    /// `blocks` blocks of `frames` from a renderer of the whole song, and
+    /// from an ahead render handing a live one its feed — the same song,
+    /// fresh plugins each.
+    fn whole_and_split(solo: Option<&str>, blocks: usize, frames: usize) -> (Vec<f32>, Vec<f32>) {
+        let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+        let _inside = runtime.enter();
+        let (daw, guid) = split_song(solo);
+        let whole = ProjectRenderer::new(&daw, &guid, 48_000);
+        let mut a = Vec::new();
+        for b in 0..blocks {
+            a.extend(whole.render_block((b * frames) as u64, frames).samples);
+        }
+        let (daw, guid) = split_song(solo);
+        let ahead = ProjectRenderer::new(&daw, &guid, 48_000);
+        let live = ProjectRenderer::new(&daw, &guid, 48_000);
+        let mut feed = Feed::default();
+        let mut split = Vec::new();
+        for b in 0..blocks {
+            let at = (b * frames) as f64;
+            let _ = ahead.render_part(at, frames, 1.0, Part::Ahead(&mut feed));
+            split.extend(live.render_part(at, frames, 1.0, Part::Live(&feed)).samples);
+        }
+        (a, split)
+    }
+
+    fn assert_same(a: &[f32], b: &[f32]) {
+        assert_eq!(a.len(), b.len());
+        assert!(rms(a) > 0.01, "the song is heard");
+        let worst = a
+            .iter()
+            .zip(b)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(
+            worst < 1e-6,
+            "ahead + live is the whole song: worst {worst}"
+        );
+    }
+
+    /// The tracks a live track feeds are live with it; the rest are not.
+    #[test]
+    fn a_monitored_track_and_what_it_feeds_are_live() {
+        let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+        let _inside = runtime.enter();
+        let (daw, guid) = split_song(None);
+        let snap = daw.read_project(&guid, RenderSnapshot::build).unwrap();
+        let live = |n: &str| snap.live[snap.tracks.iter().position(|t| t.name == n).unwrap()];
+        assert_eq!(daw.plugin_instances.read().len(), 3, "the plugins are in");
+        assert!(live("Lead") && live("Vocals"));
+        for n in ["BGV", "Kick", "Snare", "Drums", "Loop"] {
+            assert!(!live(n), "{n} renders ahead");
+        }
+    }
+
+    /// The ahead half and the live half, the live one started from the
+    /// other's feed, play the whole song sample for sample — folders,
+    /// sends into a live bus, a key into a live sidechain, plugins with
+    /// memory, a mute and master's fader — block after block.
+    #[test]
+    fn ahead_and_live_together_are_the_whole_song() {
+        let (whole, split) = whole_and_split(None, 6, 256);
+        assert_same(&whole, &split);
+        // And the feed carries something: the live half alone is not it.
+        let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+        let _inside = runtime.enter();
+        let (daw, guid) = split_song(None);
+        let live = ProjectRenderer::new(&daw, &guid, 48_000);
+        let alone = live.render_part(0.0, 256, 1.0, Part::Live(&Feed::default()));
+        let differs = alone
+            .samples
+            .iter()
+            .zip(&whole)
+            .any(|(x, y)| (x - y).abs() > 1e-3);
+        assert!(differs, "the tracks ahead are heard only through the feed");
+    }
+
+    /// The same under a solo, which routes some tracks only into what they
+    /// feed.
+    #[test]
+    fn ahead_and_live_together_are_the_whole_song_under_a_solo() {
+        for solo in ["Vocals", "Kick", "Lead"] {
+            let (whole, split) = whole_and_split(Some(solo), 4, 192);
+            assert_same(&whole, &split);
+        }
+    }
+
+    /// A feed of another live set is not taken: the live render plays
+    /// without the tracks ahead rather than on the wrong buses.
+    #[test]
+    fn a_feed_for_another_live_set_is_left_alone() {
+        let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+        let _inside = runtime.enter();
+        let (daw, guid) = split_song(None);
+        let live = ProjectRenderer::new(&daw, &guid, 48_000);
+        let mut feed = Feed::default();
+        feed.reset(128, 1, 0);
+        feed.master.fill(1.0);
+        let out = live.render_part(0.0, 128, 1.0, Part::Live(&feed));
+        assert!(out.samples.iter().all(|s| s.abs() < 0.99));
     }
 }

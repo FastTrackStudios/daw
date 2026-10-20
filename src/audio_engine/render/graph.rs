@@ -54,6 +54,45 @@ pub(crate) fn topo_order(tracks: &[TrackSnapshot]) -> Vec<usize> {
     order
 }
 
+/// Which tracks render live, in the audio callback at the device's block:
+/// every track that [plays live](TrackSnapshot::plays_live), and everything
+/// it feeds — its folder (when it sends there) and its sends'
+/// destinations, on up. The rest feed nothing live of their own making, so
+/// they can be rendered ahead and handed over.
+pub(crate) fn live_set(tracks: &[TrackSnapshot]) -> Vec<bool> {
+    let mut live: Vec<bool> = tracks.iter().map(|t| t.plays_live).collect();
+    let mut todo: Vec<usize> = (0..tracks.len()).filter(|&i| live[i]).collect();
+    while let Some(i) = todo.pop() {
+        let t = &tracks[i];
+        let parent = t.parent_idx.filter(|_| t.parent_send);
+        for next in parent
+            .into_iter()
+            .chain(t.sends.iter().filter_map(|s| s.dest_idx))
+        {
+            if let Some(slot) = live.get_mut(next)
+                && !*slot
+            {
+                *slot = true;
+                todo.push(next);
+            }
+        }
+    }
+    live
+}
+
+/// One number for which tracks are live: their guids and places. Two
+/// renders built from different snapshots agree on it exactly when a feed
+/// from one lands on the right buses of the other.
+pub(crate) fn live_print(tracks: &[TrackSnapshot], live: &[bool]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for (i, t) in tracks.iter().enumerate().filter(|(i, _)| live[*i]) {
+        i.hash(&mut h);
+        t.guid.hash(&mut h);
+    }
+    h.finish()
+}
+
 /// What a track does while something is soloed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Pass {
