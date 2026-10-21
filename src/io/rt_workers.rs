@@ -48,10 +48,12 @@ impl WorkerSeat {
     /// render ahead ([`super::realtime::AHEAD_PRIORITY`]).
     #[must_use]
     pub fn at(priority: i32) -> Self {
-        Self {
-            priority,
-            ..Self::default()
-        }
+        // Not `..Self::default()`: the seat leaves its workgroup on drop
+        // (macOS), and a type with `Drop` cannot be built by moving fields
+        // out of another value (E0509).
+        let mut seat = Self::default();
+        seat.priority = priority;
+        seat
     }
 
     /// Follow the running device: realtime policy for its period, member of
