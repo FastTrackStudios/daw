@@ -47,7 +47,9 @@ pub mod materialize;
 /// Fetching streamed media in the order it will be heard.
 #[cfg(feature = "stream-ogg")]
 pub mod media_fetch;
-#[cfg(feature = "audio")]
+/// The cpal output engine: native-only (cpal wants a `Send` callback; the
+/// browser renders through the `web` worklet path instead).
+#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
 mod mixer;
 #[cfg(feature = "clap-host")]
 pub mod plugin_host;
@@ -88,7 +90,7 @@ pub use decoder::{DecodedAudio, decode_audio, decode_audio_with_extension};
     any(target_os = "linux", target_os = "macos", target_os = "ios")
 ))]
 pub use duplex_engine::{DuplexAudioEngine, PhonesBus};
-#[cfg(feature = "audio")]
+#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
 pub use mixer::{AudioEngine, TrackHandle};
 #[cfg(feature = "audio")]
 pub use routing::{MixerRouting, RoutingSnapshot};

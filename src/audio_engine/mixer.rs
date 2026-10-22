@@ -502,6 +502,7 @@ impl AudioEngine {
         // through `Standalone::push_note_on`/`_off`/`_cc` (producer), the
         // renderer drains them once per block (consumer). SPSC + lock-free
         // like the live-input ring. Sized for a generous burst of events.
+        #[cfg(not(target_arch = "wasm32"))]
         {
             let (prod, cons) = rtrb::RingBuffer::<super::render::LiveMidiEvent>::new(4096);
             renderer.set_live_midi(cons);
@@ -692,6 +693,7 @@ impl AudioEngine {
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     if !realtime {
                         realtime = true;
+                        #[cfg(not(target_arch = "wasm32"))]
                         let _ = audio::io::realtime::promote_current_thread();
                     }
                     // Push every interleaved sample (all channels); the
@@ -789,6 +791,7 @@ impl AudioEngine {
                 move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
                     if !realtime {
                         realtime = true;
+                        #[cfg(not(target_arch = "wasm32"))]
                         let _ = audio::io::realtime::promote_current_thread();
                     }
                     let entry_micros = crate::transport_sync::now_micros();
@@ -984,6 +987,7 @@ impl AudioEngine {
                 move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
                     if !realtime {
                         realtime = true;
+                        #[cfg(not(target_arch = "wasm32"))]
                         let _ = audio::io::realtime::promote_current_thread();
                     }
                     let num_samples = data.len();

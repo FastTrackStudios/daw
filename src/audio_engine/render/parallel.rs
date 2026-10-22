@@ -183,9 +183,9 @@ impl Drop for LanePool {
 }
 
 fn worker(shared: &Shared, priority: i32) {
-    #[cfg(feature = "audio")]
+    #[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
     let mut seat = audio::io::rt_workers::WorkerSeat::at(priority);
-    #[cfg(not(feature = "audio"))]
+    #[cfg(not(all(feature = "audio", not(target_arch = "wasm32"))))]
     let _ = priority;
     let mut seen = unpack(shared.state.load(Ordering::Acquire)).0;
     let mut idle_since = Instant::now();
@@ -196,7 +196,7 @@ fn worker(shared: &Shared, priority: i32) {
         let epoch = unpack(shared.state.load(Ordering::Acquire)).0;
         if epoch != seen {
             seen = epoch;
-            #[cfg(feature = "audio")]
+            #[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
             seat.sync();
             shared.work(epoch);
             idle_since = Instant::now();

@@ -831,7 +831,7 @@ pub struct Standalone {
     /// renderer via `set_live_midi`). `push_note_on`/`_off`/`_cc` push
     /// `LiveMidiEvent`s here; the renderer drains them once per block.
     /// `None` until an audio engine attaches; pushes are then dropped.
-    #[cfg(feature = "audio")]
+    #[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
     pub(crate) live_midi_tx:
         Arc<Mutex<Option<rtrb::Producer<crate::audio_engine::render::LiveMidiEvent>>>>,
     /// wasm32 live / programmatic MIDI queue — the browser analog of
@@ -890,7 +890,7 @@ impl Standalone {
             meters_installed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             sync_positions: architect::PubSub::sliding(64),
             sync_pump_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            #[cfg(feature = "audio")]
+            #[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
             live_midi_tx: Arc::new(Mutex::new(None)),
             #[cfg(all(target_arch = "wasm32", any(feature = "decode", feature = "audio")))]
             live_midi_wasm: Arc::new(Mutex::new(std::collections::VecDeque::new())),
@@ -1223,7 +1223,7 @@ impl Standalone {
     /// audio callback becomes the sole driver of the playhead.
     /// Sample-accurate. Returns the engine; drop it to release the
     /// stream (and re-enable the soft clock manually if desired).
-    #[cfg(feature = "audio")]
+    #[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
     pub fn attach_audio_engine(
         &self,
         guid: &str,
@@ -1313,7 +1313,7 @@ impl Standalone {
     /// Install the producer end of the live-MIDI ring. Called by
     /// `AudioEngine::with_project_prefs` after wiring the consumer to the
     /// renderer. Replaces any previous producer (e.g. on engine restart).
-    #[cfg(feature = "audio")]
+    #[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
     pub(crate) fn set_live_midi_producer(
         &self,
         prod: rtrb::Producer<crate::audio_engine::render::LiveMidiEvent>,

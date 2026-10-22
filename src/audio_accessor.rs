@@ -191,9 +191,22 @@ struct OpenAccessor;
 /// a cloneable handle to shared state and an accessor created through
 /// one clone has to be readable through another — the same way a
 /// REAPER accessor is valid wherever the API is.
+#[cfg(not(target_arch = "wasm32"))]
 fn table() -> &'static Mutex<HashMap<String, Arc<OpenAccessor>>> {
     static TABLE: OnceLock<Mutex<HashMap<String, Arc<OpenAccessor>>>> = OnceLock::new();
     TABLE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The same table on wasm32, where an accessor's vox stream is `Rc`-based
+/// (not `Send`), so it cannot sit in a `static`. The browser has one
+/// thread; a per-thread table is the process-global one there.
+#[cfg(target_arch = "wasm32")]
+fn table() -> &'static Mutex<HashMap<String, Arc<OpenAccessor>>> {
+    thread_local! {
+        static TABLE: &'static Mutex<HashMap<String, Arc<OpenAccessor>>> =
+            Box::leak(Box::new(Mutex::new(HashMap::new())));
+    }
+    TABLE.with(|t| *t)
 }
 
 fn next_id() -> String {
