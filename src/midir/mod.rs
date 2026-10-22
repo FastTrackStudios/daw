@@ -29,7 +29,10 @@ use crate::proto::{
     Direction, MidiEvent, PortId, PortInfo, PortSelector, RawShortMessage, TimedEvent,
 };
 
+// A rescan thread per input: not on wasm, where `native` is Web MIDI.
+#[cfg(not(target_arch = "wasm32"))]
 mod selectable;
+#[cfg(not(target_arch = "wasm32"))]
 pub use selectable::SelectableInput;
 
 const CLIENT: &str = "midicore-midir";
