@@ -62,25 +62,58 @@ fn assert_bounded(what: &str, fx: &mut dyn PluginInstance) {
     );
 }
 
-#[test]
-fn every_reverb_at_full_decay_stays_bounded() {
-    for algorithm in 0..=13 {
-        for variant in 0..=2 {
-            let mut r = NativeReverb::new(SR);
-            for (n, v) in [
-                ("algorithm", f64::from(algorithm)),
-                ("variant", f64::from(variant)),
-                ("decay", 0.99),
-                ("size", 1.0),
-                ("mix", 1.0),
-                ("dry", 0.0),
-                ("modulation", 1.0),
-            ] {
-                r.set_named(n, v);
-            }
-            assert_bounded(&format!("reverb {algorithm}/{variant}"), &mut r);
+/// One reverb algorithm, every variant it has, at full decay. (A variant
+/// past an algorithm's own count falls back to its first, so asking every
+/// algorithm for three rendered most of them three times over.)
+fn reverb_at_full_decay_stays_bounded(algorithm: u8) {
+    let variants = reverb::AlgorithmType::from_index(usize::from(algorithm)).variant_count();
+    for variant in (0..variants).filter_map(|v| u8::try_from(v).ok()) {
+        let mut r = NativeReverb::new(SR);
+        for (n, v) in [
+            ("algorithm", f64::from(algorithm)),
+            ("variant", f64::from(variant)),
+            ("decay", 0.99),
+            ("size", 1.0),
+            ("mix", 1.0),
+            ("dry", 0.0),
+            ("modulation", 1.0),
+        ] {
+            r.set_named(n, v);
         }
+        assert_bounded(&format!("reverb {algorithm}/{variant}"), &mut r);
     }
+}
+
+/// Every reverb algorithm at full decay, one test each: twelve seconds of
+/// audio per variant is real work, and fourteen algorithms in one test ran
+/// past the per-test timeout on a loaded runner. Apart, they run in parallel
+/// and a failure names its algorithm.
+macro_rules! every_reverb_at_full_decay {
+    ($($name:ident = $algorithm:literal),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                reverb_at_full_decay_stays_bounded($algorithm);
+            }
+        )*
+    };
+}
+
+every_reverb_at_full_decay! {
+    reverb_algorithm_0_at_full_decay_stays_bounded = 0,
+    reverb_algorithm_1_at_full_decay_stays_bounded = 1,
+    reverb_algorithm_2_at_full_decay_stays_bounded = 2,
+    reverb_algorithm_3_at_full_decay_stays_bounded = 3,
+    reverb_algorithm_4_at_full_decay_stays_bounded = 4,
+    reverb_algorithm_5_at_full_decay_stays_bounded = 5,
+    reverb_algorithm_6_at_full_decay_stays_bounded = 6,
+    reverb_algorithm_7_at_full_decay_stays_bounded = 7,
+    reverb_algorithm_8_at_full_decay_stays_bounded = 8,
+    reverb_algorithm_9_at_full_decay_stays_bounded = 9,
+    reverb_algorithm_10_at_full_decay_stays_bounded = 10,
+    reverb_algorithm_11_at_full_decay_stays_bounded = 11,
+    reverb_algorithm_12_at_full_decay_stays_bounded = 12,
+    reverb_algorithm_13_at_full_decay_stays_bounded = 13,
 }
 
 #[test]
