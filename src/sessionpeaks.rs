@@ -379,7 +379,28 @@ mod tests {
             {
                 continue;
             }
-            let Some((found, peaks)) = read_any(&path) else {
+            // Once Session has opened a session it writes its own peaks
+            // beside REAPER's, and `read_any` rightly prefers ours. Where
+            // ours exist, read REAPER's file directly: the header, stamp and
+            // column checks below still hold it to REAPER's format.
+            let cands = candidates(&path);
+            let ours = cands
+                .iter()
+                .any(|c| c.extension().is_some_and(|e| e == "sessionpeaks") && c.exists());
+            let found = if ours {
+                cands.into_iter().find_map(|c| {
+                    let reaper = c.extension().is_some_and(|e| e == REAPER_EXTENSION);
+                    let peaks = if reaper {
+                        ReaPeaks::read(&c).ok()
+                    } else {
+                        None
+                    };
+                    peaks.map(|p| (c, p))
+                })
+            } else {
+                read_any(&path)
+            };
+            let Some((found, peaks)) = found else {
                 continue;
             };
             assert!(
