@@ -701,7 +701,7 @@ fn reconcile(
 ///
 /// A PipeWire MIDI buffer is a SPA POD **Sequence** of `spa_pod_control`
 /// entries. Each entry is either `SPA_CONTROL_Midi` (raw MIDI 1.0 bytes) or,
-/// on PipeWire 1.6+, `SPA_CONTROL_UMP` (32-bit Universal MIDI Packet words).
+/// on PipeWire 1.4+, `SPA_CONTROL_UMP` (32-bit Universal MIDI Packet words).
 /// A stream that negotiated `application/control` gets the former; the UMP arm
 /// is here because the daemon is free to hand us either.
 fn for_each_message(raw: &[u8], mut f: impl FnMut(&[u8])) {
@@ -736,7 +736,7 @@ fn for_each_message(raw: &[u8], mut f: impl FnMut(&[u8])) {
             let bytes = std::slice::from_raw_parts(vdata, vsize);
             match (*c).type_ {
                 libspa_sys::SPA_CONTROL_Midi => f(bytes),
-                libspa_sys::SPA_CONTROL_UMP => {
+                SPA_CONTROL_UMP => {
                     if let Some((buf, n)) = ump_to_midi1(bytes) {
                         f(&buf[..n]);
                     }
@@ -750,7 +750,18 @@ fn for_each_message(raw: &[u8], mut f: impl FnMut(&[u8])) {
     }
 }
 
+/// `SPA_CONTROL_UMP`, by its ABI value (`spa/control/control.h`:
+/// Invalid, Properties, Midi, OSC, UMP). Not `libspa_sys::SPA_CONTROL_UMP`:
+/// the bindings are generated from the system's headers, PipeWire before 1.4
+/// (Ubuntu 24.04's 1.0) has no such name, and a newer daemon can hand a
+/// client built against those headers UMP all the same.
+const SPA_CONTROL_UMP: libspa_sys::spa_control_type = 4;
+
 /// Translate a UMP word to MIDI 1.0 bytes.
+///
+/// PipeWire stores UMP words in native byte order (`spa/control/control.h`),
+/// so a note on is `0x2090_3C64` read natively — big-endian reading turned
+/// every word on a little-endian machine into message type 6 and dropped it.
 ///
 /// Only message type `0x2` (MIDI 1.0 channel voice) is translated: that is
 /// every note, CC, bend and aftertouch a controller sends. Types we do not
@@ -761,7 +772,7 @@ fn ump_to_midi1(bytes: &[u8]) -> Option<([u8; 3], usize)> {
     if bytes.len() < 4 {
         return None;
     }
-    let w = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    let w = u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
     if (w >> 28) & 0xf != 0x2 {
         return None;
     }
@@ -836,7 +847,7 @@ mod tests {
     #[test]
     fn ump_channel_voice_becomes_three_midi_bytes() {
         // group 0, type 2, status 0x90, note 60, velocity 100
-        let word = 0x2090_3C64u32.to_be_bytes();
+        let word = 0x2090_3C64u32.to_ne_bytes();
         assert_eq!(ump_to_midi1(&word), Some(([0x90, 60, 100], 3)));
     }
 
@@ -844,9 +855,9 @@ mod tests {
     /// would be read as a spurious status byte by anything downstream.
     #[test]
     fn ump_two_byte_messages_report_a_length_of_two() {
-        let pc = 0x20C0_0500u32.to_be_bytes();
+        let pc = 0x20C0_0500u32.to_ne_bytes();
         assert_eq!(ump_to_midi1(&pc), Some(([0xC0, 5, 0], 2)));
-        let pressure = 0x20D0_4000u32.to_be_bytes();
+        let pressure = 0x20D0_4000u32.to_ne_bytes();
         assert_eq!(ump_to_midi1(&pressure), Some(([0xD0, 0x40, 0], 2)));
     }
 
@@ -855,9 +866,9 @@ mod tests {
     #[test]
     fn ump_drops_what_it_cannot_faithfully_translate() {
         // Type 0x4 — MIDI 2.0 channel voice, a different word layout.
-        assert_eq!(ump_to_midi1(&0x4090_3C64u32.to_be_bytes()), None);
+        assert_eq!(ump_to_midi1(&0x4090_3C64u32.to_ne_bytes()), None);
         // Type 0x1 — system real time.
-        assert_eq!(ump_to_midi1(&0x10F8_0000u32.to_be_bytes()), None);
+        assert_eq!(ump_to_midi1(&0x10F8_0000u32.to_ne_bytes()), None);
         // A truncated word is not a message.
         assert_eq!(ump_to_midi1(&[0x20, 0x90]), None);
     }

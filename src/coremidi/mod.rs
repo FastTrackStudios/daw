@@ -683,8 +683,14 @@ mod tests {
         )
         .expect("CoreMIDI reachable");
         assert!(input.ports_named().is_empty());
+        // The child test's full name, from this module's path (minus the
+        // crate): `--exact` against a hard-coded `tests::…` matched nothing
+        // once this module moved under `coremidi`, so the child ran no test
+        // and no source ever appeared.
+        let module = module_path!().split_once("::").map_or("", |(_, m)| m);
+        let child_test = format!("{module}::child_publishes_a_source");
         let mut child = std::process::Command::new(std::env::current_exe().expect("test binary"))
-            .args(["tests::child_publishes_a_source", "--exact", "--nocapture"])
+            .args([child_test.as_str(), "--exact", "--nocapture"])
             .env("MIDICORE_CHILD_SOURCE", &name)
             .spawn()
             .expect("spawn the child");
