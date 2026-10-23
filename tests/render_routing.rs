@@ -1300,10 +1300,17 @@ fn stretch_markers_warp_playback() {
     let r = ProjectRenderer::new(&daw, &guid, SAMPLE_RATE);
     let block = r.render_block(0, SAMPLE_RATE as usize);
     let at = |secs: f64| block.samples[(secs * SAMPLE_RATE as f64) as usize * 2] / pan;
-    // Inside the stretched span: source time = take time / 2.
-    assert!((at(0.2) - 0.1).abs() < 1e-3, "at 0.2 s got {}", at(0.2));
-    assert!((at(0.4) - 0.2).abs() < 1e-3, "at 0.4 s got {}", at(0.4));
-    // After the last marker: rate 1 again, continuing from source 0.25.
+    // A stretched take is rendered at its own pitch (the stretch map, not
+    // varispeed), so the ramp is read where the map plays its source as
+    // recorded: each marker's attack (its first 20 ms), and everything
+    // past the last marker. Inside the stretched span the phase vocoder
+    // plays the source at its pitch, which a ramp cannot measure; the
+    // stretch map's own tests pin that.
+    // The first marker's attack: take 0.01 → source 0.01.
+    assert!((at(0.01) - 0.01).abs() < 1e-3, "at 0.01 s got {}", at(0.01));
+    // Past the last marker (and its 2 ms joint): rate 1 again, from
+    // source 0.25.
+    assert!((at(0.51) - 0.26).abs() < 1e-3, "at 0.51 s got {}", at(0.51));
     assert!((at(0.75) - 0.5).abs() < 1e-3, "at 0.75 s got {}", at(0.75));
 }
 

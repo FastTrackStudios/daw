@@ -513,9 +513,16 @@ impl Drop for TrackMutedGuard {
 pub struct PluginCell(std::sync::Mutex<Box<dyn PluginInstance>>);
 
 impl PluginCell {
+    /// Locked once here, on the control thread that builds it: on macOS
+    /// `std::sync::Mutex` allocates its pthread mutex on the first lock, and
+    /// that first lock would otherwise be the render's `try_lock_spinning`
+    /// on a freshly rebuilt plugin — an allocation on the audio thread
+    /// (sampler's `rt_alloc` caught it; Linux's futex mutex never allocates).
     #[must_use]
     pub fn new(plugin: Box<dyn PluginInstance>) -> Self {
-        Self(std::sync::Mutex::new(plugin))
+        let cell = Self(std::sync::Mutex::new(plugin));
+        drop(cell.lock());
+        cell
     }
 
     /// The plugin back out of its cell.

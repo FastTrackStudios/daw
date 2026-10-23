@@ -20,7 +20,13 @@ use daw_standalone::audio_engine::media_fetch::{
 use fts_sample::ogg_index::OggIndex;
 use fts_sample::sparse::SparseBytes;
 
-const RATE: u32 = 44_100;
+/// Low, so a minute of proxy encodes in a fraction of the time: every
+/// test encodes its own (nextest runs each in a process of its own), and
+/// at 44.1 kHz a debug build's Vorbis encoder spends tens of seconds on a
+/// loaded runner before the test has begun. What these tests measure —
+/// pages in time order, which seconds are asked for when — is the same at
+/// any rate.
+const RATE: u32 = 8_000;
 
 /// A proxy with some noise in it, so its pages grow with time as a real
 /// stem's do.
@@ -334,11 +340,18 @@ async fn a_resident_window_holds_only_what_is_near_the_playhead() {
             "{}: nothing far ahead is fetched",
             t.path
         );
+        // The window (5 s behind, 20 s ahead) and no more: what is resident
+        // is counted in the sparse store's 64 KiB blocks, so allow a block of
+        // rounding at each end. (A share of the file would not do: at this
+        // test's 8 kHz a block is an eighth of a two-minute proxy.)
+        let window = t.index.bytes_for(frames(5.0), frames(30.0));
+        let budget = (window.end - window.start) + 2 * 64 * 1024;
         assert!(
-            t.bytes.resident() < t.bytes.len() / 3,
-            "{}: {} of {} held",
+            t.bytes.resident() <= budget,
+            "{}: {} held, the window is {} of {}",
             t.path,
             t.bytes.resident(),
+            window.end - window.start,
             t.bytes.len()
         );
     }
