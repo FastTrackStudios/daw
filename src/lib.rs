@@ -423,7 +423,7 @@ impl Daw {
         // Verify the project exists
         self.clients
             .project
-            .get(guid.clone())
+            .project(guid.clone())
             .await?
             .ok_or_else(|| Error::ProjectNotFound(guid.clone()))?;
 
