@@ -309,11 +309,16 @@ fn a_leader_that_stops_stops_the_follower() {
 /// one the writer wrote whole (the seqlock's fences hold on arm64 too).
 #[test]
 fn a_snapshot_is_never_read_torn() {
-    use std::sync::Arc;
+    use std::sync::{Arc, Barrier};
     let cell = Arc::new(daw_transport_sync::SnapshotCell::new());
+    // Both threads start together: on a fast box the writer used to finish
+    // all its stores before the reader read once.
+    let start = Arc::new(Barrier::new(2));
     let writer = {
         let cell = Arc::clone(&cell);
+        let start = Arc::clone(&start);
         std::thread::spawn(move || {
+            start.wait();
             for i in 0..200_000u64 {
                 let x = i as f64;
                 cell.store(&AudioSnapshot {
@@ -327,8 +332,11 @@ fn a_snapshot_is_never_read_torn() {
             }
         })
     };
+    start.wait();
     let mut reads = 0;
-    while !writer.is_finished() {
+    // Until the writer is done, and at least once: a load after the last
+    // store always succeeds, so `reads > 0` cannot depend on scheduling.
+    while !writer.is_finished() || reads == 0 {
         if let Some(s) = cell.load() {
             let x = s.sequence as f64;
             assert_eq!(s.host_micros, x * 1000.0, "torn: {s:?}");
