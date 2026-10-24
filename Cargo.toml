@@ -13,7 +13,7 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [dependencies]
 # Parser dependencies
-nom = "8"
+nom = { workspace = true }
 
 # Domain types for conversion
 daw-proto = { workspace = true }
@@ -22,7 +22,7 @@ daw-proto = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-base64 = "0.22.1"
+base64 = { workspace = true }
 
 # Peak-cache building (`sessionpeaks`) — decoding media is fts-sample's
 # job, not a parser's, so it arrives only with the `peaks-*` features.
@@ -34,8 +34,8 @@ fts-sample = { workspace = true, optional = true }
 # `parallel` brings in rayon for per-track parsing; turn it off for
 # WASM (no threads / no rayon). `binaries` brings in `libc` for the
 # `rpp_perf` measurement binary (Linux/macOS rusage probe).
-rayon = { version = "1", optional = true }
-libc = { version = "0.2", optional = true }
+rayon = { workspace = true, optional = true }
+libc = { workspace = true, optional = true }
 
 [features]
 default = ["parallel"]
@@ -50,7 +50,7 @@ peaks-ogg = ["dep:fts-sample", "fts-sample/engine-core"]
 peaks-wav = ["dep:fts-sample", "fts-sample/mapped"]
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = { workspace = true }
 
 [[bench]]
 name = "parse_perf"
