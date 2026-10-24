@@ -18,9 +18,9 @@ pipewire = []
 [dependencies]
 anyhow = { workspace = true }
 atomic_float = { workspace = true }
-cpal = { version = "0.18", optional = true }
+cpal = { workspace = true, optional = true }
 facet = { workspace = true, optional = true }
-rtrb = { version = "0.3", optional = true }
+rtrb = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
@@ -31,13 +31,13 @@ audio = { path = ".", features = ["io"] }
 tracing-subscriber = { workspace = true }
 
 [target.'cfg(target_os = "ios")'.dependencies]
-objc2 = { version = "0.6" }
+objc2 = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-cpal = { version = "0.18", features = ["pipewire"] }
+cpal = { workspace = true, features = ["pipewire"] }
 libc = { workspace = true }
-libspa = { version = "0.10" }
-pipewire = { version = "0.10" }
+libspa = { workspace = true }
+pipewire = { workspace = true }
 
 [[example]]
 name = "duplex_probe"
