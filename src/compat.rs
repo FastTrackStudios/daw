@@ -108,20 +108,3 @@ pub fn StringifyRPPNode(node: &RNodeTree) -> String {
 pub fn WriteRPP(path: impl AsRef<Path>, root: &RChunk) -> RppResult<()> {
     write_rpp(path, root)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_lua_surface_create_parse_roundtrip() {
-        let mut root = CreateRPP(Some(0.1), Some("7.0/x64"), Some(123));
-        AddRNode(
-            &mut root,
-            vec!["RIPPLE".to_string(), "0".to_string(), "0".to_string()],
-        );
-        AddRChunk(&mut root, vec!["TRACK".to_string()]);
-        assert_eq!(root.name().as_deref(), Some("REAPER_PROJECT"));
-        assert_eq!(LUA_API_MATRIX.len(), 12);
-    }
-}

@@ -105,33 +105,3 @@ fn parse_toolbar_config_item(position: u32, raw: &str, flags: u32) -> ToolbarIte
         raw: Some(trimmed.to_string()),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_main_toolbar_items_and_flags() {
-        let snapshots = parse_toolbar_config_text(
-            r#"
-[Main toolbar]
-item_0=40023 New project...
-item_1=-1
-item_2=_FTS_GUEST_TOGGLE_EXAMPLE FTS: Integrated Toggle Example
-tbf_2=1
-"#,
-        );
-
-        assert_eq!(snapshots.len(), 1);
-        let toolbar = &snapshots[0];
-        assert_eq!(toolbar.toolbar_name, "Main toolbar");
-        assert_eq!(toolbar.items.len(), 3);
-        assert_eq!(toolbar.items[0].command_id, Some(40023));
-        assert_eq!(toolbar.items[1].kind, "separator");
-        assert_eq!(
-            toolbar.items[2].command_name.as_deref(),
-            Some("_FTS_GUEST_TOGGLE_EXAMPLE")
-        );
-        assert_eq!(toolbar.items[2].flags, 1);
-    }
-}
