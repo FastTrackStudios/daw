@@ -16,8 +16,8 @@ network = ["dep:facet-postcard", "tokio/io-util", "tokio/net"]
 [dependencies]
 daw = { workspace = true }
 facet = { workspace = true }
-facet-postcard = { version = "0.50.0-rc.1", optional = true }
-rusty_link = { version = "0.4", optional = true }
+facet-postcard = { workspace = true, optional = true }
+rusty_link = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tokio-util = { version = "0.7" }
 tracing = { workspace = true }
