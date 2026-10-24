@@ -21,7 +21,7 @@ daw = { workspace = true, features = ["standalone-audio"] }
 
 [dev-dependencies]
 # WAV capture for the load_plugin example (A/B render harness).
-hound = "3.5"
+hound = { workspace = true }
 
 [features]
 default = ["clap-host"]
