@@ -29,8 +29,8 @@ impl<'a> Projects for StandaloneProject<'a> {
     fn current(&self) -> Option<ProjectInfo> {
         self.daw.current()
     }
-    fn get(&self, id: &str) -> Option<ProjectInfo> {
-        self.daw.get(id)
+    fn project(&self, id: &str) -> Option<ProjectInfo> {
+        self.daw.project(id)
     }
     fn list(&self) -> Vec<ProjectInfo> {
         self.daw.list()
@@ -137,7 +137,7 @@ impl Projects for Standalone {
         s.projects.get(guid).map(|p| p.info.clone())
     }
 
-    fn get(&self, project_id: &str) -> Option<ProjectInfo> {
+    fn project(&self, project_id: &str) -> Option<ProjectInfo> {
         let s = self.state.lock().ok()?;
         s.projects.get(project_id).map(|p| p.info.clone())
     }
