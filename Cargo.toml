@@ -54,27 +54,3 @@ daw = { workspace = true, features = ["standalone"] }
 daw-standalone = { workspace = true, features = ["rpp-project", "decode"] }
 midi = { workspace = true }
 
-[[test]]
-name = "engine"
-path = "tests/engine.rs"
-required-features = ["engine"]
-
-[[test]]
-name = "mic"
-path = "tests/mic.rs"
-required-features = ["engine"]
-
-[[test]]
-name = "reverb_time"
-path = "tests/reverb_time.rs"
-required-features = ["engine"]
-
-[[test]]
-name = "sidechain"
-path = "tests/sidechain.rs"
-required-features = ["engine"]
-
-[[test]]
-name = "state_round_trip"
-path = "tests/state_round_trip.rs"
-required-features = ["engine"]

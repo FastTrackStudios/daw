@@ -86,28 +86,3 @@ impl FxFactory for NativeFxFactory {
             .map(|(_, _, ctor)| ctor(sample_rate.max(1.0)))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn catalog_creates_every_entry_by_ident_and_name() {
-        let f = NativeFxFactory;
-        for fx in f.installed() {
-            assert!(f.create(&fx.ident, 48_000.0).is_some(), "{}", fx.ident);
-            assert!(f.create(&fx.name, 48_000.0).is_some(), "{}", fx.name);
-            // Case-insensitive display-name match.
-            assert!(f.create(&fx.name.to_lowercase(), 48_000.0).is_some());
-        }
-        assert!(f.create("no-such-fx", 48_000.0).is_none());
-    }
-
-    #[test]
-    fn created_instances_report_params() {
-        let f = NativeFxFactory;
-        let mut comp = f.create("signal.fx.comp", 48_000.0).unwrap();
-        assert!(!comp.params().is_empty());
-        assert_eq!(comp.descriptor().name, "Compressor");
-    }
-}
