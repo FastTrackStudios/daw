@@ -25,9 +25,9 @@ pollster = { workspace = true, optional = true }
 sha2 = { workspace = true }
 styx-format = { workspace = true }
 thiserror = { workspace = true }
-turso = { version = "0.8.2", default-features = false, optional = true }
+turso = { workspace = true, optional = true }
 uuid = { workspace = true }
-zstd = { version = "0.13", optional = true }
+zstd = { workspace = true, optional = true }
 
 [dev-dependencies]
 session-format = { path = ".", features = ["store"] }
