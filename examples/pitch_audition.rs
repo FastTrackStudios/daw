@@ -22,8 +22,8 @@ use std::time::Instant;
 
 use builtin::{NativeDelay, NativeReverb};
 use daw::plugin::{PluginEvents, PluginInstance};
+use dsp::pitch::chain::{Algorithm, PitchChain};
 use dsp_core::audio::{AudioConfig, Processor};
-use pitch::chain::{Algorithm, PitchChain};
 
 const SR: f64 = 48_000.0;
 const BLOCK: usize = 64;

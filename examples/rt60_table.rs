@@ -86,7 +86,7 @@ fn main() {
         return;
     }
     // Each engine's own law, not the tables built from this output.
-    reverb::calibration::measure_raw(true);
+    dsp::reverb::calibration::measure_raw(true);
     let args: Vec<String> = std::env::args().skip(1).collect();
     let burst = args.iter().any(|a| a == "--burst");
     let only: Vec<(usize, usize)> = args
@@ -140,13 +140,13 @@ fn verify() {
         (10, 0, true),
     ];
     for &(a, v, burst) in pairs {
-        let alg = reverb::AlgorithmType::from_index(a);
+        let alg = dsp::reverb::AlgorithmType::from_index(a);
         let Some((lo, hi)) = alg.t60_range(v) else {
             continue;
         };
         for frac in [0.15, 0.5, 0.85] {
             let want = lo * (hi / lo).powf(frac);
-            let d = reverb::algorithm::t60_to_decay(want, lo, hi);
+            let d = dsp::reverb::algorithm::t60_to_decay(want, lo, hi);
             let got = rt60(a, v, d, 0.7, burst).unwrap_or(f64::NAN);
             println!(
                 "{a}\t{v}\t{want:.2}\t{got:.2}\t{:+.0}",

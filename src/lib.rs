@@ -89,14 +89,14 @@ pub const EQ_BANDS: usize = 24;
 /// First parameter id of the reverb's Decay Rate EQ (six bands of four
 /// fields: shape / freq / rate / q).
 pub const DECAY_BAND_BASE: u32 = 60;
-/// Decay Rate EQ bands, mirroring `reverb::DECAY_BANDS`.
+/// Decay Rate EQ bands, mirroring `dsp::reverb::DECAY_BANDS`.
 pub const DECAY_BANDS: usize = 8;
 /// Per-band fields, in wire order: used, on, freq, gain, q, shape.
 pub const EQ_FIELDS: usize = 6;
 
 // Appended param blocks (ids are APPEND-ONLY — the 0..143 layout is
 // frozen by saved rig patches):
-/// `b{i}_slope` — canonical slope index 0..10 (`eq::Slope` table).
+/// `b{i}_slope` — canonical slope index 0..10 (`dsp::eq::Slope` table).
 pub const EQ_SLOPE_BASE: u32 = 144;
 /// `output_gain` dB.
 pub const EQ_OUTPUT_GAIN_ID: u32 = 168;
@@ -161,10 +161,10 @@ pub const EQ_DYN_SIDE_LO_BASE: u32 = 496;
 pub const EQ_DYN_SIDE_HI_BASE: u32 = 520;
 pub const EQ_PARAM_COUNT: u32 = 544;
 
-/// Canonical shape conversion — [`eq::host::FilterShape`] owns the
+/// Canonical shape conversion — [`dsp::eq::host::FilterShape`] owns the
 /// one true ordering (append-only, documented there).
-fn eq_shape_to_filter(shape: u32) -> eq::FilterType {
-    eq::host::FilterShape::from_canonical_index(shape).to_filter_type()
+fn eq_shape_to_filter(shape: u32) -> dsp::eq::FilterType {
+    dsp::eq::host::FilterShape::from_canonical_index(shape).to_filter_type()
 }
 
 /// Param name for `(band, field)` — `b{band+1}_{used|on|freq|gain|q|shape}`.
@@ -304,7 +304,7 @@ pub fn eq_param_name_of(id: u32) -> Option<String> {
     None
 }
 
-/// Native EQ block — the full FTS-EQ engine: 24 dynamic bands over [`eq::runtime::chain::EqChain`]'s
+/// Native EQ block — the full FTS-EQ engine: 24 dynamic bands over [`dsp::eq::runtime::chain::EqChain`]'s
 /// Pro-Q ZPK pipeline.
 ///
 /// Each band has used/on/freq/gain/q/shape (all thirteen canonical shapes) + slope, plus
@@ -313,20 +313,20 @@ pub fn eq_param_name_of(id: u32) -> Option<String> {
 /// The rig's front end for the one EQ engine.
 ///
 /// Everything that makes an EQ — the filter bank, per-band dynamics, the spectral engine,
-/// transient splitting, listening — lives in [`eq::host::CanonicalEq`]. This is the parameter
+/// transient splitting, listening — lives in [`dsp::eq::host::CanonicalEq`]. This is the parameter
 /// surface the rig drives it through: an id-indexed value table, the automation-event pump,
 /// and the f32 buffers a host hands over.
 ///
 /// It used to be the engine itself, which is why the FTS-EQ plugin could not
 /// play a dynamic band: the capability was reachable only through these ids.
 pub struct NativeEq {
-    engine: eq::host::CanonicalEq,
+    engine: dsp::eq::host::CanonicalEq,
     /// Every param value by id, for host readback.
     values: Vec<f64>,
     /// Mirrors of the fields the id table writes, so a `sync` can rebuild a
     /// whole band from partial updates.
-    bands: [eq::host::CanonicalBandConfig; EQ_BANDS],
-    dynamics: [eq::host::CanonicalBandDynamics; EQ_BANDS],
+    bands: [dsp::eq::host::CanonicalBandConfig; EQ_BANDS],
+    dynamics: [dsp::eq::host::CanonicalBandDynamics; EQ_BANDS],
     prepared: bool,
     scratch_l: Vec<f64>,
     scratch_r: Vec<f64>,
@@ -340,10 +340,10 @@ impl NativeEq {
             values[id as usize] = eq_param_range(id).2;
         }
         let mut me = Self {
-            engine: eq::host::CanonicalEq::new(sample_rate),
+            engine: dsp::eq::host::CanonicalEq::new(sample_rate),
             values,
-            bands: [eq::host::CanonicalBandConfig::default(); EQ_BANDS],
-            dynamics: [eq::host::CanonicalBandDynamics::default(); EQ_BANDS],
+            bands: [dsp::eq::host::CanonicalBandConfig::default(); EQ_BANDS],
+            dynamics: [dsp::eq::host::CanonicalBandDynamics::default(); EQ_BANDS],
             prepared: false,
             scratch_l: Vec::new(),
             scratch_r: Vec::new(),
@@ -491,7 +491,7 @@ impl NativeEq {
             match field {
                 0 => self.bands[band].slope = v,
                 7 => {
-                    self.bands[band].placement = eq::Placement::from_index(v as u32);
+                    self.bands[band].placement = dsp::eq::Placement::from_index(v as u32);
                 }
                 8 => self.bands[band].stream = v as u32,
                 9 => self.dynamics[band].spectral = v >= 0.5,
@@ -581,9 +581,9 @@ impl PluginInstance for NativeEq {
         } else if name.ends_with("_gain") || name.ends_with("dyn_range") || name == "output_gain" {
             Some(format!("{value:+.1} dB"))
         } else if name.ends_with("_slope") {
-            let s = eq::host::Slope::from_param_index(value as usize);
+            let s = dsp::eq::host::Slope::from_param_index(value as usize);
             Some(match s {
-                eq::host::Slope::Brickwall => "Brickwall".into(),
+                dsp::eq::host::Slope::Brickwall => "Brickwall".into(),
                 s => format!("{:.0} dB/oct", s.db_per_octave()),
             })
         } else {
@@ -690,14 +690,14 @@ const PREAMP_PARAMS: &[ParamSpec] = &[
 ///
 /// The magnitudes are normalized to H1 — the UI's harmonic visualization polls these.
 /// The transfer curve for the indicative sine display comes from
-/// `saturate::preamp::analysis::transfer_curve` on a mirror.
+/// `dsp::saturate::preamp::analysis::transfer_curve` on a mirror.
 pub const PREAMP_HARMONIC_BASE: u32 = 100;
 pub const PREAMP_HARMONICS: usize = 8;
 
 /// Native Class-A preamp — asymmetric saturation with a Q-point bias,
 /// independent per-side shapers, and a 1073-style output DC blocker.
 pub struct NativePreamp {
-    pre: [saturate::preamp::ClassAPreamp; 2],
+    pre: [dsp::saturate::preamp::ClassAPreamp; 2],
     harmonics: [f32; PREAMP_HARMONICS],
     harmonics_dirty: bool,
     prepared: bool,
@@ -706,7 +706,7 @@ pub struct NativePreamp {
 impl NativePreamp {
     #[must_use]
     pub fn new(sample_rate: f64) -> Self {
-        let mk = || saturate::preamp::ClassAPreamp::new(sample_rate.max(1.0) as f32);
+        let mk = || dsp::saturate::preamp::ClassAPreamp::new(sample_rate.max(1.0) as f32);
         let mut p = Self {
             pre: [mk(), mk()],
             harmonics: [0.0; PREAMP_HARMONICS],
@@ -725,8 +725,8 @@ impl NativePreamp {
             match id {
                 0 => pre.drive = 10.0f32.powf(v.clamp(0.0, 24.0) / 20.0),
                 1 => pre.q_point = v.clamp(-1.0, 1.0),
-                2 => pre.positive = saturate::preamp::SideShaper::from_index(v as u32),
-                3 => pre.negative = saturate::preamp::SideShaper::from_index(v as u32),
+                2 => pre.positive = dsp::saturate::preamp::SideShaper::from_index(v as u32),
+                3 => pre.negative = dsp::saturate::preamp::SideShaper::from_index(v as u32),
                 4 => pre.mix = v.clamp(0.0, 1.0),
                 5 => pre.output_gain = 10.0f32.powf(v.clamp(-24.0, 24.0) / 20.0),
                 _ => {}
@@ -746,7 +746,7 @@ impl NativePreamp {
     /// Current measured harmonic spectrum (H1..H8, linear re H1).
     pub fn harmonics(&mut self) -> [f32; PREAMP_HARMONICS] {
         if self.harmonics_dirty {
-            saturate::preamp::analysis::harmonic_spectrum(&self.pre[0], &mut self.harmonics);
+            dsp::saturate::preamp::analysis::harmonic_spectrum(&self.pre[0], &mut self.harmonics);
             self.harmonics_dirty = false;
         }
         self.harmonics
@@ -947,15 +947,15 @@ pub const SATURATE_EQ_BASE: u32 = 200;
 use dsp_core::audio::biquad::{Biquad as SatBiquad, FilterType as SatFilterType};
 
 pub struct NativeSaturate {
-    pre: [saturate::preamp::ClassAPreamp; 2],
+    pre: [dsp::saturate::preamp::ClassAPreamp; 2],
     os: dsp_core::audio::oversampling::Oversampler,
     emph_lo: SatBiquad,
     emph_hi: SatBiquad,
     deemph_lo: SatBiquad,
     deemph_hi: SatBiquad,
     /// The emphasis EQ (full FTS-EQ band engine) + its inverse mirror.
-    emph_eq: eq::runtime::chain::EqChain,
-    deemph_eq: eq::runtime::chain::EqChain,
+    emph_eq: dsp::eq::runtime::chain::EqChain,
+    deemph_eq: dsp::eq::runtime::chain::EqChain,
     eq_state: [(bool, bool); EQ_BANDS],
     lf_split: SatBiquad,
     lf_low: SatBiquad,
@@ -989,7 +989,7 @@ impl NativeSaturate {
     pub fn new(sample_rate: f64) -> Self {
         use dsp_core::audio::oversampling::{OversampleQuality, OversampleRate};
         let sr = sample_rate.max(1.0);
-        let mk = || saturate::preamp::ClassAPreamp::new(sr as f32);
+        let mk = || dsp::saturate::preamp::ClassAPreamp::new(sr as f32);
         let mut sat = Self {
             pre: [mk(), mk()],
             os: dsp_core::audio::oversampling::Oversampler::new(
@@ -1001,7 +1001,7 @@ impl NativeSaturate {
             deemph_lo: SatBiquad::new(),
             deemph_hi: SatBiquad::new(),
             emph_eq: {
-                let mut c = eq::runtime::chain::EqChain::new();
+                let mut c = dsp::eq::runtime::chain::EqChain::new();
                 c.set_sample_rate(sr);
                 for _ in 0..EQ_BANDS {
                     let i = c
@@ -1015,7 +1015,7 @@ impl NativeSaturate {
                 c
             },
             deemph_eq: {
-                let mut c = eq::runtime::chain::EqChain::new();
+                let mut c = dsp::eq::runtime::chain::EqChain::new();
                 c.set_sample_rate(sr);
                 for _ in 0..EQ_BANDS {
                     let i = c
@@ -1107,12 +1107,12 @@ impl NativeSaturate {
             }
             2 => {
                 for p in &mut self.pre {
-                    p.positive = saturate::preamp::SideShaper::from_index(v as u32);
+                    p.positive = dsp::saturate::preamp::SideShaper::from_index(v as u32);
                 }
             }
             3 => {
                 for p in &mut self.pre {
-                    p.negative = saturate::preamp::SideShaper::from_index(v as u32);
+                    p.negative = dsp::saturate::preamp::SideShaper::from_index(v as u32);
                 }
             }
             4 => {
@@ -1188,7 +1188,7 @@ impl NativeSaturate {
     /// sag, tilt, and the model filters all move; every one of them
     /// remains individually overridable afterwards (= Custom).
     fn apply_model(&mut self, model: u32) {
-        use saturate::preamp::SideShaper as S;
+        use dsp::saturate::preamp::SideShaper as S;
         let sr = self.sample_rate;
         self.voice_on = (false, false);
         let (pos, neg, q, sag, tilt) = match model {
@@ -1242,7 +1242,7 @@ impl NativeSaturate {
 
     pub fn harmonics(&mut self) -> [f32; PREAMP_HARMONICS] {
         if self.harmonics_dirty {
-            saturate::preamp::analysis::harmonic_spectrum(&self.pre[0], &mut self.harmonics);
+            dsp::saturate::preamp::analysis::harmonic_spectrum(&self.pre[0], &mut self.harmonics);
             self.harmonics_dirty = false;
         }
         self.harmonics
@@ -1530,9 +1530,9 @@ pub const TUNE_CENTS_OFF_ID: u32 = 101;
 /// Hysteresis, per-PC bypass, flex-tune, A4 reference, buffer-size-independent retune slew,
 /// and PSOLA shifting. MIDI target modes take notes straight from `PluginEvents.midi`.
 pub struct NativeTune {
-    detector: tune::detect::YinDetector,
-    chain: pitch::chain::PitchChain,
-    scale: tune::correct::Scale,
+    detector: dsp::tune::detect::YinDetector,
+    chain: dsp::pitch::chain::PitchChain,
+    scale: dsp::tune::correct::Scale,
     key: u8,
     scale_kind: u32,
     retune_ms: f64,
@@ -1565,20 +1565,21 @@ impl NativeTune {
     #[must_use]
     pub fn new(sample_rate: f64) -> Self {
         let sr = sample_rate.max(1.0);
-        let detector = tune::detect::YinDetector::new(sr, tune::detect::YinConfig::default());
+        let detector =
+            dsp::tune::detect::YinDetector::new(sr, dsp::tune::detect::YinConfig::default());
         let window = detector.window();
-        let mut chain = pitch::chain::PitchChain::new();
+        let mut chain = dsp::pitch::chain::PitchChain::new();
         // PSOLA (pitch-synchronous — the right engine for voice), now
         // that its grain-boundary recentering is fixed: measured
         // +0.1/+1.3/+2.2 cents at -0.47/-2/+2 st, equal or better than
         // WSOLA (see autotune-plan.md status log).
-        chain.algorithm = pitch::chain::Algorithm::Psola;
+        chain.algorithm = dsp::pitch::chain::Algorithm::Psola;
         chain.semitones = 0.0;
         chain.mix = 1.0;
         Self {
             detector,
             chain,
-            scale: tune::correct::Scale::CHROMATIC,
+            scale: dsp::tune::correct::Scale::CHROMATIC,
             key: 0,
             scale_kind: 0,
             retune_ms: 40.0,
@@ -1605,11 +1606,11 @@ impl NativeTune {
 
     fn rebuild_scale(&mut self) {
         self.scale = match self.scale_kind {
-            1 => tune::correct::Scale::major(self.key),
-            2 => tune::correct::Scale::minor(self.key),
-            _ => tune::correct::Scale {
+            1 => dsp::tune::correct::Scale::major(self.key),
+            2 => dsp::tune::correct::Scale::minor(self.key),
+            _ => dsp::tune::correct::Scale {
                 root_pc: self.key,
-                ..tune::correct::Scale::CHROMATIC
+                ..dsp::tune::correct::Scale::CHROMATIC
             },
         };
     }
@@ -1732,8 +1733,10 @@ impl PluginInstance for NativeTune {
     }
     fn prepare(&mut self, sample_rate: f64, block_size: u32) -> Result<(), PluginError> {
         self.sample_rate = sample_rate.max(1.0);
-        self.detector =
-            tune::detect::YinDetector::new(self.sample_rate, tune::detect::YinConfig::default());
+        self.detector = dsp::tune::detect::YinDetector::new(
+            self.sample_rate,
+            dsp::tune::detect::YinConfig::default(),
+        );
         self.history = vec![0.0; self.detector.window()];
         self.hist_fill = 0;
         use dsp_core::audio::Processor;
@@ -2145,10 +2148,10 @@ const COMP_PARAMS: &[ParamSpec] = &[
     },
 ];
 
-/// Native Compressor block — wraps [`comp::ProC3Compressor`] (ProC3-style).
+/// Native Compressor block — wraps [`dsp::comp::ProC3Compressor`] (ProC3-style).
 /// Seeded with a musical default (−18 dB / 4:1).
 pub struct NativeComp {
-    comp: comp::ProC3Compressor,
+    comp: dsp::comp::ProC3Compressor,
     prepared: bool,
     /// Linear output gain (`makeup`, dB).
     makeup: f64,
@@ -2166,7 +2169,7 @@ pub struct NativeComp {
 impl NativeComp {
     #[must_use]
     pub fn new(sample_rate: f64) -> Self {
-        let mut comp = comp::ProC3Compressor::new(sample_rate.max(1.0));
+        let mut comp = dsp::comp::ProC3Compressor::new(sample_rate.max(1.0));
         comp.set_threshold(-18.0);
         comp.set_ratio(4.0);
         comp.set_attack_ms(10.0);
@@ -2401,18 +2404,18 @@ const LEVEL_PARAMS: &[ParamSpec] = &[
     },
 ];
 
-/// Native Leveler block — wraps [`level::VocalLeveler`], the realtime vocal chain.
+/// Native Leveler block — wraps [`dsp::level::VocalLeveler`], the realtime vocal chain.
 ///
 /// Gate → de-breath → ride → de-ess. The core is mono, so L/R each get their own leveler
 /// instance (independent state). Every stage parameter is an enumerable, macro/modulation-targetable
 /// [`PluginParamInfo`].
 pub struct NativeLevel {
-    left: level::VocalLeveler,
-    right: level::VocalLeveler,
-    gate: level::GateConfig,
-    debreath: level::DeBreathConfig,
-    rider: level::RiderConfig,
-    deess: level::DeEssConfig,
+    left: dsp::level::VocalLeveler,
+    right: dsp::level::VocalLeveler,
+    gate: dsp::level::GateConfig,
+    debreath: dsp::level::DeBreathConfig,
+    rider: dsp::level::RiderConfig,
+    deess: dsp::level::DeEssConfig,
     silence_db: f64,
     /// A param changed this block → re-push stage configs before processing.
     dirty: bool,
@@ -2422,11 +2425,11 @@ pub struct NativeLevel {
 impl NativeLevel {
     #[must_use]
     pub fn new(sample_rate: f64) -> Self {
-        let cfg = level::LevelerConfig::default();
+        let cfg = dsp::level::LevelerConfig::default();
         let sr = sample_rate.max(1.0);
         Self {
-            left: level::VocalLeveler::new(sr, cfg),
-            right: level::VocalLeveler::new(sr, cfg),
+            left: dsp::level::VocalLeveler::new(sr, cfg),
+            right: dsp::level::VocalLeveler::new(sr, cfg),
             gate: cfg.gate.unwrap_or_default(),
             debreath: cfg.debreath.unwrap_or_default(),
             rider: cfg.rider.unwrap_or_default(),
@@ -2437,13 +2440,13 @@ impl NativeLevel {
         }
     }
 
-    fn config(&self) -> level::LevelerConfig {
-        level::LevelerConfig {
+    fn config(&self) -> dsp::level::LevelerConfig {
+        dsp::level::LevelerConfig {
             gate: Some(self.gate),
             debreath: Some(self.debreath),
             rider: Some(self.rider),
             deess: Some(self.deess),
-            classify: level::LevelerConfig::default().classify,
+            classify: dsp::level::LevelerConfig::default().classify,
             silence_db: self.silence_db,
         }
     }
@@ -2500,8 +2503,8 @@ impl PluginInstance for NativeLevel {
     fn prepare(&mut self, sample_rate: f64, _block_size: u32) -> Result<(), PluginError> {
         let cfg = self.config();
         let sr = sample_rate.max(1.0);
-        self.left = level::VocalLeveler::new(sr, cfg);
-        self.right = level::VocalLeveler::new(sr, cfg);
+        self.left = dsp::level::VocalLeveler::new(sr, cfg);
+        self.right = dsp::level::VocalLeveler::new(sr, cfg);
         self.dirty = false;
         self.prepared = true;
         Ok(())
@@ -2839,7 +2842,7 @@ const REVERB_PARAMS: &[ParamSpec] = &[
     },
     // Chain-A tone/space controls (kept from the control-surface work,
     // renumbered above the MX block).
-    // Algorithm index (see reverb::AlgorithmType::ALL).
+    // Algorithm index (see dsp::reverb::AlgorithmType::ALL).
     ParamSpec {
         id: 39,
         name: "algorithm",
@@ -3334,7 +3337,7 @@ const REVERB_PARAMS: &[ParamSpec] = &[
     },
 ];
 
-/// Native Reverb block — wraps [`reverb::DualReverb`] (two full chains +
+/// Native Reverb block — wraps [`dsp::reverb::DualReverb`] (two full chains +
 /// `BigSky` MX dual routing; `Single` = chain A only, bit-compatible with
 /// the previous single-chain wrapper).
 ///
@@ -3396,7 +3399,7 @@ impl ParallelMix {
 }
 
 pub struct NativeReverb {
-    rev: reverb::DualReverb,
+    rev: dsp::reverb::DualReverb,
     /// Writes for chain B before it is built (`DualReverb` builds B only for
     /// a routing that plays it), in order — replayed onto it as it is.
     b_log: Vec<(u32, f64)>,
@@ -3411,16 +3414,16 @@ pub struct NativeReverb {
     /// them the Impulse live params would mark slots dirty and never
     /// re-prepare.
     #[cfg(not(target_arch = "wasm32"))]
-    reshaper_a: Option<reverb::ir::ImpulseReshaper>,
+    reshaper_a: Option<dsp::reverb::ir::ImpulseReshaper>,
     #[cfg(not(target_arch = "wasm32"))]
-    reshaper_b: Option<reverb::ir::ImpulseReshaper>,
+    reshaper_b: Option<dsp::reverb::ir::ImpulseReshaper>,
 }
 
 impl NativeReverb {
     #[must_use]
     pub fn new(_sample_rate: f64) -> Self {
-        let mut rev = reverb::DualReverb::new();
-        rev.a.set_algorithm(reverb::AlgorithmType::Hall);
+        let mut rev = dsp::reverb::DualReverb::new();
+        rev.a.set_algorithm(dsp::reverb::AlgorithmType::Hall);
         // Fully wet: single routing sums the dry itself (`ParallelMix`).
         rev.a.mix = 1.0;
         rev.a.params.decay = 0.45;
@@ -3470,7 +3473,7 @@ impl NativeReverb {
     /// With one chain the engine runs fully wet and the dry is summed in
     /// `process_block`; a dual routing keeps the engine's own crossfade.
     fn sync_mix(&mut self) {
-        self.rev.a.mix = if matches!(self.rev.routing, reverb::DualRouting::Single) {
+        self.rev.a.mix = if matches!(self.rev.routing, dsp::reverb::DualRouting::Single) {
             1.0
         } else {
             self.par.wet.min(1.0)
@@ -3482,9 +3485,10 @@ impl NativeReverb {
         // chain-scoped param on chain B (`r2_*` names, id − 100).
         match id {
             3 => {
-                self.rev.routing = reverb::DualRouting::from_index(v.round().max(0.0) as usize);
+                self.rev.routing =
+                    dsp::reverb::DualRouting::from_index(v.round().max(0.0) as usize);
                 // A routing that plays B builds it — here, a param write.
-                if self.rev.routing != reverb::DualRouting::Single {
+                if self.rev.routing != dsp::reverb::DualRouting::Single {
                     self.ensure_b();
                 }
             }
@@ -3525,9 +3529,9 @@ impl NativeReverb {
     /// One of B's params, as `set_engine` addresses it: the legacy dual
     /// block (4 algorithm, 5 decay, 6 mix, 8 pan — equivalent to
     /// r2_algorithm / r2_decay / r2_mix / r2_pan) or `r2_*` (id − 100).
-    fn apply_b(b: &mut reverb::ReverbChain, id: u32, v: f64) {
+    fn apply_b(b: &mut dsp::reverb::ReverbChain, id: u32, v: f64) {
         match id {
-            4 => b.set_algorithm(reverb::AlgorithmType::from_index(
+            4 => b.set_algorithm(dsp::reverb::AlgorithmType::from_index(
                 v.round().max(0.0) as usize
             )),
             5 => {
@@ -3549,7 +3553,7 @@ impl NativeReverb {
         }
         let log = std::mem::take(&mut self.b_log);
         let b = self.rev.b_mut();
-        b.set_algorithm(reverb::AlgorithmType::Plate);
+        b.set_algorithm(dsp::reverb::AlgorithmType::Plate);
         b.mix = 0.08;
         b.params.decay = 0.45;
         b.update_params();
@@ -3568,7 +3572,7 @@ impl NativeReverb {
         if self.reshaper_b.is_some() || self.rev.b().is_none() {
             return;
         }
-        let (reshaper, rx) = reverb::ir::ImpulseReshaper::new();
+        let (reshaper, rx) = dsp::reverb::ir::ImpulseReshaper::new();
         let b = self.rev.b_mut();
         b.set_prepared_ir_receiver(rx);
         b.set_reshape_sender(reshaper.sender());
@@ -3579,7 +3583,7 @@ impl NativeReverb {
     /// Apply a chain-scoped param (everything in `REVERB_PARAMS` except
     /// the dual block) to one `ReverbChain`. Chain A hears these at
     /// their base ids, chain B at id + 100 (`r2_*`).
-    fn set_chain(c: &mut reverb::ReverbChain, id: u32, v: f64) {
+    fn set_chain(c: &mut dsp::reverb::ReverbChain, id: u32, v: f64) {
         match id {
             0 => c.mix = v.clamp(0.0, 1.0),
             92 => c.wet_gain_db = v.clamp(-36.0, 36.0),
@@ -3614,9 +3618,9 @@ impl NativeReverb {
             }
             12 => {
                 c.impulse.tail = if v >= 0.5 {
-                    reverb::ImpulseTail::Gate
+                    dsp::reverb::ImpulseTail::Gate
                 } else {
-                    reverb::ImpulseTail::Envelope
+                    dsp::reverb::ImpulseTail::Envelope
                 };
                 c.update_params();
             }
@@ -3630,9 +3634,9 @@ impl NativeReverb {
             }
             15 => {
                 c.impulse.direction = if v >= 0.5 {
-                    reverb::ImpulseDirection::Reverse
+                    dsp::reverb::ImpulseDirection::Reverse
                 } else {
-                    reverb::ImpulseDirection::Forward
+                    dsp::reverb::ImpulseDirection::Forward
                 };
                 c.update_params();
             }
@@ -3658,7 +3662,7 @@ impl NativeReverb {
             }
             21 => {
                 c.shimmer.feedback_mode =
-                    reverb::ShimmerFeedbackMode::from_index(v.round().max(0.0) as usize);
+                    dsp::reverb::ShimmerFeedbackMode::from_index(v.round().max(0.0) as usize);
                 c.update_params();
             }
             22 => {
@@ -3703,9 +3707,9 @@ impl NativeReverb {
             }
             32 => {
                 c.chorale.voice = if v >= 0.5 {
-                    reverb::ChoirVoice::Baritone
+                    dsp::reverb::ChoirVoice::Baritone
                 } else {
-                    reverb::ChoirVoice::Tenor
+                    dsp::reverb::ChoirVoice::Tenor
                 };
                 c.update_params();
             }
@@ -3715,9 +3719,9 @@ impl NativeReverb {
             }
             34 => {
                 c.voice = if v >= 0.5 {
-                    reverb::ReverbVoice::Classic
+                    dsp::reverb::ReverbVoice::Classic
                 } else {
-                    reverb::ReverbVoice::Mx
+                    dsp::reverb::ReverbVoice::Mx
                 };
                 c.update_params();
             }
@@ -3731,9 +3735,9 @@ impl NativeReverb {
             }
             37 => {
                 c.hall.swell_type = if v >= 0.5 {
-                    reverb::SwellType::WetPlusDry
+                    dsp::reverb::SwellType::WetPlusDry
                 } else {
-                    reverb::SwellType::Wet
+                    dsp::reverb::SwellType::Wet
                 };
                 c.update_params();
             }
@@ -3741,7 +3745,7 @@ impl NativeReverb {
                 c.set_size_index(v.round().max(0.0) as usize);
             }
             39 => {
-                c.set_algorithm(reverb::AlgorithmType::from_index(
+                c.set_algorithm(dsp::reverb::AlgorithmType::from_index(
                     v.round().max(0.0) as usize
                 ));
                 c.update_params();
@@ -3762,33 +3766,36 @@ impl NativeReverb {
             44 => c.freeze = v > 0.5,
             45 => {
                 c.infinite_mode = match v.round().max(0.0) as usize {
-                    1 => reverb::InfiniteMode::Infinite,
-                    2 => reverb::InfiniteMode::Off,
-                    _ => reverb::InfiniteMode::Freeze,
+                    1 => dsp::reverb::InfiniteMode::Infinite,
+                    2 => dsp::reverb::InfiniteMode::Off,
+                    _ => dsp::reverb::InfiniteMode::Freeze,
                 }
             }
             46 => {
-                c.chamber.color = reverb::ChamberColor::from_index(v.round().max(0.0) as usize);
+                c.chamber.color =
+                    dsp::reverb::ChamberColor::from_index(v.round().max(0.0) as usize);
                 c.update_params();
             }
             47 => {
-                c.magneto.heads = reverb::MagnetoHeads::from_index(v.round().max(0.0) as usize);
+                c.magneto.heads =
+                    dsp::reverb::MagnetoHeads::from_index(v.round().max(0.0) as usize);
                 c.update_params();
             }
             48 => {
                 c.magneto.spacing = if v > 0.5 {
-                    reverb::MagnetoSpacing::Uneven
+                    dsp::reverb::MagnetoSpacing::Uneven
                 } else {
-                    reverb::MagnetoSpacing::Even
+                    dsp::reverb::MagnetoSpacing::Even
                 };
                 c.update_params();
             }
             49 => {
-                c.nonlinear.shape = Some(reverb::NlShape::from_index(v.round().max(0.0) as usize));
+                c.nonlinear.shape =
+                    Some(dsp::reverb::NlShape::from_index(v.round().max(0.0) as usize));
                 c.update_params();
             }
             50 => {
-                c.spring.dwell = reverb::SpringDwell::from_index(v.round().max(0.0) as usize);
+                c.spring.dwell = dsp::reverb::SpringDwell::from_index(v.round().max(0.0) as usize);
                 c.update_params();
             }
             51 => {
@@ -3800,13 +3807,14 @@ impl NativeReverb {
                 c.update_params();
             }
             54 => {
-                c.chorale.vowel =
-                    Some(reverb::ChoraleVowel::from_index(v.round().max(0.0) as usize));
+                c.chorale.vowel = Some(dsp::reverb::ChoraleVowel::from_index(
+                    v.round().max(0.0) as usize
+                ));
                 c.update_params();
             }
             55 => {
                 c.chorale.resonance =
-                    reverb::ChoraleResonance::from_index(v.round().max(0.0) as usize);
+                    dsp::reverb::ChoraleResonance::from_index(v.round().max(0.0) as usize);
                 c.update_params();
             }
             56 => {
@@ -3831,8 +3839,8 @@ impl NativeReverb {
                     1 => band.freq_hz = v.clamp(20.0, 20_000.0),
                     2 => {
                         band.rate = v.clamp(
-                            reverb::algorithm::DECAY_RATE_MIN,
-                            reverb::algorithm::DECAY_RATE_MAX,
+                            dsp::reverb::algorithm::DECAY_RATE_MIN,
+                            dsp::reverb::algorithm::DECAY_RATE_MAX,
                         )
                     }
                     _ => band.q = v.clamp(0.1, 10.0),
@@ -3889,7 +3897,9 @@ impl NativeReverb {
         } else {
             l.clone()
         };
-        self.rev.a.set_algorithm(reverb::AlgorithmType::Convolution);
+        self.rev
+            .a
+            .set_algorithm(dsp::reverb::AlgorithmType::Convolution);
         let ok = self.rev.a.load_convolution_ir(&l, &r);
         self.rev.a.update_params();
         ok
@@ -3932,7 +3942,7 @@ impl PluginInstance for NativeReverb {
         0
     }
     fn prepare(&mut self, sample_rate: f64, block_size: u32) -> Result<(), PluginError> {
-        if self.rev.routing != reverb::DualRouting::Single {
+        if self.rev.routing != dsp::reverb::DualRouting::Single {
             self.ensure_b();
         }
         self.rev.update(AudioConfig {
@@ -3947,7 +3957,7 @@ impl PluginInstance for NativeReverb {
         #[cfg(not(target_arch = "wasm32"))]
         {
             if self.reshaper_a.is_none() {
-                let (reshaper, rx) = reverb::ir::ImpulseReshaper::new();
+                let (reshaper, rx) = dsp::reverb::ir::ImpulseReshaper::new();
                 self.rev.a.set_prepared_ir_receiver(rx);
                 self.rev.a.set_reshape_sender(reshaper.sender());
                 self.rev.a.set_ir_trash_sender(reshaper.trash_sender());
@@ -3985,7 +3995,7 @@ impl PluginInstance for NativeReverb {
             out_r,
             |l, r| rev.process(l, r),
         );
-        if matches!(self.rev.routing, reverb::DualRouting::Single) {
+        if matches!(self.rev.routing, dsp::reverb::DualRouting::Single) {
             self.par.apply(in_l, in_r, out_l, out_r);
         }
         fx_meter::publish(fx_meter::REVERB, fx_meter::added(in_l, in_r, out_l, out_r));
@@ -4022,7 +4032,7 @@ const DELAY_PARAMS: &[ParamSpec] = &[
         max: 0.95,
         default: 0.30,
     },
-    // TimeLine MX parity params (style index: see delay::DelayStyle).
+    // TimeLine MX parity params (style index: see dsp::delay::DelayStyle).
     ParamSpec {
         id: 3,
         name: "style",
@@ -4499,13 +4509,13 @@ const DELAY_PARAMS: &[ParamSpec] = &[
     },
 ];
 
-/// Native Delay block — wraps [`delay::DualDelay`] (two full chains +
+/// Native Delay block — wraps [`dsp::delay::DualDelay`] (two full chains +
 /// `TimeLine` MX 1+2 routing; `Single` = chain A only, bit-compatible with
 /// the previous single-chain wrapper).
 ///
 /// Defaults to a subtle clean quarter-note-ish delay with modest feedback.
 pub struct NativeDelay {
-    dly: delay::DualDelay,
+    dly: dsp::delay::DualDelay,
     prepared: bool,
     /// Delay A in parallel with the dry (see [`ParallelMix`]).
     par: ParallelMix,
@@ -4518,16 +4528,16 @@ pub struct NativeDelay {
 impl NativeDelay {
     #[must_use]
     pub fn new(_sample_rate: f64) -> Self {
-        let mut dly = delay::DualDelay::new();
+        let mut dly = dsp::delay::DualDelay::new();
         let chain = &mut dly.a;
-        chain.set_style(delay::DelayStyle::Clean);
+        chain.set_style(dsp::delay::DelayStyle::Clean);
         chain.mix = 0.08;
         chain.delay_l.time_ms = 400.0;
         chain.delay_r.time_ms = 400.0;
         chain.delay_l.feedback = 0.30;
         chain.delay_r.feedback = 0.30;
         // B's, kept until a routing plays it (see `DualDelay`).
-        dly.set_b_style(delay::DelayStyle::Clean);
+        dly.set_b_style(dsp::delay::DelayStyle::Clean);
         dly.set_b_mix(0.08);
         dly.set_b_feedback(0.30);
         // Fully wet: single routing sums the dry itself (`ParallelMix`).
@@ -4575,7 +4585,7 @@ impl NativeDelay {
     /// With one delay the engine runs fully wet and the dry is summed in
     /// `process_block`; a dual routing keeps the engine's own crossfade.
     fn sync_mix(&mut self) {
-        self.dly.a.mix = if matches!(self.dly.routing, delay::DualRouting::Single) {
+        self.dly.a.mix = if matches!(self.dly.routing, dsp::delay::DualRouting::Single) {
             1.0
         } else {
             self.par.wet.min(1.0)
@@ -4595,12 +4605,14 @@ impl NativeDelay {
                 a.delay_l.feedback = v;
                 a.delay_r.feedback = v;
             }
-            3 => a.set_style(delay::DelayStyle::from_index(v.round().max(0.0) as usize)),
+            3 => a.set_style(dsp::delay::DelayStyle::from_index(
+                v.round().max(0.0) as usize
+            )),
             4 => a.swell_time_s = v,
             5 => a.freeze = v > 0.5,
             6 => a.tempo_bpm = if v > 0.0 { Some(v) } else { None },
             7 => {
-                let div = delay::TapDivision::from_index(v.round().max(0.0) as usize);
+                let div = dsp::delay::TapDivision::from_index(v.round().max(0.0) as usize);
                 a.tap_div_l = div;
                 a.tap_div_r = div;
             }
@@ -4618,8 +4630,8 @@ impl NativeDelay {
                 a.high_cut_hz = hz;
             }
             9 => a.repeat_dynamics = v > 0.5,
-            35 => a.tap_div_l = delay::TapDivision::from_index(v.round().max(0.0) as usize),
-            36 => a.tap_div_r = delay::TapDivision::from_index(v.round().max(0.0) as usize),
+            35 => a.tap_div_l = dsp::delay::TapDivision::from_index(v.round().max(0.0) as usize),
+            36 => a.tap_div_r = dsp::delay::TapDivision::from_index(v.round().max(0.0) as usize),
             37 => {
                 let p = v.clamp(-1.0, 1.0);
                 a.pan_l = p;
@@ -4644,19 +4656,19 @@ impl NativeDelay {
             }
             14 => {
                 let i = v.round().max(0.0) as usize;
-                let interval = if i >= delay::IceInterval::MENU_LEN {
-                    delay::IceInterval::Free
+                let interval = if i >= dsp::delay::IceInterval::MENU_LEN {
+                    dsp::delay::IceInterval::Free
                 } else {
-                    delay::IceInterval::from_index(i)
+                    dsp::delay::IceInterval::from_index(i)
                 };
                 a.delay_l.pitch_interval = interval;
                 a.delay_r.pitch_interval = interval;
             }
             15 => {
                 let slice = match v.round().max(0.0) as usize {
-                    0 => Some(delay::IceSlice::Short),
-                    1 => Some(delay::IceSlice::Medium),
-                    2 => Some(delay::IceSlice::Long),
+                    0 => Some(dsp::delay::IceSlice::Short),
+                    1 => Some(dsp::delay::IceSlice::Medium),
+                    2 => Some(dsp::delay::IceSlice::Long),
                     _ => None,
                 };
                 a.delay_l.pitch_slice = slice;
@@ -4667,31 +4679,31 @@ impl NativeDelay {
                 a.delay_r.pitch_blend = v;
             }
             // A routing that plays B builds it here (a param write).
-            17 => self
-                .dly
-                .set_routing(delay::DualRouting::from_index(v.round().max(0.0) as usize)),
-            18 => self
-                .dly
-                .set_b_style(delay::DelayStyle::from_index(v.round().max(0.0) as usize)),
+            17 => self.dly.set_routing(dsp::delay::DualRouting::from_index(
+                v.round().max(0.0) as usize
+            )),
+            18 => self.dly.set_b_style(dsp::delay::DelayStyle::from_index(
+                v.round().max(0.0) as usize
+            )),
             19 => self.dly.set_b_time_ms(v),
             20 => self.dly.set_b_feedback(v),
             21 => self.dly.set_b_mix(v.clamp(0.0, 1.0)),
             22 => {
                 let shape = match v.round().max(0.0) as usize {
-                    1 => delay::GrainShape::Swell,
-                    2 => delay::GrainShape::SoftPluck,
-                    3 => delay::GrainShape::Pluck,
-                    4 => delay::GrainShape::Bounce,
-                    _ => delay::GrainShape::Soft,
+                    1 => dsp::delay::GrainShape::Swell,
+                    2 => dsp::delay::GrainShape::SoftPluck,
+                    3 => dsp::delay::GrainShape::Pluck,
+                    4 => dsp::delay::GrainShape::Bounce,
+                    _ => dsp::delay::GrainShape::Soft,
                 };
                 a.delay_l.spectral_shape = shape;
                 a.delay_r.spectral_shape = shape;
             }
             23 => {
                 let dir = match v.round().max(0.0) as usize {
-                    1 => delay::GrainDirection::Reverse,
-                    2 => delay::GrainDirection::Both,
-                    _ => delay::GrainDirection::Forward,
+                    1 => dsp::delay::GrainDirection::Reverse,
+                    2 => dsp::delay::GrainDirection::Both,
+                    _ => dsp::delay::GrainDirection::Forward,
                 };
                 a.delay_l.spectral_direction = dir;
                 a.delay_r.spectral_direction = dir;
@@ -4721,7 +4733,7 @@ impl NativeDelay {
                     1.0 / 32.0,
                 ];
                 let i = (v.round().max(0.0) as usize).min(SYNCED_STEPS.len() - 1);
-                let d = delay::DensityMode::Synced(SYNCED_STEPS[i]);
+                let d = dsp::delay::DensityMode::Synced(SYNCED_STEPS[i]);
                 a.delay_l.spectral_density = d;
                 a.delay_r.spectral_density = d;
             }
@@ -4729,7 +4741,7 @@ impl NativeDelay {
                 // >= 6 ms switches to free-running density; 0 returns
                 // to the synced default (set via id 24).
                 if v >= 6.0 {
-                    let d = delay::DensityMode::FreeHz(1000.0 / v);
+                    let d = dsp::delay::DensityMode::FreeHz(1000.0 / v);
                     a.delay_l.spectral_density = d;
                     a.delay_r.spectral_density = d;
                 }
@@ -4773,7 +4785,7 @@ impl NativeDelay {
                 a.delay_r.lofi_vinyl = v;
             }
             34 => {
-                let shape = delay::LoFiFilterShape::from_index(v.round().max(0.0) as usize);
+                let shape = dsp::delay::LoFiFilterShape::from_index(v.round().max(0.0) as usize);
                 a.delay_l.lofi_filter_shape = shape;
                 a.delay_r.lofi_filter_shape = shape;
             }
@@ -4816,10 +4828,10 @@ impl NativeDelay {
             43 => a.ducker.release_ms = v.clamp(0.05, 1.0) * 1000.0,
             44 => {
                 let spacing = match v.round().max(0.0) as usize {
-                    0 => delay::DrumSpacing::Even,
-                    1 => delay::DrumSpacing::Triplet,
-                    3 => delay::DrumSpacing::Silver,
-                    _ => delay::DrumSpacing::Golden,
+                    0 => dsp::delay::DrumSpacing::Even,
+                    1 => dsp::delay::DrumSpacing::Triplet,
+                    3 => dsp::delay::DrumSpacing::Silver,
+                    _ => dsp::delay::DrumSpacing::Golden,
                 };
                 a.delay_l.set_drum_spacing(spacing);
                 a.delay_r.set_drum_spacing(spacing);
@@ -4830,16 +4842,16 @@ impl NativeDelay {
             }
             46 => {
                 let heads = match v.round().max(0.0) as usize {
-                    1 => delay::OilCanHeads::Short,
-                    2 => delay::OilCanHeads::Both,
-                    _ => delay::OilCanHeads::Long,
+                    1 => dsp::delay::OilCanHeads::Short,
+                    2 => dsp::delay::OilCanHeads::Both,
+                    _ => dsp::delay::OilCanHeads::Long,
                 };
                 a.delay_l.oilcan_heads = heads;
                 a.delay_r.oilcan_heads = heads;
             }
             47 => a.output_level = v.clamp(0.0, 1.0),
             48 => {
-                let shape = delay::FilterLfoShape::from_index(v.round().max(0.0) as usize);
+                let shape = dsp::delay::FilterLfoShape::from_index(v.round().max(0.0) as usize);
                 a.delay_l.filter_lfo_shape = shape;
                 a.delay_r.filter_lfo_shape = shape;
             }
@@ -4861,9 +4873,9 @@ impl NativeDelay {
             }
             53 => {
                 let loc = if v > 0.5 {
-                    delay::FilterLocation::Post
+                    dsp::delay::FilterLocation::Post
                 } else {
-                    delay::FilterLocation::Pre
+                    dsp::delay::FilterLocation::Pre
                 };
                 a.delay_l.filter_location = loc;
                 a.delay_r.filter_location = loc;
@@ -4885,18 +4897,18 @@ impl NativeDelay {
             }
             57 => {
                 let mode = if v > 0.5 {
-                    delay::FeedbackMode::Parallel
+                    dsp::delay::FeedbackMode::Parallel
                 } else {
-                    delay::FeedbackMode::Input
+                    dsp::delay::FeedbackMode::Input
                 };
                 a.delay_l.multitap_feedback_mode = mode;
                 a.delay_r.multitap_feedback_mode = mode;
             }
             58 => {
                 let grid = match v.round().max(0.0) as usize {
-                    1 => delay::TapGrid::Triplet,
-                    2 => delay::TapGrid::Off,
-                    _ => delay::TapGrid::Sixteenth,
+                    1 => dsp::delay::TapGrid::Triplet,
+                    2 => dsp::delay::TapGrid::Off,
+                    _ => dsp::delay::TapGrid::Sixteenth,
                 };
                 a.delay_l.multitap_grid = grid;
                 a.delay_r.multitap_grid = grid;
@@ -4907,11 +4919,11 @@ impl NativeDelay {
             }
             59 => {
                 let shape = match v.round().max(0.0) as usize {
-                    0 => delay::FilterLfoShape::TrianglePos,
-                    1 => delay::FilterLfoShape::SquarePos,
-                    3 => delay::FilterLfoShape::Ramp,
-                    4 => delay::FilterLfoShape::Saw,
-                    _ => delay::FilterLfoShape::SinePos,
+                    0 => dsp::delay::FilterLfoShape::TrianglePos,
+                    1 => dsp::delay::FilterLfoShape::SquarePos,
+                    3 => dsp::delay::FilterLfoShape::Ramp,
+                    4 => dsp::delay::FilterLfoShape::Saw,
+                    _ => dsp::delay::FilterLfoShape::SinePos,
                 };
                 a.delay_l.filter_trem_shape = shape;
                 a.delay_r.filter_trem_shape = shape;
@@ -4997,7 +5009,7 @@ impl PluginInstance for NativeDelay {
             out_r,
             |l, r| dly.process(l, r),
         );
-        if matches!(self.dly.routing, delay::DualRouting::Single) {
+        if matches!(self.dly.routing, dsp::delay::DualRouting::Single) {
             self.par.apply(in_l, in_r, out_l, out_r);
         }
         fx_meter::publish(fx_meter::DELAY, fx_meter::added(in_l, in_r, out_l, out_r));
@@ -5010,8 +5022,8 @@ impl PluginInstance for NativeDelay {
 
 // ── Modulation (chorus / flanger / vibrato) ────────────────────────────────
 
-use modulation::chorus::chain::ChorusChain;
-use modulation::chorus::engine::EffectType;
+use dsp::modulation::chorus::chain::ChorusChain;
+use dsp::modulation::chorus::engine::EffectType;
 
 const MOD_PARAMS: &[ParamSpec] = &[
     ParamSpec {
@@ -5126,7 +5138,7 @@ impl NativeMod {
             // write), then crossfades to it.
             3 => self
                 .ch
-                .set_engine(modulation::chorus::engine::EngineType::from_index(
+                .set_engine(dsp::modulation::chorus::engine::EngineType::from_index(
                     v.round().max(0.0) as usize,
                 )),
             4 => self.ch.color = v,
@@ -5210,8 +5222,8 @@ impl PluginInstance for NativeMod {
 
 // ── Tremolo ────────────────────────────────────────────────────────────────
 
-use modulation::trem::chain::TremChain;
-use modulation::trem::tremolo::TremMode;
+use dsp::modulation::trem::chain::TremChain;
+use dsp::modulation::trem::tremolo::TremMode;
 
 const TREM_PARAMS: &[ParamSpec] = &[
     ParamSpec {
@@ -5262,7 +5274,8 @@ impl NativeTrem {
         tr.set_depth(0.5);
         // The chain defaults to transport-synced triggering, but the rig
         // has no transport — the LFO would freeze. Free-run at 4 Hz.
-        tr.modulator.trigger.mode = modulation::trem::fts_modulation::trigger::TriggerMode::Free;
+        tr.modulator.trigger.mode =
+            dsp::modulation::trem::fts_modulation::trigger::TriggerMode::Free;
         tr.modulator.trigger.sync_index = 0;
         tr.modulator.trigger.rate_hz = 4.0;
         tr.mix = 1.0;
@@ -5281,7 +5294,7 @@ impl NativeTrem {
             2 => {
                 // Free-running rate: force the trigger engine out of sync.
                 self.tr.modulator.trigger.mode =
-                    modulation::trem::fts_modulation::trigger::TriggerMode::Free;
+                    dsp::modulation::trem::fts_modulation::trigger::TriggerMode::Free;
                 self.tr.modulator.trigger.sync_index = 0;
                 self.tr.modulator.trigger.rate_hz = v.max(0.01);
             }
@@ -5444,7 +5457,7 @@ const PITCH_PARAMS: &[ParamSpec] = &[
 ];
 
 /// Native Pitch block — a stereo pitch shifter over pitch-dsp's
-/// [`PitchChain`](pitch::chain::PitchChain), one per channel.
+/// [`PitchChain`](dsp::pitch::chain::PitchChain), one per channel.
 ///
 /// Engine 0 (default) is the phase-locked phase vocoder (`Spectral`): the
 /// only engine that is clean on chords and sustained notes alike —
@@ -5466,14 +5479,14 @@ const PITCH_PARAMS: &[ParamSpec] = &[
 /// rig the player hears the dry note on time and the shifted voice trails
 /// it (as on a harmonizer pedal). At a different pitch the two do not comb.
 pub struct NativePitch {
-    chain_l: pitch::chain::PitchChain,
-    chain_r: pitch::chain::PitchChain,
+    chain_l: dsp::pitch::chain::PitchChain,
+    chain_r: dsp::pitch::chain::PitchChain,
     /// Voice B's shifters — processed only while `b_level` > 0, and built
     /// only once it is: each chain holds only the engine it plays, and a
     /// rig prepares a pitch block in every patch, mostly with B silent.
-    voice_b: Option<Box<[pitch::chain::PitchChain; 2]>>,
+    voice_b: Option<Box<[dsp::pitch::chain::PitchChain; 2]>>,
     /// Voice B's settings, kept for when it is built.
-    algorithm: pitch::chain::Algorithm,
+    algorithm: dsp::pitch::chain::Algorithm,
     live: bool,
     b_semitones: f64,
     sample_rate: f64,
@@ -5498,7 +5511,7 @@ impl NativePitch {
     #[must_use]
     pub fn new(sample_rate: f64) -> Self {
         let mk = || {
-            let mut c = pitch::chain::PitchChain::only(pitch::chain::Algorithm::Spectral);
+            let mut c = dsp::pitch::chain::PitchChain::only(dsp::pitch::chain::Algorithm::Spectral);
             c.live = false;
             c.mix = 1.0;
             c
@@ -5507,7 +5520,7 @@ impl NativePitch {
             chain_l: mk(),
             chain_r: mk(),
             voice_b: None,
-            algorithm: pitch::chain::Algorithm::Spectral,
+            algorithm: dsp::pitch::chain::Algorithm::Spectral,
             live: false,
             b_semitones: -12.0,
             sample_rate,
@@ -5536,7 +5549,7 @@ impl NativePitch {
             return;
         }
         let mk = || {
-            let mut c = pitch::chain::PitchChain::only(self.algorithm);
+            let mut c = dsp::pitch::chain::PitchChain::only(self.algorithm);
             c.live = self.live;
             c.mix = 1.0;
             c.semitones = self.b_semitones;
@@ -5560,7 +5573,7 @@ impl NativePitch {
     }
 
     fn set(&mut self, id: u32, v: f64) {
-        use pitch::chain::Algorithm;
+        use dsp::pitch::chain::Algorithm;
         match id {
             0 => {
                 self.semitones = v.clamp(-24.0, 24.0);
