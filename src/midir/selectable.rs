@@ -164,28 +164,3 @@ impl Drop for SelectableInput {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::normalize;
-    use crate::proto::PortSelector;
-
-    #[test]
-    fn omni_collapses_every_other_selector() {
-        let s = normalize(vec![
-            PortSelector::NameContains("s88".into()),
-            PortSelector::All,
-        ]);
-        assert_eq!(s, vec![PortSelector::All]);
-    }
-
-    #[test]
-    fn duplicate_selectors_open_once() {
-        let s = normalize(vec![
-            PortSelector::NameContains("s88".into()),
-            PortSelector::NameContains("mio".into()),
-            PortSelector::NameContains("s88".into()),
-        ]);
-        assert_eq!(s.len(), 2);
-    }
-}

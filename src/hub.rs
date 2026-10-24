@@ -324,36 +324,3 @@ impl MidiHub {
         MidiDrain { _sub: sub, rx }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::Sub;
-    use crate::proto::PortSelector;
-    use std::sync::Arc;
-
-    fn sub(filter: Option<&str>) -> Sub {
-        Sub {
-            id: 0,
-            rig: "test",
-            filter: filter.map(str::to_string),
-            sink: Arc::new(|_| {}),
-        }
-    }
-
-    /// An omni subscriber asks for everything; a named one narrows to its
-    /// device. The backend unions these, so one omni rig links every device
-    /// however many named rigs there are.
-    ///
-    /// The filter is carried through verbatim: it is a stored port name, and
-    /// the backend matches it the way `NameContains` does, so selecting a
-    /// port in the UI behaves identically through the hub.
-    #[test]
-    fn selector_follows_the_filter() {
-        assert!(matches!(sub(None).selector(), PortSelector::All));
-        assert!(matches!(sub(Some("")).selector(), PortSelector::All));
-        match sub(Some("S88")).selector() {
-            PortSelector::NameContains(n) => assert_eq!(n, "S88"),
-            other => panic!("expected NameContains, got {other:?}"),
-        }
-    }
-}

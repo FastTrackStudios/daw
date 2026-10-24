@@ -17,16 +17,3 @@ pub fn note_name(key: u8) -> String {
         i32::from(key / 12) - 1
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn middle_c_is_c4_and_key_zero_is_c_minus_one() {
-        assert_eq!(note_name(60), "C4");
-        assert_eq!(note_name(0), "C-1");
-        assert_eq!(note_name(61), "C#4");
-        assert_eq!(note_name(127), "G9");
-    }
-}

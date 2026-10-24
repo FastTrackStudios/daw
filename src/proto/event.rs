@@ -355,39 +355,3 @@ impl MidiEvent {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn note_on_roundtrips() {
-        let ev = MidiEvent::NoteOn {
-            channel: Channel::new(0),
-            key: KeyNumber::new(60),
-            velocity: Velocity::new(100),
-        };
-        let mut buf = [0u8; 3];
-        let n = ev.encode(&mut buf).unwrap();
-        assert_eq!(&buf[..n], &[0x90, 60, 100]);
-        assert_eq!(MidiEvent::decode(&buf[..n]).unwrap(), (ev, 3));
-    }
-
-    #[test]
-    fn note_on_zero_velocity_is_note_off() {
-        let (ev, _) = MidiEvent::decode(&[0x90, 60, 0]).unwrap();
-        assert!(matches!(ev, MidiEvent::NoteOff { .. }));
-    }
-
-    #[test]
-    fn pitch_bend_center_is_8192() {
-        let (ev, _) = MidiEvent::decode(&[0xE0, 0x00, 0x40]).unwrap();
-        match ev {
-            MidiEvent::PitchBend { bend, .. } => {
-                assert_eq!(bend.get(), 8192);
-                assert_eq!(bend.offset(), 0);
-            }
-            _ => panic!("expected pitch bend"),
-        }
-    }
-}

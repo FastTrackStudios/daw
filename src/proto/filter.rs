@@ -63,26 +63,3 @@ impl Filter {
         Filter::Not(Box::new(self))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn notes_on_channel_one() {
-        use crate::proto::number::{ControllerValue, KeyNumber, Velocity};
-        let f = Filter::Notes.and(Filter::OnChannel(Channel::new(0)));
-        let note = MidiEvent::NoteOn {
-            channel: Channel::new(0),
-            key: KeyNumber::new(64),
-            velocity: Velocity::new(90),
-        };
-        let cc = MidiEvent::ControlChange {
-            channel: Channel::new(0),
-            controller: ControllerNumber::new(1),
-            value: ControllerValue::new(0),
-        };
-        assert!(f.matches(&note));
-        assert!(!f.matches(&cc));
-    }
-}

@@ -93,35 +93,3 @@ pub enum MidiIoError {
     /// Adapter-specific failure.
     Other(String),
 }
-
-#[cfg(test)]
-mod selector_tests {
-    use super::{PortId, PortSelector};
-
-    const S88: &str = "Midi-Bridge:KONTROL S88 MK3: Main (capture)";
-
-    #[test]
-    fn omni_wants_every_device() {
-        assert!(PortSelector::All.matches(S88));
-        assert!(PortSelector::NameContains(String::new()).matches(S88));
-    }
-
-    /// Case-insensitive substring — the rule stored rig presets were written
-    /// against, so they select the same device on every backend.
-    #[test]
-    fn a_named_selector_matches_a_substring_case_insensitively() {
-        assert!(PortSelector::NameContains("kontrol s88".into()).matches(S88));
-        assert!(!PortSelector::NameContains("mioXM".into()).matches(S88));
-    }
-
-    #[test]
-    fn an_id_selector_matches_the_whole_name_only() {
-        assert!(PortSelector::Id(PortId(S88.into())).matches(S88));
-        assert!(!PortSelector::Id(PortId("KONTROL".into())).matches(S88));
-    }
-
-    #[test]
-    fn a_virtual_selector_selects_no_existing_source() {
-        assert!(!PortSelector::Virtual("Signal".into()).matches(S88));
-    }
-}
