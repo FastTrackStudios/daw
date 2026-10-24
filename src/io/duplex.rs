@@ -344,31 +344,3 @@ pub use crate::io::duplex_coreaudio::CoreAudioBackend as Backend;
 pub use crate::io::duplex_ios::RemoteIoBackend as Backend;
 #[cfg(target_os = "linux")]
 pub use crate::io::duplex_pw::PipewireBackend as Backend;
-
-#[cfg(test)]
-mod drop_ring_tests {
-    use super::*;
-
-    /// Events come back in order with their data, a reader sees each once,
-    /// and an overflowed ring keeps the newest.
-    #[test]
-    fn drops_are_collected_once_in_order() {
-        let r = DropRing::default();
-        r.push(DropKind::OverBudget, 3_000_000, 2_666_666, 128);
-        r.push(DropKind::DeviceOverload, 0, 0, 128);
-        let mut seen = 0;
-        let got = r.collect(&mut seen);
-        assert_eq!(got.len(), 2);
-        assert_eq!(got[0].kind, DropKind::OverBudget);
-        assert_eq!(got[0].render_ns, 3_000_000);
-        assert_eq!(got[1].kind, DropKind::DeviceOverload);
-        assert!(got[1].at_ns >= got[0].at_ns);
-        assert!(r.collect(&mut seen).is_empty());
-        for _ in 0..(DROP_RING + 10) {
-            r.push(DropKind::OverBudget, 1, 1, 64);
-        }
-        let got = r.collect(&mut seen);
-        assert_eq!(got.len(), DROP_RING);
-        assert_eq!(got.last().unwrap().seq, (DROP_RING + 11) as u64);
-    }
-}

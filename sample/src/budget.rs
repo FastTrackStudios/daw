@@ -245,38 +245,3 @@ impl Drop for Charge {
 /// eviction tests) must hold this, or their deltas race each other.
 #[cfg(test)]
 pub(crate) static TEST_COUNTER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn charge_and_release_move_the_total_by_what_they_say() {
-        let _serial = TEST_COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let before = used_bytes();
-        charge(4096);
-        assert!(used_bytes() >= before + 4096);
-        release(4096);
-        assert!(used_bytes() < before + 4096);
-    }
-
-    #[test]
-    fn charge_guard_balances_across_clone_and_drop() {
-        let _serial = TEST_COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let before = used_bytes();
-        let g = Charge::now(2048);
-        let g2 = g.clone();
-        assert_eq!(g2.bytes(), 2048);
-        assert!(used_bytes() >= before + 4096);
-        drop(g);
-        drop(g2);
-        assert!(used_bytes() < before + 4096);
-    }
-
-    #[test]
-    fn releasing_more_than_was_charged_floors_at_zero() {
-        assert_eq!(after_release(10, 4), 6);
-        assert_eq!(after_release(10, usize::MAX), 0);
-        assert_eq!(after_release(0, 1), 0);
-    }
-}

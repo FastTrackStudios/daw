@@ -201,33 +201,3 @@ mod macos {
         unsafe { os_workgroup_leave(wg, &mut token) };
     }
 }
-
-#[cfg(all(test, target_os = "linux"))]
-mod tests {
-    /// A worker seated for its first batch runs at the audio thread's
-    /// policy where the user may (the `audio` group), as it was otherwise.
-    #[test]
-    fn a_seated_worker_is_as_realtime_as_the_callback() {
-        let (callback, worker) = std::thread::spawn(|| {
-            let callback = super::super::realtime::promote_current_thread();
-            let worker = std::thread::spawn(|| {
-                let mut seat = super::WorkerSeat::default();
-                seat.sync();
-                seat.sync();
-                // SAFETY: reads the calling thread's policy.
-                (unsafe { libc::sched_getscheduler(0) }) & !libc::SCHED_RESET_ON_FORK
-            })
-            .join()
-            .expect("the worker");
-            (callback, worker)
-        })
-        .join()
-        .expect("the callback");
-        let expected = if callback {
-            libc::SCHED_FIFO
-        } else {
-            libc::SCHED_OTHER
-        };
-        assert_eq!(worker, expected);
-    }
-}

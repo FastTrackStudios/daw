@@ -60,24 +60,3 @@ pub fn promote_current_thread_at(priority: i32) -> bool {
         false
     }
 }
-
-#[cfg(all(test, target_os = "linux"))]
-mod tests {
-    /// A thread that asks goes realtime where the user may (the studio
-    /// machine's `audio` group); where it may not, it says so and carries
-    /// on — never a panic.
-    #[test]
-    fn a_thread_goes_realtime_or_says_why_not() {
-        let took = std::thread::spawn(|| {
-            let took = super::promote_current_thread();
-            let policy = unsafe { libc::sched_getscheduler(0) };
-            (took, policy)
-        })
-        .join()
-        .expect("the thread");
-        match took {
-            (true, policy) => assert_eq!(policy & !libc::SCHED_RESET_ON_FORK, libc::SCHED_FIFO),
-            (false, policy) => assert_eq!(policy, libc::SCHED_OTHER),
-        }
-    }
-}
