@@ -8,7 +8,7 @@
 //! the overheads' high end gone wherever a tail was slowed.
 //!
 //! A stretched take is rendered instead, once, through its markers as a
-//! stretch map ([`stretch::map`]): between each pair, a stretch played at
+//! stretch map ([`dsp::stretch::map`]): between each pair, a stretch played at
 //! speed is copied from the source as it is and one played slower or
 //! faster goes through the phase vocoder — its pitch kept, its timing the
 //! map's, started afresh at each marker so every mic of a kit, rendered
@@ -95,7 +95,7 @@ pub(crate) fn rendered(
 }
 
 /// The render itself: the take's markers as a stretch map over the part
-/// of its source it plays ([`stretch::map::render`]).
+/// of its source it plays ([`dsp::stretch::map::render`]).
 fn render(audio: &AudioSource, markers: &[StretchMarker], length: f64) -> AudioSource {
     let sr = f64::from(audio.sample_rate().max(1));
     let channels = usize::from(audio.channels().max(1));
@@ -114,7 +114,7 @@ fn render(audio: &AudioSource, markers: &[StretchMarker], length: f64) -> AudioS
     cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
     // Only the source the take plays, and a frame's reach either side —
     // a slice of a long take reads its own few hundred milliseconds.
-    let config = stretch::map::MapConfig::for_sample_rate(sr);
+    let config = dsp::stretch::map::MapConfig::for_sample_rate(sr);
     let reach = config.vocoder.frame as f64;
     let (lo, hi) = cuts
         .iter()
@@ -131,15 +131,15 @@ fn render(audio: &AudioSource, markers: &[StretchMarker], length: f64) -> AudioS
                 .collect()
         })
         .collect();
-    let anchors: Vec<stretch::map::Anchor> = cuts
+    let anchors: Vec<dsp::stretch::map::Anchor> = cuts
         .iter()
-        .map(|&t| stretch::map::Anchor {
+        .map(|&t| dsp::stretch::map::Anchor {
             out: t * sr,
             src: map(t).max(0.0) * sr - from as f64,
         })
         .collect();
     let input: Vec<&[f32]> = planar.iter().map(Vec::as_slice).collect();
-    let out = stretch::map::render(&input, &anchors, frames, &config);
+    let out = dsp::stretch::map::render(&input, &anchors, frames, &config);
     let mut interleaved = Vec::with_capacity(frames * channels);
     for i in 0..frames {
         for ch in &out {
