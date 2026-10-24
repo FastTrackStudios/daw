@@ -37,14 +37,14 @@ tokio = { version = "1", default-features = false, features = ["sync"] }
 # media_fetch: requests in flight (FuturesUnordered). Wasm-clean.
 futures = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
-web-time = "1"
+web-time = { workspace = true }
 
 # Optional: in-process Daw client bootstrap (LocalCaller-style helper).
 daw-control = { workspace = true, optional = true }
 eyre = { workspace = true, optional = true }
 
 # Audio engine (feature-gated)
-cpal = { version = "0.18", optional = true, features = ["wasm-bindgen"] }
+cpal = { workspace = true, features = ["wasm-bindgen"], optional = true }
 # Shared audio-file layer: header probe always; the `decode` feature adds
 # resident symphonium decodes (wav/mp3/ogg/flac/aac) + the preload RAM
 # budget; native (below) adds the mmap'd PCM source. Wasm-clean at this
@@ -56,7 +56,7 @@ dawfile-reaper = { workspace = true, optional = true }
 session-format = { workspace = true, optional = true }
 
 # Optional native HTTP fetcher for `HttpBaseUrlResolver`.
-ureq = { version = "2", optional = true }
+ureq = { workspace = true, optional = true }
 
 # CLAP plugin hosting (Rust-native; supports macOS / Linux / Windows
 # .clap bundles and dylibs). Behind `clap-host` feature.
@@ -65,7 +65,7 @@ clack-extensions = { workspace = true, optional = true }
 # rwh 0.6 for bridging host windows into embedded CLAP GUIs — the same
 # crates.io version clack-extensions' raw-window-handle_06 resolves to,
 # so the Window::from_raw_window_handle types line up.
-raw-window-handle-06 = { package = "raw-window-handle", version = "0.6", optional = true }
+raw-window-handle-06 = { workspace = true, optional = true }
 thiserror = { workspace = true }
 
 # VST3 plugin hosting (auto-generated Steinberg COM bindings). Native-only.
@@ -73,7 +73,7 @@ vst3 = { workspace = true, optional = true }
 libloading = { workspace = true, optional = true }
 
 # Decoding REAPER VST/VST3/CLAP plugin state blobs from .rpp files.
-base64 = "0.22"
+base64 = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # mmap-backed PCM streaming (native only; WASM falls back to decode) —
@@ -83,12 +83,12 @@ tokio = { workspace = true }
 # Shared device-selection / open-stream plumbing + lock-free input ring.
 # Native-only (cpal device streams); pulled in by the `audio` feature.
 audio = { workspace = true, features = ["io", "monitor"], optional = true }
-rtrb = { version = "0.3", optional = true }
+rtrb = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-gloo-timers = { version = "0.3", features = ["futures"] }
-wasm-bindgen = { version = "0.2", optional = true }
-js-sys = { version = "0.3", optional = true }
+gloo-timers = { workspace = true, features = ["futures"] }
+wasm-bindgen = { workspace = true, optional = true }
+js-sys = { workspace = true, optional = true }
 
 [dev-dependencies]
 # This crate, with the features its own tests need.
@@ -106,7 +106,7 @@ eyre = { workspace = true }
 # `streamed_playback` encodes the proxy it streams.
 fts-sample = { workspace = true, features = ["engine-native"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
-base64 = "0.22"
+base64 = { workspace = true }
 dawfile-reaper = { workspace = true }
 tempfile = { workspace = true }
 
