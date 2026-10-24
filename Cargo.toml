@@ -31,7 +31,3 @@ eyre = { workspace = true }
 studio = { workspace = true, features = ["reaper", "test-harness"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 
-[[test]]
-name = "link_engine"
-path = "tests/link_engine.rs"
-required-features = ["link"]
