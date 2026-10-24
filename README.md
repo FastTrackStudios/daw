@@ -54,4 +54,4 @@ Draws on [`helgoboss-midi`](https://github.com/helgoboss/helgoboss-midi):
 ## Status
 
 Compiles green on the upstream facet 0.50-rc / vox 0.10-rc stack; 5 unit tests
-pass. Not yet pushed to codeberg (org over storage quota — pending GC).
+pass.
