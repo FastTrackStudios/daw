@@ -20,7 +20,7 @@ pub trait Projects {
     // ── Collection ─────────────────────────────────────────────────
 
     fn current(&self) -> Option<ProjectInfo>;
-    fn get(&self, project_id: &str) -> Option<ProjectInfo>;
+    fn project(&self, project_id: &str) -> Option<ProjectInfo>;
     fn list(&self) -> Vec<ProjectInfo>;
 
     /// Project at the given 0-based tab slot, if any.
