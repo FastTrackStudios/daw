@@ -5276,7 +5276,8 @@ impl NativeTrem {
         // has no transport — the LFO would freeze. Free-run at 4 Hz.
         tr.modulator.trigger.mode =
             dsp::modulation::trem::fts_modulation::trigger::TriggerMode::Free;
-        tr.modulator.trigger.sync_index = 0;
+        tr.modulator.trigger.division =
+            dsp::modulation::trem::fts_modulation::tempo::SyncDivision::FreeHz;
         tr.modulator.trigger.rate_hz = 4.0;
         tr.mix = 1.0;
         Self {
@@ -5295,7 +5296,8 @@ impl NativeTrem {
                 // Free-running rate: force the trigger engine out of sync.
                 self.tr.modulator.trigger.mode =
                     dsp::modulation::trem::fts_modulation::trigger::TriggerMode::Free;
-                self.tr.modulator.trigger.sync_index = 0;
+                self.tr.modulator.trigger.division =
+                    dsp::modulation::trem::fts_modulation::tempo::SyncDivision::FreeHz;
                 self.tr.modulator.trigger.rate_hz = v.max(0.01);
             }
             3 => self.tr.set_mode(match v.round().max(0.0) as u32 {
