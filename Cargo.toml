@@ -13,8 +13,13 @@ workspace = true
 [features]
 default = []
 store = ["dep:pollster", "dep:turso", "dep:zstd"]
+# The project file as a sync replica: `store::Replica`, a `crdt::Persistence`
+# over the store, one synced doc per branch (docs/design/sync.md).
+sync = ["store", "dep:crdt", "dep:async-trait"]
 
 [dependencies]
+async-trait = { workspace = true, optional = true }
+crdt = { workspace = true, optional = true }
 daw-proto = { workspace = true }
 dawfile-reaper = { workspace = true }
 facet = { workspace = true }
@@ -30,7 +35,9 @@ uuid = { workspace = true }
 zstd = { workspace = true, optional = true }
 
 [dev-dependencies]
-session-format = { path = ".", features = ["store"] }
+session-format = { path = ".", features = ["store", "sync"] }
+crdt = { workspace = true }
+tokio = { workspace = true }
 interchange = { workspace = true, features = ["aaf", "dawproject"] }
 # required-features): a plain `cargo test` of the workspace builds them all.
 daw-proto = { workspace = true }

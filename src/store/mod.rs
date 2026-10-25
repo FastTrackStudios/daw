@@ -37,6 +37,11 @@
 
 use sha2::{Digest, Sha256};
 
+#[cfg(feature = "sync")]
+mod replica;
+#[cfg(feature = "sync")]
+pub use replica::{Replica, SYNC_LABEL};
+
 /// The schema this build writes, kept in `meta.schema`.
 pub const SCHEMA: i64 = 1;
 
