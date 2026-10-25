@@ -42,6 +42,9 @@ mod replica;
 #[cfg(feature = "sync")]
 pub use replica::{Replica, SYNC_LABEL};
 
+/// How long a write waits for another connection's lock on the file.
+const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// The schema this build writes, kept in `meta.schema`.
 pub const SCHEMA: i64 = 1;
 
@@ -150,6 +153,12 @@ impl Store {
                 .build()
                 .await?;
             let conn = db.connect()?;
+            // Another connection to the file (another process, or a sync
+            // replica's writer and a reader of the same project) may hold
+            // its lock for a moment: wait for it rather than fail, or a
+            // change written in that moment is lost (the replica's writer
+            // logs a refused append and drops it).
+            conn.busy_timeout(BUSY_TIMEOUT)?;
             for sql in [
                 "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
                 "CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, kind TEXT NOT NULL, \
