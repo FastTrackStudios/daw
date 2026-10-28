@@ -16,6 +16,9 @@ store = ["dep:pollster", "dep:turso", "dep:zstd"]
 # The project file as a sync replica: `store::Replica`, a `crdt::Persistence`
 # over the store, one synced doc per branch (docs/design/sync.md).
 sync = ["store", "dep:crdt", "dep:async-trait"]
+# The project file read from its bytes, without Turso or C zstd: what a
+# browser opens a song it was handed with (`read::ProjectFile`).
+read = ["dep:ruzstd"]
 
 [dependencies]
 async-trait = { workspace = true, optional = true }
@@ -27,6 +30,7 @@ facet-styx = { workspace = true }
 interchange = { workspace = true, features = ["dawproject"] }
 loro = { workspace = true }
 pollster = { workspace = true, optional = true }
+ruzstd = { workspace = true, optional = true }
 sha2 = { workspace = true }
 styx-format = { workspace = true }
 thiserror = { workspace = true }
@@ -35,7 +39,7 @@ uuid = { workspace = true }
 zstd = { workspace = true, optional = true }
 
 [dev-dependencies]
-session-format = { path = ".", features = ["store", "sync"] }
+session-format = { path = ".", features = ["store", "sync", "read"] }
 crdt = { workspace = true }
 tokio = { workspace = true }
 interchange = { workspace = true, features = ["aaf", "dawproject"] }

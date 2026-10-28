@@ -83,6 +83,9 @@ impl Store {
 /// each naming its branch by the doc id ([`Store::doc_id`]).
 pub struct Replica {
     store: std::sync::Mutex<Store>,
+    /// The name the next appended update is recorded under
+    /// ([`Self::name_next`]); [`SYNC_LABEL`] when nobody named it.
+    next: std::sync::Mutex<Option<String>>,
 }
 
 impl Replica {
@@ -90,7 +93,29 @@ impl Replica {
     pub fn new(store: Store) -> Self {
         Self {
             store: std::sync::Mutex::new(store),
+            next: std::sync::Mutex::new(None),
         }
+    }
+
+    /// Record the next update under `label`: an app editing the synced doc
+    /// names its step just before committing it, and the doc's own writer
+    /// appends it — so the branch's history keeps the step's name instead
+    /// of [`SYNC_LABEL`]. An update another device sent in that moment
+    /// would take the name instead; the history is a list of names, and
+    /// the operations are the same either way.
+    pub fn name_next(&self, label: &str) {
+        *self
+            .next
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(label.to_owned());
+    }
+
+    fn take_name(&self) -> String {
+        self.next
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+            .unwrap_or_else(|| SYNC_LABEL.to_owned())
     }
 
     /// The store, for the rest of what the app does with the file. Held
@@ -139,11 +164,10 @@ impl crdt::Persistence for Replica {
     }
 
     async fn append_update(&self, doc_id: Uuid, bytes: &[u8]) -> Result<(), crdt::PersistError> {
+        let label = self.take_name();
         self.with(|store| {
             let branch = Self::branch(store, doc_id)?;
-            store
-                .append_update(&branch, SYNC_LABEL, bytes)
-                .map_err(backend)
+            store.append_update(&branch, &label, bytes).map_err(backend)
         })
     }
 

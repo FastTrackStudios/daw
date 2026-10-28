@@ -86,6 +86,8 @@ pub mod id;
 pub mod objects;
 pub mod oplog;
 pub mod project;
+#[cfg(feature = "read")]
+pub mod read;
 pub mod rpp;
 #[cfg(feature = "store")]
 pub mod store;

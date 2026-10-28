@@ -127,6 +127,38 @@ async fn a_fold_keeps_the_branch_and_its_doc() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_step_named_before_its_commit_keeps_its_name_in_the_history() {
+    let dir = tempfile::tempdir().expect("a dir");
+    let path = dir.path().join("Song.session");
+    let store = Store::open(&path).expect("a store");
+    let id = store.doc_id(MAIN).expect("an id");
+    let replica = std::sync::Arc::new(Replica::new(store));
+    let doc = CrdtDoc::open_shared(id, replica.clone())
+        .await
+        .expect("open");
+
+    replica.name_next("Move item");
+    put(&doc, "kick", 1.0);
+    put(&doc, "snare", 2.0);
+    let want = items(doc.loro());
+    drop(doc);
+
+    settled(&path, &want);
+    let labels: Vec<String> = Store::open(&path)
+        .expect("reopen")
+        .steps(MAIN)
+        .expect("steps")
+        .into_iter()
+        .map(|step| step.label)
+        .collect();
+    assert_eq!(
+        labels,
+        ["Move item", session_format::store::SYNC_LABEL],
+        "the named step keeps its name; an unnamed one is a sync"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_doc_of_another_project_is_refused() {
     let dir = tempfile::tempdir().expect("a dir");
     let store = Store::open(&dir.path().join("Song.session")).expect("a store");

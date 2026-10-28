@@ -517,6 +517,28 @@ impl Store {
         Ok(doc)
     }
 
+    /// Start `branch` again from `doc`, a doc of a new lineage holding what
+    /// the branch holds now: its snapshot, its updates dropped, and no fork
+    /// point (the parent's history it pointed into is not this doc's). What
+    /// a song's live state accumulates — maps deleted and made again, every
+    /// one kept — is left behind; Unbreakable's 157 MB of state was 26 MB
+    /// written fresh. Rebase every branch of a project together: an
+    /// alternative without a snapshot of its own loads from its parent's
+    /// history, which this replaces.
+    ///
+    /// # Errors
+    ///
+    /// The doc would not export, or the database refused the write.
+    pub fn rebase(&self, branch: &str, doc: &loro::LoroDoc) -> StoreResult<()> {
+        self.compact(branch, doc)?;
+        run(async {
+            self.conn
+                .execute("UPDATE branches SET base = NULL WHERE name = ?1", (branch,))
+                .await?;
+            StoreResult::Ok(())
+        })
+    }
+
     /// Fold `branch`'s history into one snapshot of `doc` (which must be
     /// the branch as loaded, with every update appended so far) and drop
     /// the updates it covers. History is kept — a Loro snapshot carries
