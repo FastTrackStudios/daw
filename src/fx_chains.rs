@@ -10,8 +10,7 @@ use daw_proto::{DawError, DawResult, Fx, FxChainContext};
 use crate::sync::{FxChainKey, FxEntry, Standalone};
 
 fn resolve_project(daw: &Standalone) -> Option<String> {
-    let state = daw.state.lock().ok()?;
-    state.current_project_guid.clone()
+    daw.current_project_guid()
 }
 
 fn no_project() -> DawError {

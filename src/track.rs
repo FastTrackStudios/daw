@@ -20,10 +20,7 @@ use crate::sync::{Standalone, TrackExt};
 fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
     match ctx {
         ProjectContext::Project(guid) => Some(guid.clone()),
-        ProjectContext::Current => {
-            let state = daw.state.lock().ok()?;
-            state.current_project_guid.clone()
-        }
+        ProjectContext::Current => daw.current_project_guid(),
     }
 }
 

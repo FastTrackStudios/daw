@@ -32,11 +32,7 @@ fn take_guid(
 fn resolve(daw: &Standalone, loc: &StretchTakeRef) -> DawResult<(String, String)> {
     let project = match &loc.project {
         ProjectContext::Project(g) => Some(g.clone()),
-        ProjectContext::Current => daw
-            .state
-            .lock()
-            .ok()
-            .and_then(|s| s.current_project_guid.clone()),
+        ProjectContext::Current => daw.current_project_guid(),
     }
     .ok_or_else(|| DawError::not_found("Project", "context"))?;
     let take = take_guid(daw, &loc.project, &loc.item, &loc.take)

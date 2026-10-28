@@ -110,43 +110,30 @@ impl<'a> Projects for StandaloneProject<'a> {
 /// guid, or pass through an explicit `Project(guid)`. `None` if no
 /// project is current and the context was `Current`.
 fn resolve_ctx_guid(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
-    match ctx {
-        ProjectContext::Project(g) => Some(g.clone()),
-        ProjectContext::Current => daw.state.lock().ok()?.current_project_guid.clone(),
-    }
+    daw.resolve_project(ctx)
 }
 
 impl Projects for Standalone {
     fn info(&self, project: ProjectContext) -> DawResult<ProjectInfo> {
         let guid = resolve_ctx_guid(self, &project)
             .ok_or_else(|| daw_proto::DawError::not_found("project", "current"))?;
-        let state = self
-            .state
-            .lock()
-            .map_err(|_| daw_proto::DawError::internal("state poisoned"))?;
-        state
-            .projects
-            .get(&guid)
-            .map(|p| p.info.clone())
+        self.cell(&guid)
+            .map(|cell| cell.info())
             .ok_or_else(|| daw_proto::DawError::not_found("project", &guid))
     }
 
     fn current(&self) -> Option<ProjectInfo> {
-        let s = self.state.lock().ok()?;
-        let guid = s.current_project_guid.as_ref()?;
-        s.projects.get(guid).map(|p| p.info.clone())
+        let guid = self.current_project_guid()?;
+        self.cell(&guid).map(|cell| cell.info())
     }
 
     fn project(&self, project_id: &str) -> Option<ProjectInfo> {
-        let s = self.state.lock().ok()?;
-        s.projects.get(project_id).map(|p| p.info.clone())
+        self.cell(project_id).map(|cell| cell.info())
     }
 
     fn list(&self) -> Vec<ProjectInfo> {
-        let Ok(s) = self.state.lock() else {
-            return Vec::new();
-        };
-        let mut out: Vec<ProjectInfo> = s.projects.values().map(|p| p.info.clone()).collect();
+        // Each project's published info: no project's edit is waited on.
+        let mut out: Vec<ProjectInfo> = self.cells().iter().map(|cell| cell.info()).collect();
         // Deterministic ordering by name so tests can rely on it.
         out.sort_by(|a, b| a.name.cmp(&b.name));
         out
@@ -157,15 +144,7 @@ impl Projects for Standalone {
     }
 
     fn select(&self, project_id: &str) -> bool {
-        let Ok(mut s) = self.state.lock() else {
-            return false;
-        };
-        if s.projects.contains_key(project_id) {
-            s.current_project_guid = Some(project_id.to_string());
-            true
-        } else {
-            false
-        }
+        self.select_project(project_id)
     }
 
     /// Load a `.rpp` file from disk into a new project tab. Native-only
@@ -202,10 +181,7 @@ impl Projects for Standalone {
                         &summary.project_guid,
                     );
                 }
-                let s = self.state.lock().ok()?;
-                s.projects
-                    .get(&summary.project_guid)
-                    .map(|p| p.info.clone())
+                self.cell(&summary.project_guid).map(|cell| cell.info())
             }
             #[cfg(not(any(feature = "rpp-project", feature = "rpp-project-wasm")))]
             {
@@ -235,18 +211,8 @@ impl Projects for Standalone {
     }
 
     fn close(&self, project_id: &str) -> bool {
-        let Ok(mut s) = self.state.lock() else {
-            return false;
-        };
-        if s.projects.remove(project_id).is_some() {
-            if s.current_project_guid.as_deref() == Some(project_id) {
-                // Fall back to any remaining project, else None.
-                s.current_project_guid = s.projects.keys().next().cloned();
-            }
-            true
-        } else {
-            false
-        }
+        // A current project closed falls back to any remaining one.
+        self.remove_project(project_id)
     }
 
     /// Snapshot-based undo over the project's edit surface.
@@ -261,115 +227,46 @@ impl Projects for Standalone {
         let Some(guid) = resolve_ctx_guid(self, &project) else {
             return;
         };
-        let Ok(mut s) = self.state.lock() else {
+        let Some(cell) = self.cell(&guid) else {
             return;
         };
-        let Some(p) = s.projects.get_mut(&guid) else {
-            return;
-        };
-        // From here each per-item map keeps what it held before the step
-        // first writes a key: the step is its changes, not a copy.
-        p.record();
-        #[cfg(any(feature = "audio", feature = "decode"))]
-        p.audio_sources.record();
-        let step = crate::sync::daw::UndoStep {
-            label: label.to_string(),
-            deltas: crate::sync::daw::Deltas::default(),
-            #[cfg(any(feature = "audio", feature = "decode"))]
-            audio: Vec::new(),
-            before: crate::sync::daw::EditSnapshot::capture(p),
-            after: None,
-        };
-        // A begin with no end is abandoned, not stacked.
-        s.pending_undo.insert(guid, step);
+        cell.write(|slot| begin_step(slot, label));
     }
 
     fn end_undo_block(&self, project: ProjectContext, label: &str, _scope: Option<UndoScope>) {
         let Some(guid) = resolve_ctx_guid(self, &project) else {
             return;
         };
-        let Ok(mut s) = self.state.lock() else {
+        let Some(cell) = self.cell(&guid) else {
             return;
         };
-        let Some(mut step) = s.pending_undo.remove(&guid) else {
+        let Some(Some(named)) = cell.write(|slot| end_step(slot, label)) else {
             return;
         };
-        if !label.is_empty() {
-            step.label = label.to_string();
-        }
-        if let Some(p) = s.projects.get_mut(&guid) {
-            step.deltas = p.recorded();
-            #[cfg(any(feature = "audio", feature = "decode"))]
-            {
-                step.audio = p.audio_sources.recorded();
-            }
-            step.after = Some(crate::sync::daw::EditSnapshot::capture(p));
-        }
-        let named = step.label.clone();
-        let stack = s.undo.entry(guid.clone()).or_default();
-        stack.push(step);
-        if stack.len() > crate::sync::daw::UNDO_LIMIT {
-            stack.remove(0);
-        }
-        // A new edit invalidates the redo branch, as everywhere.
-        s.redo.remove(&guid);
-        drop(s);
         crate::steps::finished(&guid, &named);
     }
 
     // r[impl drums.quantize.undo]
     fn undo(&self, project: ProjectContext) -> bool {
-        let Some(guid) = resolve_ctx_guid(self, &project) else {
-            return false;
-        };
-        let Ok(mut s) = self.state.lock() else {
-            return false;
-        };
-        let Some(step) = s.undo.get_mut(&guid).and_then(Vec::pop) else {
-            return false;
-        };
-        let Some(p) = s.projects.get_mut(&guid) else {
-            return false;
-        };
-        step.put_back(p, crate::journal::Side::Before);
-        let label = step.label.clone();
-        s.redo.entry(guid.clone()).or_default().push(step);
-        drop(s);
-        crate::steps::finished(&guid, &format!("Undo {label}"));
-        true
+        self.step_back(&project, crate::journal::Side::Before)
     }
 
     fn redo(&self, project: ProjectContext) -> bool {
-        let Some(guid) = resolve_ctx_guid(self, &project) else {
-            return false;
-        };
-        let Ok(mut s) = self.state.lock() else {
-            return false;
-        };
-        let Some(step) = s.redo.get_mut(&guid).and_then(Vec::pop) else {
-            return false;
-        };
-        let Some(p) = s.projects.get_mut(&guid) else {
-            return false;
-        };
-        step.put_back(p, crate::journal::Side::After);
-        let label = step.label.clone();
-        s.undo.entry(guid.clone()).or_default().push(step);
-        drop(s);
-        crate::steps::finished(&guid, &format!("Redo {label}"));
-        true
+        self.step_back(&project, crate::journal::Side::After)
     }
 
     fn last_undo_label(&self, project: ProjectContext) -> Option<String> {
         let guid = resolve_ctx_guid(self, &project)?;
-        let s = self.state.lock().ok()?;
-        s.undo.get(&guid)?.last().map(|u| u.label.clone())
+        let cell = self.cell(&guid)?;
+        let slot = cell.read()?;
+        slot.history.undo.last().map(|u| u.label.clone())
     }
 
     fn last_redo_label(&self, project: ProjectContext) -> Option<String> {
         let guid = resolve_ctx_guid(self, &project)?;
-        let s = self.state.lock().ok()?;
-        s.redo.get(&guid)?.last().map(|u| u.label.clone())
+        let cell = self.cell(&guid)?;
+        let slot = cell.read()?;
+        slot.history.redo.last().map(|u| u.label.clone())
     }
     fn run_command(&self, _project: ProjectContext, _command: &str) -> bool {
         // No REAPER action registry on standalone; commands no-op
@@ -411,15 +308,9 @@ impl Projects for Standalone {
         let Some(guid) = resolve_ctx_guid(self, &project) else {
             return String::new();
         };
-        let Ok(s) = self.state.lock() else {
-            return String::new();
-        };
-        let Some(p) = s.projects.get(&guid) else {
-            return String::new();
-        };
         // Map a handful of canonical REAPER `GetSetProjectInfo_String`
         // keys to fields we model. Unknown keys return empty.
-        match key {
+        self.read_project(&guid, |p| match key {
             "PROJECT_NAME" => p.info.name.clone(),
             "PROJECT_PATH" => p.info.path.clone(),
             "PROJECT_NOTES" => p
@@ -432,7 +323,8 @@ impl Projects for Standalone {
                 .get(&(String::new(), key.to_string()))
                 .cloned()
                 .unwrap_or_default(),
-        }
+        })
+        .unwrap_or_default()
     }
 
     fn set_project_info_string(&self, project: ProjectContext, key: &str, value: &str) {
@@ -453,19 +345,16 @@ impl Projects for Standalone {
         let Some(guid) = resolve_ctx_guid(self, &project) else {
             return 0.0;
         };
-        let Ok(s) = self.state.lock() else { return 0.0 };
-        let Some(p) = s.projects.get(&guid) else {
-            return 0.0;
-        };
         // Surface the most-used REAPER numeric keys. Unknown keys = 0.
-        match key {
+        self.read_project(&guid, |p| match key {
             "PROJECT_TIMESIG_NUM" => p.transport.time_signature.numerator as f64,
             "PROJECT_TIMESIG_DENOM" => p.transport.time_signature.denominator as f64,
             "PROJECT_BPM" => p.transport.tempo.bpm(),
             _ => ruler_lane_flags_key(key)
                 .and_then(|i| p.ruler_lanes.get(&i))
                 .map_or(0.0, |lane| f64::from(lane.flags)),
-        }
+        })
+        .unwrap_or(0.0)
     }
 
     fn set_project_info(&self, project: ProjectContext, key: &str, value: f64) {
@@ -496,15 +385,12 @@ impl Projects for Standalone {
 
     fn get_project_config(&self, project: ProjectContext, key: &str) -> Option<f64> {
         let guid = resolve_ctx_guid(self, &project)?;
-        let s = self.state.lock().ok()?;
-        let value = s
-            .projects
-            .get(&guid)?
-            .project_ext_state
-            .get(&("daw-standalone:project_config".into(), key.to_string()))?
-            .parse()
-            .ok()?;
-        Some(value)
+        self.read_project(&guid, |p| {
+            p.project_ext_state
+                .get(&("daw-standalone:project_config".into(), key.to_string()))?
+                .parse()
+                .ok()
+        })?
     }
 
     fn set_project_config(&self, project: ProjectContext, key: &str, value: f64) -> bool {
@@ -534,28 +420,25 @@ impl Projects for Standalone {
         let Some(guid) = resolve_ctx_guid(self, &project) else {
             return String::new();
         };
-        let Ok(s) = self.state.lock() else {
-            return String::new();
-        };
-        s.projects
-            .get(&guid)
-            .and_then(|p| p.ruler_lanes.get(&lane_index))
-            .map(|lane| lane.name.clone())
-            .unwrap_or_default()
+        self.read_project(&guid, |p| {
+            p.ruler_lanes.get(&lane_index).map(|lane| lane.name.clone())
+        })
+        .flatten()
+        .unwrap_or_default()
     }
 
     fn ruler_lane_count(&self, project: ProjectContext) -> u32 {
         let Some(guid) = resolve_ctx_guid(self, &project) else {
             return 0;
         };
-        let Ok(s) = self.state.lock() else { return 0 };
+
         // REAPER's lanes are a contiguous 0..count run; a gap is an
         // unnamed lane, not a missing one. So the count is one past the
         // highest index, never the number of named entries.
-        s.projects
-            .get(&guid)
-            .and_then(|p| p.ruler_lanes.keys().next_back())
-            .map_or(0, |last| last + 1)
+        self.read_project(&guid, |p| {
+            p.ruler_lanes.keys().next_back().map_or(0, |last| last + 1)
+        })
+        .unwrap_or(0)
     }
 }
 
@@ -602,4 +485,81 @@ pub(crate) fn default_lane(
 pub(crate) fn marker_or_region_guid_taken(p: &super::daw::ProjectState, guid: &str) -> bool {
     p.markers.values().any(|m| m.guid.as_deref() == Some(guid))
         || p.regions.values().any(|r| r.guid.as_deref() == Some(guid))
+}
+
+/// Open an undo step on a project: from here each per-item map keeps what
+/// it held before the step first writes a key — the step is its changes,
+/// not a copy. A begin with no end is abandoned, not stacked.
+fn begin_step(slot: &mut super::daw::ProjectSlot, label: &str) {
+    let p = &mut slot.project;
+    p.record();
+    #[cfg(any(feature = "audio", feature = "decode"))]
+    p.audio_sources.record();
+    slot.history.pending = Some(super::daw::UndoStep {
+        label: label.to_string(),
+        deltas: super::daw::Deltas::default(),
+        #[cfg(any(feature = "audio", feature = "decode"))]
+        audio: Vec::new(),
+        before: super::daw::EditSnapshot::capture(p),
+        after: None,
+    });
+}
+
+/// Close the project's open undo step under `label` (its own, if empty)
+/// and stack it; a new edit drops the redo branch. The step's label, or
+/// `None` if no step was open.
+fn end_step(slot: &mut super::daw::ProjectSlot, label: &str) -> Option<String> {
+    let mut step = slot.history.pending.take()?;
+    if !label.is_empty() {
+        step.label = label.to_string();
+    }
+    let p = &mut slot.project;
+    step.deltas = p.recorded();
+    #[cfg(any(feature = "audio", feature = "decode"))]
+    {
+        step.audio = p.audio_sources.recorded();
+    }
+    step.after = Some(super::daw::EditSnapshot::capture(p));
+    let named = step.label.clone();
+    let stack = &mut slot.history.undo;
+    stack.push(step);
+    if stack.len() > super::daw::UNDO_LIMIT {
+        stack.remove(0);
+    }
+    slot.history.redo.clear();
+    Some(named)
+}
+
+impl Standalone {
+    /// Undo (`Side::Before`) or redo (`Side::After`) the project's last
+    /// step, moving it to the other stack. Whether there was one.
+    fn step_back(&self, project: &ProjectContext, side: crate::journal::Side) -> bool {
+        let Some(guid) = resolve_ctx_guid(self, project) else {
+            return false;
+        };
+        let Some(cell) = self.cell(&guid) else {
+            return false;
+        };
+        let moved = cell.write(|slot| {
+            let history = &mut slot.history;
+            let (from, to) = match side {
+                crate::journal::Side::Before => (&mut history.undo, &mut history.redo),
+                crate::journal::Side::After => (&mut history.redo, &mut history.undo),
+            };
+            let step = from.pop()?;
+            step.put_back(&mut slot.project, side);
+            let label = step.label.clone();
+            to.push(step);
+            Some(label)
+        });
+        let Some(Some(label)) = moved else {
+            return false;
+        };
+        let verb = match side {
+            crate::journal::Side::Before => "Undo",
+            crate::journal::Side::After => "Redo",
+        };
+        crate::steps::finished(&guid, &format!("{verb} {label}"));
+        true
+    }
 }

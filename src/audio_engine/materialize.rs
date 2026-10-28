@@ -66,6 +66,78 @@ pub struct PendingMedia {
     pub playrate: f64,
 }
 
+/// The media that plays in `project_guid` — what a song needs first:
+/// each item's *active* take, items that are not muted, on a lane its
+/// track plays (the rule [`crate::audio_accessor`] mixes by), earliest
+/// first. Every playing take is listed (many items cut from one recording
+/// each play it); [`files_first_heard`] gives each file once. Inactive
+/// takes, comp lanes and muted items are [`pending_media`]'s rest, fetched
+/// when they are needed.
+#[must_use]
+pub fn playing_media(daw: &Standalone, project_guid: &str) -> Vec<PendingMedia> {
+    daw.with_project(project_guid, |p| {
+        let plays = |track: &str, lane: Option<u32>| {
+            p.tracks.iter().find(|t| t.guid == track).is_none_or(|t| {
+                t.lane_count <= 1
+                    || 1_u64
+                        .checked_shl(lane.unwrap_or(0))
+                        .is_some_and(|bit| t.lane_play_mask & bit != 0)
+            })
+        };
+        let mut out: Vec<PendingMedia> = Vec::new();
+        for (item_guid, take_list) in &p.takes {
+            let Some(entry) = p.items.get(item_guid) else {
+                continue;
+            };
+            let item = &entry.item;
+            if item.muted || !plays(&item.track_guid, item.fixed_lane) {
+                continue;
+            }
+            let Some(take) = usize::try_from(take_list.active_idx)
+                .ok()
+                .and_then(|i| take_list.takes.get(i))
+            else {
+                continue;
+            };
+            let Some(path) = take.source_file_path.as_ref().filter(|p| !p.is_empty()) else {
+                continue;
+            };
+            let start = item.position.as_seconds();
+            out.push(PendingMedia {
+                take_guid: take.guid.clone(),
+                item_guid: item_guid.clone(),
+                track_guid: item.track_guid.clone(),
+                path: path.clone(),
+                start,
+                end: start + item.length.as_seconds(),
+                source_offset: take.start_offset.as_seconds(),
+                playrate: if take.play_rate > 0.0 {
+                    take.play_rate
+                } else {
+                    1.0
+                },
+            });
+        }
+        out.sort_by(|a, b| a.start.total_cmp(&b.start));
+        out
+    })
+    .unwrap_or_default()
+}
+
+/// Each file of `media` once, in the order it is first heard: what to
+/// make a proxy of, or fetch, first.
+#[must_use]
+pub fn files_first_heard(media: &[PendingMedia]) -> Vec<String> {
+    let mut by_start: Vec<&PendingMedia> = media.iter().collect();
+    by_start.sort_by(|a, b| a.start.total_cmp(&b.start));
+    let mut seen = std::collections::HashSet::new();
+    by_start
+        .into_iter()
+        .filter(|m| seen.insert(m.path.as_str()))
+        .map(|m| m.path.clone())
+        .collect()
+}
+
 /// Every take in `project_guid` that plays a file — what materializing the
 /// project loads, take by take.
 #[must_use]
@@ -201,7 +273,10 @@ where
     {
         let stream = fts_sample::ogg_stream::OggStream::open_file(&disk_path)
             .map_err(|e| format!("ogg stream for {path}: {e}"))?;
-        stream_ogg(daw, project_guid, take_guid, stream);
+        let key = disk_path.display().to_string();
+        stream_ogg(daw, project_guid, take_guid, stream, key, move || {
+            fts_sample::ogg_stream::OggStream::open_file(&disk_path).ok()
+        });
         return Ok(());
     }
     // Streaming fast path: mmap uncompressed PCM straight from disk.
@@ -231,9 +306,12 @@ where
     #[cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
     if ext == "ogg" {
         let bytes: Arc<[u8]> = bytes.into();
-        let stream = fts_sample::ogg_stream::OggStream::open(bytes)
+        let stream = fts_sample::ogg_stream::OggStream::open(Arc::clone(&bytes))
             .map_err(|e| format!("ogg stream for {path}: {e}"))?;
-        stream_ogg(daw, project_guid, take_guid, stream);
+        let key = format!("{path}#{}", bytes.len());
+        stream_ogg(daw, project_guid, take_guid, stream, key, move || {
+            fts_sample::ogg_stream::OggStream::open(Arc::clone(&bytes)).ok()
+        });
         return Ok(());
     }
     // Resident decode: the whole file lands in RAM, charged against the
@@ -311,16 +389,26 @@ pub fn detach_audio_source(daw: &Standalone, project_guid: &str, take_guid: &str
 ///
 /// Returns `Err` if no bay resolver is installed.
 /// Attach an Ogg stream to a take as a [`super::streamed::Streamed`]
-/// source, fed around the playhead by the native butler.
+/// source, fed around the playhead by the native butler — its waveform
+/// decoded whole from a stream `reopen` opens at its start, once per
+/// proxy (`key`), when the waveform is first asked for.
 #[cfg(all(feature = "stream-ogg", not(target_arch = "wasm32")))]
 fn stream_ogg(
     daw: &Standalone,
     project_guid: &str,
     take_guid: &str,
     stream: fts_sample::ogg_stream::OggStream,
+    key: String,
+    reopen: impl Fn() -> Option<fts_sample::ogg_stream::OggStream> + Send + Sync + 'static,
 ) {
     use super::streamed::{StreamFeeder, Streamed};
     let streamed = Streamed::new(stream.channels(), stream.sample_rate(), stream.frames());
+    #[cfg(feature = "reapeaks")]
+    streamed.set_whole(Box::new(move || {
+        super::streamed::named_peaks(&key, || super::streamed::peaks_of_ogg(reopen()?))
+    }));
+    #[cfg(not(feature = "reapeaks"))]
+    let _ = (key, reopen);
     let _ = daw.with_project_mut(project_guid, |p| {
         p.audio_sources.insert(
             take_guid.to_owned(),
@@ -399,4 +487,36 @@ pub fn materialize_via_bay(
         |path| bay.resolve_file(path),
         |path| bay.resolve_file_path(path),
     ))
+}
+
+#[cfg(test)]
+mod playing_tests {
+    use super::{PendingMedia, files_first_heard};
+
+    fn at(path: &str, start: f64) -> PendingMedia {
+        PendingMedia {
+            take_guid: format!("{path}@{start}"),
+            item_guid: String::new(),
+            track_guid: String::new(),
+            path: path.into(),
+            start,
+            end: start + 1.0,
+            source_offset: 0.0,
+            playrate: 1.0,
+        }
+    }
+
+    #[test]
+    fn each_file_once_in_the_order_it_is_first_heard() {
+        let media = [
+            at("kick.wav", 30.0),
+            at("vox.wav", 12.0),
+            at("kick.wav", 2.0),
+            at("bass.wav", 12.5),
+        ];
+        assert_eq!(
+            files_first_heard(&media),
+            ["kick.wav", "vox.wav", "bass.wav"]
+        );
+    }
 }

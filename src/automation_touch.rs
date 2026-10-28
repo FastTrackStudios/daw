@@ -398,7 +398,7 @@ impl Standalone {
         };
         let guid = match project {
             ProjectContext::Project(g) => g,
-            ProjectContext::Current => self.state.lock().ok()?.current_project_guid.clone()?,
+            ProjectContext::Current => self.current_project_guid()?,
         };
         self.with_project(&guid, |p| {
             p.tracks
@@ -419,7 +419,7 @@ impl Standalone {
     ) -> Option<AutomationMode> {
         let guid = match project {
             ProjectContext::Project(g) => g,
-            ProjectContext::Current => self.state.lock().ok()?.current_project_guid.clone()?,
+            ProjectContext::Current => self.current_project_guid()?,
         };
         let key = EnvelopeKey::from_ref(&location.envelope);
         // Take envelopes use "" as the owner field — others use the
@@ -542,11 +542,7 @@ fn take_mutate(
     let guid = match project {
         ProjectContext::Project(g) => g,
         ProjectContext::Current => daw
-            .state
-            .lock()
-            .map_err(|_| DawError::operation_failed("state poisoned"))?
-            .current_project_guid
-            .clone()
+            .current_project_guid()
             .ok_or_else(|| DawError::not_found("Project", "current"))?,
     };
     let did = daw

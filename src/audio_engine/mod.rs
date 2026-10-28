@@ -60,6 +60,10 @@ pub mod render;
 /// Lock-free output routing (main / guide / headphone-check bus + main mute).
 #[cfg(feature = "audio")]
 pub mod routing;
+/// The set engine's audio: one stream mixing every song of a set, each on
+/// its own transport.
+#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
+pub mod set_audio;
 /// Streaming audio sources (mmap PCM + decoded memory) — REAPER's model.
 pub mod source;
 /// Streamed takes: decoded a window at a time around the playhead.
@@ -94,6 +98,11 @@ pub use duplex_engine::{DuplexAudioEngine, PhonesBus};
 pub use mixer::{AudioEngine, TrackHandle};
 #[cfg(feature = "audio")]
 pub use routing::{MixerRouting, RoutingSnapshot};
+#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
+pub use set_audio::{
+    BlockClock, HandoffRefused, SetAudio, SetAudioError, SetBlock, Voice, VoiceSetup, Voices,
+    render_set_block, schedule_handoff,
+};
 pub use source::AudioSource;
 #[cfg(not(target_arch = "wasm32"))]
 pub use source::PcmFile;

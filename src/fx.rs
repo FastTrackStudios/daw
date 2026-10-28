@@ -39,10 +39,7 @@ use crate::sync::{FxChainKey, FxEntry, Standalone};
 fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
     match ctx {
         ProjectContext::Project(guid) => Some(guid.clone()),
-        ProjectContext::Current => {
-            let state = daw.state.lock().ok()?;
-            state.current_project_guid.clone()
-        }
+        ProjectContext::Current => daw.current_project_guid(),
     }
 }
 
@@ -154,8 +151,7 @@ impl Effects for Standalone {
     }
 
     fn last_touched(&self) -> Option<LastTouchedFx> {
-        let s = self.state.lock().ok()?;
-        s.last_touched_fx.clone()
+        self.engine_state().last_touched_fx.clone()
     }
 
     fn list(&self, project: ProjectContext, chain: FxChainContext) -> Vec<Fx> {
@@ -509,11 +505,7 @@ impl Effects for Standalone {
         let fx_index = Effects::get(self, project, request.target.clone())
             .map(|fx| fx.index)
             .unwrap_or(0);
-        let mut s = self
-            .state
-            .lock()
-            .map_err(|_| DawError::operation_failed("standalone state poisoned"))?;
-        s.last_touched_fx = Some(LastTouchedFx {
+        self.engine_state().last_touched_fx = Some(LastTouchedFx {
             track_guid,
             fx_index,
             param_index: request.index,

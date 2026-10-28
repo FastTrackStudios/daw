@@ -12,10 +12,7 @@ use crate::sync::Standalone;
 fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
     match ctx {
         ProjectContext::Project(guid) => Some(guid.clone()),
-        ProjectContext::Current => {
-            let state = daw.state.lock().ok()?;
-            state.current_project_guid.clone()
-        }
+        ProjectContext::Current => daw.current_project_guid(),
     }
 }
 
@@ -25,40 +22,28 @@ fn no_project() -> DawError {
 
 impl ExtState for Standalone {
     fn get(&self, section: &str, key: &str) -> Option<String> {
-        let state = self.state.lock().ok()?;
-        state
+        self.engine_state()
             .global_ext_state
             .get(&(section.to_string(), key.to_string()))
             .cloned()
     }
 
     fn set(&self, section: &str, key: &str, value: &str, _persist: bool) -> DawResult<()> {
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| DawError::operation_failed("standalone state lock poisoned"))?;
-        state
+        self.engine_state()
             .global_ext_state
             .insert((section.to_string(), key.to_string()), value.to_string());
         Ok(())
     }
 
     fn delete(&self, section: &str, key: &str, _persist: bool) -> DawResult<()> {
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| DawError::operation_failed("standalone state lock poisoned"))?;
-        state
+        self.engine_state()
             .global_ext_state
             .remove(&(section.to_string(), key.to_string()));
         Ok(())
     }
 
     fn has(&self, section: &str, key: &str) -> bool {
-        let Ok(state) = self.state.lock() else {
-            return false;
-        };
-        state
+        self.engine_state()
             .global_ext_state
             .contains_key(&(section.to_string(), key.to_string()))
     }

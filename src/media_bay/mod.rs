@@ -535,7 +535,7 @@ impl MediaBay {
     fn resolve_project(&self, ctx: &ProjectContext) -> Option<String> {
         match ctx {
             ProjectContext::Project(g) => Some(g.clone()),
-            ProjectContext::Current => self.daw.state.lock().ok()?.current_project_guid.clone(),
+            ProjectContext::Current => self.daw.current_project_guid(),
         }
     }
 

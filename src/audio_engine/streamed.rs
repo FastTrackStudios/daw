@@ -54,7 +54,20 @@ struct Inner {
     /// before (and without) the audio arriving.
     #[cfg(feature = "reapeaks")]
     peaks: std::sync::OnceLock<Arc<dawfile_reaper::reapeaks::ReaPeaks>>,
+    /// Builds the waveform from the whole proxy — `None` until every byte
+    /// of it is here ([`Streamed::set_whole`]). For a stand-in with no
+    /// cache of its original's: the chunks resident are only those near
+    /// the playhead, and a waveform read from them is silent everywhere
+    /// else — a song's lanes drawn as slivers.
+    #[cfg(feature = "reapeaks")]
+    whole: std::sync::OnceLock<WholePeaks>,
 }
+
+/// What builds a streamed take's waveform from its whole proxy, once every
+/// byte of it is here ([`Streamed::set_whole`]).
+#[cfg(feature = "reapeaks")]
+pub type WholePeaks =
+    Box<dyn Fn() -> Option<Arc<dawfile_reaper::reapeaks::ReaPeaks>> + Send + Sync + 'static>;
 
 impl Streamed {
     #[must_use]
@@ -69,6 +82,8 @@ impl Streamed {
                 wanted: AtomicU64::new(0),
                 #[cfg(feature = "reapeaks")]
                 peaks: std::sync::OnceLock::new(),
+                #[cfg(feature = "reapeaks")]
+                whole: std::sync::OnceLock::new(),
             }),
         }
     }
@@ -90,6 +105,36 @@ impl Streamed {
     #[must_use]
     pub fn peaks(&self) -> Option<Arc<dawfile_reaper::reapeaks::ReaPeaks>> {
         self.inner.peaks.get().cloned()
+    }
+
+    /// Say how to build the waveform from the whole proxy once it has all
+    /// arrived (the first one handed in stays).
+    #[cfg(feature = "reapeaks")]
+    pub fn set_whole(&self, build: WholePeaks) {
+        let _ = self.inner.whole.set(build);
+    }
+
+    /// The waveform: the one handed in, else built from the whole proxy
+    /// when every byte of it is here (and kept from then on). `None` while
+    /// it is still arriving — what the chunks resident show is all there
+    /// is to draw.
+    #[cfg(feature = "reapeaks")]
+    #[must_use]
+    pub fn peaks_or_build(&self) -> Option<Arc<dawfile_reaper::reapeaks::ReaPeaks>> {
+        if let Some(peaks) = self.peaks() {
+            return Some(peaks);
+        }
+        let built = (self.inner.whole.get()?)()?;
+        self.set_peaks(built);
+        self.peaks()
+    }
+
+    /// Whether [`Self::peaks_or_build`] has a waveform to give: a read of
+    /// this take's peaks without one is only the chunks resident.
+    #[cfg(feature = "reapeaks")]
+    #[must_use]
+    pub fn has_peaks(&self) -> bool {
+        self.inner.peaks.get().is_some()
     }
 
     #[must_use]
@@ -217,6 +262,14 @@ pub trait Decode {
     fn arrivals(&self) -> u64 {
         0
     }
+    /// How to build the take's waveform from the whole stream, once all
+    /// of it is here ([`Streamed::set_whole`]): handed to the take's
+    /// source by [`StreamFeeder::new`], whoever makes the feeder. `None`
+    /// for a decoder that cannot.
+    #[cfg(feature = "reapeaks")]
+    fn whole_peaks(&self) -> Option<WholePeaks> {
+        None
+    }
 }
 
 impl<D: Decode + ?Sized> Decode for Box<D> {
@@ -230,6 +283,11 @@ impl<D: Decode + ?Sized> Decode for Box<D> {
 
     fn arrivals(&self) -> u64 {
         (**self).arrivals()
+    }
+
+    #[cfg(feature = "reapeaks")]
+    fn whole_peaks(&self) -> Option<WholePeaks> {
+        (**self).whole_peaks()
     }
 }
 
@@ -287,6 +345,12 @@ impl Decode for RemoteOgg {
         self.bytes.arrivals()
     }
 
+    #[cfg(feature = "reapeaks")]
+    fn whole_peaks(&self) -> Option<WholePeaks> {
+        let (bytes, index) = (Arc::clone(&self.bytes), self.index.clone());
+        Some(Box::new(move || whole_ogg_peaks(&bytes, &index)))
+    }
+
     fn decode(&mut self, out: &mut Vec<f32>) -> Result<Option<(u64, usize)>, DecodeError> {
         let Some(stream) = self.stream.as_mut() else {
             return Err(DecodeError::NotYet);
@@ -301,6 +365,119 @@ impl Decode for RemoteOgg {
             }
         }
     }
+}
+
+/// The proxies' waveforms built so far, by their bytes: every take cut
+/// from one recording (a sliced kit is thousands) shares its proxy's
+/// bytes, and its waveform is decoded once for all of them.
+#[cfg(all(feature = "stream-ogg", feature = "reapeaks"))]
+type Built = Vec<(
+    std::sync::Weak<fts_sample::sparse::SparseBytes>,
+    Arc<dawfile_reaper::reapeaks::ReaPeaks>,
+)>;
+
+#[cfg(all(feature = "stream-ogg", feature = "reapeaks"))]
+static BUILT: std::sync::Mutex<Built> = std::sync::Mutex::new(Vec::new());
+
+/// The waveform of a proxy streamed from elsewhere, decoded whole from its
+/// bytes — `None` until every one of them is here (or when they do not
+/// decode). Built once per proxy ([`BUILT`]).
+#[cfg(all(feature = "stream-ogg", feature = "reapeaks"))]
+#[must_use]
+pub fn whole_ogg_peaks(
+    bytes: &Arc<fts_sample::sparse::SparseBytes>,
+    index: &fts_sample::ogg_index::OggIndex,
+) -> Option<Arc<dawfile_reaper::reapeaks::ReaPeaks>> {
+    if bytes.arrived() < bytes.len() {
+        return None;
+    }
+    let held = |built: &mut Built| {
+        built.retain(|(of, _)| of.strong_count() > 0);
+        built
+            .iter()
+            .find(|(of, _)| std::ptr::eq(of.as_ptr(), Arc::as_ptr(bytes)))
+            .map(|(_, peaks)| Arc::clone(peaks))
+    };
+    if let Some(peaks) = BUILT.lock().ok().and_then(|mut b| held(&mut b)) {
+        return Some(peaks);
+    }
+    let peaks = Arc::new(decode_whole_ogg(bytes, index)?);
+    if let Ok(mut built) = BUILT.lock() {
+        if let Some(first) = held(&mut built) {
+            return Some(first);
+        }
+        built.push((Arc::downgrade(bytes), Arc::clone(&peaks)));
+    }
+    Some(peaks)
+}
+
+/// One pass over a proxy's bytes, packet by packet, into its peaks.
+#[cfg(all(feature = "stream-ogg", feature = "reapeaks"))]
+fn decode_whole_ogg(
+    bytes: &Arc<fts_sample::sparse::SparseBytes>,
+    index: &fts_sample::ogg_index::OggIndex,
+) -> Option<dawfile_reaper::reapeaks::ReaPeaks> {
+    peaks_of_ogg(fts_sample::ogg_stream::OggStream::open_view(Arc::clone(bytes), index, 0).ok()?)
+}
+
+/// The peaks of an Ogg stream from where it is to its end, decoded packet
+/// by packet: nothing is held but the peaks.
+#[cfg(all(feature = "stream-ogg", feature = "reapeaks"))]
+#[must_use]
+pub fn peaks_of_ogg(
+    mut stream: fts_sample::ogg_stream::OggStream,
+) -> Option<dawfile_reaper::reapeaks::ReaPeaks> {
+    let mut builder = dawfile_reaper::reapeaks::PeaksBuilder::new(
+        usize::from(stream.channels().max(1)),
+        stream.sample_rate(),
+    );
+    let mut block: Vec<f32> = Vec::new();
+    loop {
+        block.clear();
+        match stream.decode(&mut block).ok()? {
+            Some(_) => builder.push_interleaved(&block),
+            None => break,
+        }
+    }
+    Some(builder.finish())
+}
+
+/// Proxies' waveforms by name (a proxy on disk, by its path), held while a
+/// take holds them: every take cut from one recording decodes it once.
+#[cfg(feature = "reapeaks")]
+type Named = std::collections::HashMap<String, std::sync::Weak<dawfile_reaper::reapeaks::ReaPeaks>>;
+
+#[cfg(feature = "reapeaks")]
+static NAMED: std::sync::Mutex<Option<Named>> = std::sync::Mutex::new(None);
+
+/// The waveform named `key`, built by `build` the first time it is asked
+/// for while no take holds it.
+#[cfg(feature = "reapeaks")]
+pub fn named_peaks(
+    key: &str,
+    build: impl FnOnce() -> Option<dawfile_reaper::reapeaks::ReaPeaks>,
+) -> Option<Arc<dawfile_reaper::reapeaks::ReaPeaks>> {
+    let held = || {
+        NAMED
+            .lock()
+            .ok()?
+            .as_ref()?
+            .get(key)
+            .and_then(std::sync::Weak::upgrade)
+    };
+    if let Some(peaks) = held() {
+        return Some(peaks);
+    }
+    let peaks = Arc::new(build()?);
+    if let Ok(mut named) = NAMED.lock() {
+        let named = named.get_or_insert_with(Default::default);
+        named.retain(|_, p| p.strong_count() > 0);
+        if let Some(first) = named.get(key).and_then(std::sync::Weak::upgrade) {
+            return Some(first);
+        }
+        named.insert(key.to_owned(), Arc::downgrade(&peaks));
+    }
+    Some(peaks)
 }
 
 /// Keeps a [`Streamed`] take's chunks filled around where playback reads.
@@ -341,6 +518,13 @@ enum Filled {
 impl<D: Decode> StreamFeeder<D> {
     #[must_use]
     pub fn new(source: Streamed, decoder: D) -> Self {
+        // Its waveform from the whole stream once it is here, for a take
+        // with no cache of its original's: what is resident is only near
+        // the playhead.
+        #[cfg(feature = "reapeaks")]
+        if let Some(whole) = decoder.whole_peaks() {
+            source.set_whole(whole);
+        }
         Self {
             source,
             decoder,
@@ -714,6 +898,70 @@ mod tests {
             f.source().sample(CHUNK * 2 + 9, 0),
             level(CHUNK as u64 * 2 + 9)
         );
+    }
+
+    /// A streamed take with no cache of its original's: until every byte
+    /// of its proxy is here it has no waveform (what is resident is only
+    /// near the playhead — drawn, it was a lane of slivers); once they
+    /// are, its waveform is the whole proxy's, to its end, and kept.
+    #[cfg(all(feature = "stream-ogg", feature = "reapeaks"))]
+    #[test]
+    fn a_streamed_take_s_waveform_is_its_whole_proxy_once_every_byte_is_here() {
+        use fts_sample::ogg_index::OggIndex;
+        use fts_sample::sparse::SparseBytes;
+        let rate = 48_000_u32;
+        let frames = rate as usize * 3;
+        // Three seconds of a tone at half scale, both channels.
+        let pcm: Vec<f32> = (0..frames)
+            .flat_map(|i| {
+                let v = 0.5 * (i as f32 * 440.0 * std::f32::consts::TAU / rate as f32).sin();
+                [v, v]
+            })
+            .collect();
+        let ogg = fts_sample::cache::encode_ogg_vorbis(&pcm, 2, rate, 0.4).expect("encodes");
+        let index = OggIndex::build(&ogg, u64::from(rate)).expect("an ogg stream");
+        let bytes = SparseBytes::in_memory(ogg.len() as u64);
+        let half = ogg.len() / 2;
+        bytes
+            .insert(0, &ogg[..half])
+            .expect("the first half arrives");
+
+        // Whoever makes its feeder, the take's source learns how to build
+        // its waveform from the whole proxy.
+        let feeder = StreamFeeder::new(
+            Streamed::new(index.channels, index.sample_rate, index.frames),
+            RemoteOgg::new(Arc::clone(&bytes), index.clone()),
+        );
+        let streamed = feeder.source().clone();
+        assert!(
+            streamed.peaks_or_build().is_none(),
+            "half the proxy is no waveform"
+        );
+        assert!(!streamed.has_peaks());
+
+        bytes
+            .insert(half as u64, &ogg[half..])
+            .expect("the rest arrives");
+        let peaks = streamed
+            .peaks_or_build()
+            .expect("the whole proxy's waveform");
+        assert!(streamed.has_peaks(), "kept once built");
+        let fine = &peaks.levels[0];
+        let spp = fine.samples_per_peak as usize;
+        assert!(
+            fine.count * spp >= frames,
+            "it reaches the take's end: {} peaks of {spp}",
+            fine.count
+        );
+        // The last half second, where nothing was resident: the tone.
+        let from = (frames - rate as usize / 2) / spp;
+        for p in from..frames / spp {
+            let (max, _) = fine.pair(peaks.channels, 0, p);
+            assert!(
+                max > 0.3,
+                "peak {p} of the end is the tone, not silence: {max}"
+            );
+        }
     }
 }
 

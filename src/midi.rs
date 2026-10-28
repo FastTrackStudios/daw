@@ -40,10 +40,7 @@ const TICKS_PER_QN: f64 = 960.0;
 fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
     match ctx {
         ProjectContext::Project(guid) => Some(guid.clone()),
-        ProjectContext::Current => {
-            let state = daw.state.lock().ok()?;
-            state.current_project_guid.clone()
-        }
+        ProjectContext::Current => daw.current_project_guid(),
     }
 }
 
@@ -79,6 +76,26 @@ fn resolve_take_guid(daw: &Standalone, location: &MidiTakeLocation) -> Option<St
     })
     .ok()
     .flatten()
+}
+
+/// Where the take's item starts, as a project quarter-note position — what
+/// [`Midi::add_notes`] subtracts to make a project position the take's own.
+/// Through the same conversion its callers use (`time_to_quarter_notes`),
+/// so a note they place on a downbeat lands on it.
+fn item_start_qn(daw: &Standalone, location: &MidiTakeLocation) -> f64 {
+    let position = resolve_project(daw, &location.project).and_then(|guid| {
+        daw.with_project(&guid, |p| match &location.item {
+            ItemRef::Guid(g) => p.items.get(g).map(|e| e.item.position),
+            ItemRef::Index(_) | ItemRef::ProjectIndex(_) => None,
+        })
+        .ok()
+        .flatten()
+    });
+    position.map_or(0.0, |at| {
+        daw_proto::PositionConversion::time_to_quarter_notes(daw, location.project.clone(), at)
+            .quarter_notes
+            .as_quarter_notes()
+    })
 }
 
 /// Reissue indices so the `index` field matches the vec position.
@@ -315,11 +332,20 @@ impl Midi for Standalone {
     /// the renderer reads both through the tempo map — so the length is
     /// converted here. Stored as given, a generated click's quarter-note
     /// tick sounded for 960 quarter notes.
+    ///
+    /// The start is made the take's own, as `MIDI_GetPPQPosFromProjQN`
+    /// does: a take's notes count from the item's start (the loader reads
+    /// them so, the renderer plays them so). Stored as given, every note
+    /// of an item that does not start at zero played that far late — the
+    /// guide, whose items start at the song's count-in, counted into each
+    /// section two bars after its downbeat.
     fn add_notes(&self, location: MidiTakeLocation, notes: Vec<MidiNoteCreate>) -> Vec<u32> {
+        let item_qn = item_start_qn(self, &location);
         notes
             .into_iter()
             .map(|n| {
                 let n = MidiNoteCreate {
+                    start_ppq: n.start_ppq - item_qn,
                     length_ppq: n.length_ppq / TICKS_PER_QN,
                     ..n
                 };

@@ -708,6 +708,15 @@ pub struct ProjectRenderer {
     /// renders — the render ahead's renderer, which must know which
     /// snapshot each frame it renders was made from.
     held: std::sync::atomic::AtomicBool,
+    /// Whether this renderer writes the backend's meter bank. A backend
+    /// has one bank, by track index, for its current song; a set engine
+    /// renders several songs at once and lets only the current one meter
+    /// (see [`set_metering`](Self::set_metering)). Shared with a render
+    /// ahead's renderer of the same song.
+    metering: Arc<std::sync::atomic::AtomicBool>,
+    /// The bank a renderer that does not meter writes into: empty, so
+    /// every write is a no-op. Made once here, never on the audio thread.
+    no_meters: Arc<crate::metering::Meters>,
 }
 
 /// Which tracks a snapshot renders live, and what its tracks ahead are, as
@@ -771,7 +780,23 @@ impl ProjectRenderer {
             lanes: std::sync::OnceLock::new(),
             live_print: std::sync::atomic::AtomicU64::new(0),
             held: std::sync::atomic::AtomicBool::new(false),
+            metering: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            no_meters: crate::metering::Meters::empty(),
         }
+    }
+
+    /// Whether this renderer's blocks write the backend's meter bank (on
+    /// by default). Any thread; takes effect on the next block.
+    pub fn set_metering(&self, on: bool) {
+        self.metering
+            .store(on, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Meter (or not) together with `with`: one switch for a song's two
+    /// renderers (a render ahead's and the callback's).
+    #[cfg(all(not(target_arch = "wasm32"), feature = "audio"))]
+    pub(crate) fn share_metering(&mut self, with: &ProjectRenderer) {
+        self.metering = with.metering.clone();
     }
 
     /// Render for a realtime callback: from here on the render thread never
@@ -916,15 +941,7 @@ impl ProjectRenderer {
             }
         }
         // Has the project moved on? Read without waiting.
-        let revision = match self.daw.state.try_lock() {
-            Ok(s) => s.projects.get(&self.project_guid).map(|p| p.revision),
-            Err(std::sync::TryLockError::Poisoned(p)) => p
-                .into_inner()
-                .projects
-                .get(&self.project_guid)
-                .map(|p| p.revision),
-            Err(std::sync::TryLockError::WouldBlock) => None,
-        };
+        let revision = self.daw.try_project_revision(&self.project_guid);
         match (&*current, revision) {
             (Some((rev, _)), Some(now)) if *rev != now => {
                 if b.wanted.swap(now, Ordering::AcqRel) != now {
@@ -1232,7 +1249,9 @@ impl ProjectRenderer {
         // The meter bank. In realtime mode, re-read only when its lock is
         // free (its readers are UI polls) — the cached one otherwise.
         #[cfg(not(target_arch = "wasm32"))]
-        let meters = if self.realtime.get().is_some() {
+        let meters = if !self.metering.load(std::sync::atomic::Ordering::Relaxed) {
+            self.no_meters.clone()
+        } else if self.realtime.get().is_some() {
             if let Ok(m) = self.daw.meters.try_lock() {
                 if !scratch.meters.as_ref().is_some_and(|c| Arc::ptr_eq(c, &m)) {
                     scratch.meters = Some(m.clone());
@@ -1243,7 +1262,11 @@ impl ProjectRenderer {
             self.daw.meters()
         };
         #[cfg(target_arch = "wasm32")]
-        let meters = self.daw.meters();
+        let meters = if self.metering.load(std::sync::atomic::Ordering::Relaxed) {
+            self.daw.meters()
+        } else {
+            self.no_meters.clone()
+        };
         // Split-borrow every scratch field so the stages below can
         // hold disjoint &muts simultaneously.
         let RenderScratch {

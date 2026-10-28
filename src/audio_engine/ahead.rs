@@ -862,11 +862,10 @@ impl DualRender {
             return Self::whole(live);
         };
         let sample_rate = shared.sample_rate();
-        let ahead = Arc::new(ProjectRenderer::new(
-            live.daw(),
-            live.project_guid(),
-            sample_rate,
-        ));
+        let mut ahead = ProjectRenderer::new(live.daw(), live.project_guid(), sample_rate);
+        // The song meters, or not, as one.
+        ahead.share_metering(&live);
+        let ahead = Arc::new(ahead);
         // One snapshot an edit, for both.
         ahead.share_snapshots(&live);
         ahead.set_realtime_ahead();
@@ -918,6 +917,12 @@ impl DualRender {
             _ahead: Some(Ahead { control, thread }),
             out: StereoBuffer::zeroed(0, sample_rate),
         }
+    }
+
+    /// Hold room for a block of `frames`, so the callback's first render
+    /// does not grow the block buffer on the audio thread.
+    pub fn reserve(&mut self, frames: usize) {
+        self.out.samples.reserve(frames.saturating_mul(2));
     }
 
     /// Nothing is played (stopped): the render ahead rests until play.

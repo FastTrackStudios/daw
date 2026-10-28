@@ -165,6 +165,15 @@ impl TakeReader {
             && let Some(media) = proxy.parent().and_then(std::path::Path::parent)
         {
             self.reapeaks = crate::peak_store::for_stand_in(&media.join(original), &self.source);
+            if self.reapeaks.is_some() {
+                return;
+            }
+        }
+        // No cache of its original's: built from the whole proxy once every
+        // byte of it is here. Until then the chunks resident are what is
+        // read — only those near the playhead, silent everywhere else.
+        if let AudioSource::Streamed(streamed) = &*self.source {
+            self.reapeaks = streamed.peaks_or_build();
             return;
         }
         // An on-disk file: its cache, built once if it has none. (A page
@@ -179,6 +188,17 @@ impl TakeReader {
 
     #[cfg(not(all(feature = "reapeaks", any(feature = "audio", feature = "decode"))))]
     pub(crate) fn ensure_reapeaks(&mut self) {}
+
+    /// Whether what this reads is only part of the take: a streamed one
+    /// with no waveform ([`Self::ensure_reapeaks`] found none), whose
+    /// chunks resident are those near the playhead, silent elsewhere.
+    pub(crate) fn is_partial(&self) -> bool {
+        let streamed = matches!(*self.source, AudioSource::Streamed(_));
+        #[cfg(all(feature = "reapeaks", any(feature = "audio", feature = "decode")))]
+        return streamed && self.reapeaks.is_none();
+        #[cfg(not(all(feature = "reapeaks", any(feature = "audio", feature = "decode"))))]
+        return streamed;
+    }
 
     pub(crate) fn channels(&self) -> u16 {
         self.source.channels()
@@ -272,10 +292,6 @@ impl TakeReader {
 fn project_guid(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
     match ctx {
         ProjectContext::Project(g) => Some(g.clone()),
-        ProjectContext::Current => daw
-            .state
-            .lock()
-            .ok()
-            .and_then(|s| s.current_project_guid.clone()),
+        ProjectContext::Current => daw.current_project_guid(),
     }
 }

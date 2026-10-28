@@ -1,7 +1,8 @@
 //! `Standalone` root handle and shared state types for the sync backend.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use daw_proto::automation::{
     AutomationItem, Envelope, EnvelopePoint, EnvelopeRef, EnvelopeType, SendEnvelopeKind,
@@ -703,13 +704,124 @@ impl UndoStep {
     }
 }
 
+/// Run an edit on `project`: every mutable pass counts as a mutation —
+/// false positives just refresh a cache, staleness would corrupt playback —
+/// so its revision moves on. Returns what `f` did and the track count the
+/// meter bank must cover.
+fn edit<R>(project: &mut ProjectState, f: impl FnOnce(&mut ProjectState) -> R) -> (R, usize) {
+    let r = f(project);
+    project.revision = project.revision.wrapping_add(1);
+    (r, project.tracks.len())
+}
+
 /// Undo depth per project. An edit session is drags and applies, not a
 /// text editor; 32 steps of maps-and-Arcs is small.
 pub const UNDO_LIMIT: usize = 32;
 
-/// Aggregate state for the standalone sync backend.
-pub struct StandaloneState {
-    pub projects: HashMap<String, ProjectState>,
+/// A project's undo history: its steps, most recent last, and a
+/// `begin_undo_block` whose `end` has not arrived yet.
+#[derive(Default)]
+pub struct History {
+    pub undo: Vec<UndoStep>,
+    pub redo: Vec<UndoStep>,
+    pub pending: Option<UndoStep>,
+}
+
+/// What a project's lock guards: the project and its undo history, which
+/// change together.
+pub struct ProjectSlot {
+    pub project: ProjectState,
+    pub history: History,
+}
+
+/// One project of an engine, behind a lock of its own: an edit to one song
+/// never waits on, or holds up, a reader or editor of another.
+///
+/// Beside the lock, what is asked of every project without needing its
+/// state — its revision (the renderer asks every block) and its info
+/// (listing the projects) — is published at the end of every write, so
+/// those never wait on an edit at all.
+pub struct ProjectCell {
+    slot: RwLock<ProjectSlot>,
+    revision: AtomicU64,
+    /// A leaf lock: nothing is locked while it is held.
+    info: Mutex<ProjectInfo>,
+}
+
+impl ProjectCell {
+    fn new(project: ProjectState) -> Self {
+        Self {
+            revision: AtomicU64::new(project.revision),
+            info: Mutex::new(project.info.clone()),
+            slot: RwLock::new(ProjectSlot {
+                project,
+                history: History::default(),
+            }),
+        }
+    }
+
+    /// The project and its history, for reading. `None` if a writer
+    /// panicked under the lock.
+    pub fn read(&self) -> Option<RwLockReadGuard<'_, ProjectSlot>> {
+        self.slot.read().ok()
+    }
+
+    /// Run `f` over the project and its history, for writing, then publish
+    /// the revision and info it left. `None` if a writer panicked under the
+    /// lock. Does not move the revision on: the caller says whether `f` was
+    /// an edit.
+    pub fn write<R>(&self, f: impl FnOnce(&mut ProjectSlot) -> R) -> Option<R> {
+        let mut slot = self.slot.write().ok()?;
+        let r = f(&mut slot);
+        self.publish(&slot.project);
+        Some(r)
+    }
+
+    /// Publish what readers ask without the lock — under the write lock, so
+    /// the two writes of two writers land in their order.
+    fn publish(&self, project: &ProjectState) {
+        self.revision.store(project.revision, Ordering::Release);
+        let mut info = self.info.lock().unwrap_or_else(PoisonError::into_inner);
+        if *info != project.info {
+            info.clone_from(&project.info);
+        }
+    }
+
+    /// The project's revision as its last write left it. Lock-free.
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Acquire)
+    }
+
+    /// The project's info as its last write left it.
+    #[must_use]
+    pub fn info(&self) -> ProjectInfo {
+        self.info
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+/// The projects of an engine, each in its own [`ProjectCell`].
+///
+/// # Lock order
+///
+/// - The map lock is held only to look a cell up, insert or remove one —
+///   never while a cell is locked, and a cell is never locked while it is
+///   held.
+/// - At most one cell is locked at a time. Work across projects (listing
+///   them, a live note bumping every project with the track) takes a
+///   snapshot of the cells and locks each in turn.
+/// - The engine-wide [`EngineState`] lock may be taken while holding the
+///   map lock (current-project changes check the map), never the other way
+///   round, and never together with a cell.
+/// - A cell's info mirror is a leaf.
+pub(crate) type ProjectMap = HashMap<String, Arc<ProjectCell>>;
+
+/// Engine-wide state, outside every project: small, held only to read or
+/// set one field.
+pub struct EngineState {
     pub current_project_guid: Option<String>,
     /// Global ext state keyed by `(section, key)`.
     pub global_ext_state: HashMap<(String, String), String>,
@@ -717,24 +829,15 @@ pub struct StandaloneState {
     pub last_touched_fx: Option<LastTouchedFx>,
     /// Buffered console output (for tests).
     pub console_log: Vec<String>,
-    /// Undo stacks per project guid, most recent last.
-    pub undo: HashMap<String, Vec<UndoStep>>,
-    pub redo: HashMap<String, Vec<UndoStep>>,
-    /// A `begin_undo_block` whose `end` has not arrived yet.
-    pub pending_undo: HashMap<String, UndoStep>,
 }
 
-impl StandaloneState {
+impl EngineState {
     fn new() -> Self {
         Self {
-            projects: HashMap::new(),
             current_project_guid: None,
             global_ext_state: HashMap::new(),
             last_touched_fx: None,
             console_log: Vec::new(),
-            undo: HashMap::new(),
-            redo: HashMap::new(),
-            pending_undo: HashMap::new(),
         }
     }
 }
@@ -745,7 +848,11 @@ impl StandaloneState {
 /// optionally seed projects via [`Standalone::seed_project`].
 #[derive(Clone)]
 pub struct Standalone {
-    pub(crate) state: Arc<Mutex<StandaloneState>>,
+    /// The projects, each behind its own lock ([`ProjectMap`] has the lock
+    /// order).
+    pub(crate) projects: Arc<RwLock<ProjectMap>>,
+    /// Engine-wide state outside every project.
+    pub(crate) engine: Arc<Mutex<EngineState>>,
     /// Per-project transport engine bundles (sample clock + subscriber pumps).
     /// Lazily created on first access. WASM-compatible; lock-free on the
     /// inner [`TransportShared`] atomics.
@@ -867,7 +974,8 @@ impl Standalone {
     /// Create a new empty standalone backend.
     pub fn new() -> Self {
         Self {
-            state: Arc::new(Mutex::new(StandaloneState::new())),
+            projects: Arc::default(),
+            engine: Arc::new(Mutex::new(EngineState::new())),
             transport_engines: Arc::new(Mutex::new(std::collections::HashMap::new())),
             bay_resolver: Arc::new(Mutex::new(None)),
             automation_touch: Arc::new(Mutex::new(
@@ -952,13 +1060,14 @@ impl Standalone {
         if !fresh {
             return;
         }
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
-        for project in state.projects.values_mut() {
-            if project.tracks.iter().any(|t| t.guid == track) {
-                project.revision = project.revision.wrapping_add(1);
-            }
+        // One project at a time, never two locks at once.
+        for cell in self.cells() {
+            cell.write(|slot| {
+                let project = &mut slot.project;
+                if project.tracks.iter().any(|t| t.guid == track) {
+                    project.revision = project.revision.wrapping_add(1);
+                }
+            });
         }
     }
 
@@ -1008,10 +1117,7 @@ impl Standalone {
                 if bank.is_empty() {
                     continue;
                 }
-                let Some(project_guid) = ({
-                    let s = this.state.lock().expect("standalone state poisoned");
-                    s.current_project_guid.clone()
-                }) else {
+                let Some(project_guid) = this.current_project_guid() else {
                     continue;
                 };
                 let tracks = (0..bank.len())
@@ -1140,25 +1246,107 @@ impl Standalone {
     /// not another one.
     #[must_use]
     pub fn same_engine(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.state, &other.state)
+        Arc::ptr_eq(&self.projects, &other.projects)
+    }
+
+    /// The project map, to look up, insert or remove a cell. Held for
+    /// nothing longer ([`ProjectMap`]'s lock order).
+    pub(crate) fn project_map(&self) -> RwLockReadGuard<'_, ProjectMap> {
+        self.projects.read().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The project map, to insert or remove a cell.
+    pub(crate) fn project_map_mut(&self) -> RwLockWriteGuard<'_, ProjectMap> {
+        self.projects
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The engine-wide state.
+    pub(crate) fn engine_state(&self) -> MutexGuard<'_, EngineState> {
+        self.engine.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Project `guid`'s cell, if the engine has it. The map lock is
+    /// released before this returns.
+    pub(crate) fn cell(&self, guid: &str) -> Option<Arc<ProjectCell>> {
+        self.project_map().get(guid).cloned()
+    }
+
+    /// Every project's cell, as the map holds them now.
+    pub(crate) fn cells(&self) -> Vec<Arc<ProjectCell>> {
+        self.project_map().values().cloned().collect()
+    }
+
+    /// The current project's guid, if any.
+    pub(crate) fn current_project_guid(&self) -> Option<String> {
+        self.engine_state().current_project_guid.clone()
+    }
+
+    /// The project `ctx` names: its guid, or the current project's.
+    pub(crate) fn resolve_project(&self, ctx: &daw_proto::ProjectContext) -> Option<String> {
+        match ctx {
+            daw_proto::ProjectContext::Project(guid) => Some(guid.clone()),
+            daw_proto::ProjectContext::Current => self.current_project_guid(),
+        }
+    }
+
+    /// Project `guid`'s revision, read without waiting on anything: `None`
+    /// for no such project, or while a project is being added or removed.
+    /// What the realtime renderer asks every block.
+    pub(crate) fn try_project_revision(&self, guid: &str) -> Option<u64> {
+        let map = match self.projects.try_read() {
+            Ok(map) => map,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return None,
+        };
+        map.get(guid).map(|cell| cell.revision())
+    }
+
+    /// Put `project` in the engine as `guid`, replacing any project there,
+    /// and make it current if none is.
+    pub(crate) fn insert_project(&self, guid: &str, project: ProjectState) {
+        let mut map = self.project_map_mut();
+        map.insert(guid.to_owned(), Arc::new(ProjectCell::new(project)));
+        let mut engine = self.engine_state();
+        if engine.current_project_guid.is_none() {
+            engine.current_project_guid = Some(guid.to_owned());
+        }
     }
 
     pub fn seed_project(&self, info: ProjectInfo) -> String {
         let guid = info.guid.clone();
-        let mut s = self.state.lock().expect("standalone state poisoned");
-        if s.current_project_guid.is_none() {
-            s.current_project_guid = Some(guid.clone());
-        }
-        s.projects.insert(guid.clone(), ProjectState::new(info));
+        self.insert_project(&guid, ProjectState::new(info));
         guid
     }
 
     /// Mark `guid` as the current project. No-op if the project is not present.
     pub fn set_current_project(&self, guid: &str) {
-        let mut s = self.state.lock().expect("standalone state poisoned");
-        if s.projects.contains_key(guid) {
-            s.current_project_guid = Some(guid.to_string());
+        self.select_project(guid);
+    }
+
+    /// Mark `guid` as the current project, if the engine has it.
+    pub(crate) fn select_project(&self, guid: &str) -> bool {
+        let map = self.project_map();
+        if !map.contains_key(guid) {
+            return false;
         }
+        self.engine_state().current_project_guid = Some(guid.to_owned());
+        true
+    }
+
+    /// Remove project `guid`; if it was current, any project left becomes
+    /// current. Whether there was such a project.
+    pub(crate) fn remove_project(&self, guid: &str) -> bool {
+        let mut map = self.project_map_mut();
+        if map.remove(guid).is_none() {
+            return false;
+        }
+        let mut engine = self.engine_state();
+        if engine.current_project_guid.as_deref() == Some(guid) {
+            engine.current_project_guid = map.keys().next().cloned();
+        }
+        true
     }
 
     /// Run a closure with mutable access to a project's state.
@@ -1167,17 +1355,12 @@ impl Standalone {
         guid: &str,
         f: impl FnOnce(&mut ProjectState) -> R,
     ) -> DawResult<R> {
-        let mut s = self.state.lock().expect("standalone state poisoned");
-        let project = s
-            .projects
-            .get_mut(guid)
+        let cell = self
+            .cell(guid)
             .ok_or_else(|| DawError::not_found("Project", guid))?;
-        let r = f(project);
-        // Every mutable pass counts as a mutation — false positives
-        // just refresh a cache, staleness would corrupt playback.
-        project.revision = project.revision.wrapping_add(1);
-        let track_count = project.tracks.len();
-        drop(s);
+        let (r, track_count) = cell
+            .write(|slot| edit(&mut slot.project, f))
+            .expect("project state poisoned");
         self.meters_follow_tracks(track_count);
         Ok(r)
     }
@@ -1188,7 +1371,7 @@ impl Standalone {
     /// bank only grows (cells are by track index; a removed track's cell
     /// reads silence next block). Swapped whole; the renderer picks the new
     /// bank up on its next block.
-    fn meters_follow_tracks(&self, track_count: usize) {
+    pub(crate) fn meters_follow_tracks(&self, track_count: usize) {
         if !self
             .meters_installed
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -1210,12 +1393,11 @@ impl Standalone {
         guid: &str,
         f: impl FnOnce(&ProjectState) -> R,
     ) -> DawResult<R> {
-        let s = self.state.lock().expect("standalone state poisoned");
-        let project = s
-            .projects
-            .get(guid)
+        let cell = self
+            .cell(guid)
             .ok_or_else(|| DawError::not_found("Project", guid))?;
-        Ok(f(project))
+        let slot = cell.read().expect("project state poisoned");
+        Ok(f(&slot.project))
     }
 
     /// Attach a cpal-backed [`AudioEngine`](crate::audio_engine::AudioEngine)
@@ -1267,6 +1449,18 @@ impl Standalone {
         prefs: &audio::io::AudioIoPrefs,
     ) -> Result<crate::audio_engine::AudioEngine, String> {
         crate::audio_engine::AudioEngine::attached_to_prefs(self, guid, prefs)
+    }
+
+    /// Open the set engine's one audio stream (`docs/design/set-engine.md`)
+    /// on the device `prefs` choose: every song given a voice
+    /// ([`SetAudio::add_voice`](crate::audio_engine::SetAudio::add_voice))
+    /// sounds from it, each on its own transport. Drop it to stop audio.
+    #[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
+    pub fn attach_set_audio_with_prefs(
+        &self,
+        prefs: &audio::io::AudioIoPrefs,
+    ) -> Result<crate::audio_engine::SetAudio, String> {
+        crate::audio_engine::SetAudio::open(self, prefs)
     }
 
     /// Whether a loaded plugin instance is backing the given FX
@@ -1602,16 +1796,20 @@ impl Standalone {
     /// changed instead of every item.
     #[must_use]
     pub fn item_changes_since(&self, guid: &str, cursor: u64) -> Option<ItemChanges> {
-        let s = self.state.lock().ok()?;
-        // Read under the lock every write takes: nothing lands between.
-        Some(s.projects.get(guid)?.item_changes_since(cursor))
+        // Read under the lock every write to the project takes: nothing
+        // lands between.
+        self.read_project(guid, |p| p.item_changes_since(cursor))
     }
 
     /// Visit a project's state via a read-only closure. Test/debug
     /// hook; production code should go through the proto trait surface.
+    ///
+    /// Readers of one project share its lock; a writer of another project
+    /// holds none of it.
     pub fn read_project<R>(&self, guid: &str, f: impl FnOnce(&ProjectState) -> R) -> Option<R> {
-        let s = self.state.lock().ok()?;
-        s.projects.get(guid).map(f)
+        let cell = self.cell(guid)?;
+        let slot = cell.read()?;
+        Some(f(&slot.project))
     }
 
     /// Visit a project's state via a mutable closure. Test/debug hook
@@ -1622,26 +1820,20 @@ impl Standalone {
         guid: &str,
         f: impl FnOnce(&mut ProjectState) -> R,
     ) -> Option<R> {
-        let mut s = self.state.lock().ok()?;
-        let project = s.projects.get_mut(guid)?;
-        let r = f(project);
-        project.revision = project.revision.wrapping_add(1);
-        let track_count = project.tracks.len();
-        drop(s);
+        let cell = self.cell(guid)?;
+        let (r, track_count) = cell.write(|slot| edit(&mut slot.project, f))?;
         self.meters_follow_tracks(track_count);
         Some(r)
     }
 
     /// Captured console messages, useful in tests.
     pub fn console_log(&self) -> Vec<String> {
-        let s = self.state.lock().expect("standalone state poisoned");
-        s.console_log.clone()
+        self.engine_state().console_log.clone()
     }
 
     /// Set the synthetic last-touched FX (for tests).
     pub fn set_last_touched_fx(&self, fx: Option<LastTouchedFx>) {
-        let mut s = self.state.lock().expect("standalone state poisoned");
-        s.last_touched_fx = fx;
+        self.engine_state().last_touched_fx = fx;
     }
 }
 
@@ -1649,12 +1841,9 @@ impl Daw for Standalone {
     type Project<'a> = super::project::StandaloneProject<'a>;
 
     fn current_project(&self) -> DawResult<Self::Project<'_>> {
-        let guid = {
-            let s = self.state.lock().expect("standalone state poisoned");
-            s.current_project_guid
-                .clone()
-                .ok_or_else(|| DawError::not_found("Project", "current"))?
-        };
+        let guid = self
+            .current_project_guid()
+            .ok_or_else(|| DawError::not_found("Project", "current"))?;
         self.with_project(&guid, |_| ())?;
         Ok(super::project::StandaloneProject::new(self, guid))
     }
@@ -1668,17 +1857,18 @@ impl Daw for Standalone {
     }
 
     fn projects(&self) -> Vec<ProjectInfo> {
-        let s = self.state.lock().expect("standalone state poisoned");
-        s.projects.values().map(|p| p.info.clone()).collect()
+        // Each project's published info: no project's edit is waited on.
+        self.cells().iter().map(|cell| cell.info()).collect()
     }
 
     fn show_console_msg(&self, msg: &str) {
-        let mut s = self.state.lock().expect("standalone state poisoned");
-        s.console_log.push(msg.to_string());
+        self.engine_state().console_log.push(msg.to_string());
     }
 
     fn last_touched_fx(&self) -> Option<LastTouchedFx> {
-        let s = self.state.lock().expect("standalone state poisoned");
-        s.last_touched_fx.clone()
+        self.engine_state().last_touched_fx.clone()
     }
 }
+
+#[cfg(test)]
+mod tests;

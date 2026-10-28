@@ -31,7 +31,7 @@ use super::routing;
 /// Largest block (in frames) the aux staging buffer covers. Callbacks
 /// larger than this fall back to the direct path (no aux hook) so the
 /// audio thread never allocates.
-const AUX_MAX_FRAMES: usize = 16_384;
+pub(super) const AUX_MAX_FRAMES: usize = 16_384;
 
 // Engine-level device selection. On native this is the shared
 // `audio::io::AudioIoPrefs`; on wasm (where `daw_audio_io` is a
@@ -57,17 +57,17 @@ pub struct AudioIoPrefs {
 /// Resolved output device + stream config, opened from [`AudioIoPrefs`].
 /// Two target impls: native goes through `audio::io::open_output`
 /// (JACK-aware device selection); wasm uses the cpal default host.
-struct ResolvedOutput {
-    device: cpal::Device,
-    config: StreamConfig,
-    sample_format: SampleFormat,
-    sample_rate: u32,
-    channels: u16,
+pub(super) struct ResolvedOutput {
+    pub(super) device: cpal::Device,
+    pub(super) config: StreamConfig,
+    pub(super) sample_format: SampleFormat,
+    pub(super) sample_rate: u32,
+    pub(super) channels: u16,
 }
 
 impl ResolvedOutput {
     #[cfg(not(target_arch = "wasm32"))]
-    fn open(prefs: &AudioIoPrefs) -> Result<Self, String> {
+    pub(super) fn open(prefs: &AudioIoPrefs) -> Result<Self, String> {
         let host = audio::io::audio_host();
         let out = audio::io::open_output(&host, prefs)?;
         Ok(Self {
@@ -1180,6 +1180,6 @@ impl AudioEngine {
 
 /// Whether a stream error is only a buffer under/overrun — a glitch the
 /// stream survives — rather than a device that has gone away.
-fn is_xrun(err: &cpal::Error) -> bool {
+pub(super) fn is_xrun(err: &cpal::Error) -> bool {
     err.kind() == cpal::ErrorKind::Xrun
 }

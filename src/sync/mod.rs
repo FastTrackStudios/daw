@@ -1,9 +1,9 @@
 //! Sync trait implementation for the standalone backend.
 //!
 //! This module implements `daw_proto::*` traits with an in-memory state
-//! store. It is intended for tests and non-REAPER hosts. The state lives behind
-//! a single `std::sync::Mutex` (this is non-realtime control state — std mutex
-//! is fine, this is not the audio path).
+//! store. It is intended for tests and non-REAPER hosts. Each project lives
+//! behind its own lock (`ProjectCell`), engine-wide state behind a small one
+//! of its own; `ProjectMap` documents the lock order.
 //!
 //! The sync state here is independent from the older async services in this
 //! crate (`StandaloneTransport`, `StandaloneRegion`, etc.). Sharing the storage
@@ -20,6 +20,7 @@ mod daw;
 // lives at `crate::marker`. The borrowed `StandaloneMarkers<'a>` view
 // retired with the port.
 pub(crate) mod project;
+mod stage;
 // regions ported to architect::rpc — see `crate::region`.
 // routing ported to architect::rpc — see `crate::routing_sync`.
 // takes ported to architect::rpc — see `crate::take`.
@@ -30,6 +31,7 @@ pub(crate) mod project;
 // Standalone` lives at `crate::transport`.
 
 pub use daw::{
-    EnvelopeData, EnvelopeKey, FxChainKey, FxEntry, ItemChanges, ItemEntry, ProjectState,
-    RulerLane, Standalone, StandaloneState, TakeList, TrackExt,
+    EngineState, EnvelopeData, EnvelopeKey, FxChainKey, FxEntry, History, ItemChanges, ItemEntry,
+    ProjectCell, ProjectSlot, ProjectState, RulerLane, Standalone, TakeList, TrackExt,
 };
+pub use stage::Stage;

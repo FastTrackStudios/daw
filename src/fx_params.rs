@@ -19,8 +19,7 @@ use crate::plugin::PluginParamInfo;
 use crate::sync::{FxChainKey, ProjectState, Standalone};
 
 fn resolve_project(daw: &Standalone) -> Option<String> {
-    let state = daw.state.lock().ok()?;
-    state.current_project_guid.clone()
+    daw.current_project_guid()
 }
 
 fn no_project() -> DawError {

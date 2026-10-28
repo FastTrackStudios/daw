@@ -14,10 +14,7 @@ impl Standalone {
         let guid = match project {
             ProjectContext::Project(guid) => guid.clone(),
             ProjectContext::Current => self
-                .state
-                .lock()
-                .ok()
-                .and_then(|s| s.current_project_guid.clone())
+                .current_project_guid()
                 .ok_or_else(|| DawError::NotFound("no current project".into()))?,
         };
         self.with_project(&guid, |p| p.info.path.clone())

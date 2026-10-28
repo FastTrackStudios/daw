@@ -178,7 +178,7 @@ impl daw_proto::TransportSync for Standalone {
     fn snapshot(&self, project: ProjectContext) -> Option<StampedPosition> {
         let guid = match project {
             ProjectContext::Project(guid) => guid,
-            ProjectContext::Current => self.state.lock().ok()?.current_project_guid.clone()?,
+            ProjectContext::Current => self.current_project_guid()?,
         };
         let backend = self.sync_backend(&guid)?;
         backend

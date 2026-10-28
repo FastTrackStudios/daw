@@ -130,7 +130,7 @@ mod window_manager;
 // Old `Standalone*` per-service structs retired.
 pub use project::project_guids;
 pub use shared_state::SharedProjectState;
-pub use sync::{ItemChanges, Standalone};
+pub use sync::{ItemChanges, Stage, Standalone};
 
 /// REAPER `.reapeaks` peak-cache reading (the `reapeaks` feature) — draw
 /// waveforms from REAPER's own peak mipmaps.

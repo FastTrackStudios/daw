@@ -84,6 +84,9 @@ tokio = { workspace = true }
 # Native-only (cpal device streams); pulled in by the `audio` feature.
 audio = { workspace = true, features = ["io", "monitor"], optional = true }
 rtrb = { workspace = true, optional = true }
+# The set engine's voice list, swapped in whole from control threads and
+# read by the audio callback without a lock (`audio_engine::set_audio`).
+arc-swap = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { workspace = true, features = ["futures"] }
@@ -99,7 +102,10 @@ js-sys = { workspace = true, optional = true }
 # `rpp-project` — without this the test does not compile, and because a
 # crate's test targets are built as a set, it took every other test in
 # daw-standalone down with it.
-daw-standalone = { path = ".", features = ["rpp-project", "bootstrap"] }
+# `audio` for the audio engine's own tests (the render ahead, the set
+# engine's block loop), which run without a device; `stream-ogg` and
+# `reapeaks` for a streamed take's waveform built from its whole proxy.
+daw-standalone = { path = ".", features = ["rpp-project", "bootstrap", "audio", "stream-ogg", "reapeaks"] }
 daw-proto = { workspace = true }
 daw-control = { workspace = true }
 eyre = { workspace = true }
@@ -125,7 +131,7 @@ decode = ["fts-sample/load", "fts-sample/decode-compressed", "fts-sample/budget"
 # `daw-audio-io` + `rtrb` are native-only (`cfg(not(wasm32))` target
 # deps); enabling them here is a no-op on wasm32 where Cargo ignores
 # the target dep, and the live-input paths are themselves `cfg`-gated.
-audio = ["decode", "dep:cpal", "audio/io", "dep:rtrb"]
+audio = ["decode", "dep:cpal", "audio/io", "dep:rtrb", "dep:arc-swap"]
 # Native PipeWire duplex engine (`DuplexAudioEngine`) — one realtime callback
 # (input+output, no ring) via daw-audio-io's `pw_filter` backend. Linux-only.
 # PipeWire is DEFAULT on Linux (daw-audio-io target-gates it); alias kept

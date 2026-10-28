@@ -109,7 +109,11 @@ impl Peaks for Standalone {
             peaks,
             samples_per_peak: block,
         };
-        if let Some((key, revision)) = cache_key
+        // A streamed take read without its waveform is only the chunks
+        // resident near the playhead: not kept, so a read once the proxy
+        // has all arrived builds the whole one.
+        let partial = reader.is_partial();
+        if let Some((key, revision)) = cache_key.filter(|_| !partial)
             && let Ok(mut c) = cache().lock()
         {
             c.insert(key, (revision, std::sync::Arc::new(data.clone())));
@@ -156,7 +160,7 @@ fn peak_cache_key(
     use daw_proto::Takes;
     let guid = match project {
         ProjectContext::Project(g) => g.clone(),
-        ProjectContext::Current => daw.state.lock().ok()?.current_project_guid.clone()?,
+        ProjectContext::Current => daw.current_project_guid()?,
     };
     let takes = daw.get_takes(project.clone(), item.clone());
     let index = match take {
