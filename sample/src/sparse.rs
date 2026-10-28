@@ -31,9 +31,17 @@ enum Store {
     /// Blocks by index, each [`BLOCK`] bytes (the last one shorter),
     /// allocated when a byte of it arrives.
     Memory(HashMap<u64, Box<[u8]>>),
+    /// A file of the whole length, and beside it (`<file>.have`) which of
+    /// its ranges have arrived — so bytes kept on disk are still there the
+    /// next time it is opened.
     #[cfg(not(target_arch = "wasm32"))]
-    File(std::fs::File),
+    File(std::fs::File, std::path::PathBuf),
 }
+
+/// Arrivals between two writes of the `.have` ranges: often enough that a
+/// restart refetches little, rarely enough to cost nothing.
+#[cfg(not(target_arch = "wasm32"))]
+const HAVE_EVERY: u64 = 64;
 
 struct Inner {
     store: Store,
@@ -93,18 +101,28 @@ impl SparseBytes {
     /// The file cannot be created.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn on_disk(len: u64, path: &std::path::Path) -> std::io::Result<Arc<Self>> {
+        let have_path = have_path(path);
+        // What arrived before, when the file is the one it was kept for
+        // (its length) and says what of it arrived; else it starts over.
+        let kept = std::fs::metadata(path)
+            .is_ok_and(|m| m.len() == len)
+            .then(|| read_have(&have_path, len))
+            .flatten();
         let file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
-            .truncate(true)
+            .truncate(kept.is_none())
             .open(path)?;
         file.set_len(len)?;
+        if kept.is_none() {
+            let _ = std::fs::remove_file(&have_path);
+        }
         Ok(Arc::new(Self {
             len,
             inner: Mutex::new(Inner {
-                store: Store::File(file),
-                have: Vec::new(),
+                store: Store::File(file, have_path),
+                have: kept.unwrap_or_default(),
                 wanted: None,
                 arrivals: 0,
             }),
@@ -158,7 +176,7 @@ impl SparseBytes {
                 }
             }
             #[cfg(not(target_arch = "wasm32"))]
-            Store::File(file) => {
+            Store::File(file, _) => {
                 file.seek(SeekFrom::Start(offset))?;
                 let take = usize::try_from(end - offset).unwrap_or(0);
                 std::io::Write::write_all(file, data.get(..take).unwrap_or_default())?;
@@ -166,6 +184,13 @@ impl SparseBytes {
         }
         add_range(&mut inner.have, offset..end);
         inner.arrivals += 1;
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Store::File(_, have_path) = &inner.store {
+            let complete = covered(&inner.have, &(0..self.len));
+            if complete || inner.arrivals % HAVE_EVERY == 0 {
+                write_have(have_path, &inner.have)?;
+            }
+        }
         if inner
             .wanted
             .as_ref()
@@ -174,6 +199,12 @@ impl SparseBytes {
             inner.wanted = None;
         }
         Ok(())
+    }
+
+    /// How many of its bytes have arrived.
+    #[must_use]
+    pub fn arrived(&self) -> u64 {
+        self.have().iter().map(|r| r.end - r.start).sum()
     }
 
     /// How many times bytes have arrived. Unchanged means nothing new
@@ -272,7 +303,7 @@ impl SparseBytes {
                 }
             }
             #[cfg(not(target_arch = "wasm32"))]
-            Store::File(file) => {
+            Store::File(file, _) => {
                 file.seek(SeekFrom::Start(offset))?;
                 file.read_exact(buf.get_mut(..n).unwrap_or_default())?;
             }
@@ -326,7 +357,7 @@ impl SparseBytes {
                 .map(|b| u64::try_from(b.len()).unwrap_or(0))
                 .sum(),
             #[cfg(not(target_arch = "wasm32"))]
-            Store::File(_) => 0,
+            Store::File(_, _) => 0,
         }
     }
 }
@@ -452,5 +483,66 @@ impl symphonia_core::io::MediaSource for SparseView {
 
     fn byte_len(&self) -> Option<u64> {
         Some(self.view_len())
+    }
+}
+
+/// Where `store`'s arrived ranges are kept: `<store>.have`.
+#[cfg(not(target_arch = "wasm32"))]
+fn have_path(store: &std::path::Path) -> std::path::PathBuf {
+    let mut name = store.as_os_str().to_owned();
+    name.push(".have");
+    std::path::PathBuf::from(name)
+}
+
+/// The ranges kept at `path` (`start end` a line), when they read whole
+/// and lie inside `len`; `None` otherwise — the bytes are not trusted.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_have(path: &std::path::Path, len: u64) -> Option<Vec<Range<u64>>> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let mut have = Vec::new();
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        let (start, end) = line.split_once(' ')?;
+        let (start, end) = (start.trim().parse().ok()?, end.trim().parse().ok()?);
+        if start >= end || end > len {
+            return None;
+        }
+        add_range(&mut have, start..end);
+    }
+    Some(have)
+}
+
+/// `have` written to `path`, whole or not at all (through a temporary).
+#[cfg(not(target_arch = "wasm32"))]
+fn write_have(path: &std::path::Path, have: &[Range<u64>]) -> std::io::Result<()> {
+    use std::fmt::Write as _;
+    let mut text = String::new();
+    for r in have {
+        let _ = writeln!(text, "{} {}", r.start, r.end);
+    }
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(&tmp, path)
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod kept_tests {
+    use super::SparseBytes;
+
+    #[test]
+    fn bytes_kept_on_disk_are_there_the_next_time_it_opens() {
+        let dir = std::env::temp_dir().join(format!("sparse-kept-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a dir");
+        let store = dir.join("Kick.ogg.part");
+        let bytes = SparseBytes::on_disk(1000, &store).expect("open");
+        bytes.insert(0, &[7; 600]).expect("arrive");
+        bytes.insert(600, &[7; 400]).expect("arrive");
+        drop(bytes);
+        let again = SparseBytes::on_disk(1000, &store).expect("reopen");
+        assert!(again.has(&(0..1000)), "kept, not fetched again");
+        // Another length: another file — it starts over.
+        let other = SparseBytes::on_disk(2000, &store).expect("reopen");
+        assert_eq!(other.arrived(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
