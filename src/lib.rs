@@ -5,6 +5,7 @@
 //! (`typed_uuid_id!`, `typed_string_id!`) used by both `signal-proto` and
 //! `session-proto` without introducing a dependency between them.
 
+pub mod keyboard;
 pub mod paths;
 pub mod prefs;
 
