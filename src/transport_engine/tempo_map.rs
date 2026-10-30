@@ -189,17 +189,39 @@ impl DynamicTempoMap {
 
 extern crate alloc;
 
+/// Tempo points closer than this are at the same time (well under a
+/// sample at any rate).
+const SAME_TIME_SECONDS: f64 = 1e-9;
+
 /// Build a [`DynamicTempoMap`] from a list of `(time_seconds, bpm)`
 /// tempo points. Integrates beats forward through each segment so the
 /// resulting keyframes carry musical positions matching the proto
 /// seconds-axis source.
 ///
-/// Sorting is the caller's responsibility (`points` must be sorted by
-/// time). If the first point isn't at `t = 0`, a synthetic 120 BPM
-/// segment is prepended so the keyframe list is valid.
+/// `points` are taken in time order, whatever order they come in, and
+/// points at the same time are one point: the later in the list wins (a
+/// project's tempo list can hold both — an import's, an edit's — and a
+/// map refused for it would leave the engine on a stale one). If the first
+/// point isn't at `t = 0`, a synthetic 120 BPM segment is prepended so the
+/// keyframe list is valid.
 pub fn build_dynamic_from_time_bpm(
     points: &[(f64, f64)],
 ) -> Result<DynamicTempoMap, TempoMapError> {
+    let mut sorted: alloc::vec::Vec<(f64, f64)> = points
+        .iter()
+        .copied()
+        .filter(|(t, bpm)| t.is_finite() && bpm.is_finite())
+        .collect();
+    // Stable: of points at one time, list order is kept for the dedup.
+    sorted.sort_by(|a, b| a.0.total_cmp(&b.0));
+    sorted.dedup_by(|later, kept| {
+        let same = (later.0 - kept.0).abs() < SAME_TIME_SECONDS;
+        if same {
+            *kept = *later;
+        }
+        same
+    });
+    let points = sorted.as_slice();
     if points.is_empty() {
         return Err(TempoMapError::Empty);
     }
@@ -290,6 +312,27 @@ mod tests {
         // 1 s @ 120 = 2 beats. Then 1 beat @ 60 = +1s = 2s total.
         let s_at_3 = m.musical_to_samples(InstantMusical(3.0), 1.0, &c);
         assert_eq!(s_at_3.0, 96_000);
+    }
+
+    #[test]
+    fn build_from_time_bpm_takes_points_in_time_order() {
+        // The 60 BPM point listed first still starts at 2 s.
+        let m = build_dynamic_from_time_bpm(&[(2.0, 60.0), (0.0, 120.0)]).unwrap();
+        let c = SampleClock::new(48_000);
+        let s_at_5 = m.musical_to_samples(InstantMusical(5.0), 1.0, &c);
+        assert_eq!(s_at_5.0, 144_000);
+    }
+
+    #[test]
+    fn build_from_time_bpm_keeps_the_later_of_points_at_one_time() {
+        // Two points at 2 s: the later (90 BPM) is the tempo from there.
+        let m = build_dynamic_from_time_bpm(&[(0.0, 120.0), (2.0, 60.0), (2.0, 90.0)]).unwrap();
+        let c = SampleClock::new(48_000);
+        // 2 s @ 120 = 4 beats; 3 more beats @ 90 = +2 s.
+        let s_at_7 = m.musical_to_samples(InstantMusical(7.0), 1.0, &c);
+        assert_eq!(s_at_7.0, 192_000);
+        // Two points at the origin as well.
+        assert!(build_dynamic_from_time_bpm(&[(0.0, 100.0), (0.0, 120.0), (1.0, 60.0)]).is_ok());
     }
 
     #[test]
