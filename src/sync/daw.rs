@@ -1273,6 +1273,13 @@ impl Standalone {
         Arc::ptr_eq(&self.projects, &other.projects)
     }
 
+    /// Which engine this is, as a number: the same for every handle on it
+    /// ([`Self::same_engine`]), another for another engine alive now.
+    #[must_use]
+    pub fn engine_id(&self) -> usize {
+        Arc::as_ptr(&self.projects).cast::<()>() as usize
+    }
+
     /// The project map, to look up, insert or remove a cell. Held for
     /// nothing longer ([`ProjectMap`]'s lock order).
     pub(crate) fn project_map(&self) -> RwLockReadGuard<'_, ProjectMap> {
