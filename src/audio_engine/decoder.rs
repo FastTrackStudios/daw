@@ -48,16 +48,24 @@ impl DecodedAudio {
     /// fallback for compressed media yet (the future butler/streaming
     /// seam) — but the overrun gets one alertable warning.
     pub fn charged(samples: Vec<f32>, channels: u16, sample_rate: u32, src: &str) -> Self {
+        // Once per overrun, not once per file: a long song decodes thousands
+        // past the budget, and a warning each buried every other line. Said
+        // again once usage has come back under the budget and gone over.
+        static OVER: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
         let bytes = samples.len() * core::mem::size_of::<f32>();
         if (bytes as u64) > fts_sample::budget::remaining_bytes() {
-            tracing::warn!(
-                bytes,
-                src,
-                used_mb = fts_sample::budget::used_bytes() / (1024 * 1024),
-                budget_mb = fts_sample::budget::limit_bytes() / (1024 * 1024),
-                "daw: decoded audio exceeds the preload budget — loading anyway \
-                 (no compressed streaming fallback yet)"
-            );
+            if !OVER.swap(true, core::sync::atomic::Ordering::AcqRel) {
+                tracing::warn!(
+                    bytes,
+                    src,
+                    used_mb = fts_sample::budget::used_bytes() / (1024 * 1024),
+                    budget_mb = fts_sample::budget::limit_bytes() / (1024 * 1024),
+                    "daw: decoded audio exceeds the preload budget — loading anyway \
+                     (no compressed streaming fallback yet); not said again until under it"
+                );
+            }
+        } else {
+            OVER.store(false, core::sync::atomic::Ordering::Release);
         }
         Self {
             samples,
