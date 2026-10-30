@@ -51,6 +51,8 @@ pub mod media_fetch;
 /// browser renders through the `web` worklet path instead).
 #[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
 mod mixer;
+#[cfg(any(feature = "decode", feature = "audio"))]
+pub mod perf;
 #[cfg(feature = "clap-host")]
 pub mod plugin_host;
 #[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
@@ -84,7 +86,7 @@ pub mod test_tone;
 pub use audio::io::AudioIoPrefs;
 /// Realtime metrics both engines report (block size, render time, xruns).
 #[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
-pub use audio::io::duplex::EngineStats;
+pub use audio::io::duplex::{DropEvent, DropKind, EngineStats, clock_ns};
 #[cfg(feature = "audio")]
 pub use aux_render::{AuxClock, AuxRenderer};
 #[cfg(any(feature = "decode", feature = "audio"))]

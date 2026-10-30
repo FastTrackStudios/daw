@@ -911,6 +911,9 @@ pub struct Standalone {
     /// the realtime renderer, read (and reset) by a health log.
     #[cfg(any(feature = "decode", feature = "audio"))]
     pub(crate) block_profile: Arc<crate::audio_engine::render::BlockProfileCell>,
+    /// What each track's media and FX have cost the realtime renders.
+    #[cfg(any(feature = "decode", feature = "audio"))]
+    pub(crate) track_costs: Arc<crate::audio_engine::perf::TrackCosts>,
     /// Meter-frame stream hub (`PeaksStreamSource`). A process-wide
     /// pump (spawned lazily by the first `set_meters`, i.e. when an
     /// audio engine attaches) reads the meter bank at ~30 Hz and
@@ -993,6 +996,8 @@ impl Standalone {
             meters: Arc::new(Mutex::new(crate::metering::Meters::empty())),
             #[cfg(any(feature = "decode", feature = "audio"))]
             block_profile: Arc::default(),
+            #[cfg(any(feature = "decode", feature = "audio"))]
+            track_costs: Arc::default(),
             meter_events: architect::PubSub::sliding(64),
             meter_pump_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             meters_installed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1079,6 +1084,25 @@ impl Standalone {
     #[must_use]
     pub fn take_block_profile(&self) -> Option<crate::audio_engine::render::BlockProfile> {
         self.block_profile.take()
+    }
+
+    /// The first `n` tracks' media and FX time in the realtime renders so
+    /// far, µs, by project track index — a reader's difference between
+    /// two reads is each track's CPU over that time.
+    #[cfg(any(feature = "decode", feature = "audio"))]
+    #[must_use]
+    pub fn track_costs(&self, n: usize) -> Vec<crate::audio_engine::perf::TrackCost> {
+        self.track_costs.read(n)
+    }
+
+    /// The latency the plugin `fx_guid` reports, samples — `None` when it
+    /// is not loaded, or a render has it now (never waited for: a reader
+    /// holding a plugin the render wants costs that block its FX).
+    #[must_use]
+    pub fn fx_latency_now(&self, fx_guid: &str) -> Option<u32> {
+        let plugins = self.plugin_instances.read();
+        let mut plugin = plugins.cell(fx_guid)?.try_lock_spinning(1)?;
+        Some(plugin.latency())
     }
 
     pub fn meters(&self) -> Arc<crate::metering::Meters> {

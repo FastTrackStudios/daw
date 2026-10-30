@@ -621,13 +621,20 @@ pub struct BlockProfile {
     pub slowest_track_us: u32,
     /// Frames in the block.
     pub frames: u32,
+    /// Every track's items played into its bus: reading their sources,
+    /// stretching, fades and take envelopes.
+    pub items_us: u32,
+    /// The track whose items took longest (project track index), and how
+    /// long.
+    pub slowest_items_track: u32,
+    pub slowest_items_us: u32,
 }
 
 /// The worst [`BlockProfile`] of the current window, written by one render
 /// thread and taken by a reader — atomics, no lock.
 #[derive(Debug, Default)]
 pub struct BlockProfileCell {
-    fields: [std::sync::atomic::AtomicU32; 7],
+    fields: [std::sync::atomic::AtomicU32; 10],
 }
 
 impl BlockProfileCell {
@@ -644,6 +651,9 @@ impl BlockProfileCell {
             p.slowest_track,
             p.slowest_track_us,
             p.frames,
+            p.items_us,
+            p.slowest_items_track,
+            p.slowest_items_us,
         ];
         for (f, x) in self.fields.iter().zip(v) {
             f.store(x, Relaxed);
@@ -662,6 +672,9 @@ impl BlockProfileCell {
             slowest_track: v[4],
             slowest_track_us: v[5],
             frames: v[6],
+            items_us: v[7],
+            slowest_items_track: v[8],
+            slowest_items_us: v[9],
         })
     }
 }
@@ -1408,6 +1421,13 @@ impl ProjectRenderer {
         // 1) Item playback into per-track buses. Item-level envelopes
         // (take volume / pan / mute / pitch) are evaluated per-frame
         // inside mix_item_into_bus via cursors.
+        let (mut items_us, mut slowest_items) = (0u32, (0u32, 0u32));
+        // Each track's cost, counted for a performance meter from the
+        // realtime renders only (a bounce is not the song playing).
+        #[cfg(not(target_arch = "wasm32"))]
+        let costs = self.realtime.get().map(|_| &*self.daw.track_costs);
+        #[cfg(target_arch = "wasm32")]
+        let costs: Option<&super::perf::TrackCosts> = None;
         for (ti, t) in tracks.iter().enumerate() {
             // Gate on the solo-routing MASK, not the raw per-track `soloed`
             // flag: soloing a folder must keep its children audible (they pass
@@ -1416,6 +1436,10 @@ impl ProjectRenderer {
             if !covers(ti) || (any_soloed && !passes(ti)) {
                 continue;
             }
+            if t.items.is_empty() {
+                continue;
+            }
+            let t_items = Stamp::now();
             let bus = &mut buses[ti];
             for item in &t.items {
                 if item.muted {
@@ -1439,6 +1463,14 @@ impl ProjectRenderer {
                     self.sample_rate,
                     rate,
                 );
+            }
+            let us = t_items.us();
+            if let Some(costs) = costs {
+                costs.add_media(ti, us);
+            }
+            items_us = items_us.saturating_add(us);
+            if us > slowest_items.1 {
+                slowest_items = (ti as u32, us);
             }
         }
 
@@ -1630,6 +1662,9 @@ impl ProjectRenderer {
                             .fetch_add(u64::from(job.busy), std::sync::atomic::Ordering::Relaxed);
                     }
                     fx_us += job.us;
+                    if let Some(costs) = costs {
+                        costs.add_fx(ti, job.us);
+                    }
                     if job.us > slowest.1 {
                         slowest = (ti as u32, job.us);
                     }
@@ -1852,6 +1887,9 @@ impl ProjectRenderer {
             if !t.fx_chain.is_empty() && !chain_done[ti] {
                 let us = t_fx.us();
                 fx_us += us;
+                if let Some(costs) = costs {
+                    costs.add_fx(ti, us);
+                }
                 if us > slowest.1 {
                     slowest = (ti as u32, us);
                 }
@@ -2229,10 +2267,20 @@ impl ProjectRenderer {
                 slowest_track: slowest.0,
                 slowest_track_us: slowest.1,
                 frames: frames as u32,
+                items_us,
+                slowest_items_track: slowest_items.0,
+                slowest_items_us: slowest_items.1,
             });
         }
         #[cfg(target_arch = "wasm32")]
-        let _ = (snapshot_us, plugin_lock_us, fx_us, slowest);
+        let _ = (
+            snapshot_us,
+            plugin_lock_us,
+            fx_us,
+            slowest,
+            items_us,
+            slowest_items,
+        );
     }
 
     /// Transport-derived clock info at `seconds` for the aux post-render
