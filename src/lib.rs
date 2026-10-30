@@ -2543,6 +2543,457 @@ impl PluginInstance for NativeLevel {
     }
 }
 
+// ── FX stack (reverb / delay) ──────────────────────────────────────────────
+//
+// The reverb and delay blocks are stacks of up to `FX_STAGES` full chains
+// on a `dsp::stack::StagePool` (`fx.stack.every-shell`): lanes of serial
+// stages summed in parallel. The `BigSky` / `TimeLine` MX dual routings are
+// topologies of that stack — `routing` writes the stages' placement:
+//
+// | routing        | stages                     | lanes            |
+// |----------------|----------------------------|------------------|
+// | 0 Single       | 0                          | one              |
+// | 1 Series 1>2   | 0 then 1, one lane         | one              |
+// | 2 Series 2>1   | 1 then 0, one lane         | one              |
+// | 3 Parallel     | 0 on lane 0, 1 on lane 1   | dry once + Σ wet |
+// | 4 Split        | as Parallel                | 0 left, 1 right  |
+// | 5 Split Swap   | as Parallel                | 0 right, 1 left  |
+//
+// Ids (`fx.stack.params`, append-only): stage 0 keeps the block's own ids;
+// stage n ≥ 1 is `n · STAGE_BASE + local` (the reverb's `r2_*` at id + 100
+// was already stage 1); the stack params follow every stage block from
+// `STACK_BASE`. Only stage 0 is built up front — another stage's chain (a
+// reverb network, seconds of delay line) is built when the stack first
+// plays it, and the writes it was sent until then are replayed onto it.
+
+use dsp::stack::{LaneCtl, Stage, StagePool, SumMode};
+
+/// Stages in a reverb / delay block's stack (`fx.stack.limits`).
+pub const FX_STAGES: usize = 8;
+/// Stage n's ids are `n · STAGE_BASE + local id`.
+pub const STAGE_BASE: u32 = 100;
+/// First stack param id: after all `FX_STAGES` stage blocks.
+pub const STACK_BASE: u32 = STAGE_BASE * FX_STAGES as u32;
+/// Per-stage placement params from `STACK_BASE`, `STACK_STAGE_STRIDE` each
+/// (`STACK_STAGE_PARAMS` order).
+const STACK_STAGE_STRIDE: u32 = 4;
+/// Per-lane params, `STACK_LANE_STRIDE` each (`STACK_LANE_PARAMS` order).
+pub const STACK_LANE_BASE: u32 = STACK_BASE + STACK_STAGE_STRIDE * FX_STAGES as u32;
+const STACK_LANE_STRIDE: u32 = 4;
+/// `summode`: 0 = 1/N, 1 = power, 2 = raw, 3 = dry once + Σ wet (the
+/// dual-effect parallel law).
+pub const STACK_SUM_MODE: u32 = STACK_LANE_BASE + STACK_LANE_STRIDE * FX_STAGES as u32;
+/// `stktrim`: the whole block's output trim, dB.
+pub const STACK_TRIM: u32 = STACK_SUM_MODE + 1;
+const STACK_END: u32 = STACK_TRIM + 1;
+
+/// A stage's placement (local ids from its `STACK_BASE + i · 4`). Names
+/// take the kind's stage prefix (`use`, `r2_use`, …); `use` defaults on for
+/// stage 0 only and `order` to the stage's own index.
+const STACK_STAGE_PARAMS: &[ParamSpec] = &[
+    ParamSpec {
+        id: 0,
+        name: "use",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+    },
+    ParamSpec {
+        id: 1,
+        name: "on",
+        min: 0.0,
+        max: 1.0,
+        default: 1.0,
+    },
+    ParamSpec {
+        id: 2,
+        name: "lane",
+        min: 0.0,
+        max: (FX_STAGES - 1) as f64,
+        default: 0.0,
+    },
+    ParamSpec {
+        id: 3,
+        name: "order",
+        min: 0.0,
+        max: (FX_STAGES - 1) as f64,
+        default: 0.0,
+    },
+];
+
+/// A lane's mix (local ids from its `STACK_LANE_BASE + l · 4`), named
+/// `<name>_<lane number>` (`lgain_1`, …). `lpan` −1 … +1 mono-sums the lane
+/// and places it (±1 = one side only: the Split routings).
+const STACK_LANE_PARAMS: &[ParamSpec] = &[
+    ParamSpec {
+        id: 0,
+        name: "lgain",
+        min: -24.0,
+        max: 24.0,
+        default: 0.0,
+    },
+    ParamSpec {
+        id: 1,
+        name: "lmute",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+    },
+    ParamSpec {
+        id: 2,
+        name: "lsolo",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+    },
+    ParamSpec {
+        id: 3,
+        name: "lpan",
+        min: -1.0,
+        max: 1.0,
+        default: 0.0,
+    },
+];
+
+const STACK_GLOBAL_PARAMS: &[ParamSpec] = &[
+    ParamSpec {
+        id: STACK_SUM_MODE,
+        name: "summode",
+        min: 0.0,
+        max: 3.0,
+        default: 0.0,
+    },
+    ParamSpec {
+        id: STACK_TRIM,
+        name: "stktrim",
+        min: -24.0,
+        max: 24.0,
+        default: 0.0,
+    },
+];
+
+/// Stage `i`'s name for `name`: bare for stage 0, `<prefix><i + 1>_<name>`
+/// after it (`r2_decay`, `d3_time`).
+fn stage_param_name(prefix: &str, i: usize, name: &str) -> String {
+    if i == 0 {
+        name.to_string()
+    } else {
+        format!("{prefix}{}_{name}", i + 1)
+    }
+}
+
+/// Split a stage-prefixed name (`r3_decay` → `(2, "decay")`); anything
+/// else is stage 0's.
+fn split_stage_name<'a>(prefix: &str, name: &'a str) -> (usize, &'a str) {
+    let Some(head) = name.get(..prefix.len()) else {
+        return (0, name);
+    };
+    if !head.eq_ignore_ascii_case(prefix) {
+        return (0, name);
+    }
+    let rest = name.get(prefix.len()..).unwrap_or_default();
+    let Some((num, base)) = rest.split_once('_') else {
+        return (0, name);
+    };
+    match num.parse::<usize>() {
+        Ok(n) if (2..=FX_STAGES).contains(&n) => (n - 1, base),
+        _ => (0, name),
+    }
+}
+
+/// Every stack param, as the block lists them.
+fn stack_param_infos(prefix: &str) -> Vec<PluginParamInfo> {
+    let mut infos = Vec::new();
+    for i in 0..FX_STAGES {
+        for s in STACK_STAGE_PARAMS {
+            infos.push(PluginParamInfo {
+                id: STACK_BASE + i as u32 * STACK_STAGE_STRIDE + s.id,
+                name: stage_param_name(prefix, i, s.name),
+                min: s.min,
+                max: s.max,
+                default: match s.name {
+                    "use" => f64::from(u8::from(i == 0)),
+                    "order" => i as f64,
+                    _ => s.default,
+                },
+            });
+        }
+    }
+    for l in 0..FX_STAGES {
+        for s in STACK_LANE_PARAMS {
+            infos.push(PluginParamInfo {
+                id: STACK_LANE_BASE + l as u32 * STACK_LANE_STRIDE + s.id,
+                name: format!("{}_{}", s.name, l + 1),
+                min: s.min,
+                max: s.max,
+                default: s.default,
+            });
+        }
+    }
+    infos.extend(param_infos(STACK_GLOBAL_PARAMS));
+    infos
+}
+
+/// A stack param's id by name (see [`stack_param_infos`]).
+fn stack_param_id(prefix: &str, name: &str) -> Option<u32> {
+    if let Some(id) = param_id(STACK_GLOBAL_PARAMS, name) {
+        return Some(id);
+    }
+    if let Some((base, num)) = name.rsplit_once('_') {
+        if let (Some(local), Ok(l)) = (param_id(STACK_LANE_PARAMS, base), num.parse::<usize>()) {
+            if (1..=FX_STAGES).contains(&l) {
+                return Some(STACK_LANE_BASE + (l - 1) as u32 * STACK_LANE_STRIDE + local);
+            }
+        }
+    }
+    let (i, base) = split_stage_name(prefix, name);
+    param_id(STACK_STAGE_PARAMS, base)
+        .map(|local| STACK_BASE + i as u32 * STACK_STAGE_STRIDE + local)
+}
+
+/// The stack's topology as the block's params set it — applied to the
+/// pool on every change ([`StackTopo::apply`]).
+#[derive(Clone, Copy)]
+struct StackTopo {
+    in_use: [bool; FX_STAGES],
+    on: [bool; FX_STAGES],
+    lane: [usize; FX_STAGES],
+    order: [usize; FX_STAGES],
+    lanes: [LaneCtl; FX_STAGES],
+    sum_mode: SumMode,
+    /// Output trim, linear — applied to the block's output (dry included).
+    trim: f64,
+}
+
+impl StackTopo {
+    /// One stage on one lane: the plain block.
+    fn new() -> Self {
+        let mut in_use = [false; FX_STAGES];
+        in_use[0] = true;
+        Self {
+            in_use,
+            on: [true; FX_STAGES],
+            lane: [0; FX_STAGES],
+            order: core::array::from_fn(|i| i),
+            lanes: [LaneCtl::default(); FX_STAGES],
+            sum_mode: SumMode::Coherent,
+            trim: 1.0,
+        }
+    }
+
+    /// Write the MX dual `routing` (0 Single / 1 Series 1>2 / 2 Series 2>1
+    /// / 3 Parallel / 4 Split / 5 Split Swap; anything else Single) as
+    /// stages 0 and 1's placement — the rest leave the stack. Stage bypass,
+    /// lane gain/mute/solo and the trim are the user's and stay.
+    fn set_routing(&mut self, routing: usize) {
+        let dual = (1..=5).contains(&routing);
+        self.in_use = [false; FX_STAGES];
+        self.in_use[0] = true;
+        self.in_use[1] = dual;
+        self.lane = [0; FX_STAGES];
+        self.order = core::array::from_fn(|i| i);
+        self.lanes[0].pan = 0.0;
+        self.lanes[1].pan = 0.0;
+        self.sum_mode = SumMode::Coherent;
+        match routing {
+            2 => self.order[..2].copy_from_slice(&[1, 0]),
+            // Each chain blends its own dry; dry counted once is the old
+            // `a + b − dry`.
+            3 => {
+                self.lane[1] = 1;
+                self.sum_mode = SumMode::DryOnce;
+            }
+            // Each lane mono-summed onto its side.
+            4 | 5 => {
+                self.lane[1] = 1;
+                let side = if routing == 4 { 1.0 } else { -1.0 };
+                self.lanes[0].pan = -side;
+                self.lanes[1].pan = side;
+                self.sum_mode = SumMode::Raw;
+            }
+            _ => {}
+        }
+    }
+
+    /// Apply a stack param write; `false` if `id` is not one.
+    fn set_param(&mut self, id: u32, v: f64) -> bool {
+        let on = v >= 0.5;
+        let index = (v.round().max(0.0) as usize).min(FX_STAGES - 1);
+        if (STACK_BASE..STACK_LANE_BASE).contains(&id) {
+            let i = ((id - STACK_BASE) / STACK_STAGE_STRIDE) as usize;
+            match (id - STACK_BASE) % STACK_STAGE_STRIDE {
+                0 => self.in_use[i] = on,
+                1 => self.on[i] = on,
+                2 => self.lane[i] = index,
+                _ => self.order[i] = index,
+            }
+            return true;
+        }
+        if (STACK_LANE_BASE..STACK_SUM_MODE).contains(&id) {
+            let lane = &mut self.lanes[((id - STACK_LANE_BASE) / STACK_LANE_STRIDE) as usize];
+            match (id - STACK_LANE_BASE) % STACK_LANE_STRIDE {
+                0 => lane.gain = 10f64.powf(v.clamp(-24.0, 24.0) / 20.0),
+                1 => lane.mute = on,
+                2 => lane.solo = on,
+                _ => lane.pan = v.clamp(-1.0, 1.0),
+            }
+            return true;
+        }
+        match id {
+            STACK_SUM_MODE => {
+                self.sum_mode = match v.round().max(0.0) as usize {
+                    1 => SumMode::Power,
+                    2 => SumMode::Raw,
+                    3 => SumMode::DryOnce,
+                    _ => SumMode::Coherent,
+                };
+                true
+            }
+            STACK_TRIM => {
+                self.trim = 10f64.powf(v.clamp(-24.0, 24.0) / 20.0);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Stage 0 alone, playing: the block's single-chain path, where the
+    /// chain runs fully wet and the block sums the dry ([`ParallelMix`]).
+    /// Any other topology runs each chain on its own mix.
+    fn plays_one(&self) -> bool {
+        self.in_use[0] && self.on[0] && !self.in_use[1..].contains(&true)
+    }
+
+    fn apply<S: Stage>(&self, pool: &mut StagePool<S>) {
+        for i in 0..FX_STAGES {
+            pool.set_slot(i, self.in_use[i], self.on[i], self.lane[i]);
+            pool.set_order(i, self.order[i]);
+            pool.set_lane(i, self.lanes[i]);
+        }
+        pool.sum_mode = self.sum_mode;
+        // The trim is the block's, after the dry sum (see `trim`).
+        pool.output_trim = 1.0;
+        pool.update_alignment();
+    }
+}
+
+/// One stage of a reverb / delay stack: a chain, built only once the stack
+/// plays it (until then a wire it never runs).
+struct ChainStage<C>(Option<Box<C>>);
+
+impl<C: Processor> Stage for ChainStage<C> {
+    fn process(&mut self, l: &mut [f64], r: &mut [f64]) {
+        if let Some(c) = self.0.as_deref_mut() {
+            c.process(l, r);
+        }
+    }
+
+    fn reset(&mut self) {
+        if let Some(c) = self.0.as_deref_mut() {
+            c.reset();
+        }
+    }
+}
+
+/// The pool's block capacity: the host block, and never under 512 — the
+/// chunk the dual composition ran at before, so an oversized host block is
+/// split exactly as it was.
+fn stack_block(block_size: usize) -> usize {
+    block_size.max(512)
+}
+
+/// A fresh pool: stage 0 = `first`, the rest unbuilt; prepared for the
+/// default block so a block processed before `prepare` still runs.
+fn new_stack_pool<C: Processor>(first: C) -> StagePool<ChainStage<C>> {
+    let mut stages = vec![ChainStage(Some(Box::new(first)))];
+    stages.extend((1..FX_STAGES).map(|_| ChainStage(None)));
+    let mut pool = StagePool::new(stages);
+    pool.prepare(stack_block(0), 0);
+    pool
+}
+
+/// Run the pool over `l`/`r` in chunks of at most `cap` (its prepared block).
+fn process_stack<S: Stage>(pool: &mut StagePool<S>, l: &mut [f64], r: &mut [f64], cap: usize) {
+    let n = l.len().min(r.len());
+    let mut pos = 0;
+    while pos < n {
+        let end = (pos + cap.max(1)).min(n);
+        pool.process(&mut l[pos..end], &mut r[pos..end]);
+        pos = end;
+    }
+}
+
+/// The block's output trim (`stktrim`), after everything.
+fn apply_trim(trim: f64, out_l: &mut [f32], out_r: &mut [f32]) {
+    if trim == 1.0 {
+        return;
+    }
+    for x in out_l.iter_mut().chain(out_r.iter_mut()) {
+        *x = (f64::from(*x) * trim) as f32;
+    }
+}
+
+/// A stage ≥ 1's own wet mix: `mix · level` (stage 0's is the block's
+/// [`ParallelMix`]).
+#[derive(Clone, Copy)]
+struct StageMix {
+    mix: f64,
+    level: f64,
+}
+
+impl StageMix {
+    const SEED: Self = Self {
+        mix: 0.08,
+        level: 1.0,
+    };
+
+    fn wet(self) -> f64 {
+        (self.mix * self.level).min(1.0)
+    }
+}
+
+/// Writes for stages not built yet, per stage, in order — replayed onto a
+/// stage as it is built, as if it had been there all along.
+struct StageLog(Vec<Vec<(u32, f64)>>);
+
+impl StageLog {
+    fn new() -> Self {
+        Self((0..FX_STAGES).map(|_| Vec::new()).collect())
+    }
+
+    fn push(&mut self, stage: usize, id: u32, v: f64) {
+        let Some(log) = self.0.get_mut(stage) else {
+            return;
+        };
+        // A drag on one of the stage's knobs is a run of writes to one
+        // param: the last stands for it.
+        match log.last_mut() {
+            Some(last) if last.0 == id => last.1 = v,
+            _ => log.push((id, v)),
+        }
+        // A long session of edits to a stage that never plays: each
+        // param's last write, in the order those were made.
+        if log.len() > 1024 {
+            let mut seen = std::collections::HashSet::new();
+            let mut kept: Vec<(u32, f64)> = log
+                .iter()
+                .rev()
+                .filter(|(i, _)| seen.insert(*i))
+                .copied()
+                .collect();
+            kept.reverse();
+            *log = kept;
+        }
+    }
+
+    fn take(&mut self, stage: usize) -> Vec<(u32, f64)> {
+        self.0
+            .get_mut(stage)
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+}
+
 // ── Reverb ─────────────────────────────────────────────────────────────────
 
 const REVERB_PARAMS: &[ParamSpec] = &[
@@ -3337,12 +3788,6 @@ const REVERB_PARAMS: &[ParamSpec] = &[
     },
 ];
 
-/// Native Reverb block — wraps [`dsp::reverb::DualReverb`] (two full chains +
-/// `BigSky` MX dual routing; `Single` = chain A only, bit-compatible with
-/// the previous single-chain wrapper).
-///
-/// Defaults to a subtle Hall (low mix) so it sits under the tone rather than
-/// washing it out.
 /// A time effect in parallel with the dry signal: the dry passes at `dry`
 /// (default all of it) and the effect's wet output is added at `wet` (the
 /// block's `mix`). The engines crossfade (`dry·(1−mix) + wet·mix`), which
@@ -3398,191 +3843,273 @@ impl ParallelMix {
     }
 }
 
+/// Native Reverb block — a stack of up to [`FX_STAGES`] full
+/// [`dsp::reverb::ReverbChain`]s on a [`StagePool`] (see the FX stack
+/// section): stage 0 is reverb A, stage 1 the `BigSky` MX reverb B, and the
+/// `routing` param writes their dual topologies. Stage 0 alone is
+/// bit-compatible with the previous single-chain wrapper.
+///
+/// Defaults to a subtle Hall (low mix) so it sits under the tone rather than
+/// washing it out.
 pub struct NativeReverb {
-    rev: dsp::reverb::DualReverb,
-    /// Writes for chain B before it is built (`DualReverb` builds B only for
-    /// a routing that plays it), in order — replayed onto it as it is.
-    b_log: Vec<(u32, f64)>,
+    pool: StagePool<ChainStage<dsp::reverb::ReverbChain>>,
+    /// The stack's topology, as `routing` and the stack params set it.
+    topo: StackTopo,
+    /// Writes for stages not built yet (see [`StageLog`]).
+    log: StageLog,
+    /// Stages ≥ 1's own mix and level.
+    stage_mix: [StageMix; FX_STAGES],
+    /// What `prepare` last prepared for: a stage built after it is prepared
+    /// too.
+    config: Option<AudioConfig>,
+    /// The pool's prepared block (see [`stack_block`]).
+    pool_block: usize,
     prepared: bool,
-    /// Chain A in parallel with the dry (see [`ParallelMix`]).
+    /// Stage 0 in parallel with the dry (see [`ParallelMix`]).
     par: ParallelMix,
     scratch_l: Vec<f64>,
     scratch_r: Vec<f64>,
-    /// Impulse re-prepare workers (native only), one per chain: re-bake
-    /// the IR off the audio thread when imp_* shaping params change and
-    /// take the displaced buffers for off-thread deallocation. Without
-    /// them the Impulse live params would mark slots dirty and never
-    /// re-prepare.
+    /// Impulse re-prepare workers (native only), one per stage, spawned in
+    /// `prepare`: re-bake the IR off the audio thread when imp_* shaping
+    /// params change and take the displaced buffers for off-thread
+    /// deallocation. Without them the Impulse live params would mark slots
+    /// dirty and never re-prepare.
     #[cfg(not(target_arch = "wasm32"))]
-    reshaper_a: Option<dsp::reverb::ir::ImpulseReshaper>,
+    reshapers: Vec<Option<dsp::reverb::ir::ImpulseReshaper>>,
+    /// Each worker's output, held until its stage is built and takes it —
+    /// a stage the stack builds mid-stream wires up without spawning.
     #[cfg(not(target_arch = "wasm32"))]
-    reshaper_b: Option<dsp::reverb::ir::ImpulseReshaper>,
+    reshaper_rx: Vec<Option<crossbeam_channel::Receiver<dsp::reverb::ir::PreparedIrPair>>>,
 }
 
 impl NativeReverb {
     #[must_use]
     pub fn new(_sample_rate: f64) -> Self {
-        let mut rev = dsp::reverb::DualReverb::new();
-        rev.a.set_algorithm(dsp::reverb::AlgorithmType::Hall);
-        // Fully wet: single routing sums the dry itself (`ParallelMix`).
-        rev.a.mix = 1.0;
-        rev.a.params.decay = 0.45;
-        rev.a.params.size = 0.5;
-        rev.a.update_params();
-        // B (a plate, see `seed_b`) is built when a routing plays it.
+        let mut a = dsp::reverb::ReverbChain::new();
+        a.set_algorithm(dsp::reverb::AlgorithmType::Hall);
+        // Fully wet: a lone stage 0 sums the dry itself (`ParallelMix`).
+        a.mix = 1.0;
+        a.params.decay = 0.45;
+        a.params.size = 0.5;
+        a.update_params();
+        // The other stages (plates, see `ensure_stage`) are built when the
+        // stack plays them.
         Self {
-            rev,
-            b_log: Vec::new(),
+            pool: new_stack_pool(a),
+            topo: StackTopo::new(),
+            log: StageLog::new(),
+            stage_mix: [StageMix::SEED; FX_STAGES],
+            config: None,
+            pool_block: stack_block(0),
             prepared: false,
             par: ParallelMix::new(0.08),
             #[cfg(not(target_arch = "wasm32"))]
-            reshaper_a: None,
+            reshapers: (0..FX_STAGES).map(|_| None).collect(),
             #[cfg(not(target_arch = "wasm32"))]
-            reshaper_b: None,
+            reshaper_rx: (0..FX_STAGES).map(|_| None).collect(),
             scratch_l: Vec::new(),
             scratch_r: Vec::new(),
         }
     }
 
+    /// Stage `i`'s chain, if it has been built (stage 0 always is).
+    fn chain_mut(&mut self, i: usize) -> Option<&mut dsp::reverb::ReverbChain> {
+        self.pool.stage_mut(i).and_then(|s| s.0.as_deref_mut())
+    }
+
     fn set(&mut self, id: u32, v: f64) {
-        // Chain A's mix and the dry are the parallel sum's (see
+        // Stage 0's mix and the dry are the parallel sum's (see
         // `ParallelMix`); the engine's own mix is derived in `sync_mix`.
         match id {
             0 => {
                 self.par.set_mix(v);
                 self.sync_mix();
-                return;
             }
             94 => {
                 self.par.set_level_db(v);
                 self.sync_mix();
-                return;
             }
-            93 => {
-                self.par.dry = v.clamp(0.0, 1.0);
-                return;
+            93 => self.par.dry = v.clamp(0.0, 1.0),
+            3 => {
+                self.topo.set_routing(v.round().max(0.0) as usize);
+                self.apply_topology();
             }
-            _ => {}
-        }
-        self.set_engine(id, v);
-        if id == 3 {
-            self.sync_mix();
+            STACK_BASE..STACK_END => {
+                self.topo.set_param(id, v);
+                self.apply_topology();
+            }
+            // The legacy dual block's reverb-B params (algo_b / decay_b /
+            // mix_b / pan_b).
+            4 | 5 | 6 | 8 => self.write_stage(1, id, v),
+            STAGE_BASE..STACK_BASE => self.write_stage((id / STAGE_BASE) as usize, id, v),
+            _ => {
+                if let Some(a) = self.chain_mut(0) {
+                    Self::set_chain(a, id, v);
+                }
+            }
         }
     }
 
-    /// With one chain the engine runs fully wet and the dry is summed in
-    /// `process_block`; a dual routing keeps the engine's own crossfade.
+    /// Bring the stack to `topo`: build the stages it plays (an allocation
+    /// — a param write's, as a routing change always was), set stage 0's
+    /// mix for the path it now takes, and place every stage.
+    fn apply_topology(&mut self) {
+        for i in 1..FX_STAGES {
+            if self.topo.in_use[i] {
+                self.ensure_stage(i);
+            }
+        }
+        self.sync_mix();
+        self.topo.apply(&mut self.pool);
+    }
+
+    /// Stage 0 alone runs fully wet and the dry is summed in
+    /// `process_block`; in any other topology it keeps its own crossfade.
     fn sync_mix(&mut self) {
-        self.rev.a.mix = if matches!(self.rev.routing, dsp::reverb::DualRouting::Single) {
+        let mix = if self.topo.plays_one() {
             1.0
         } else {
             self.par.wet.min(1.0)
         };
-    }
-
-    fn set_engine(&mut self, id: u32, v: f64) {
-        // Ids < 100: chain A + the dual block. Ids 100+: the same
-        // chain-scoped param on chain B (`r2_*` names, id − 100).
-        match id {
-            3 => {
-                self.rev.routing =
-                    dsp::reverb::DualRouting::from_index(v.round().max(0.0) as usize);
-                // A routing that plays B builds it — here, a param write.
-                if self.rev.routing != dsp::reverb::DualRouting::Single {
-                    self.ensure_b();
-                }
-            }
-            4 | 5 | 6 | 8 => self.write_b(id, v),
-            _ if id >= 100 => self.write_b(id, v),
-            _ => Self::set_chain(&mut self.rev.a, id, v),
+        if let Some(a) = self.chain_mut(0) {
+            a.mix = mix;
         }
     }
 
-    /// A write for chain B: to it, or kept for when it is built.
-    fn write_b(&mut self, id: u32, v: f64) {
-        if self.rev.b().is_some() {
-            Self::apply_b(self.rev.b_mut(), id, v);
+    /// A write for stage `i` ≥ 1: to it, or kept for when it is built.
+    fn write_stage(&mut self, i: usize, id: u32, v: f64) {
+        if let Some(c) = self.pool.stage_mut(i).and_then(|s| s.0.as_deref_mut()) {
+            if let Some(mix) = self.stage_mix.get_mut(i) {
+                Self::apply_stage(c, mix, id, v);
+            }
             return;
         }
-        // A drag on one of B's knobs is a run of writes to one param: the
-        // last stands for it.
-        match self.b_log.last_mut() {
-            Some(last) if last.0 == id => last.1 = v,
-            _ => self.b_log.push((id, v)),
-        }
-        // A long session of edits to a B that never plays: each param's
-        // last write, in the order those were made.
-        if self.b_log.len() > 1024 {
-            let mut seen = std::collections::HashSet::new();
-            let mut kept: Vec<(u32, f64)> = self
-                .b_log
-                .iter()
-                .rev()
-                .filter(|(i, _)| seen.insert(*i))
-                .copied()
-                .collect();
-            kept.reverse();
-            self.b_log = kept;
-        }
+        self.log.push(i, id, v);
     }
 
-    /// One of B's params, as `set_engine` addresses it: the legacy dual
-    /// block (4 algorithm, 5 decay, 6 mix, 8 pan — equivalent to
-    /// r2_algorithm / r2_decay / r2_mix / r2_pan) or `r2_*` (id − 100).
-    fn apply_b(b: &mut dsp::reverb::ReverbChain, id: u32, v: f64) {
+    /// One of a stage ≥ 1's params, as `set` addresses it: the legacy dual
+    /// block (stage 1 only: 4 algorithm, 5 decay, 6 mix, 8 pan — equivalent
+    /// to r2_algorithm / r2_decay / r2_mix / r2_pan) or its own block
+    /// (`n · 100 + local`).
+    fn apply_stage(c: &mut dsp::reverb::ReverbChain, mix: &mut StageMix, id: u32, v: f64) {
         match id {
-            4 => b.set_algorithm(dsp::reverb::AlgorithmType::from_index(
+            4 => c.set_algorithm(dsp::reverb::AlgorithmType::from_index(
                 v.round().max(0.0) as usize
             )),
             5 => {
-                b.params.decay = v;
-                b.update_params();
+                c.params.decay = v;
+                c.update_params();
             }
-            6 => b.mix = v.clamp(0.0, 1.0),
-            8 => b.pan = v.clamp(-1.0, 1.0),
-            _ => Self::set_chain(b, id.saturating_sub(100), v),
+            6 => {
+                mix.mix = v.clamp(0.0, 1.0);
+                c.mix = mix.wet();
+            }
+            8 => c.pan = v.clamp(-1.0, 1.0),
+            _ => match id % STAGE_BASE {
+                0 => {
+                    mix.mix = v.clamp(0.0, 1.0);
+                    c.mix = mix.wet();
+                }
+                94 => {
+                    mix.level = 10f64.powf(v.clamp(-60.0, 12.0) / 20.0);
+                    c.mix = mix.wet();
+                }
+                // The dry is the block's (stage 0's parallel sum).
+                93 => {}
+                local => Self::set_chain(c, local, v),
+            },
         }
     }
 
-    /// Build chain B: seeded as a plate (so engaging a dual routing is
-    /// immediately audible before any params are set), then every write it
-    /// was sent, in order — as if it had been there all along.
-    fn ensure_b(&mut self) {
-        if self.rev.b().is_some() {
+    /// Build stage `i` if it is not: seeded as a plate (so engaging a dual
+    /// routing is immediately audible before any params are set), then
+    /// every write it was sent, in order.
+    fn ensure_stage(&mut self, i: usize) {
+        if i == 0 || i >= FX_STAGES || self.chain_mut(i).is_some() {
             return;
         }
-        let log = std::mem::take(&mut self.b_log);
-        let b = self.rev.b_mut();
-        b.set_algorithm(dsp::reverb::AlgorithmType::Plate);
-        b.mix = 0.08;
-        b.params.decay = 0.45;
-        b.update_params();
-        for (id, v) in log {
-            Self::apply_b(b, id, v);
+        let mut c = Box::new(dsp::reverb::ReverbChain::new());
+        if let Some(cfg) = self.config {
+            c.update(cfg);
+        }
+        c.set_algorithm(dsp::reverb::AlgorithmType::Plate);
+        let mut mix = StageMix::SEED;
+        c.mix = mix.wet();
+        c.params.decay = 0.45;
+        c.update_params();
+        for (id, v) in self.log.take(i) {
+            Self::apply_stage(&mut c, &mut mix, id, v);
+        }
+        self.stage_mix[i] = mix;
+        if let Some(s) = self.pool.stage_mut(i) {
+            s.0 = Some(c);
         }
         #[cfg(not(target_arch = "wasm32"))]
-        if self.prepared {
-            self.wire_b_reshaper();
-        }
+        self.wire_reshaper(i);
     }
 
-    /// B's Impulse re-prepare worker (see `reshaper_a`), once B exists.
+    /// Spawn stage `i`'s Impulse re-prepare worker (see `reshapers`) if it
+    /// has none. Spawns a thread — `prepare` only, never the audio thread.
     #[cfg(not(target_arch = "wasm32"))]
-    fn wire_b_reshaper(&mut self) {
-        if self.reshaper_b.is_some() || self.rev.b().is_none() {
+    fn spawn_reshaper(&mut self, i: usize) {
+        if self.reshapers.get(i).is_none_or(Option::is_some) {
             return;
         }
         let (reshaper, rx) = dsp::reverb::ir::ImpulseReshaper::new();
-        let b = self.rev.b_mut();
-        b.set_prepared_ir_receiver(rx);
-        b.set_reshape_sender(reshaper.sender());
-        b.set_ir_trash_sender(reshaper.trash_sender());
-        self.reshaper_b = Some(reshaper);
+        self.reshapers[i] = Some(reshaper);
+        self.reshaper_rx[i] = Some(rx);
+    }
+
+    /// Hand stage `i` its worker's channels, once both exist. Allocation-
+    /// and spawn-free, so `ensure_stage` can call it on the audio thread.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn wire_reshaper(&mut self, i: usize) {
+        if self.chain_mut(i).is_none() {
+            return;
+        }
+        let Some(rx) = self.reshaper_rx.get_mut(i).and_then(Option::take) else {
+            return;
+        };
+        let Some(reshaper) = self.reshapers[i].as_ref() else {
+            return;
+        };
+        let (jobs, trash) = (reshaper.sender(), reshaper.trash_sender());
+        if let Some(c) = self.chain_mut(i) {
+            c.set_prepared_ir_receiver(rx);
+            c.set_reshape_sender(jobs);
+            c.set_ir_trash_sender(trash);
+        }
+    }
+
+    /// Copy one stage's parameter surface onto another (`BigSky` MX "copy
+    /// settings": params, mix, pan, EQ, duck, trem — not the algorithm),
+    /// building the destination if it is not. `false` for a stage out of
+    /// range.
+    pub fn copy_stage_params(&mut self, from: usize, to: usize) -> bool {
+        if from >= FX_STAGES || to >= FX_STAGES {
+            return false;
+        }
+        self.ensure_stage(to);
+        let Some(surface) = self.chain_mut(from).map(|c| c.param_surface()) else {
+            return false;
+        };
+        let Some(c) = self.chain_mut(to) else {
+            return false;
+        };
+        c.apply_surface(&surface);
+        c.update_params();
+        let mix = c.mix;
+        // The surface carries the mix: stage 0's stays the block's.
+        match self.stage_mix.get_mut(to) {
+            Some(m) if to > 0 => *m = StageMix { mix, level: 1.0 },
+            _ => self.sync_mix(),
+        }
+        true
     }
 
     /// Apply a chain-scoped param (everything in `REVERB_PARAMS` except
-    /// the dual block) to one `ReverbChain`. Chain A hears these at
-    /// their base ids, chain B at id + 100 (`r2_*`).
+    /// the dual block) to one `ReverbChain`. Stage 0 hears these at their
+    /// base ids, stage n at `n · 100 + id` (`r2_*` … `r8_*`).
     fn set_chain(c: &mut dsp::reverb::ReverbChain, id: u32, v: f64) {
         match id {
             0 => c.mix = v.clamp(0.0, 1.0),
@@ -3863,11 +4390,18 @@ impl NativeReverb {
     }
 
     /// Apply a build-time parameter by name (see `REVERB_PARAMS`).
-    /// `r2_<name>` addresses the same chain-scoped param on reverb 2.
+    /// `r<n>_<name>` (n = 2 … `FX_STAGES`) addresses the same chain-scoped
+    /// param on stage n (`r2_*` = reverb 2); the stack params go by their
+    /// own names (`use`, `r2_lane`, `lgain_1`, `summode`, …).
     pub fn set_named(&mut self, name: &str, value: f64) {
-        if let Some(base) = name.strip_prefix("r2_") {
+        if let Some(id) = stack_param_id("r", name) {
+            self.set(id, value);
+            return;
+        }
+        let (stage, base) = split_stage_name("r", name);
+        if stage > 0 {
             if let Some(id) = param_id(REVERB_PARAMS, base) {
-                self.set(id + 100, value);
+                self.set(stage as u32 * STAGE_BASE + id, value);
             }
             return;
         }
@@ -3876,7 +4410,7 @@ impl NativeReverb {
         }
     }
 
-    /// Load a custom impulse response from a wav file into chain A's
+    /// Load a custom impulse response from a wav file into stage 0's
     /// convolution engine (switching it to the Convolution algorithm).
     /// Mono files duplicate to both sides; samples normalize to f64.
     pub fn load_ir_wav(&mut self, path: &str) -> bool {
@@ -3897,11 +4431,12 @@ impl NativeReverb {
         } else {
             l.clone()
         };
-        self.rev
-            .a
-            .set_algorithm(dsp::reverb::AlgorithmType::Convolution);
-        let ok = self.rev.a.load_convolution_ir(&l, &r);
-        self.rev.a.update_params();
+        let Some(a) = self.chain_mut(0) else {
+            return false;
+        };
+        a.set_algorithm(dsp::reverb::AlgorithmType::Convolution);
+        let ok = a.load_convolution_ir(&l, &r);
+        a.update_params();
         ok
     }
 }
@@ -3912,21 +4447,25 @@ impl PluginInstance for NativeReverb {
     }
     fn params(&mut self) -> Vec<PluginParamInfo> {
         let mut infos = param_infos(REVERB_PARAMS);
-        // Mirror every chain-scoped param for reverb 2 at id + 100
-        // (`r2_*`), so a dual preset can run two full MX engines. The
-        // dual block (routing + the legacy b params) stays single.
-        infos.extend(
-            REVERB_PARAMS
-                .iter()
-                .filter(|s| !matches!(s.id, 3..=6 | 8))
-                .map(|s| PluginParamInfo {
-                    id: s.id + 100,
-                    name: format!("r2_{}", s.name),
-                    min: s.min,
-                    max: s.max,
-                    default: s.default,
-                }),
-        );
+        // Every chain-scoped param again for each further stage at
+        // `n · 100 + id` (`r2_*` … `r8_*`), so a preset can run full MX
+        // engines side by side. The dual block (routing + the legacy b
+        // params) is the block's, not a stage's.
+        for n in 1..FX_STAGES {
+            infos.extend(
+                REVERB_PARAMS
+                    .iter()
+                    .filter(|s| !matches!(s.id, 3..=6 | 8))
+                    .map(|s| PluginParamInfo {
+                        id: n as u32 * STAGE_BASE + s.id,
+                        name: stage_param_name("r", n, s.name),
+                        min: s.min,
+                        max: s.max,
+                        default: s.default,
+                    }),
+            );
+        }
+        infos.extend(stack_param_infos("r"));
         infos
     }
     fn param_value(&mut self, _id: u32) -> Option<f64> {
@@ -3942,29 +4481,30 @@ impl PluginInstance for NativeReverb {
         0
     }
     fn prepare(&mut self, sample_rate: f64, block_size: u32) -> Result<(), PluginError> {
-        if self.rev.routing != dsp::reverb::DualRouting::Single {
-            self.ensure_b();
-        }
-        self.rev.update(AudioConfig {
+        let config = AudioConfig {
             sample_rate: sample_rate.max(1.0),
             max_buffer_size: block_size.max(1) as usize,
-        });
-        self.rev.reset();
-        // Impulse live-param pipeline, one worker per chain (the r2_*
-        // mirror block can host a second Impulse engine): workers
-        // re-prepare shaped IRs and dispose swap garbage off the audio
+        };
+        self.config = Some(config);
+        // Stages the stack plays were built as it came to play them; the
+        // rest stay unbuilt until it does.
+        for i in 0..FX_STAGES {
+            if let Some(c) = self.chain_mut(i) {
+                c.update(config);
+            }
+        }
+        self.pool_block = stack_block(config.max_buffer_size);
+        self.pool.prepare(self.pool_block, 0);
+        self.pool.reset();
+        // Impulse live-param pipeline, one worker per stage (each can host
+        // its own Impulse engine): workers re-prepare shaped IRs and dispose
+        // swap garbage off the audio thread. Spawned here for every stage so
+        // a stage the stack builds mid-stream never spawns on the audio
         // thread.
         #[cfg(not(target_arch = "wasm32"))]
-        {
-            if self.reshaper_a.is_none() {
-                let (reshaper, rx) = dsp::reverb::ir::ImpulseReshaper::new();
-                self.rev.a.set_prepared_ir_receiver(rx);
-                self.rev.a.set_reshape_sender(reshaper.sender());
-                self.rev.a.set_ir_trash_sender(reshaper.trash_sender());
-                self.reshaper_a = Some(reshaper);
-            }
-            // B's only once B exists (a routing that plays it).
-            self.wire_b_reshaper();
+        for i in 0..FX_STAGES {
+            self.spawn_reshaper(i);
+            self.wire_reshaper(i);
         }
         self.scratch_l = vec![0.0; block_size.max(1) as usize];
         self.scratch_r = vec![0.0; block_size.max(1) as usize];
@@ -3985,7 +4525,7 @@ impl PluginInstance for NativeReverb {
         for &(id, value) in events.params {
             self.set(id, value);
         }
-        let rev = &mut self.rev;
+        let (pool, cap) = (&mut self.pool, self.pool_block);
         process_f64_inplace(
             &mut self.scratch_l,
             &mut self.scratch_r,
@@ -3993,11 +4533,12 @@ impl PluginInstance for NativeReverb {
             in_r,
             out_l,
             out_r,
-            |l, r| rev.process(l, r),
+            |l, r| process_stack(pool, l, r, cap),
         );
-        if matches!(self.rev.routing, dsp::reverb::DualRouting::Single) {
+        if self.topo.plays_one() {
             self.par.apply(in_l, in_r, out_l, out_r);
         }
+        apply_trim(self.topo.trim, out_l, out_r);
         fx_meter::publish(fx_meter::REVERB, fx_meter::added(in_l, in_r, out_l, out_r));
         Ok(())
     }
@@ -4509,15 +5050,27 @@ const DELAY_PARAMS: &[ParamSpec] = &[
     },
 ];
 
-/// Native Delay block — wraps [`dsp::delay::DualDelay`] (two full chains +
-/// `TimeLine` MX 1+2 routing; `Single` = chain A only, bit-compatible with
-/// the previous single-chain wrapper).
+/// Native Delay block — a stack of up to [`FX_STAGES`] full
+/// [`dsp::delay::DelayChain`]s on a [`StagePool`] (see the FX stack
+/// section): stage 0 is delay A, stage 1 the `TimeLine` MX delay B, and the
+/// `routing` param writes their 1+2 topologies. Stage 0 alone is
+/// bit-compatible with the previous single-chain wrapper.
 ///
 /// Defaults to a subtle clean quarter-note-ish delay with modest feedback.
 pub struct NativeDelay {
-    dly: dsp::delay::DualDelay,
+    pool: StagePool<ChainStage<dsp::delay::DelayChain>>,
+    /// The stack's topology, as `routing` and the stack params set it.
+    topo: StackTopo,
+    /// Writes for stages not built yet (see [`StageLog`]).
+    log: StageLog,
+    /// Stages ≥ 1's own mix and level.
+    stage_mix: [StageMix; FX_STAGES],
+    /// Set by `prepare`: a stage built after it is prepared too.
+    config: Option<AudioConfig>,
+    /// The pool's prepared block (see [`stack_block`]).
+    pool_block: usize,
     prepared: bool,
-    /// Delay A in parallel with the dry (see [`ParallelMix`]).
+    /// Stage 0 in parallel with the dry (see [`ParallelMix`]).
     par: ParallelMix,
     sample_rate: f64,
     block_size: usize,
@@ -4528,27 +5081,23 @@ pub struct NativeDelay {
 impl NativeDelay {
     #[must_use]
     pub fn new(_sample_rate: f64) -> Self {
-        let mut dly = dsp::delay::DualDelay::new();
-        let chain = &mut dly.a;
-        chain.set_style(dsp::delay::DelayStyle::Clean);
-        chain.mix = 0.08;
-        chain.delay_l.time_ms = 400.0;
-        chain.delay_r.time_ms = 400.0;
-        chain.delay_l.feedback = 0.30;
-        chain.delay_r.feedback = 0.30;
-        // B's, kept until a routing plays it (see `DualDelay`).
-        dly.set_b_style(dsp::delay::DelayStyle::Clean);
-        dly.set_b_mix(0.08);
-        dly.set_b_feedback(0.30);
-        // Fully wet: single routing sums the dry itself (`ParallelMix`).
-        dly.a.mix = 1.0;
-        // B seeds slightly shorter so engaging a dual routing is
-        // immediately audible before any params are set.
-        dly.set_b_time_ms(300.0);
+        let mut a = dsp::delay::DelayChain::new();
+        a.set_style(dsp::delay::DelayStyle::Clean);
+        a.delay_l.time_ms = 400.0;
+        a.delay_r.time_ms = 400.0;
+        a.delay_l.feedback = 0.30;
+        a.delay_r.feedback = 0.30;
+        // Fully wet: a lone stage 0 sums the dry itself (`ParallelMix`).
+        a.mix = 1.0;
         Self {
             sample_rate: 48000.0,
             block_size: 512,
-            dly,
+            pool: new_stack_pool(a),
+            topo: StackTopo::new(),
+            log: StageLog::new(),
+            stage_mix: [StageMix::SEED; FX_STAGES],
+            config: None,
+            pool_block: stack_block(0),
             prepared: false,
             par: ParallelMix::new(0.08),
             scratch_l: Vec::new(),
@@ -4556,45 +5105,136 @@ impl NativeDelay {
         }
     }
 
+    /// Stage `i`'s chain, if it has been built (stage 0 always is).
+    fn chain_mut(&mut self, i: usize) -> Option<&mut dsp::delay::DelayChain> {
+        self.pool.stage_mut(i).and_then(|s| s.0.as_deref_mut())
+    }
+
     fn set(&mut self, id: u32, v: f64) {
-        // Delay A's mix and the dry are the parallel sum's (see
+        // Stage 0's mix and the dry are the parallel sum's (see
         // `ParallelMix`); the engine's own mix is derived in `sync_mix`.
         match id {
             0 => {
                 self.par.set_mix(v);
                 self.sync_mix();
-                return;
             }
             62 => {
                 self.par.set_level_db(v);
                 self.sync_mix();
-                return;
             }
-            61 => {
-                self.par.dry = v.clamp(0.0, 1.0);
-                return;
+            61 => self.par.dry = v.clamp(0.0, 1.0),
+            17 => {
+                self.topo.set_routing(v.round().max(0.0) as usize);
+                self.apply_topology();
             }
-            _ => {}
-        }
-        self.set_engine(id, v);
-        if id == 17 {
-            self.sync_mix();
+            STACK_BASE..STACK_END => {
+                self.topo.set_param(id, v);
+                self.apply_topology();
+            }
+            // The legacy dual block's delay-B params, as stage 1's own:
+            // style_b / time_b / feedback_b / mix_b.
+            18 => self.write_stage(1, STAGE_BASE + 3, v),
+            19 => self.write_stage(1, STAGE_BASE + 1, v),
+            20 => self.write_stage(1, STAGE_BASE + 2, v),
+            21 => self.write_stage(1, STAGE_BASE, v),
+            STAGE_BASE..STACK_BASE => self.write_stage((id / STAGE_BASE) as usize, id, v),
+            _ => {
+                let sr = self.sample_rate;
+                if let Some(a) = self.chain_mut(0) {
+                    Self::set_chain(a, id, v, sr);
+                }
+            }
         }
     }
 
-    /// With one delay the engine runs fully wet and the dry is summed in
-    /// `process_block`; a dual routing keeps the engine's own crossfade.
+    /// Bring the stack to `topo`: build the stages it plays (an allocation
+    /// — a param write's, as a routing change always was), set stage 0's
+    /// mix for the path it now takes, and place every stage.
+    fn apply_topology(&mut self) {
+        for i in 1..FX_STAGES {
+            if self.topo.in_use[i] {
+                self.ensure_stage(i);
+            }
+        }
+        self.sync_mix();
+        self.topo.apply(&mut self.pool);
+    }
+
+    /// Stage 0 alone runs fully wet and the dry is summed in
+    /// `process_block`; in any other topology it keeps its own crossfade.
     fn sync_mix(&mut self) {
-        self.dly.a.mix = if matches!(self.dly.routing, dsp::delay::DualRouting::Single) {
+        let mix = if self.topo.plays_one() {
             1.0
         } else {
             self.par.wet.min(1.0)
         };
+        if let Some(a) = self.chain_mut(0) {
+            a.mix = mix;
+        }
     }
 
-    fn set_engine(&mut self, id: u32, v: f64) {
-        // Ids 0-16 address delay A; 17+ are the dual-routing block.
-        let a = &mut self.dly.a;
+    /// A write for stage `i` ≥ 1: to it, or kept for when it is built.
+    fn write_stage(&mut self, i: usize, id: u32, v: f64) {
+        let sr = self.sample_rate;
+        if let Some(c) = self.pool.stage_mut(i).and_then(|s| s.0.as_deref_mut()) {
+            if let Some(mix) = self.stage_mix.get_mut(i) {
+                Self::apply_stage(c, mix, id, v, sr);
+            }
+            return;
+        }
+        self.log.push(i, id, v);
+    }
+
+    /// One of a stage ≥ 1's params (`n · 100 + local`).
+    fn apply_stage(c: &mut dsp::delay::DelayChain, mix: &mut StageMix, id: u32, v: f64, sr: f64) {
+        match id % STAGE_BASE {
+            0 => {
+                mix.mix = v.clamp(0.0, 1.0);
+                c.mix = mix.wet();
+            }
+            62 => {
+                mix.level = 10f64.powf(v.clamp(-60.0, 12.0) / 20.0);
+                c.mix = mix.wet();
+            }
+            // The dry is the block's (stage 0's parallel sum), the dual
+            // block the block's own.
+            61 | 17..=21 => {}
+            local => Self::set_chain(c, local, v, sr),
+        }
+    }
+
+    /// Build stage `i` if it is not: seeded slightly shorter than delay A
+    /// (so engaging a dual routing is immediately audible before any
+    /// params are set), then every write it was sent, in order.
+    fn ensure_stage(&mut self, i: usize) {
+        if i == 0 || i >= FX_STAGES || self.chain_mut(i).is_some() {
+            return;
+        }
+        let mut c = Box::new(dsp::delay::DelayChain::new());
+        c.set_style(dsp::delay::DelayStyle::Clean);
+        c.delay_l.time_ms = 300.0;
+        c.delay_r.time_ms = 300.0;
+        c.delay_l.feedback = 0.30;
+        c.delay_r.feedback = 0.30;
+        let mut mix = StageMix::SEED;
+        c.mix = mix.wet();
+        let sr = self.sample_rate;
+        for (id, v) in self.log.take(i) {
+            Self::apply_stage(&mut c, &mut mix, id, v, sr);
+        }
+        if let Some(cfg) = self.config {
+            c.update(cfg);
+        }
+        self.stage_mix[i] = mix;
+        if let Some(s) = self.pool.stage_mut(i) {
+            s.0 = Some(c);
+        }
+    }
+
+    /// Apply a chain-scoped param (everything in `DELAY_PARAMS` except the
+    /// dual block and the block's dry/level) to one `DelayChain`. Stage 0
+    /// hears these at their base ids, stage n at `n · 100 + id`.
+    fn set_chain(a: &mut dsp::delay::DelayChain, id: u32, v: f64, sample_rate: f64) {
         match id {
             0 => a.mix = v.clamp(0.0, 1.0),
             1 => {
@@ -4678,16 +5318,6 @@ impl NativeDelay {
                 a.delay_l.pitch_blend = v;
                 a.delay_r.pitch_blend = v;
             }
-            // A routing that plays B builds it here (a param write).
-            17 => self.dly.set_routing(dsp::delay::DualRouting::from_index(
-                v.round().max(0.0) as usize
-            )),
-            18 => self.dly.set_b_style(dsp::delay::DelayStyle::from_index(
-                v.round().max(0.0) as usize
-            )),
-            19 => self.dly.set_b_time_ms(v),
-            20 => self.dly.set_b_feedback(v),
-            21 => self.dly.set_b_mix(v.clamp(0.0, 1.0)),
             22 => {
                 let shape = match v.round().max(0.0) as usize {
                     1 => dsp::delay::GrainShape::Swell,
@@ -4772,7 +5402,7 @@ impl NativeDelay {
                 // the host rate mean "no reduction" (divisor 1).
                 let step = v.clamp(0.0, 20.0);
                 let hz = 750.0 * (96000.0f64 / 750.0).powf(step / 20.0);
-                let div = (self.sample_rate / hz).max(1.0);
+                let div = (sample_rate / hz).max(1.0);
                 a.delay_l.lofi_sr_div = div;
                 a.delay_r.lofi_sr_div = div;
             }
@@ -4935,11 +5565,39 @@ impl NativeDelay {
     /// Apply a build-time parameter by name (`mix`/`time`/`feedback`/
     /// `style`/`swell`/`freeze`/`tempo_bpm`/`tap_div`/`high_pass`/
     /// `repeat_dyn`/`voice`/`tape_age`/`crinkle`/`bucket_loss`/
-    /// `interval`/`slice`/`blend`, plus the dual block: `routing`/
-    /// `style_b`/`time_b`/`feedback_b`/`mix_b`).
+    /// `interval`/`slice`/`blend`/…, plus the dual block: `routing`/
+    /// `style_b`/`time_b`/`feedback_b`/`mix_b`). `d<n>_<name>` (n = 2 …
+    /// `FX_STAGES`) addresses the same chain-scoped param on stage n; the
+    /// stack params go by their own names (`use`, `d2_lane`, `lgain_1`,
+    /// `summode`, …).
     pub fn set_named(&mut self, name: &str, value: f64) {
+        if let Some(id) = stack_param_id("d", name) {
+            self.set(id, value);
+            return;
+        }
+        let (stage, base) = split_stage_name("d", name);
+        if stage > 0 {
+            if let Some(id) = param_id(DELAY_PARAMS, base) {
+                self.set(stage as u32 * STAGE_BASE + id, value);
+            }
+            return;
+        }
         if let Some(id) = param_id(DELAY_PARAMS, name) {
             self.set(id, value);
+        }
+    }
+
+    /// Re-derive every built stage's tempo-synced times, style ranges and
+    /// head modes from its fields.
+    fn update_stages(&mut self) {
+        let config = AudioConfig {
+            sample_rate: self.sample_rate,
+            max_buffer_size: self.block_size.max(1),
+        };
+        for i in 0..FX_STAGES {
+            if let Some(c) = self.chain_mut(i) {
+                c.update(config);
+            }
         }
     }
 }
@@ -4949,7 +5607,26 @@ impl PluginInstance for NativeDelay {
         descriptor("signal.fx.delay", "Delay")
     }
     fn params(&mut self) -> Vec<PluginParamInfo> {
-        param_infos(DELAY_PARAMS)
+        let mut infos = param_infos(DELAY_PARAMS);
+        // Every chain-scoped param again for each further stage at
+        // `n · 100 + id` (`d2_*` … `d8_*`). The dual block and the dry
+        // are the block's, not a stage's.
+        for n in 1..FX_STAGES {
+            infos.extend(
+                DELAY_PARAMS
+                    .iter()
+                    .filter(|s| !matches!(s.id, 17..=21 | 61))
+                    .map(|s| PluginParamInfo {
+                        id: n as u32 * STAGE_BASE + s.id,
+                        name: stage_param_name("d", n, s.name),
+                        min: s.min,
+                        max: s.max,
+                        default: s.default,
+                    }),
+            );
+        }
+        infos.extend(stack_param_infos("d"));
+        infos
     }
     fn param_value(&mut self, _id: u32) -> Option<f64> {
         None
@@ -4966,11 +5643,16 @@ impl PluginInstance for NativeDelay {
     fn prepare(&mut self, sample_rate: f64, block_size: u32) -> Result<(), PluginError> {
         self.sample_rate = sample_rate.max(1.0);
         self.block_size = block_size.max(1) as usize;
-        self.dly.update(AudioConfig {
-            sample_rate: sample_rate.max(1.0),
-            max_buffer_size: block_size.max(1) as usize,
+        self.config = Some(AudioConfig {
+            sample_rate: self.sample_rate,
+            max_buffer_size: self.block_size,
         });
-        self.dly.reset();
+        // Stages the stack plays were built as it came to play them; the
+        // rest stay unbuilt until it does.
+        self.update_stages();
+        self.pool_block = stack_block(self.block_size);
+        self.pool.prepare(self.pool_block, 0);
+        self.pool.reset();
         self.scratch_l = vec![0.0; block_size.max(1) as usize];
         self.scratch_r = vec![0.0; block_size.max(1) as usize];
         self.prepared = true;
@@ -4994,12 +5676,9 @@ impl PluginInstance for NativeDelay {
             // Param writes only set fields; tempo-synced times, style
             // ranges, and head modes are derived in update() — re-run it
             // or tap divisions and tap tempo silently do nothing.
-            self.dly.update(AudioConfig {
-                sample_rate: self.sample_rate,
-                max_buffer_size: self.block_size.max(1),
-            });
+            self.update_stages();
         }
-        let dly = &mut self.dly;
+        let (pool, cap) = (&mut self.pool, self.pool_block);
         process_f64_inplace(
             &mut self.scratch_l,
             &mut self.scratch_r,
@@ -5007,11 +5686,12 @@ impl PluginInstance for NativeDelay {
             in_r,
             out_l,
             out_r,
-            |l, r| dly.process(l, r),
+            |l, r| process_stack(pool, l, r, cap),
         );
-        if matches!(self.dly.routing, dsp::delay::DualRouting::Single) {
+        if self.topo.plays_one() {
             self.par.apply(in_l, in_r, out_l, out_r);
         }
+        apply_trim(self.topo.trim, out_l, out_r);
         fx_meter::publish(fx_meter::DELAY, fx_meter::added(in_l, in_r, out_l, out_r));
         Ok(())
     }

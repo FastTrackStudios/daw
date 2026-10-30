@@ -12,8 +12,9 @@ workspace = true
 engine = ["dep:comp-plugin", "dep:daw-standalone", "dep:delay-plugin", "dep:eq-plugin", "dep:gate-plugin", "dep:level-plugin", "dep:limiter-plugin", "dep:meter-plugin", "dep:mic-plugin", "dep:modulation-plugin", "dep:nice-plug", "dep:num-traits", "dep:pitch-plugin", "dep:reverb-plugin", "dep:saturate-plugin", "dep:serde", "dep:serde_json", "dep:tracing", "dep:tune-plugin", "dep:unison-plugin"]
 
 [dependencies]
-dsp = { workspace = true, features = ["comp", "delay", "eq", "level", "modulation", "pitch", "reverb", "saturate", "saturate-analysis", "tune"] }
+dsp = { workspace = true, features = ["comp", "delay", "eq", "level", "modulation", "pitch", "reverb", "saturate", "saturate-analysis", "stack", "tune"] }
 comp-plugin = { workspace = true, optional = true }
+crossbeam-channel = { workspace = true }
 daw = { workspace = true, features = ["standalone"] }
 daw-proto = { workspace = true }
 daw-standalone = { workspace = true, optional = true }
