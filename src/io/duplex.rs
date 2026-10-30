@@ -182,6 +182,11 @@ impl DropRing {
 pub struct EngineStats {
     /// Total process callbacks fired.
     pub calls: AtomicU64,
+    /// Frames handed to the device, every block's: against the wall clock,
+    /// how much time the device went without audio from us — what a
+    /// callback that never returned (no block, so no overrun counted)
+    /// still costs the listener.
+    pub frames_delivered: AtomicU64,
     /// Frames in the last block (the running quantum).
     pub block_frames: AtomicU32,
     /// Render time of the last block, nanoseconds.
@@ -289,6 +294,7 @@ impl EngineStats {
     pub fn record_render_at(&self, ns: u64, rate: u32) {
         self.record_render(ns);
         let frames = self.block_frames.load(Ordering::Relaxed) as u64;
+        self.frames_delivered.fetch_add(frames, Ordering::Relaxed);
         if frames > 0 && rate > 0 {
             let budget_ns = frames * 1_000_000_000 / rate as u64;
             if ns > budget_ns {
