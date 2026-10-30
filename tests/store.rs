@@ -152,3 +152,31 @@ fn a_checkpointed_project_is_one_file() {
         "the file holds it"
     );
 }
+
+/// A fold is taken with the song held and packed and written after; two in
+/// flight at once may land in either order, and an older one written last
+/// never puts the song back to what it held — nor loses an edit appended
+/// while either was being packed.
+#[test]
+fn a_fold_written_after_a_later_one_changes_nothing() {
+    let (dir, store) = store();
+    let doc = loro::LoroDoc::new();
+    step(&store, MAIN, &doc, "k1", 0.0);
+    let older = store.take_snapshot(MAIN, &doc).expect("taken");
+    step(&store, MAIN, &doc, "k2", 1.0);
+    let newer = store.take_snapshot(MAIN, &doc).expect("taken");
+    // Appended while both are being packed.
+    step(&store, MAIN, &doc, "k3", 2.0);
+    store
+        .write_snapshot(newer.pack().expect("packed"))
+        .expect("written");
+    store
+        .write_snapshot(older.pack().expect("packed"))
+        .expect("written");
+    drop(store);
+    let reopened = Store::open(&dir.path().join("Song.session")).expect("reopened");
+    assert_eq!(
+        reopened.load(MAIN).expect("loaded").get_deep_value(),
+        doc.get_deep_value()
+    );
+}

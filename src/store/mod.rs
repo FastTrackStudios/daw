@@ -52,6 +52,52 @@ pub const SCHEMA: i64 = 1;
 /// default's ratio, still fast to write for a save.
 const LEVEL: i32 = 9;
 
+/// The zstd level a branch's snapshot is packed at. A long-edited song's
+/// snapshot is hundreds of MB: at [`LEVEL`] Unbreakable's 598 MB took
+/// 10.6 s to pack, every time the song was left alone; at 3 a fraction
+/// of that, for a somewhat larger file.
+const SNAPSHOT_LEVEL: i32 = 3;
+
+/// A branch's snapshot taken ([`Store::take_snapshot`]), not packed yet.
+#[derive(Debug)]
+pub struct Snapshot {
+    branch: String,
+    upto: i64,
+    data: Vec<u8>,
+}
+
+impl Snapshot {
+    /// Packed for the store: the slow part, which needs neither the doc
+    /// nor the store.
+    ///
+    /// # Errors
+    ///
+    /// zstd refused it.
+    pub fn pack(self) -> StoreResult<PackedSnapshot> {
+        let span = tracing::info_span!(
+            "store.pack",
+            store.snapshot_bytes = self.data.len(),
+            store.packed_bytes = tracing::field::Empty,
+        );
+        let _in = span.enter();
+        let data = zstd::encode_all(self.data.as_slice(), SNAPSHOT_LEVEL)?;
+        span.record("store.packed_bytes", data.len());
+        Ok(PackedSnapshot {
+            branch: self.branch,
+            upto: self.upto,
+            data,
+        })
+    }
+}
+
+/// A snapshot packed, to be written ([`Store::write_snapshot`]).
+#[derive(Debug)]
+pub struct PackedSnapshot {
+    branch: String,
+    upto: i64,
+    data: Vec<u8>,
+}
+
 /// What went wrong.
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -549,11 +595,22 @@ impl Store {
     ///
     /// The doc would not export, or the database refused the write.
     pub fn compact(&self, branch: &str, doc: &loro::LoroDoc) -> StoreResult<()> {
-        let snapshot = doc
-            .export(loro::ExportMode::Snapshot)
-            .map_err(|e| StoreError::Loro(e.to_string()))?;
-        let packed = zstd::encode_all(snapshot.as_slice(), LEVEL)?;
-        run(async {
+        let taken = self.take_snapshot(branch, doc)?;
+        self.write_snapshot(taken.pack()?)
+    }
+
+    /// The first step of [`Self::compact`], the only one that needs the
+    /// doc still: its snapshot, and how far the branch's updates go now —
+    /// what the snapshot holds. The caller may let go of the doc after it
+    /// and pack and write the rest elsewhere ([`Snapshot::pack`],
+    /// [`Self::write_snapshot`]): updates appended meanwhile stay.
+    ///
+    /// # Errors
+    ///
+    /// The doc would not export, or the database would not say.
+    pub fn take_snapshot(&self, branch: &str, doc: &loro::LoroDoc) -> StoreResult<Snapshot> {
+        let _span = tracing::info_span!("store.take_snapshot").entered();
+        let upto = run(async {
             let mut rows = self
                 .conn
                 .query(
@@ -565,20 +622,45 @@ impl Store {
                 Some(row) => row.get(0)?,
                 None => 0,
             };
-            drop(rows);
+            StoreResult::Ok(upto)
+        })?;
+        let data = doc
+            .export(loro::ExportMode::Snapshot)
+            .map_err(|e| StoreError::Loro(e.to_string()))?;
+        Ok(Snapshot {
+            branch: branch.to_owned(),
+            upto,
+            data,
+        })
+    }
+
+    /// The last step of [`Self::compact`]: a packed snapshot made the
+    /// branch's base, and the updates it holds dropped.
+    ///
+    /// # Errors
+    ///
+    /// The database refused the write.
+    pub fn write_snapshot(&self, packed: PackedSnapshot) -> StoreResult<()> {
+        let _span = tracing::info_span!("store.write_snapshot").entered();
+        let PackedSnapshot { branch, upto, data } = packed;
+        run(async {
             self.conn.execute("BEGIN", ()).await?;
             self.conn
                 .execute(
+                    // Never back: a snapshot packed after a later one
+                    // (two folds at once) would put back the updates the
+                    // later one dropped as folded.
                     "INSERT INTO snapshots (branch, upto, at, data) VALUES (?1, ?2, ?3, ?4) \
                      ON CONFLICT(branch) DO UPDATE SET upto = excluded.upto, \
-                     at = excluded.at, data = excluded.data",
-                    (branch, upto, now(), packed),
+                     at = excluded.at, data = excluded.data \
+                     WHERE excluded.upto >= snapshots.upto",
+                    (branch.as_str(), upto, now(), data),
                 )
                 .await?;
             self.conn
                 .execute(
                     "DELETE FROM updates WHERE branch = ?1 AND seq <= ?2",
-                    (branch, upto),
+                    (branch.as_str(), upto),
                 )
                 .await?;
             self.conn.execute("COMMIT", ()).await?;

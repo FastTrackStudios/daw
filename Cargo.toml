@@ -32,6 +32,8 @@ loro = { workspace = true }
 pollster = { workspace = true, optional = true }
 ruzstd = { workspace = true, optional = true }
 sha2 = { workspace = true }
+# The store's slow work (a compaction's export, pack and write) as spans.
+tracing = { workspace = true }
 styx-format = { workspace = true }
 thiserror = { workspace = true }
 turso = { workspace = true, optional = true }
