@@ -272,6 +272,16 @@ struct Saved {
 }
 
 impl<P: Plugin> PluginInstance for Embedded<P> {
+    /// A built-in shares nothing per block with another track's: its state
+    /// is its own, its models and impulses are read-only, and a chain's
+    /// thread-local key (the DI a post-amp gate listens to) stays with its
+    /// chain, which renders whole on one thread. Only a sidechain input —
+    /// a key the engine hands over from another track — ties it to the
+    /// render thread's order.
+    fn parallel_safe(&self) -> bool {
+        self.layout.aux_input_ports.is_empty()
+    }
+
     fn descriptor(&self) -> PluginDescriptor {
         PluginDescriptor {
             id: format!("fts.builtin.{}", P::NAME.to_lowercase().replace(' ', "-")),
