@@ -252,7 +252,17 @@ pub fn build_dynamic_from_time_bpm(
 
     let start_idx = if points[0].0 > 0.0 { 0 } else { 1 };
     for &(t, bpm) in &points[start_idx..] {
-        let dt = (t - prev_secs).max(0.0);
+        // Points at one moment are a step: the last is the tempo from it.
+        // Two keyframes at one beat are out of order, and the map that
+        // would not build left the engine on a stale one.
+        if t - prev_secs < 1e-9 {
+            prev_bpm = bpm.max(1e-3);
+            if let Some(last) = keyframes.last_mut() {
+                last.bpm = prev_bpm;
+            }
+            continue;
+        }
+        let dt = t - prev_secs;
         let beats = prev_beats + dt * beats_per_second(prev_bpm, 1.0);
         keyframes.push(TempoKeyframe {
             at_musical: InstantMusical(beats),
@@ -302,6 +312,20 @@ mod tests {
         // 1 more beat @ 60 BPM = +1 s.
         let s_at_5 = m.musical_to_samples(InstantMusical(5.0), 1.0, &c);
         assert_eq!(s_at_5.0, 144_000);
+    }
+
+    #[test]
+    fn build_from_time_bpm_takes_a_step_as_the_last_point_at_its_moment() {
+        // 160 BPM, then a step to 116 at 3 s written as two points there
+        // (the tempo it leaves, the tempo it takes), and a second pair at
+        // the origin. It builds, and plays 116 from 3 s.
+        let m =
+            build_dynamic_from_time_bpm(&[(0.0, 120.0), (0.0, 160.0), (3.0, 160.0), (3.0, 116.0)])
+                .expect("a step is not out of order");
+        let c = SampleClock::new(48_000);
+        // 3 s at 160 = 8 beats; 116 more beats at 116 = +60 s.
+        let s = m.musical_to_samples(InstantMusical(8.0 + 116.0), 1.0, &c);
+        assert_eq!(s.0, 63 * 48_000);
     }
 
     #[test]

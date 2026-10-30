@@ -357,8 +357,16 @@ impl TempoMap {
             .map(|tp| (tp.position_seconds(), tp.bpm.max(1.0)))
             .collect();
         pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-        // Drop duplicates at the same time (keep the last write).
-        pts.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-9);
+        // Points at one moment are a step: the last is the tempo from it
+        // (`dedup_by` keeps the earlier element, so it takes the later's
+        // tempo).
+        pts.dedup_by(|later, kept| {
+            let same = (later.0 - kept.0).abs() < 1e-9;
+            if same {
+                *kept = *later;
+            }
+            same
+        });
 
         let mut segments: Vec<TempoSegment> = Vec::new();
         // Always seed with a segment at time=0 so any PPQ before
@@ -947,5 +955,37 @@ mod input_monitoring_tests {
         assert_eq!(hears(true, InputMonitoringMode::Off), None);
         assert_eq!(hears(true, InputMonitoringMode::Normal), Some(0));
         assert_eq!(hears(true, InputMonitoringMode::NotWhenPlaying), Some(0));
+    }
+}
+
+#[cfg(test)]
+mod tempo_map_tests {
+    use daw_proto::primitives::PositionInSeconds;
+    use daw_proto::{Position, TempoPoint};
+
+    use super::TempoMap;
+    use crate::sync::ProjectState;
+
+    #[test]
+    fn a_step_takes_the_tempo_of_the_last_point_at_its_moment() {
+        // A step from 160 to 116 at 288 s, written as two points there
+        // (the tempo it leaves, the tempo it takes), the way a Live set
+        // brings its steps.
+        let mut p = ProjectState::new(daw_proto::project::ProjectInfo {
+            guid: "p".into(),
+            name: "p".into(),
+            path: String::new(),
+        });
+        for (at, bpm) in [(0.0, 160.0), (288.0, 160.0), (288.0, 116.0)] {
+            let at = Position::from_time(PositionInSeconds::from_seconds(at));
+            p.tempo_points.push(TempoPoint::new(at, bpm));
+        }
+        let map = TempoMap::from_state(&p);
+        assert!(
+            (map.tempo_at(300.0) - 116.0).abs() < 1e-9,
+            "not the 160 it left"
+        );
+        // 768 beats at 160, then 116: 60 more seconds are 116 beats.
+        assert!((map.seconds_to_beat(348.0) - (768.0 + 116.0)).abs() < 1e-9);
     }
 }
