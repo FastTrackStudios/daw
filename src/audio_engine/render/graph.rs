@@ -54,6 +54,35 @@ pub(crate) fn topo_order(tracks: &[TrackSnapshot]) -> Vec<usize> {
     order
 }
 
+/// Each track's depth in the routing graph: 0 for a track nothing feeds,
+/// else one past the deepest track feeding it (a child summed into its
+/// folder, a send's source). Every track of one depth has its whole input
+/// once every shallower track is done, so a depth's FX chains can run side
+/// by side ([`super::parallel`]). `order` is a topological order of
+/// `tracks` ([`topo_order`]).
+pub(crate) fn depths(tracks: &[TrackSnapshot], order: &[usize]) -> Vec<u32> {
+    let parents: Vec<Option<usize>> = tracks.iter().map(|t| t.parent_idx).collect();
+    let sends: Vec<Vec<usize>> = tracks
+        .iter()
+        .map(|t| t.sends.iter().filter_map(|s| s.dest_idx).collect())
+        .collect();
+    depths_of(&parents, &sends, order)
+}
+
+/// [`depths`] over each track's parent and send destinations.
+fn depths_of(parents: &[Option<usize>], sends: &[Vec<usize>], order: &[usize]) -> Vec<u32> {
+    let n = parents.len();
+    let mut depth = vec![0u32; n];
+    for &i in order {
+        let next = depth[i].saturating_add(1);
+        let fed = parents[i].into_iter().chain(sends[i].iter().copied());
+        for j in fed.filter(|&j| j != i && j < n) {
+            depth[j] = depth[j].max(next);
+        }
+    }
+    depth
+}
+
 /// Which tracks render live, in the audio callback at the device's block:
 /// every track that [plays live](TrackSnapshot::plays_live), and everything
 /// it feeds — its folder (when it sends there) and its sends'
@@ -295,7 +324,18 @@ mod key_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::{Pass, solo_mask};
+    use super::{Pass, depths_of, solo_mask};
+
+    #[test]
+    fn a_track_is_one_deeper_than_the_deepest_track_feeding_it() {
+        let (parents, sends) = live_bus();
+        // A topological order: what feeds a track comes before it.
+        let order = [1, 2, 4, 0, 3, 5, 6, 7];
+        assert_eq!(
+            depths_of(&parents, &sends, &order),
+            vec![1, 0, 0, 1, 0, 1, 1, 2]
+        );
+    }
 
     /// The live-bus shape: stems inside instrument folders with their
     /// parent send off, reaching the mix only through a send to a bus in

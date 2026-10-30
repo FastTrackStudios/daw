@@ -215,6 +215,22 @@ fn worker(shared: &Shared, priority: i32) {
 /// Worker count for a realtime renderer: `FTS_RENDER_THREADS` if set (0
 /// renders serially), else a few of the performance cores — the render
 /// thread is one more, and the UI and the sample streamer need the rest.
+/// Workers for a render ahead's pool (`FTS_RENDER_AHEAD_THREADS`, else
+/// half the cores, at most 15): it renders the whole song off the
+/// callback's deadline, so a mix of a few thousand plugins wants every
+/// core it can have — one render-ahead thread at a full core played
+/// Unbreakable at a tenth of realtime.
+pub(crate) fn ahead_threads() -> usize {
+    if let Some(n) = std::env::var("FTS_RENDER_AHEAD_THREADS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+    {
+        return n.min(15);
+    }
+    let cores = std::thread::available_parallelism().map_or(1, usize::from);
+    (cores / 2).clamp(1, 15)
+}
+
 pub(crate) fn default_threads() -> usize {
     if let Some(n) = std::env::var("FTS_RENDER_THREADS")
         .ok()

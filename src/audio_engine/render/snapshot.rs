@@ -47,6 +47,10 @@ pub(crate) struct RenderSnapshot {
     /// (children sum upward) and every send destination (busses
     /// receive post-fader signal). See [`graph::topo_order`].
     pub(crate) order: Vec<usize>,
+    /// Each track's depth in the routing graph ([`graph::depths`]); `order`
+    /// runs through the depths shallowest first, so a depth's tracks come
+    /// together and its FX can run side by side.
+    pub(crate) depth: Vec<u32>,
     /// Solo routing mask — `Some` iff any track is soloed. With folder
     /// summing, a soloed track's signal flows THROUGH its ancestors,
     /// so they (and its descendants) keep passing audio even though
@@ -101,7 +105,10 @@ impl RenderSnapshot {
             .iter()
             .map(|t| snapshot_track(p, t, &tempo_map, &idx_by_guid, played_live))
             .collect();
-        let order = graph::topo_order(&tracks);
+        let mut order = graph::topo_order(&tracks);
+        let depth = graph::depths(&tracks, &order);
+        // Still topological — a track is deeper than all that feed it.
+        order.sort_by_key(|&i| depth[i]);
         let solo_pass = graph::solo_pass(&tracks);
         let beats_per_measure = p.transport.time_signature.numerator().max(1);
         let time_sig_den = p.transport.time_signature.denominator().max(1);
@@ -113,6 +120,7 @@ impl RenderSnapshot {
         Arc::new(Self {
             tracks,
             order,
+            depth,
             solo_pass,
             tempo_map,
             beats_per_measure,
