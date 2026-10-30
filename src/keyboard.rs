@@ -97,6 +97,12 @@ impl Default for Flag {
 /// switch), whatever has focus.
 pub static KEYS_OFF: Flag = Flag::new();
 
+/// On while the renderer has a text input focused, in any window of the
+/// process: set by the renderer itself (dioxus-native-dom's
+/// `on_text_focus_change`, installed by `app_shell`), so every field holds
+/// the keyboard without wiring of its own.
+pub static TEXT_FIELD: Flag = Flag::new();
+
 #[cfg(test)]
 mod tests {
     use super::{Flag, claim, typing};
