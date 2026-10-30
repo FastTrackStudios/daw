@@ -68,6 +68,8 @@ pub mod routing;
 pub mod set_audio;
 /// Streaming audio sources (mmap PCM + decoded memory) — REAPER's model.
 pub mod source;
+#[cfg(any(feature = "decode", feature = "audio"))]
+pub mod source_cache;
 /// Streamed takes: decoded a window at a time around the playhead.
 pub mod streamed;
 #[cfg(feature = "vst3-host")]

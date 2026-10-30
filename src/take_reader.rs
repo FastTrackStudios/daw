@@ -119,21 +119,29 @@ impl TakeReader {
         };
         let t = takes.get(index)?;
         let path = t.source_file_path.clone()?;
-        let bytes = std::fs::read(&path).ok()?;
-        let extension = std::path::Path::new(&path)
-            .extension()
-            .and_then(|e| e.to_str());
-        // The extension is a hint only: symphonia probes the content, and
-        // a file named `.wav` that is really a FLAC still decodes.
-        let decoded = match extension {
-            Some(ext) => crate::audio_engine::decode_audio_with_extension(&bytes, ext),
-            None => crate::audio_engine::decode_audio(&bytes),
-        }?;
-        let take_guid = t.guid.clone();
-        daw.with_project_mut(&guid, |p| {
-            p.audio_sources
-                .insert(take_guid.clone(), Arc::new(AudioSource::Memory(decoded)));
-        })
+        // The way every take's media loads: mapped when it is PCM on disk,
+        // and shared with every other take of the file. Decoded here, take
+        // by take, a song held one resident copy of a recording per item
+        // cut from it (#311).
+        let bay = daw.media_bay();
+        crate::audio_engine::materialize::materialize_take(
+            daw,
+            &guid,
+            &t.guid,
+            &path,
+            &mut |p: &str| {
+                bay.resolve_file(p)
+                    .or_else(|_| std::fs::read(p).map_err(|e| format!("read {p}: {e}")))
+            },
+            // The bay resolver is authoritative (project-relative paths);
+            // a plain path that exists works without one.
+            &mut |p: &str| {
+                bay.resolve_file_path(p).or_else(|| {
+                    let raw = std::path::Path::new(p);
+                    raw.is_file().then(|| raw.to_path_buf())
+                })
+            },
+        )
         .ok()?;
         Self::open(daw, project, item, take)
     }

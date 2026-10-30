@@ -17,6 +17,22 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
+/// Bytes of decoded chunks resident across every [`Streamed`] source in
+/// the process. Changed only where chunks are stored or dropped (the
+/// feeder's side, never the reader's).
+static RESIDENT_BYTES: AtomicU64 = AtomicU64::new(0);
+
+/// Bytes of decoded chunks every streamed source holds now.
+#[must_use]
+pub fn resident_bytes() -> u64 {
+    RESIDENT_BYTES.load(Ordering::Relaxed)
+}
+
+/// What a resident chunk holds, bytes.
+fn chunk_bytes(chunk: &[i16]) -> u64 {
+    (std::mem::size_of_val(chunk)) as u64
+}
+
 /// Frames per resident chunk (~0.37 s at 44.1 kHz).
 pub const CHUNK: usize = 16_384;
 
@@ -61,6 +77,17 @@ struct Inner {
     /// else — a song's lanes drawn as slivers.
     #[cfg(feature = "reapeaks")]
     whole: std::sync::OnceLock<WholePeaks>,
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        let chunks = self
+            .chunks
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let held: u64 = chunks.iter().flatten().map(|c| chunk_bytes(c)).sum();
+        RESIDENT_BYTES.fetch_sub(held, Ordering::Relaxed);
+    }
 }
 
 /// What builds a streamed take's waveform from its whole proxy, once every
@@ -189,7 +216,10 @@ impl Streamed {
         if let Ok(mut chunks) = self.inner.chunks.write()
             && let Some(slot) = chunks.get_mut(index)
         {
-            *slot = Some(pcm);
+            RESIDENT_BYTES.fetch_add(chunk_bytes(&pcm), Ordering::Relaxed);
+            if let Some(old) = slot.replace(pcm) {
+                RESIDENT_BYTES.fetch_sub(chunk_bytes(&old), Ordering::Relaxed);
+            }
         }
     }
 
@@ -197,8 +227,10 @@ impl Streamed {
     fn evict(&self, keep: std::ops::Range<usize>) {
         if let Ok(mut chunks) = self.inner.chunks.write() {
             for (i, slot) in chunks.iter_mut().enumerate() {
-                if !keep.contains(&i) {
-                    *slot = None;
+                if !keep.contains(&i)
+                    && let Some(old) = slot.take()
+                {
+                    RESIDENT_BYTES.fetch_sub(chunk_bytes(&old), Ordering::Relaxed);
                 }
             }
         }
