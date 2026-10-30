@@ -13,9 +13,33 @@
 //! decode path instead (`decode_bytes` under the `load` feature).
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::probe::{probe, WavFormat};
 use crate::SamplerError;
+
+/// Bytes of every [`PcmFile`] mapping open in the process, and how many
+/// there are: what the engine holds mapped (backed by the page cache, not
+/// resident memory of its own). Read by [`mapped`].
+static MAPPED_BYTES: AtomicU64 = AtomicU64::new(0);
+static MAPPED_FILES: AtomicU64 = AtomicU64::new(0);
+
+/// What the process has mapped through [`PcmFile`]s right now.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Mapped {
+    /// Open mappings.
+    pub files: u64,
+    /// Their size, bytes.
+    pub bytes: u64,
+}
+
+/// What the process has mapped through [`PcmFile`]s right now.
+pub fn mapped() -> Mapped {
+    Mapped {
+        files: MAPPED_FILES.load(Ordering::Relaxed),
+        bytes: MAPPED_BYTES.load(Ordering::Relaxed),
+    }
+}
 
 /// Sample encodings we read directly from WAV `data` chunks.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -107,6 +131,8 @@ impl PcmFile {
         let avail = map.len().saturating_sub(data_offset) / frame_bytes;
         let frames = (info.num_frames as usize).min(avail);
 
+        MAPPED_FILES.fetch_add(1, Ordering::Relaxed);
+        MAPPED_BYTES.fetch_add(map.len() as u64, Ordering::Relaxed);
         Ok(Self {
             map,
             data_offset,
@@ -216,3 +242,14 @@ impl PcmFile {
         std::hint::black_box(touched);
     }
 }
+
+impl Drop for PcmFile {
+    fn drop(&mut self) {
+        MAPPED_FILES.fetch_sub(1, Ordering::Relaxed);
+        MAPPED_BYTES.fetch_sub(self.map.len() as u64, Ordering::Relaxed);
+    }
+}
+
+// The resident decoder (`load`) is what the mapped reads are held to.
+#[cfg(all(test, feature = "load"))]
+mod tests;
