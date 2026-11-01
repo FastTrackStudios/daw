@@ -74,3 +74,38 @@ pub fn plugins_dir() -> PathBuf {
 fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
+
+/// The source checkout this process runs from, when it runs from one: the
+/// first directory holding the workspace's `Cargo.lock` and `features/`
+/// above `$CARGO_MANIFEST_DIR` (set by `cargo run` and `cargo test`), the
+/// executable (a dev build lives in the checkout's `target/`) or the
+/// working directory. `None` for an installed app.
+///
+/// Found at run time on purpose: an `env!("CARGO_MANIFEST_DIR")` would bake
+/// one checkout's absolute path into the crate, so no other worktree could
+/// share its build from the compiler cache (kache keys that variable by its
+/// full path), and a build would point at the checkout that compiled it.
+pub fn checkout_root() -> Option<PathBuf> {
+    let starts = [
+        std::env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from),
+        std::env::current_exe().ok(),
+        std::env::current_dir().ok(),
+    ];
+    starts
+        .into_iter()
+        .flatten()
+        .find_map(|start| find_checkout_above(&start))
+}
+
+/// `rel` inside the [`checkout_root`] — or, outside a checkout, relative to
+/// the working directory, which is where it would be looked for anyway.
+pub fn checkout_path(rel: impl AsRef<std::path::Path>) -> PathBuf {
+    checkout_root().unwrap_or_default().join(rel)
+}
+
+fn find_checkout_above(start: &std::path::Path) -> Option<PathBuf> {
+    start
+        .ancestors()
+        .find(|dir| dir.join("Cargo.lock").is_file() && dir.join("features").is_dir())
+        .map(std::path::Path::to_path_buf)
+}
