@@ -121,6 +121,74 @@ fn an_alternative_is_the_song_forked_and_edited_on_its_own() {
     assert_eq!(names, vec![MAIN.to_owned(), "Organized".to_owned()]);
 }
 
+/// One step on `doc`, appended to the song: an item for each of `ids`,
+/// at its number plus `nudge` — many hits in one undo step, as a quantize
+/// writes them.
+fn hits(store: &Store, doc: &loro::LoroDoc, (ids, nudge): (std::ops::Range<u32>, f64)) {
+    let from = doc.oplog_vv();
+    let items = doc.get_map("items");
+    for i in ids {
+        let item = items
+            .insert_container(&format!("hit{i}"), loro::LoroMap::new())
+            .expect("an item");
+        item.insert("position", f64::from(i) + nudge)
+            .expect("a position");
+    }
+    doc.commit();
+    let update = doc
+        .export(loro::ExportMode::updates(&from))
+        .expect("an update");
+    store
+        .append_update(MAIN, "Quantize", &update)
+        .expect("appended");
+}
+
+/// A checkpoint (a branch forked before a drum rewrite) costs a row, not a
+/// copy of the song: forking a long song grows its file by next to
+/// nothing. And it outlives what happens to the song after — more edits,
+/// the song compacted (a Loro snapshot keeps every operation, so the fork
+/// point is still there) — opening as the song was when it was forked.
+#[test]
+fn a_checkpoint_shares_the_song_and_outlives_its_compaction() {
+    let (dir, store) = store();
+    let file = dir.path().join("Song.session");
+    let song = loro::LoroDoc::new();
+    // A long song: thousands of hits, in a few steps.
+    for take in 0..4_u32 {
+        hits(&store, &song, (take * 1_000..(take + 1) * 1_000, 0.0));
+    }
+    store.compact(MAIN, &song).expect("compacted");
+    store.checkpoint().expect("one file");
+    let before = std::fs::metadata(&file).expect("the file").len();
+    let as_it_was = song.get_deep_value();
+
+    store
+        .fork("Before DRUMS_REQUANTIZE 2026-10-31 14:05", MAIN, &song)
+        .expect("forked");
+    store.checkpoint().expect("one file");
+    let grown = std::fs::metadata(&file)
+        .expect("the file")
+        .len()
+        .saturating_sub(before);
+    assert!(
+        grown <= 16 * 1024,
+        "a fork is a row, not a copy: the file grew {grown} bytes on {before}"
+    );
+
+    // The rewrite, and the song compacted after it.
+    hits(&store, &song, (0..1_000, 0.01));
+    store.compact(MAIN, &song).expect("compacted again");
+    drop(store);
+    let reopened = Store::open(&file).expect("reopened");
+    assert_eq!(
+        reopened
+            .load("Before DRUMS_REQUANTIZE 2026-10-31 14:05")
+            .expect("the checkpoint opens")
+            .get_deep_value(),
+        as_it_was
+    );
+}
+
 /// A file from another schema is refused, not misread.
 #[test]
 fn another_schema_is_refused() {
