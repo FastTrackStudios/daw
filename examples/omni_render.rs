@@ -2,7 +2,7 @@
 //! real Omnisphere VST3 and write the result to a 32-bit float WAV.
 //!
 //! ```text
-//! cargo +1.94.0 run --release -p daw-standalone --features vst3-host \
+//! cargo +1.99.1 run --release -p daw-standalone --features vst3-host \
 //!     --example omni_render -- <patch.prt_omn | default> <out.wav> \
 //!     [--note 48 --vel 100 --hold 2.0 --tail 2.0 --sr 48000 \
 //!      --part 1 --preroll 1.0 --dump-state <file> --plugin <bundle.vst3>]
