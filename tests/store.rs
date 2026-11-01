@@ -1,7 +1,7 @@
 //! The project file: blobs once each, each branch's history appended and
 //! folded, alternatives forked — and all of it read back as written.
 
-use session_format::store::{MAIN, Store, hash_of};
+use session_format::store::{MAIN, MomentKind, MomentRef, Store, hash_of};
 
 fn store() -> (tempfile::TempDir, Store) {
     let dir = tempfile::tempdir().expect("a dir");
@@ -186,6 +186,73 @@ fn a_checkpoint_shares_the_song_and_outlives_its_compaction() {
             .expect("the checkpoint opens")
             .get_deep_value(),
         as_it_was
+    );
+}
+
+/// Every step is noted in the file's history with the doc's frontier
+/// after it — two named alike stay two — and that outlives a compaction
+/// and a reopen: each still opens the version it was, the song's history
+/// being whole in its snapshot.
+#[test]
+fn a_noted_step_outlives_compaction_and_opens_as_it_was() {
+    let (dir, store) = store();
+    let doc = loro::LoroDoc::new();
+    let mut noted = Vec::new();
+    for (guid, at) in [("k1", 1.0), ("k2", 2.0)] {
+        step(&store, MAIN, &doc, guid, at);
+        let seq = store
+            .note(
+                MAIN,
+                (MomentKind::Step, "Move", Some("ARRANGE_MOVE")),
+                &doc.state_frontiers(),
+            )
+            .expect("noted");
+        noted.push((seq, doc.get_deep_value()));
+    }
+    store
+        .note(
+            MAIN,
+            (
+                MomentKind::Mark,
+                "Before QUANTIZE 2026-10-31 14:05",
+                Some("QUANTIZE"),
+            ),
+            &doc.state_frontiers(),
+        )
+        .expect("marked");
+    store.compact(MAIN, &doc).expect("compacted");
+    drop(store);
+
+    let reopened = Store::open(&dir.path().join("Song.session")).expect("reopened");
+    let (history, total) = reopened.history(MAIN, (0, 10)).expect("its history");
+    assert_eq!(total, 3);
+    let labels: Vec<(&str, MomentKind)> =
+        history.iter().map(|m| (m.label.as_str(), m.kind)).collect();
+    assert_eq!(
+        labels,
+        [
+            ("Before QUANTIZE 2026-10-31 14:05", MomentKind::Mark),
+            ("Move", MomentKind::Step),
+            ("Move", MomentKind::Step),
+        ]
+    );
+    let song = reopened.load(MAIN).expect("the song");
+    for (seq, value) in noted {
+        let moment = reopened
+            .moment(MAIN, &MomentRef::Seq(seq))
+            .expect("read")
+            .expect("there");
+        let at = loro::Frontiers::decode(&moment.frontiers).expect("a frontier");
+        assert_eq!(song.fork_at(&at).expect("forked").get_deep_value(), value);
+    }
+    assert!(
+        reopened
+            .moment(
+                MAIN,
+                &MomentRef::Mark("Before QUANTIZE 2026-10-31 14:05".to_owned())
+            )
+            .expect("read")
+            .is_some()
     );
 }
 

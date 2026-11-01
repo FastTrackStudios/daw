@@ -18,6 +18,11 @@
 //!                                     to its branch (zstd)
 //! snapshots  branch → upto, snapshot  a branch's doc as of its update
 //!                                     `upto`, folded by [`Store::compact`]
+//! history    seq → branch, kind,      each step and mark of a branch: its
+//!            label, action, at,       name, the action that made it, when,
+//!            frontiers                and the doc's frontier after it —
+//!                                     never folded, so a step stays
+//!                                     reachable after any compaction
 //! ```
 //!
 //! A branch is Logic's alternative: `Organized` forked from the song when
@@ -158,11 +163,71 @@ pub struct Step {
     pub bytes: i64,
 }
 
+/// What a [`Moment`] of a branch's history is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MomentKind {
+    /// A step of edits, as undo names it.
+    Step,
+    /// A mark set on the song as it was, before a rewrite: a name to go
+    /// back to, no branch.
+    Mark,
+}
+
+impl MomentKind {
+    const fn key(self) -> &'static str {
+        match self {
+            Self::Step => "step",
+            Self::Mark => "mark",
+        }
+    }
+}
+
+/// A step or a mark of a branch's history, as [`Store::history`] lists
+/// it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Moment {
+    /// Its number in the file: what a step is gone back to by.
+    pub seq: i64,
+    pub kind: MomentKind,
+    /// The step's name, or the mark's.
+    pub label: String,
+    /// The action that made it, when one did.
+    pub action: Option<String>,
+    /// When, in seconds since the epoch.
+    pub at: i64,
+    /// The doc's frontier after it, encoded (`loro::Frontiers::encode`).
+    pub frontiers: Vec<u8>,
+}
+
 /// One project's file.
 pub struct Store {
     conn: turso::Connection,
     /// Kept so the file stays open as long as the store.
     _db: turso::Database,
+}
+
+/// Which moment of a branch's history: a step's (or mark's) number, or a
+/// mark's name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MomentRef {
+    Seq(i64),
+    Mark(String),
+}
+
+fn moment(row: &turso::Row) -> StoreResult<Moment> {
+    let kind: String = row.get(1)?;
+    Ok(Moment {
+        seq: row.get(0)?,
+        kind: if kind == "mark" {
+            MomentKind::Mark
+        } else {
+            MomentKind::Step
+        },
+        label: row.get(2)?,
+        action: row.get::<Option<String>>(3)?,
+        at: row.get(4)?,
+        frontiers: row.get(5)?,
+    })
 }
 
 /// Run `future` to completion here.
@@ -216,6 +281,9 @@ impl Store {
                  data BLOB NOT NULL)",
                 "CREATE TABLE IF NOT EXISTS snapshots (branch TEXT PRIMARY KEY, \
                  upto INTEGER NOT NULL, at INTEGER NOT NULL, data BLOB NOT NULL)",
+                "CREATE TABLE IF NOT EXISTS history (seq INTEGER PRIMARY KEY AUTOINCREMENT, \
+                 branch TEXT NOT NULL, kind TEXT NOT NULL, label TEXT NOT NULL, \
+                 action TEXT, at INTEGER NOT NULL, frontiers BLOB NOT NULL)",
             ] {
                 conn.execute(sql, ()).await?;
             }
@@ -405,6 +473,7 @@ impl Store {
             for sql in [
                 "DELETE FROM updates WHERE branch = ?1",
                 "DELETE FROM snapshots WHERE branch = ?1",
+                "DELETE FROM history WHERE branch = ?1",
                 "DELETE FROM branches WHERE name = ?1",
             ] {
                 self.conn.execute(sql, (name,)).await?;
@@ -433,6 +502,7 @@ impl Store {
             for sql in [
                 "DELETE FROM updates WHERE branch = ?1",
                 "DELETE FROM snapshots WHERE branch = ?1",
+                "DELETE FROM history WHERE branch = ?1",
                 "DELETE FROM branches WHERE name = ?1",
             ] {
                 self.conn.execute(sql, (name,)).await?;
@@ -480,6 +550,147 @@ impl Store {
                 });
             }
             Ok(out)
+        })
+    }
+
+    /// Note a step or a mark of `branch`: `label`, the action that made it,
+    /// and `frontiers`, the doc's after it. Kept through every compaction.
+    ///
+    /// # Errors
+    ///
+    /// The database refused the write.
+    pub fn note(
+        &self,
+        branch: &str,
+        (kind, label, action): (MomentKind, &str, Option<&str>),
+        frontiers: &loro::Frontiers,
+    ) -> StoreResult<i64> {
+        run(async {
+            self.conn
+                .execute(
+                    "INSERT INTO history (branch, kind, label, action, at, frontiers) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    (branch, kind.key(), label, action, now(), frontiers.encode()),
+                )
+                .await?;
+            let mut rows = self.conn.query("SELECT last_insert_rowid()", ()).await?;
+            Ok(match rows.next().await? {
+                Some(row) => row.get(0)?,
+                None => 0,
+            })
+        })
+    }
+
+    /// `branch`'s history, newest first: `limit` moments from `offset`,
+    /// and how many it has in all.
+    ///
+    /// # Errors
+    ///
+    /// The database refused the read.
+    pub fn history(
+        &self,
+        branch: &str,
+        (offset, limit): (u32, u32),
+    ) -> StoreResult<(Vec<Moment>, u32)> {
+        run(async {
+            let mut rows = self
+                .conn
+                .query(
+                    "SELECT seq, kind, label, action, at, frontiers FROM history \
+                     WHERE branch = ?1 ORDER BY seq DESC LIMIT ?2 OFFSET ?3",
+                    (branch, i64::from(limit), i64::from(offset)),
+                )
+                .await?;
+            let mut out = Vec::new();
+            while let Some(row) = rows.next().await? {
+                out.push(moment(&row)?);
+            }
+            let mut count = self
+                .conn
+                .query("SELECT COUNT(*) FROM history WHERE branch = ?1", (branch,))
+                .await?;
+            let total: i64 = match count.next().await? {
+                Some(row) => row.get(0)?,
+                None => 0,
+            };
+            Ok((out, u32::try_from(total).unwrap_or(u32::MAX)))
+        })
+    }
+
+    /// The moment of `branch` numbered `seq`, or its newest mark called
+    /// `name`.
+    ///
+    /// # Errors
+    ///
+    /// The database refused the read.
+    pub fn moment(&self, branch: &str, which: &MomentRef) -> StoreResult<Option<Moment>> {
+        run(async {
+            let mut rows = match which {
+                MomentRef::Seq(seq) => {
+                    self.conn
+                        .query(
+                            "SELECT seq, kind, label, action, at, frontiers FROM history \
+                             WHERE branch = ?1 AND seq = ?2",
+                            (branch, *seq),
+                        )
+                        .await?
+                }
+                MomentRef::Mark(name) => {
+                    self.conn
+                        .query(
+                            "SELECT seq, kind, label, action, at, frontiers FROM history \
+                             WHERE branch = ?1 AND kind = 'mark' AND label = ?2 \
+                             ORDER BY seq DESC LIMIT 1",
+                            (branch, name.as_str()),
+                        )
+                        .await?
+                }
+            };
+            Ok(match rows.next().await? {
+                Some(row) => Some(moment(&row)?),
+                None => None,
+            })
+        })
+    }
+
+    /// The names of `branch`'s marks.
+    ///
+    /// # Errors
+    ///
+    /// The database refused the read.
+    pub fn mark_names(&self, branch: &str) -> StoreResult<Vec<String>> {
+        run(async {
+            let mut rows = self
+                .conn
+                .query(
+                    "SELECT label FROM history WHERE branch = ?1 AND kind = 'mark'",
+                    (branch,),
+                )
+                .await?;
+            let mut out = Vec::new();
+            while let Some(row) = rows.next().await? {
+                out.push(row.get(0)?);
+            }
+            Ok(out)
+        })
+    }
+
+    /// Give `from`'s history to `to`: what a branch kept aside before it
+    /// starts over from another lineage takes with it, the lineage its
+    /// frontiers are of.
+    ///
+    /// # Errors
+    ///
+    /// The database refused the write.
+    pub fn move_history(&self, from: &str, to: &str) -> StoreResult<()> {
+        run(async {
+            self.conn
+                .execute(
+                    "UPDATE history SET branch = ?2 WHERE branch = ?1",
+                    (from, to),
+                )
+                .await?;
+            StoreResult::Ok(())
         })
     }
 
