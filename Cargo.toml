@@ -25,8 +25,6 @@ members = [
     "crates/input/input-config-proto",
     "crates/input/input-dioxus",
     "crates/input/input-keybinds",
-    "crates/keyflow/keyflow-proto",
-    "crates/keyflow/keyflow-syntax",
     "crates/kontrol/kontrol",
     "crates/midicore/midicore",
     "crates/midicore/midicore-macos",
@@ -246,11 +244,14 @@ daw-theme-reaper = { path = "features/daw-ui/daw-theme-reaper" }
 # session_proto::Song). Keyflow-agnostic: charts are stored as references
 # (relative paths / attachment ids), never embedded keyflow::Chart types.
 
-# ── keyflow domain (wave 3) ───────────────────────────────────────────
-# `keyflow` and `engraver` are the facades; keyflow-proto/-text/-midi/
-# -syntax/-live and engraver-proto are INTERNAL to the domain.
-keyflow-proto = { path = "crates/keyflow/keyflow-proto" }
-keyflow-syntax = { path = "crates/keyflow/keyflow-syntax" }
+# ── keyflow (FastTrackStudios/keyflow) ────────────────────────────────
+# The musical primitives are keyflow's: chords, keys, scales, the time
+# types. daw used to carry its own copies of keyflow-proto and
+# keyflow-syntax, which drifted from the authority every time keyflow
+# changed; now it takes keyflow's crate at a tag. keyflow-proto does not
+# depend on daw, so this is no cycle (keyflow-daw-analysis, which does,
+# is never pulled in here). The only consumer is expression-editor-core.
+keyflow-proto = { git = "https://github.com/FastTrackStudios/keyflow", tag = "v0.4.0" }
 # Engraver — defaults OFF at the root (the full `engraver` feature drags
 # wgpu/vello + PDF export); consumers opt into `svg`/`wgpu`/`engraver`.
 
@@ -974,3 +975,41 @@ opt-level = 3
 [profile.dev.package.pitch-dsp]
 opt-level = 3
 
+# One architect revision for the whole graph. keyflow-proto (a git dep on
+# FastTrackStudios/keyflow) asks for architect at keyflow's own pin, which
+# is newer than daw's and drags architect's fleet workspace-hack with it —
+# exact pins (blitz, clap, bitflags, …) that this lockfile cannot satisfy.
+# keyflow-proto needs nothing from that newer architect but
+# `#[architect::rpc]`, so every architect crate is lifted onto daw's tag
+# here. The www. host is a different source to cargo (GitHub redirects
+# it), which is what lets it patch the plain one; a same-host patch is
+# refused. Keep the tag in step with the pins above; drop the block when
+# daw's architect pin reaches keyflow's.
+[patch."https://github.com/FastTrackStudios/architect"]
+architect = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-derive = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-rpc-derive = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-action-derive = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-atom = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-form = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-permissions = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-permissions-proto = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-auth = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+auth = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+auth-proto = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+auth-db = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+auth-client = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+crdt = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+crdt-derive = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+crdt-seaorm = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-ui = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-launcher-core = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-launcher-ui = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-launcher-providers = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-telemetry = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-story-core = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-story-macros = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-story-runtime = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-story-shell = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-story-snapshots = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
+architect-story-parity = { git = "https://www.github.com/FastTrackStudios/architect", tag = "v0.9.2" }
