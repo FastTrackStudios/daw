@@ -544,6 +544,15 @@ impl FxHandle {
         Ok(())
     }
 
+    /// Take the FX offline (unloaded, its state kept) or back online.
+    pub async fn set_offline(&self, offline: bool) -> Result<()> {
+        self.clients
+            .fx
+            .set_offline(self.project_context(), self.target(), offline)
+            .await??;
+        Ok(())
+    }
+
     /// Disable/bypass the FX
     pub async fn disable(&self) -> Result<()> {
         self.clients

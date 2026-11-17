@@ -138,6 +138,7 @@ pub(crate) use daw_proto::RegionsClient;
 pub(crate) use daw_proto::RoutingClient;
 pub(crate) use daw_proto::ScreensetsClient;
 pub(crate) use daw_proto::SongFilesClient;
+pub(crate) use daw_proto::StretchMarkersClient;
 pub(crate) use daw_proto::TakesClient;
 pub(crate) use daw_proto::TempoMapClient;
 pub(crate) use daw_proto::TracksClient;
@@ -262,6 +263,7 @@ architect::clients! {
         pub(crate) diagnostics: DiagnosticsClient,
         pub(crate) transport_sync: TransportSyncClient,
         pub(crate) song_files: SongFilesClient,
+        pub(crate) stretch_markers: StretchMarkersClient,
         // `#[subscribe]` stream siblings — argless subscriptions;
         // filtering happens client-side in the handle wrappers.
         pub(crate) transport_stream: TransportStreamClient,
@@ -421,7 +423,7 @@ impl Daw {
         // Verify the project exists
         self.clients
             .project
-            .get(guid.clone())
+            .project(guid.clone())
             .await?
             .ok_or_else(|| Error::ProjectNotFound(guid.clone()))?;
 
@@ -609,7 +611,7 @@ impl Daw {
     /// Access the dock host for registering and toggling UI panels.
     ///
     /// Backed by `DockHostService` — the platform-portable trait. The
-    /// REAPER+Dioxus implementation lives in `daw-reaper-dioxus`; tests
+    /// REAPER+Dioxus implementation lives in `reaper-dioxus`; tests
     /// can swap in `MockDockHost` (under `daw-proto`'s `test-utils`
     /// feature) without spinning up REAPER or a GPU.
     pub fn dock_host(&self) -> DockHost {

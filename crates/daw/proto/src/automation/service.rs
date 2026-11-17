@@ -67,6 +67,15 @@ impl AddAutomationItemParams {
     }
 }
 
+/// Parameters for [`Automation::set_automation_item_points`].
+#[derive(Clone, Debug, Facet)]
+pub struct SetAutomationItemPointsParams {
+    /// The item, by its index on the envelope.
+    pub index: u32,
+    /// Its whole curve, in seconds into its source, sorted by time.
+    pub points: Vec<EnvelopePoint>,
+}
+
 /// Parameters for [`Automation::set_automation_item`].
 ///
 /// Every field is optional: a drag sets position, a resize sets length,
@@ -216,6 +225,15 @@ pub trait Automation {
         project: ProjectContext,
         location: EnvelopeLocation,
         params: SetAutomationItemParams,
+    ) -> DawResult<()>;
+
+    /// Replace an automation item's curve — its pooled source's, so every
+    /// instance of its pool changes with it, which is what pooling is.
+    fn set_automation_item_points(
+        &self,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        params: SetAutomationItemPointsParams,
     ) -> DawResult<()>;
 
     /// Remove an automation item. The envelope's own points are

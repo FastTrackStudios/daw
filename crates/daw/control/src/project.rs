@@ -53,7 +53,7 @@ impl Project {
     pub async fn info(&self) -> crate::Result<daw_proto::ProjectInfo> {
         self.clients
             .project
-            .get(self.guid.clone())
+            .project(self.guid.clone())
             .await?
             .ok_or_else(|| Error::Other(format!("Project not found: {}", self.guid)))
     }

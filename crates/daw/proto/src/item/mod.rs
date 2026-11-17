@@ -16,6 +16,6 @@ pub use item::{FadeShape, Item, ItemRef};
 pub use service::*;
 
 pub use take::{
-    AddTakeMarkerAtPositionRequest, SourceType, Take, TakeMarker, TakeMarkerCreate,
-    TakeMarkerUpdate, TakeRating, TakeRef, take_rating_actions,
+    AddTakeMarkerAtPositionRequest, HitMark, MarkOrigin, SourceType, Take, TakeMarker,
+    TakeMarkerCreate, TakeMarkerUpdate, TakeRating, TakeRef, take_rating_actions,
 };

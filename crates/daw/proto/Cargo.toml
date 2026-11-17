@@ -16,7 +16,7 @@ facet = { workspace = true }
 # Canonical MIDI event type — `MidiEvent` + constrained newtypes + byte codec,
 # re-exported from `live_midi` as this crate's live-MIDI message type. Consumed
 # through the `midicore` facade (never midicore-proto directly).
-midicore = { workspace = true, default-features = false }
+midi = { workspace = true }
 # architect — provides `#[architect::rpc]`. Enabling the `vox` feature
 # wires the macro's emission through to the workspace's vox stack.
 architect = { workspace = true, features = ["vox"] }
@@ -30,7 +30,7 @@ daw-transport-sync = { workspace = true }
 
 [features]
 # `vox` here is the consumer-crate flag the architect-rpc-derive macro
-# checks via `#[cfg_attr(feature = "vox", ::architect::vox::service)]`.
+# checks via `#["vox"]`.
 # Enabling it activates the macro's `<T>Client` type alias and the
 # vox::service decoration on the hidden mirror trait.
 default = ["vox"]
@@ -40,6 +40,12 @@ vox = []
 # need REAPER / GPU. Enable from a consumer's dev-dependencies:
 #   daw-proto = { workspace = true, features = ["test-utils"] }
 test-utils = []
+
+[dependencies.uuid]
+# Ids a caller mints for what it is about to make (`id::ItemId::new`); `js`
+# gives browser builds their randomness, as `daw-utils` does.
+workspace = true
+features = ["js"]
 
 [dev-dependencies]
 # Locks the externally-tagged JSON wire shape of the batch op enums.

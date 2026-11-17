@@ -43,6 +43,7 @@ pub mod fx_params;
 pub mod groups;
 pub mod handle;
 pub mod health;
+pub mod id;
 pub mod input;
 pub mod item;
 pub mod live_midi;
@@ -156,10 +157,10 @@ pub use toolbar::*;
 pub use track::TracksClient;
 pub use track::{
     AddChildren, Comp, CompArea, FolderDepthChange, InputMonitoringMode, LaneComping, LaneDisplay,
-    RecordInput, ReorderTracksBehavior, Track, TrackError, TrackEvent, TrackExtStateRequest,
-    TrackGroup, TrackGrouping, TrackHierarchy, TrackHierarchyBuilder, TrackNode, TrackRef,
-    TrackShape, TrackStructureBuilder, TrackTree, Tracks, TracksExt, TracksRpc,
-    assert_tracks_equal, display_tracklist, format_tracklist,
+    RecordInput, ReorderTracksBehavior, Track, TrackError, TrackEvent, TrackExtEntry,
+    TrackExtStateRequest, TrackGroup, TrackGrouping, TrackHierarchy, TrackHierarchyBuilder,
+    TrackNode, TrackRef, TrackShape, TrackStructureBuilder, TrackTree, Tracks, TracksExt,
+    TracksRpc, assert_tracks_equal, display_tracklist, format_tracklist,
 };
 pub use transport::*;
 // Explicit re-exports (see marker / track for the rationale).

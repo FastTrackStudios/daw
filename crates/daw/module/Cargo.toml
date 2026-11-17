@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Module-system primitives — DawModule trait, ActionDef, PanelDef. Leaf crate so UI host adapters (daw-reaper-dioxus etc.) can depend on it without cycling through the daw facade."
+description = "Module-system primitives — DawModule trait, ActionDef, PanelDef. Leaf crate so UI host adapters (reaper-dioxus etc.) can depend on it without cycling through the daw facade."
 
 [package.metadata]
 

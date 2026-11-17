@@ -1,47 +1,65 @@
 # daw
 
-The DAW platform: a DAW-agnostic domain core, the backends that drive
-real hosts, the per-DAW project-file parsers, and the shared audio /
-MIDI / input substrate everything else in FastTrackStudio is built on.
+The base of FastTrackStudios' audio stack: the crates everything else is
+built on and that depend on nothing above them. Studio
+(FastTrackStudios/studio), and the repos being split out of it
+(studio#510), take them from here by git.
 
-Split out of the FastTrackStudio monorepo in August 2026. This is the
-bottom of the stack — it depends on no other FastTrackStudio product
-repo, and `session`, `signal` and `Ignition` all depend on it.
+| Crate | Path | What it is |
+|---|---|---|
+| `daw-proto` | `crates/daw/proto` | The DAW's wire types and services (`#[architect::rpc]`), wasm-clean |
+| `daw-control` | `crates/daw/control` | The client handles over `daw-proto` |
+| `daw-transport-sync` | `crates/daw/transport-sync` | Several transports playing as one: shared clock, drift correction |
+| `daw-module` | `crates/daw/module` | Module-system primitives (`DawModule`, `ActionDef`, `PanelDef`) |
+| `daw-audio-graph` | `crates/daw/audio-graph` | The audio processing graph: `AudioNode`, `BufferPool` |
+| `daw-allocator` | `crates/daw/allocator` | Realtime-aware allocator and main-thread dispatch |
+| `daw-test-macro` | `crates/daw/macros` | `#[daw_test]` / `#[reaper_test]` |
+| `utils` | `crates/daw/utils` | Paths and preferences |
+| `midi` | `features/midi` | MIDI events, the byte codec, each platform's input behind a feature |
+| `audio` | `features/audio` | Audio devices, sample IO, the core audio types |
+| `fts-sample` | `features/audio/sample` | Sample loading, the pack engine |
 
-## Layout
+The paths are Studio's, so history and docs line up.
 
-```
-crates/daw/          the domain core — items, tracks, tempo/measure
-                     conversion, transport, ext-state, undo
-crates/audiocore/    audio primitives, DSP, sample handling, metering
-crates/midicore/     MIDI types, ports, the midir backend
-crates/input/        keybinds, input config, the Dioxus input layer
-crates/kontrol/      Native Instruments hardware (S88 light guide)
-features/dawfile/    per-DAW project parsers — reaper, protools,
-                     ableton, logic, aaf, dawproject
-features/reaper/     the REAPER backend + theming + extension runtime
-features/audio/      the audio graph, IO, allocator
-features/sync/       transport sync, Link, network
-features/standalone/ daw-standalone — the headless workstation backend
-features/daw-ui/     the DAW UI surface and theme art
-features/expression-editor/  MPE + Melodyne-style expression editing
-libs/                dock, utils, adaptive-grid, devtools, installer-core
-```
+## History
+
+Until October 2026 this repo was the whole DAW (the engine, the REAPER
+backend, the project-file parsers, the UI). That code was folded into the
+Studio monorepo and carried on there; it is in this repo's history up to
+`5c2570e7` and under the tags `v0.0.6` to `v0.0.9`, which older consumers
+still pin. In November 2026 the eleven crates above came back from Studio
+with their history, and the rest of the old tree was removed here. The
+engine (`daw`, `daw-standalone`, `session-format`, `daw-actions`) is still
+in Studio.
 
 ## Build
 
 ```bash
-nix develop          # or: direnv allow
-cargo check --workspace
-cargo nextest run --workspace
+cargo check --workspace --all-targets
+cargo test --workspace
 ```
 
-`rust-version` is a **floor** (1.87), not a pin, so consumers on newer
-toolchains — Ignition runs 1.95 — can depend on this repo directly.
+Eight of the crates are in Studio's browser builds; CI also checks them
+for `wasm32-unknown-unknown` with the features those builds ask for (the
+command is in `.github/workflows/checks.yml`).
+
+Rust 1.99.1 (`rust-toolchain.toml`). The root `Cargo.toml` declares every
+dependency with the versions, git pins and patches Studio uses, so the
+fleet builds one of each: change a pin here and in Studio together.
+
+## Working on this and Studio together
+
+In Studio's root `Cargo.toml`, point the git source at a checkout of this
+repo, and never commit it:
+
+```toml
+[patch."https://github.com/FastTrackStudios/daw"]
+daw-proto = { path = "../daw/crates/daw/proto" }
+```
+
+One line per crate you are changing. Studio's `AGENTS.md` has the full
+table.
 
 ## Licence
 
-GPL-3.0-or-later, except two vendored crates that keep the licence of
-the code they vendor: `libs/vendor/world` (WORLD vocoder, M. Morise,
-BSD-3-Clause) and `libs/vendor/dioxus-test` (DioxusLabs, MIT OR
-Apache-2.0).
+GPL-3.0-or-later.

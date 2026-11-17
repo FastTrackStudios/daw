@@ -227,6 +227,16 @@ impl ProjectItems {
     }
 
     /// Get all items in the project
+    /// Every item's active take, in one call — each with its
+    /// `item_guid`.
+    pub async fn active_takes(&self) -> Result<Vec<daw_proto::Take>> {
+        Ok(self
+            .clients
+            .take
+            .get_all_active_takes(self.context())
+            .await?)
+    }
+
     pub async fn all(&self) -> Result<Vec<Item>> {
         let items = self.clients.item.get_all_items(self.context()).await?;
         Ok(items)
@@ -493,6 +503,15 @@ impl ItemHandle {
         self.clients
             .item
             .set_locked(self.context(), self.item_ref(), true)
+            .await??;
+        Ok(())
+    }
+
+    /// Loop its source across it, or play it once.
+    pub async fn set_loop_source(&self, loop_source: bool) -> Result<()> {
+        self.clients
+            .item
+            .set_loop_source(self.context(), self.item_ref(), loop_source)
             .await??;
         Ok(())
     }
@@ -863,6 +882,31 @@ impl TakeHandle {
         Ok(())
     }
 
+    /// The take's stretch markers, in order.
+    pub async fn stretch_markers(&self) -> Result<Vec<daw_proto::StretchMarker>> {
+        Ok(self
+            .clients
+            .stretch_markers
+            .get_stretch_markers(self.context(), self.item_ref(), self.take_ref.clone())
+            .await?)
+    }
+
+    /// Replace the take's stretch markers with `markers`.
+    pub async fn set_stretch_markers(&self, markers: Vec<daw_proto::StretchMarker>) -> Result<()> {
+        self.clients
+            .stretch_markers
+            .set_stretch_markers(
+                daw_proto::StretchTakeRef::new(
+                    self.context(),
+                    self.item_ref(),
+                    self.take_ref.clone(),
+                ),
+                markers,
+            )
+            .await??;
+        Ok(())
+    }
+
     /// Set take play rate
     pub async fn set_play_rate(&self, rate: f64) -> Result<()> {
         self.clients
@@ -1002,9 +1046,25 @@ impl TakeHandle {
                     name: name.to_string(),
                     source_position_seconds,
                     color,
+                    ..Default::default()
                 },
             )
             .await?)
+    }
+
+    /// Replace every marker on the take's source with `markers`, as one
+    /// change — what a detection run writes. Each keeps its `id`.
+    pub async fn set_markers(&self, markers: Vec<daw_proto::TakeMarker>) -> Result<()> {
+        self.clients
+            .take
+            .set_take_markers(
+                self.context(),
+                self.item_ref(),
+                self.take_ref.clone(),
+                markers,
+            )
+            .await??;
+        Ok(())
     }
 
     /// Update an existing take marker. Pass `None` for fields that should
@@ -1027,6 +1087,7 @@ impl TakeHandle {
                     name: name.map(|s| s.to_string()),
                     source_position_seconds,
                     color,
+                    ..Default::default()
                 },
             )
             .await??;

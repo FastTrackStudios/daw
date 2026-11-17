@@ -70,9 +70,14 @@ pub enum TakeEnvelopeKind {
     Pitch = 3,
 }
 
+impl TakeEnvelopeKind {
+    /// Every kind a take can have an envelope of.
+    pub const ALL: [Self; 4] = [Self::Volume, Self::Pan, Self::Mute, Self::Pitch];
+}
+
 /// Reference to an envelope
 #[repr(C)]
-#[derive(Clone, Debug, Facet)]
+#[derive(Clone, Debug, PartialEq, Facet)]
 pub enum EnvelopeRef {
     /// Reference by envelope type (for track envelopes)
     Type(EnvelopeType),
@@ -170,7 +175,8 @@ pub struct AutomationItem {
     pub start_offset: Duration,
     /// `D_PLAYRATE`.
     pub play_rate: f64,
-    /// `D_BASELINE` — the value the item's curve is measured from.
+    /// `D_BASELINE` — moves the item's curve: `0.5` leaves it where it
+    /// was drawn (REAPER's 0%), `0` and `1` are −100% and +100%.
     pub baseline: f64,
     /// `D_AMPLITUDE` — the curve's scale, and it may be negative
     /// (inverted), which is why this is not a `0..1`.
@@ -191,7 +197,7 @@ impl Default for AutomationItem {
             length: Duration::ZERO,
             start_offset: Duration::ZERO,
             play_rate: 1.0,
-            baseline: 0.0,
+            baseline: 0.5,
             amplitude: 1.0,
             loop_source: false,
             selected: false,
@@ -219,7 +225,7 @@ pub enum EnvelopeShape {
 }
 
 /// A point on an automation envelope
-#[derive(Clone, Debug, Facet)]
+#[derive(Clone, Debug, PartialEq, Facet)]
 pub struct EnvelopePoint {
     /// Index of this point in the envelope
     pub index: u32,

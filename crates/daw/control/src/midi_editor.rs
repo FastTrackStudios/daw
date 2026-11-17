@@ -61,6 +61,22 @@ impl MidiEditor {
         Ok(notes)
     }
 
+    /// Write the take's contents in one call, as one undo point — what an
+    /// editor that holds the whole take (the expression editor) saves
+    /// with. Returns the notes' new indices, in the order given.
+    pub async fn write_take(
+        &self,
+        content: daw_proto::midi::MidiTakeContent,
+        mode: daw_proto::midi::WriteMode,
+    ) -> Result<Vec<u32>> {
+        let indices = self
+            .clients
+            .midi
+            .write_take(self.location(), content, mode)
+            .await?;
+        Ok(indices)
+    }
+
     /// Get notes in a PPQ range
     pub async fn notes_in_range(&self, start_ppq: f64, end_ppq: f64) -> Result<Vec<MidiNote>> {
         let notes = self

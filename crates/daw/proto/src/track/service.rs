@@ -27,6 +27,15 @@ pub struct TrackExtStateRequest {
     pub value: String,
 }
 
+/// One ext-state key a track carries, and its value: what a template or
+/// an extension wrote on the track (`FTS:kind` → `piece`), REAPER's
+/// `P_EXT`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Facet)]
+pub struct TrackExtEntry {
+    pub key: String,
+    pub value: String,
+}
+
 #[architect::rpc(ops(ProjectContext as ProjectArg, TrackRef as TrackArg), scopes(project: ProjectContext, track: TrackRef))]
 pub trait Tracks {
     // ── Queries ─────────────────────────────────────────────────────
@@ -86,6 +95,22 @@ pub trait Tracks {
         project: ProjectContext,
         track: TrackRef,
         inverted: bool,
+    ) -> DawResult<()>;
+
+    /// Whether `track` always renders live — at the device's block, in the
+    /// audio callback — rather than ahead of the playhead whenever nothing
+    /// plays it now: REAPER's "prevent anticipative FX" (`I_PERFFLAGS & 2`).
+    /// A track live this way hears a change to it at once, and costs the
+    /// callback its render.
+    fn render_live(&self, project: ProjectContext, track: TrackRef) -> bool;
+
+    /// Render `track` live always (`live`), or ahead of the playhead
+    /// whenever nothing plays it now.
+    fn set_render_live(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        live: bool,
     ) -> DawResult<()>;
 
     // ── Track groups ────────────────────────────────────────────────
@@ -325,6 +350,20 @@ pub trait Tracks {
         project: ProjectContext,
         track: TrackRef,
         lane: Option<u32>,
+    ) -> DawResult<()>;
+
+    // ── Ext state ───────────────────────────────────────────────────
+
+    /// Every ext-state key `track` carries, with its value, by key.
+    fn ext_state(&self, project: ProjectContext, track: TrackRef) -> Vec<TrackExtEntry>;
+
+    /// Set `key` on `track` to `value`; an empty value removes it.
+    fn set_ext_state(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        key: &str,
+        value: &str,
     ) -> DawResult<()>;
 
     // ── Streaming ───────────────────────────────────────────────────

@@ -82,6 +82,17 @@ impl Envelopes {
         )
     }
 
+    /// The envelope `reference` names — there or not yet: a first point
+    /// written to it makes it.
+    pub fn of(&self, reference: EnvelopeRef) -> EnvelopeHandle {
+        EnvelopeHandle::new(
+            self.track_guid.clone(),
+            reference,
+            self.project_id.clone(),
+            self.clients.clone(),
+        )
+    }
+
     /// Get pan envelope
     pub fn pan(&self) -> EnvelopeHandle {
         EnvelopeHandle::new(
@@ -419,6 +430,23 @@ impl EnvelopeHandle {
         self.clients
             .automation
             .set_automation_item(self.context(), self.location(), params)
+            .await??;
+        Ok(())
+    }
+
+    /// Replace an automation item's curve (every instance of its pool).
+    pub async fn set_automation_item_points(
+        &self,
+        index: u32,
+        points: Vec<EnvelopePoint>,
+    ) -> Result<()> {
+        self.clients
+            .automation
+            .set_automation_item_points(
+                self.context(),
+                self.location(),
+                daw_proto::automation::SetAutomationItemPointsParams { index, points },
+            )
             .await??;
         Ok(())
     }

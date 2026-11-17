@@ -122,11 +122,11 @@ impl BatchBuilder {
     /// Get a specific project by GUID.
     pub fn get_project(&mut self, guid: impl Into<String>) -> StepHandle<Option<ProjectInfo>> {
         self.push(
-            BatchOp::Project(ProjectsOp::Get {
+            BatchOp::Project(ProjectsOp::Project {
                 project_id: guid.into(),
             }),
             |o, step| match o {
-                BatchOpOutput::Project(ProjectsOpOutput::Get(v)) => Ok(v.clone()),
+                BatchOpOutput::Project(ProjectsOpOutput::Project(v)) => Ok(v.clone()),
                 _ => mismatch(step, "Option<ProjectInfo>"),
             },
         )

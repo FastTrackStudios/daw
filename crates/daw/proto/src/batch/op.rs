@@ -199,7 +199,7 @@ impl StepOutputs {
             BatchOpOutput::Project(out) => match out {
                 ProjectsOpOutput::Info(r) => r.as_ref().ok(),
                 ProjectsOpOutput::Current(o)
-                | ProjectsOpOutput::Get(o)
+                | ProjectsOpOutput::Project(o)
                 | ProjectsOpOutput::GetBySlot(o)
                 | ProjectsOpOutput::Open(o)
                 | ProjectsOpOutput::Create(o) => o.as_ref(),
