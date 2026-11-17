@@ -1,0 +1,335 @@
+# daw: the base crates of FastTrackStudios' audio stack.
+#
+# These eleven crates depend on nothing above them. Studio
+# (FastTrackStudios/studio) and the repos split out of it take them from
+# here by git (studio#510). Every external dependency below is declared
+# with the version, git pin and features Studio's root manifest uses, and
+# Cargo.lock was seeded from Studio's, so the fleet builds one of each:
+# move a pin here and in Studio together.
+
+[workspace]
+resolver = "3"
+
+members = [
+    "crates/daw/allocator",
+    "crates/daw/audio-graph",
+    "crates/daw/control",
+    "crates/daw/macros",
+    "crates/daw/module",
+    "crates/daw/proto",
+    "crates/daw/transport-sync",
+    "crates/daw/utils",
+    "features/audio",
+    "features/audio/sample",
+    "features/midi",
+]
+
+[workspace.package]
+# Studio's version: these crates were versioned with it and still ship in it.
+version = "26.10.3"
+edition = "2024"
+rust-version = "1.87"
+authors = ["FastTrack Studio"]
+license = "GPL-3.0-or-later"
+repository = "https://github.com/FastTrackStudios/daw"
+
+[workspace.dependencies]
+# ── This workspace ────────────────────────────────────────────────────
+audio = { path = "features/audio" }
+daw-allocator = { path = "crates/daw/allocator" }
+daw-audio-graph = { path = "crates/daw/audio-graph" }
+daw-control = { path = "crates/daw/control" }
+daw-module = { path = "crates/daw/module" }
+daw-proto = { path = "crates/daw/proto" }
+daw-test-macro = { path = "crates/daw/macros" }
+daw-transport-sync = { path = "crates/daw/transport-sync" }
+fts-sample = { path = "features/audio/sample", default-features = false }
+midi = { path = "features/midi" }
+utils = { path = "crates/daw/utils" }
+
+# ── External, exactly as Studio declares them ─────────────────────────
+# architect: one tag for the whole framework, the tag Studio pins.
+# dioxus: DioxusLabs/dioxus main 430cfb56 (0.8.0-alpha.3), architect's.
+# wasm-bindgen: pinned exactly, to the wasm-bindgen-cli Studio's dev shell
+# carries.
+anyhow = "1.0"
+arc-swap = "1.7"
+architect = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.12.6" }
+atomic_float = "1.1"
+claxon = "0.4"
+core-foundation = "0.10"
+coremidi = "0.9"
+cpal = "0.18"
+crossbeam-channel = "0.5"
+dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["lib"] }
+eyre = "0.6"
+facet = { version = "0.50.0-rc.5", features = ["reflect", "chrono", "uuid"] }
+facet-json = { version = "0.50.0-rc.7" }
+facet-styx = { version = "5.0.0-rc.7" }
+flacenc = "0.5.1"
+futures = "0.3"
+hound = "3.5"
+js-sys = "0.3"
+libc = "0.2"
+libspa = "0.10"
+libspa-sys = "0.10"
+memmap2 = "0.9"
+midir = "0.11"
+objc2 = "0.6.4"
+pipewire = "0.10"
+proc-macro2 = "1"
+quote = "1"
+rayon = "1.12"
+rtrb = "0.3.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+symphonia = { version = "0.5", default-features = false }
+symphonia-bundle-flac = "0.5"
+symphonia-codec-vorbis = "0.5"
+symphonia-core = "0.5"
+symphonia-format-ogg = "0.5"
+symphonium = { version = "0.6", default-features = false, features = ["wav", "pcm", "fft-resampler"] }
+syn = { version = "2", features = ["full", "extra-traits"] }
+thiserror = "2.0"
+tokio = { version = "1.48", features = ["full"] }
+tracing = { version = "0.1", features = ["std"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
+vorbis_rs = "0.5"
+vox = { version = "0.10.0-rc.5", default-features = false, features = ["runtime"] }
+vox-phon = { version = "0.10.0-rc.5" }
+vox-types = { version = "0.10.0-rc.5" }
+wasm-bindgen = "=0.2.127"
+wasm-bindgen-futures = "0.4"
+web-sys = "0.3.98"
+web-time = "1"
+
+[patch.crates-io]
+# Studio's [patch] tables, minus the entries nothing here reaches: a
+# git dependency's [patch] does not reach its consumers, so each workspace
+# carries its own copy.
+# Vendored one-line fix: parse_schema_bytes rejected every real schema
+# exchange with "schema decode consumed N of M bytes" — it compared
+# phon_schema::schema_from_bytes's owned-allocation byte count (added in
+# 0.2.0-rc.6) against the encoded slice length, two unrelated numbers.
+# schema_from_bytes already guarantees full-slice consumption internally.
+# Surfaced by daw's architect v0.7.1 bump (which pulls vox). Drop the
+# vendor once upstream removes/fixes the check. See vendor's README.
+vox-phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.3.0" }
+# pipewire-rs one commit past its v0.10.0 release. PipeWire 1.6 rewrote
+# constants like SPA_ID_INVALID from a bare `0xffffffff` into a cast form,
+# `((uint32_t)0xffffffff)`, which bindgen's own macro evaluator cannot fold —
+# it needs the clang fallback, which 0.10.0 asks for but never gives a
+# writable build dir, so the fallback silently produces nothing and the
+# constants vanish from the generated bindings. The result is
+# `error[E0425]: cannot find value SPA_ID_INVALID in crate spa_sys` in
+# libspa, which takes out everything downstream of daw-audio-io (patchbay,
+# signal-sampler, and with it the FTS Signal plugin). Upstream commit
+# 9b54509 "sys: Set clang macro fallback build dir to OUT_DIR" is the fix;
+# drop this patch when a release carrying it lands on crates.io.
+libspa-sys = { git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", rev = "9b54509e848e53ffa971ace15d7adf4908c09358" }
+pipewire-sys = { git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", rev = "9b54509e848e53ffa971ace15d7adf4908c09358" }
+# Blitz from the FTS fork, at the revision architect v0.12.6 pins (past the
+# `fts-upstream-2026-11` tag; the `www.` host so it is the same source as
+# architect's workspace-hack, which names it directly): DioxusLabs/blitz
+# main (0.3.0-beta.4) with the FTS work rebased on top — focus follows
+# pointerdown for all focusable content (the editor's tabindex div),
+# touch as pointer events, the iOS safe area and pacing, layered
+# compositing of texture widgets, a press/release click target (a knob
+# let go over a footswitch does not press it, studio#178), a pointer held
+# outside the window keeps its target (studio#141, nice-plug-dioxus stops
+# clamping to match), the measure fix. Upstream's versioned `NodeId` and
+# `Node::final_layout()` replace the stale-id patches this tree carried.
+# The fork's FTS.md lists where it departs from upstream (architect#211
+# has the full kept/dropped table). One revision across all blitz crates,
+# and anyrender from the same one.
+blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+# The fork's anyrender (0.14), carried in the blitz repo at the same tag:
+# the compositor's `composite` module and `RenderContext::render`, which
+# the processor's painted visualisers and the vendored anyrender_vello use.
+anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+# From the vendor repo (a sibling checkout path would build on one machine
+# and nowhere else). Three
+# measured changes to the present path — the GPU barrier removed, frame
+# latency 1 instead of 2, a switchable present mode — each reversible
+# from the environment. See anyrender_vello/UPSTREAM.md in FastTrackStudios/vendor.
+anyrender_vello = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
+# Vendored one-line fix, for the iOS simulator (the one place this
+# renderer runs): a resize that arrives before the renderer is ready left
+# the surface at its first size. See
+# anyrender_vello_hybrid/UPSTREAM.md in FastTrackStudios/vendor.
+anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
+# The three forks below sat in [workspace.dependencies] after the October
+# merge, where nothing consumed them, so their fixes silently stopped
+# applying; they are patches. Each carries its UPSTREAM.md/FTS-PATCH.md in
+# the vendor repo.
+# A tap that came while a frame was drawn is handled at once, not when the
+# next touch arrives (the proxy wake-up never drained winit's event queue).
+winit-uikit = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
+# The iOS Simulator has indirect draw/dispatch, so full Vello runs there.
+wgpu-hal = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
+# No explicit ObjC class name: each plugin bundle links its own copy, and a
+# second plugin registering the same name crashed the host.
+raw-window-metal = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
+# Vendored one-line fix: quote scalars containing `<`/`>` — upstream
+# (facet-rs/facet) styx-format emits them bare but styx-parse rejects
+# them, so serialized keybind configs (`keys "<C-s>"`) could not be
+# re-parsed. Drop the vendor once upstream fixes can_be_bare.
+styx-format = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.1.0" }
+# Vendored phon rc.7 + derive support for parse/display opaque scalars
+# (Uuid, chrono DateTime/NaiveDate, url, …). Upstream (rc.5 through rc.7)
+# PANICS (and the reply path aborts the process) the first time a vox RPC
+# reply contains such a field — every task-server list/stats call died.
+# Drop the vendor once upstream phon derives these scalars.
+#
+# (This entry used to point at vendor v0.1.0, which is phon rc.5: against
+# this repo's rc.7 graph cargo filed it under [patch.unused] and quietly
+# used unpatched upstream rc.7.)
+#
+# The rc.7 forward-ports, as is facet-core's below: vendor v0.4.1.
+phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.4.1" }
+# Vendored facet-core rc.7 with one change: chrono's display fns keep
+# sub-second precision. chrono types are opaque scalars whose only encode
+# path is `display`, so upstream's `SecondsFormat::Secs` rounded EVERY
+# timestamp on every vox RPC to the second — and anything ordered by one
+# could invert when two events shared a second.
+facet-core = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.4.1" }
+# Vendored phon-jit rc.5 with a one-line build.rs fix: force the stable,
+# call-based stencils. Upstream's nightly detection can be true while no real
+# nightly is present (the pinned nix toolchain), so it compiled the `become`
+# (explicit tail calls) stencils on stable rustc 1.94 → E0658, breaking the
+# macOS-aarch64 build. Drop the vendor once phon-jit builds on stable.
+phon-jit = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.2.3" }
+# mermaid-rs-renderer's patch died 2026-09: task moved it out again, into
+# its own `editor` repo (consumed there as `editor-mermaid`, tag v0.0.3) —
+# it now arrives as an ordinary transitive dep of `editor`/`editor-keyflow`,
+# same as task's own [patch] table no longer needs to redirect it either.
+
+# ── Lints — merged union of the dissolved workspaces' policies ─────────
+[workspace.lints.rust]
+# Flipped from "allow" 2026-07-28 (task cleanup): the blanket allows are
+# WHY ~30k lines of dead code accumulated silently. The task tree is
+# warning-clean under these; legacy crates in other domains carry a
+# crate-level `#![allow(dead_code, unused)]` marked "Lint debt" until
+# their own burn-down.
+dead_code = "warn"
+unused = "warn"
+unused_unsafe = "warn"
+# architect's attribute macros (`#[architect::error]`, `wire`, `entity`)
+# emit `#[cfg_attr(feature = "fake", ...)]` into the calling crate; declare
+# the name so those crates don't warn. Same line as architect's own
+# workspace.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("fake"))'] }
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "allow"
+private_intra_doc_links = "allow"
+redundant_explicit_links = "allow"
+
+[workspace.lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+# Deny panics — crash-prevention lints (namtao.com/rust)
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
+unreachable = "deny"
+unimplemented = "deny"
+unchecked_time_subtraction = "deny"
+todo = "deny"
+string_slice = "deny"
+panic_in_result_fn = "deny"
+panic = "deny"
+exit = "deny"
+as_conversions = "deny"
+
+# ── Dev profile (carried from the dissolved signal workspace) ──────────
+# The live rig runs from `session-desktop --engine` (formerly fasttrackstudio --engine, formerly signal-engine/signal-rigd): the vendored NAM C++
+# core and the DSP crates are unusable at opt-level 0 (~10-50x slower,
+# xruns), so dependencies build at release opt in dev while the thin
+# app/UI workspace crates stay at light opt for fast rebuilds.
+
+[patch."https://github.com/DioxusLabs/dioxus"]
+dioxus-native = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
+dioxus-native-dom = { git = "https://www.github.com/FastTrackStudios/vendor", rev = "25bf4bcdfd0b6acb268ca91a93bc8ff8da683a96" }
+dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
+
+[patch."https://github.com/FastTrackStudios/editor"]
+editor-ext = { git = "https://www.github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528" }
+editor-state = { git = "https://www.github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528" }
+editor-syntax = { git = "https://www.github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528" }
+editor-view = { git = "https://www.github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528" }
+editor-vim = { git = "https://www.github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528" }
+
+# ── Profiles: Studio's dev profile, for the crates this workspace reaches ──
+# Light opt and line tables for our own crates; dependencies at opt-level 1
+# with no debuginfo; the audio path at 3, so a dev run never xruns. Studio's
+# root manifest has the reasons and the measurements. A profile here governs
+# builds of THIS workspace only: a consumer's own profiles apply when it
+# builds these crates as dependencies.
+[profile.dev]
+opt-level = 1
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+opt-level = 1
+debug = false
+
+# Build scripts and proc macros (facet, architect, dioxus rsx run thousands
+# of times per build).
+[profile.dev.build-override]
+opt-level = 3
+debug = false
+
+# Ours, on the audio thread.
+[profile.dev.package.daw-audio-graph]
+opt-level = 3
+[profile.dev.package.audio]
+opt-level = 3
+
+# Audio-thread dependencies (Studio's allowlist, the ones in this graph).
+[profile.dev.package.rubato]
+opt-level = 3
+[profile.dev.package.fixed-resample]
+opt-level = 3
+[profile.dev.package.fast-interleave]
+opt-level = 3
+[profile.dev.package.dasp_sample]
+opt-level = 3
+[profile.dev.package.rustfft]
+opt-level = 3
+[profile.dev.package.realfft]
+opt-level = 3
+[profile.dev.package.transpose]
+opt-level = 3
+[profile.dev.package.strength_reduce]
+opt-level = 3
+[profile.dev.package.primal-check]
+opt-level = 3
+[profile.dev.package.num-complex]
+opt-level = 3
+[profile.dev.package.symphonia-core]
+opt-level = 3
+[profile.dev.package.symphonia-bundle-mp3]
+opt-level = 3
+[profile.dev.package.symphonia-codec-pcm]
+opt-level = 3
+[profile.dev.package.symphonia-codec-aac]
+opt-level = 3
+[profile.dev.package.symphonia-format-riff]
+opt-level = 3
+[profile.dev.package.blake3]
+opt-level = 3
+[profile.dev.package.phon]
+opt-level = 3
+[profile.dev.package.phon-engine]
+opt-level = 3
+[profile.dev.package.phon-jit]
+opt-level = 3

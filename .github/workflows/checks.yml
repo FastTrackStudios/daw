@@ -1,0 +1,54 @@
+# daw: the one PR/push gate. GitHub's hosted runner, rustup and apt (the
+# native headers Studio's hosted jobs install), no nix.
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Build + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      # The workspace pin (rust-toolchain.toml); keep the two in step.
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: rustfmt
+          targets: wasm32-unknown-unknown
+      - name: Native headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev libfontconfig1-dev libfreetype-dev \
+            libclang-dev clang llvm mold libasound2-dev libudev-dev \
+            libjack-jackd2-dev libpipewire-0.3-dev libspa-0.2-dev
+      - uses: Swatinem/rust-cache@v2
+      - name: Manifests + lockfile
+        run: cargo metadata --locked --format-version 1 > /dev/null
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+      - name: cargo check --workspace --all-targets
+        run: cargo check --workspace --all-targets --locked
+      - name: cargo test --workspace
+        run: cargo test --workspace --locked
+      # What Studio's browser builds take from here, with the features they
+      # ask for (session-daw-web, session-web, signal-web, the Signal remote).
+      - name: wasm32 check
+        run: >
+          cargo check --locked --target wasm32-unknown-unknown
+          -p daw-control -p daw-proto -p daw-module -p daw-transport-sync
+          -p utils -p midi -p audio -p fts-sample
+          --no-default-features
+          --features daw-proto/vox,midi/vox,midi/native,midi/ui,audio/io,audio/monitor,fts-sample/load,fts-sample/write,fts-sample/engine-core,fts-sample/decode-compressed
