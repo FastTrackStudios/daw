@@ -24,7 +24,8 @@
 //! deterministic on a fresh checkout, and the real material (#159) is
 //! ~13.8 GB that no CI machine has.
 
-use session_format::{DawProject, DocumentEdit, DocumentQuery, EntityId, ImportReport, SourceRef};
+use dawfile_reaper::session::{ImportReport, RppProject};
+use session_format::{DawProject, DocumentEdit, DocumentQuery, EntityId, SourceRef};
 use std::path::{Path, PathBuf};
 
 /// Every `.RPP` in the fixture corpus, plus anything `DAW_RPP_CORPUS` adds.

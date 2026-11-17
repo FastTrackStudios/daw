@@ -24,10 +24,8 @@ read = ["dep:ruzstd"]
 async-trait = { workspace = true, optional = true }
 crdt = { workspace = true, optional = true }
 daw-proto = { workspace = true }
-dawfile-reaper = { workspace = true }
 facet = { workspace = true }
 facet-styx = { workspace = true }
-interchange = { workspace = true, features = ["dawproject"] }
 loro = { workspace = true }
 pollster = { workspace = true, optional = true }
 ruzstd = { workspace = true, optional = true }
@@ -44,10 +42,14 @@ zstd = { workspace = true, optional = true }
 session-format = { path = ".", features = ["store", "sync", "read"] }
 crdt = { workspace = true }
 tokio = { workspace = true }
-interchange = { workspace = true, features = ["aaf", "dawproject"] }
+# The adapters over this document, for the tests that build a project from
+# a `.rpp` or cross it to DAWproject (`tests/rpp_roundtrip.rs`,
+# `tests/project.rs`, `tests/dawproject_*.rs`, …). Dev-only: each depends on
+# this crate, so nothing here may depend on them outside tests.
+interchange = { workspace = true, features = ["aaf", "dawproject", "session"] }
 # required-features): a plain `cargo test` of the workspace builds them all.
 daw-proto = { workspace = true }
-dawfile-reaper = { workspace = true }
+dawfile-reaper = { workspace = true, features = ["session"] }
 loro = { workspace = true }
 tempfile = { workspace = true }
 uuid = { workspace = true }

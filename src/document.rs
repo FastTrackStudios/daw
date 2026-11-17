@@ -17,7 +17,8 @@
 //!
 //! Nothing outside the modelled set is dropped: an imported document keeps
 //! its whole source as a verbatim object (see [`Provenance`]) and reports
-//! every construct it did not model — see [`crate::rpp::ImportReport`].
+//! every construct it did not model — see
+//! `dawfile_reaper::session::ImportReport`.
 
 use crate::id::{EntityId, ObjectId};
 use daw_proto::automation::{Envelope, EnvelopePoint};

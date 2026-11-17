@@ -20,6 +20,7 @@
 use std::path::Path;
 
 use daw_proto::automation::{EnvelopePoint, EnvelopeType};
+use dawfile_reaper::session::RppProject;
 use session_format::{DawProject, DocumentEdit, DocumentQuery, EntityId};
 
 /// The four concerns scenario 1 generates, in the order the editor
@@ -166,7 +167,7 @@ fn dawproject_carries_the_composite_too() {
     use interchange::dawproject::types::{ExpressionType, LaneContent};
 
     let (project, _) = scenario_one();
-    let dp = session_format::dawproject::to_dawproject(project.document());
+    let dp = interchange::dawproject::session::to_dawproject(project.document());
 
     // Through the wire and back, not just the in-memory struct: the
     // zip is where a field silently fails to serialize.
@@ -226,7 +227,7 @@ fn an_ambiguous_item_sends_no_automation_rather_than_a_guess() {
         }
     });
 
-    let dp = session_format::dawproject::to_dawproject(project.document());
+    let dp = interchange::dawproject::session::to_dawproject(project.document());
     let automation = dp
         .arrangement
         .iter()
@@ -266,7 +267,7 @@ fn item_envelope_times_become_absolute_on_the_timeline() {
     });
     assert!(origin > 0.0, "the fixture item must not start at zero");
 
-    let dp = session_format::dawproject::to_dawproject(project.document());
+    let dp = interchange::dawproject::session::to_dawproject(project.document());
     let a = dp
         .arrangement
         .as_ref()
@@ -315,7 +316,7 @@ fn one_lane_per_track_however_many_items_ride() {
         ids.len()
     });
 
-    let dp = session_format::dawproject::to_dawproject(project.document());
+    let dp = interchange::dawproject::session::to_dawproject(project.document());
     let arrangement = dp.arrangement.expect("arrangement");
     assert_eq!(
         arrangement.lanes.len(),

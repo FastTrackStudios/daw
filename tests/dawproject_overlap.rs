@@ -52,7 +52,7 @@ fn track_of_items(items: &[(f64, f64, f64)]) -> DawProject {
 
 /// Every automation lane's points, in time order.
 fn lane_points(project: &DawProject) -> Vec<Vec<(f64, f64)>> {
-    let dp = session_format::dawproject::to_dawproject(project.document());
+    let dp = interchange::dawproject::session::to_dawproject(project.document());
     // Through the wire and back: the zip is where a field silently
     // fails to serialize.
     let bytes = interchange::dawproject::serialize_project_bytes(&dp).expect("write");

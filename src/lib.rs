@@ -39,8 +39,14 @@
 //!
 //! ## Getting started
 //!
-//! ```no_run
-//! use crate::{DawProject, DocumentEdit, DocumentQuery};
+//! REAPER text is read and written by `dawfile-reaper` (its `session`
+//! feature, `dawfile_reaper::session::RppProject`), DAWproject by
+//! `interchange` (`interchange::dawproject::session`): the adapters depend on
+//! the document, never the document on them.
+//!
+//! ```ignore
+//! use dawfile_reaper::session::RppProject;
+//! use session_format::{DawProject, DocumentEdit, DocumentQuery};
 //!
 //! // Import a REAPER project. The original bytes are kept verbatim.
 //! let (mut project, report) = DawProject::import_rpp_file("Belief.RPP")?;
@@ -59,7 +65,7 @@
 //!
 //! // Save as a `.session` project directory.
 //! project.save("Belief.session")?;
-//! # Ok::<(), crate::DawError>(())
+//! # Ok::<(), session_format::DawError>(())
 //! ```
 //!
 //! ## What lives elsewhere
@@ -78,7 +84,6 @@
 /// in ([`project::DawProject::set_history`]).
 pub use loro;
 
-pub mod dawproject;
 pub mod document;
 pub mod edit;
 pub mod error;
@@ -88,7 +93,6 @@ pub mod oplog;
 pub mod project;
 #[cfg(feature = "read")]
 pub mod read;
-pub mod rpp;
 #[cfg(feature = "store")]
 pub mod store;
 pub mod styx;
@@ -105,4 +109,3 @@ pub use objects::ObjectStore;
 pub use project::{
     DAW_EXTENSION, DawProject, OBJECTS_DIR, PROJECT_EXTENSIONS, SESSION_EXTENSION, choose_manifest,
 };
-pub use rpp::{ExportReport, ImportReport};

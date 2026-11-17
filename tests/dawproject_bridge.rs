@@ -1,6 +1,6 @@
 //! `.daw` <-> DAWproject, both ways (#174).
 
-use session_format::dawproject::{from_dawproject, to_dawproject};
+use interchange::dawproject::session::{from_dawproject, to_dawproject};
 use session_format::document::{DawDocument, TrackNode};
 use session_format::id::EntityId;
 

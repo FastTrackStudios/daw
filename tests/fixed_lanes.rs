@@ -9,6 +9,7 @@
 
 use daw_proto::track::{CompArea, LaneComping, LaneDisplay};
 use daw_proto::{Duration, PositionInSeconds};
+use dawfile_reaper::session::RppProject;
 use session_format::{DawProject, DocumentEdit, DocumentQuery};
 
 const FIXTURE: &str = include_str!(
