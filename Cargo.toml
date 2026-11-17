@@ -30,6 +30,11 @@ base64 = { workspace = true }
 # consumer that does not ask for peaks pays nothing.
 fts-sample = { workspace = true, optional = true }
 
+# The `.session` document this crate imports into and exports from
+# (`session`, feature `session`). The adapter depends on the document;
+# the document does not know REAPER.
+session-format = { workspace = true, optional = true }
+
 # Native-only optional speedups.
 # `parallel` brings in rayon for per-track parsing; turn it off for
 # WASM (no threads / no rayon). `binaries` brings in `libc` for the
@@ -41,6 +46,9 @@ libc = { workspace = true, optional = true }
 default = ["parallel"]
 parallel = ["dep:rayon"]
 binaries = ["dep:libc"]
+# `.rpp` in and out of the `.session` document: `session::{from_rpp,
+# to_rpp, to_rpp_patched, RppProject}`.
+session = ["dep:session-format"]
 # Build a `.sessionpeaks` cache from an Ogg Vorbis proxy, in memory.
 # Wasm-clean (symphonia, no threads, no I/O): a page that fetched a
 # proxy can scan it itself when no cache was served.

@@ -69,6 +69,9 @@ pub mod primitives;
 pub mod reapeaks;
 pub mod rpp_tree;
 pub mod scaffold;
+/// `.rpp` in and out of the `.session` document (`session-format`).
+#[cfg(feature = "session")]
+pub mod session;
 pub mod sessionpeaks;
 pub mod setlist_rpp;
 pub mod stock_fx;
