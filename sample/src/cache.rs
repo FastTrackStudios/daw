@@ -1960,7 +1960,134 @@ fn parse_extended80(b: &[u8]) -> f64 {
     }
 }
 
+/// A plain WAV's layout: PCM 16/24/32-bit or 32-bit float, every sample in
+/// a container of exactly its own size. `None` for anything else.
+struct WavLayout {
+    channels: u16,
+    sample_rate: u32,
+    bits: u16,
+    float: bool,
+    data_offset: u64,
+    data_len: u64,
+}
+
+/// Walk the RIFF chunks for `fmt ` and `data` (see [`WavLayout`]).
+fn plain_wav_layout(file: &mut File) -> Option<WavLayout> {
+    let mut head = [0u8; 12];
+    file.read_exact(&mut head).ok()?;
+    if &head[0..4] != b"RIFF" || &head[8..12] != b"WAVE" {
+        return None;
+    }
+    let mut fmt: Option<(u16, u16, u32, u16)> = None; // tag, channels, rate, bits
+    let mut pos = 12u64;
+    loop {
+        let mut ch = [0u8; 8];
+        file.read_exact(&mut ch).ok()?;
+        let size = u64::from(u32::from_le_bytes([ch[4], ch[5], ch[6], ch[7]]));
+        let body = pos + 8;
+        match &ch[0..4] {
+            b"fmt " => {
+                let mut f = vec![0u8; usize::try_from(size.min(64)).ok()?];
+                file.read_exact(&mut f).ok()?;
+                if f.len() < 16 {
+                    return None;
+                }
+                let mut tag = u16::from_le_bytes([f[0], f[1]]);
+                let bits = u16::from_le_bytes([f[14], f[15]]);
+                if tag == 0xFFFE {
+                    // WAVE_FORMAT_EXTENSIBLE: valid bits must fill the container
+                    if f.len() < 26 || u16::from_le_bytes([f[18], f[19]]) != bits {
+                        return None;
+                    }
+                    tag = u16::from_le_bytes([f[24], f[25]]);
+                }
+                fmt = Some((
+                    tag,
+                    u16::from_le_bytes([f[2], f[3]]),
+                    u32::from_le_bytes([f[4], f[5], f[6], f[7]]),
+                    bits,
+                ));
+            }
+            b"data" => {
+                let (tag, channels, sample_rate, bits) = fmt?;
+                let float = match (tag, bits) {
+                    (1, 16 | 24 | 32) => false,
+                    (3, 32) => true,
+                    _ => return None,
+                };
+                if channels == 0 {
+                    return None;
+                }
+                return Some(WavLayout {
+                    channels,
+                    sample_rate,
+                    bits,
+                    float,
+                    data_offset: body,
+                    data_len: size,
+                });
+            }
+            _ => {}
+        }
+        // chunks are word-aligned
+        pos = body + size + (size & 1);
+        file.seek(SeekFrom::Start(pos)).ok()?;
+    }
+}
+
+/// [`load_wav`] for a plain WAV: the whole data chunk in one read, converted
+/// in one pass — the same values hound's per-sample reader gives (`v / 2^(bits−1)`
+/// for integers), without its per-sample call and buffer bookkeeping (it was
+/// ~60 % of an orchestral null-test render). `None` when the file is not a
+/// plain WAV (then hound reads it).
+fn load_wav_bulk(path: &Path) -> Option<Result<SampleData, SamplerError>> {
+    let mut file = File::open(path).ok()?;
+    let l = plain_wav_layout(&mut file)?;
+    let bytes_per = u64::from(l.bits / 8);
+    // a truncated data chunk keeps its whole frames, like hound
+    let len = l.data_len - l.data_len % (bytes_per * u64::from(l.channels));
+    if file.seek(SeekFrom::Start(l.data_offset)).is_err() {
+        return None;
+    }
+    let mut bytes = vec![0u8; usize::try_from(len).ok()?];
+    if let Err(e) = file.read_exact(&mut bytes) {
+        return Some(Err(SamplerError::Io(e)));
+    }
+    let frames: Vec<f32> = if l.float {
+        bytes
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect()
+    } else {
+        let max = (1i64 << (l.bits - 1)) as f32;
+        match l.bits {
+            16 => bytes
+                .chunks_exact(2)
+                .map(|c| f32::from(i16::from_le_bytes([c[0], c[1]])) / max)
+                .collect(),
+            24 => bytes
+                .chunks_exact(3)
+                .map(|c| (i32::from_le_bytes([0, c[0], c[1], c[2]]) >> 8) as f32 / max)
+                .collect(),
+            _ => bytes
+                .chunks_exact(4)
+                .map(|c| i32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f32 / max)
+                .collect(),
+        }
+    };
+    let num_frames = frames.len() / usize::from(l.channels);
+    Some(Ok(SampleData::from_f32(
+        frames,
+        l.channels,
+        l.sample_rate,
+        num_frames,
+    )))
+}
+
 fn load_wav(path: &Path) -> Result<SampleData, SamplerError> {
+    if let Some(done) = load_wav_bulk(path) {
+        return done;
+    }
     let mut reader = hound::WavReader::open(path)
         .map_err(|e| SamplerError::Io(std::io::Error::other(e.to_string())))?;
 
@@ -3531,4 +3658,84 @@ fn load_flac_reader<R: Read>(
         sample_rate,
         num_frames,
     ))
+}
+
+#[cfg(test)]
+mod wav_bulk_tests {
+    use super::*;
+
+    /// The hound reader's values, the reference the bulk path must match.
+    fn hound_values(path: &Path) -> Vec<f32> {
+        let mut r = hound::WavReader::open(path).unwrap();
+        let spec = r.spec();
+        match spec.sample_format {
+            hound::SampleFormat::Float => r.samples::<f32>().map(Result::unwrap).collect(),
+            hound::SampleFormat::Int => {
+                let max = (1i64 << (spec.bits_per_sample - 1)) as f32;
+                r.samples::<i32>()
+                    .map(|s| s.unwrap() as f32 / max)
+                    .collect()
+            }
+        }
+    }
+
+    fn bulk_values(path: &Path) -> Vec<f32> {
+        let d = load_wav_bulk(path).expect("plain wav").expect("read");
+        assert_eq!(d.channels, 2);
+        (0..d.num_frames)
+            .flat_map(|i| {
+                let (l, r) = d.frame(i);
+                [l, r]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn bulk_wav_matches_hound_bit_for_bit() {
+        let dir = std::env::temp_dir().join(format!("fts-wav-bulk-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (bits, float) in [(16u16, false), (24, false), (32, false), (32, true)] {
+            let path = dir.join(format!("t{bits}{float}.wav"));
+            let spec = hound::WavSpec {
+                channels: 2,
+                sample_rate: 48_000,
+                bits_per_sample: bits,
+                sample_format: if float {
+                    hound::SampleFormat::Float
+                } else {
+                    hound::SampleFormat::Int
+                },
+            };
+            let mut w = hound::WavWriter::create(&path, spec).unwrap();
+            let max = (1i64 << (bits - 1)) - 1;
+            for i in 0..2002i64 {
+                // extremes, zero and a sweep of both signs
+                let v = match i {
+                    0 => max,
+                    1 => -max - 1,
+                    2 => 0,
+                    _ => (i * 7919 % (2 * max + 1)) - max,
+                };
+                if float {
+                    w.write_sample(v as f32 / max as f32).unwrap();
+                } else if bits == 16 {
+                    w.write_sample(v as i16).unwrap();
+                } else {
+                    w.write_sample(v as i32).unwrap();
+                }
+            }
+            w.finalize().unwrap();
+            let want = hound_values(&path);
+            let got = bulk_values(&path);
+            assert_eq!(got.len(), want.len(), "{bits}-bit float={float}");
+            for (i, (a, b)) in got.iter().zip(&want).enumerate() {
+                assert_eq!(
+                    a.to_bits(),
+                    b.to_bits(),
+                    "{bits}-bit float={float} sample {i}"
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
