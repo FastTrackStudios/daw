@@ -43,7 +43,21 @@ unison-plugin = { workspace = true, optional = true }
 # Its own tests and examples, with the features they need (see their
 # required-features): a plain `cargo test` of the workspace builds them all.
 builtin = { path = ".", features = ["engine"] }
-daw = { workspace = true, features = ["standalone"] }
+daw = { workspace = true, features = ["standalone", "vst3-host"] }
 daw-standalone = { workspace = true, features = ["rpp-project", "decode"] }
 midi = { workspace = true }
+# The comparison tools (examples/: eq_match, reverb_match, the probes and
+# checks, chart). They were examples of `dsp` until the effects moved to
+# FastTrackStudios/fts-fx (studio#510); they drive a commercial plugin
+# through signal-plugin-host and read its presets with signal-import, both
+# Studio's, so they stay here.
+anyhow = { workspace = true }
+dsp = { workspace = true, features = ["analyzer", "hits"] }
+dsp-core = { workspace = true, features = ["audio", "golden", "modulation"] }
+fts-sample = { workspace = true, features = ["decode-compressed"] }
+hound = { workspace = true }
+realfft = { workspace = true }
+serde_json = { workspace = true }
+signal-import = { workspace = true }
+signal-plugin-host = { workspace = true, features = ["clap-host", "vst3-host"] }
 
