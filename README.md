@@ -37,8 +37,11 @@ in Studio.
 ```bash
 cargo check --workspace --all-targets
 cargo test --workspace
-cargo check --target wasm32-unknown-unknown -p daw-control -p utils -p daw-module -p daw-audio-graph
 ```
+
+Eight of the crates are in Studio's browser builds; CI also checks them
+for `wasm32-unknown-unknown` with the features those builds ask for (the
+command is in `.github/workflows/checks.yml`).
 
 Rust 1.99.1 (`rust-toolchain.toml`). The root `Cargo.toml` declares every
 dependency with the versions, git pins and patches Studio uses, so the
