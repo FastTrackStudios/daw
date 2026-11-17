@@ -1,0 +1,61 @@
+[package]
+name = "midi"
+version.workspace = true
+edition = "2021"
+authors.workspace = true
+license.workspace = true
+description = "MIDI: facet-typed events, the byte codec and the I/O services, with each platform's input (PipeWire, CoreMIDI, Web MIDI, midir) behind a feature"
+
+[lints]
+workspace = true
+
+[features]
+default = ["vox"]
+coremidi = ["dep:core-foundation", "dep:coremidi", "dep:tracing"]
+midir = ["dep:crossbeam-channel", "dep:eyre", "dep:midir", "dep:tracing"]
+midir-jack = ["midir", "midir/jack"]
+midir-pipewire = ["midir-jack"]
+native = ["coremidi", "dep:crossbeam-channel", "dep:eyre", "dep:tracing", "pipewire", "webmidi"]
+pipewire = ["dep:eyre", "dep:libspa", "dep:libspa-sys", "dep:pipewire", "dep:tracing"]
+ui = ["dep:dioxus"]
+vox = []
+webmidi = ["dep:js-sys", "dep:tracing", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:web-sys"]
+
+[dependencies]
+architect = { workspace = true, features = ["vox"] }
+crossbeam-channel = { workspace = true, optional = true }
+dioxus = { workspace = true, optional = true }
+eyre = { workspace = true, optional = true }
+facet = { workspace = true }
+midir = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+vox = { workspace = true }
+vox-types = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = { workspace = true, optional = true }
+wasm-bindgen = { workspace = true, optional = true }
+wasm-bindgen-futures = { workspace = true, optional = true }
+web-sys = { workspace = true, features = ["Event", "EventTarget", "Navigator", "Window", "MidiAccess", "MidiInput", "MidiInputMap", "MidiMessageEvent", "MidiPort", "MidiPortDeviceState"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libspa = { workspace = true, optional = true }
+libspa-sys = { workspace = true, optional = true }
+pipewire = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+tracing-subscriber = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = { workspace = true, optional = true }
+coremidi = { workspace = true, optional = true }
+
+[[example]]
+name = "pw_midi_probe"
+path = "examples/pw_midi_probe.rs"
+required-features = ["pipewire"]
+
+[[example]]
+name = "sources"
+path = "examples/sources.rs"
+required-features = ["coremidi"]
