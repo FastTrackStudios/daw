@@ -1,0 +1,45 @@
+[package]
+name = "audio"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Audio devices, sample IO and the core audio types"
+
+[lints]
+workspace = true
+
+[features]
+io = ["dep:cpal", "dep:facet"]
+jack = ["cpal/jack"]
+monitor = ["dep:rtrb"]
+pipewire = []
+
+[dependencies]
+anyhow = { workspace = true }
+atomic_float = { workspace = true }
+cpal = { workspace = true, optional = true }
+facet = { workspace = true, optional = true }
+rtrb = { workspace = true, optional = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+# Its own tests and examples, with the features they need (see their
+# required-features): a plain `cargo test` of the workspace builds them all.
+audio = { path = ".", features = ["io"] }
+tracing-subscriber = { workspace = true }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+cpal = { workspace = true, features = ["pipewire"] }
+libc = { workspace = true }
+libspa = { workspace = true }
+pipewire = { workspace = true }
+
+[[example]]
+name = "duplex_probe"
+path = "examples/duplex_probe.rs"
+required-features = ["io"]
