@@ -11,7 +11,7 @@
 //!   decides what a loaded project contains.
 //! - **save**: the exact inverse of that loader. The engine state becomes
 //!   a typed `dawfile_reaper` [`ReaperProject`], serialized with
-//!   [`RppSerialize`], imported with [`DawProject::import_rpp`] and saved.
+//!   [`RppSerialize`], imported with [`RppProject::import_rpp`] and saved.
 //!
 //! ## What a save starts from
 //!
@@ -65,6 +65,7 @@ use daw_proto::routing::SendMode;
 use daw_proto::track::{InputMonitoringMode, LaneDisplay, RecordInput};
 use daw_proto::{Take as PTake, Track as PTrack, TrackRoute};
 use dawfile_reaper::rpp_tree::{self, RChunk, RNodeTree};
+use dawfile_reaper::session::RppProject;
 use dawfile_reaper::types::RppSerialize;
 use dawfile_reaper::types::envelope::{
     Envelope as RppEnvelope, EnvelopePoint as RppEnvelopePoint, EnvelopePointShape,

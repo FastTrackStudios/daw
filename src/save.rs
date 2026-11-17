@@ -15,6 +15,7 @@
 
 use std::path::{Path, PathBuf};
 
+use dawfile_reaper::session::RppProject;
 use session_format::document::{ItemNode, SourceRef, TakeNode};
 use session_format::id::EntityId;
 use session_format::project::DawProject;
