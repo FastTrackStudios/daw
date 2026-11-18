@@ -28,6 +28,5 @@ tracing = { workspace = true }
 daw-sync = { path = ".", features = ["link", "network"] }
 daw = { workspace = true }
 eyre = { workspace = true }
-studio = { workspace = true, features = ["reaper", "test-harness"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 
