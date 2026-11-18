@@ -1,0 +1,54 @@
+[package]
+name = "session-format"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The daw's own project file: `Song.session` (a Loro doc, round-tripping DAWproject and RPP), and its Turso store"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+store = ["dep:pollster", "dep:turso", "dep:zstd"]
+# The project file as a sync replica: `store::Replica`, a `crdt::Persistence`
+# over the store, one synced doc per branch (docs/design/sync.md).
+sync = ["store", "dep:crdt", "dep:async-trait"]
+# The project file read from its bytes, without Turso or C zstd: what a
+# browser opens a song it was handed with (`read::ProjectFile`).
+read = ["dep:ruzstd"]
+
+[dependencies]
+async-trait = { workspace = true, optional = true }
+crdt = { workspace = true, optional = true }
+daw-proto = { workspace = true }
+facet = { workspace = true }
+facet-styx = { workspace = true }
+loro = { workspace = true }
+pollster = { workspace = true, optional = true }
+ruzstd = { workspace = true, optional = true }
+sha2 = { workspace = true }
+# The store's slow work (a compaction's export, pack and write) as spans.
+tracing = { workspace = true }
+styx-format = { workspace = true }
+thiserror = { workspace = true }
+turso = { workspace = true, optional = true }
+uuid = { workspace = true }
+zstd = { workspace = true, optional = true }
+
+[dev-dependencies]
+session-format = { path = ".", features = ["store", "sync", "read"] }
+crdt = { workspace = true }
+tokio = { workspace = true }
+# The `.rpp` reader over this document, for the tests that build a project
+# from a `.rpp` (`tests/rpp_roundtrip.rs`, `tests/project.rs`, …). Dev-only:
+# it depends on this crate, so nothing here may depend on it outside tests.
+# The DAWproject bridge's tests are interchange's (`tests/dawproject_*.rs`).
+# required-features): a plain `cargo test` of the workspace builds them all.
+daw-proto = { workspace = true }
+dawfile-reaper = { workspace = true, features = ["session"] }
+loro = { workspace = true }
+tempfile = { workspace = true }
+uuid = { workspace = true }
