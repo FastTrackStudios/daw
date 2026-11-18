@@ -30,8 +30,9 @@ them by git.
   are copies of it.
 - **Wasm**: `daw-proto`, `daw-control`, `daw-module`, `daw-transport-sync`,
   `utils`, `midi`, `audio`, `fts-sample`, and the engine's `daw`,
-  `daw-standalone`, `session-format` and `dawfile-reaper`, are in
-  Studio's browser builds. CI checks them for `wasm32-unknown-unknown` with
+  `daw-standalone`, `session-format`, `dawfile-reaper` and `builtin`, are
+  in Studio's browser builds; `daw-standalone`'s `web` feature is the
+  AudioWorklet renderer. CI checks them for `wasm32-unknown-unknown` with
   the features those builds ask for (`.github/workflows/checks.yml`).
 - **Timing tests**: the engine's `sync::daw::tests` and
   `audio_engine::ahead::tests` have millisecond wall-clock budgets; they
