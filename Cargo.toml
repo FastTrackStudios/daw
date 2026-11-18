@@ -42,11 +42,10 @@ zstd = { workspace = true, optional = true }
 session-format = { path = ".", features = ["store", "sync", "read"] }
 crdt = { workspace = true }
 tokio = { workspace = true }
-# The adapters over this document, for the tests that build a project from
-# a `.rpp` or cross it to DAWproject (`tests/rpp_roundtrip.rs`,
-# `tests/project.rs`, `tests/dawproject_*.rs`, …). Dev-only: each depends on
-# this crate, so nothing here may depend on them outside tests.
-interchange = { workspace = true, features = ["aaf", "dawproject", "session"] }
+# The `.rpp` reader over this document, for the tests that build a project
+# from a `.rpp` (`tests/rpp_roundtrip.rs`, `tests/project.rs`, …). Dev-only:
+# it depends on this crate, so nothing here may depend on it outside tests.
+# The DAWproject bridge's tests are interchange's (`tests/dawproject_*.rs`).
 # required-features): a plain `cargo test` of the workspace builds them all.
 daw-proto = { workspace = true }
 dawfile-reaper = { workspace = true, features = ["session"] }
