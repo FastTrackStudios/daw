@@ -8,7 +8,7 @@
 //! the bug the format is designed to prevent.
 //!
 //! ```
-//! # use crate::{DawDocument, DocumentEdit, DocumentQuery};
+//! # use session_format::{DawDocument, DocumentEdit, DocumentQuery};
 //! let mut document = DawDocument::new("Demo");
 //! let drums = document.add_track("Drums");
 //! let kick = document.add_track("Kick");
