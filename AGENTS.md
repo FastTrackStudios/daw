@@ -33,9 +33,19 @@ them by git.
 
 ## Check
 
+Inside the fleet's devenv shell: `devenv shell -- <command>`, or direnv
+through `.envrc` (`eval "$(devenv direnvrc)"` then `use devenv`; a bare
+`use devenv` fails silently in an agent shell and leaves the host's rustc).
+devenv-fleet's `rust` module (devenv.yaml) is the toolchain; check it with
+`devenv shell -- fleet-doctor` (rustc store path, wrapper, linker; fails off
+the pin). devenv.nix adds what the crates link. Move the pins only with
+devenv-fleet's `scripts/fleet-pins --write .`, never by hand; never set or
+unset `RUSTC_WRAPPER` or `CARGO_HOME`; keep `.cargo/config.toml`'s rustflags
+tables the fleet's, flag for flag.
+
 ```bash
-cargo check --workspace --all-targets
-cargo test --workspace
+devenv shell -- cargo check --workspace --all-targets
+devenv shell -- cargo test --workspace
 ```
 
 and the wasm check from `checks.yml`.
