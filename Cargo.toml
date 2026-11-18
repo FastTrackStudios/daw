@@ -22,6 +22,16 @@ members = [
     "features/audio",
     "features/audio/sample",
     "features/midi",
+    # The engine and what it needs (studio#510): the facade, the standalone
+    # engine, the session document, the .rpp reader, plugin hosting, the
+    # built-in effects as engine blocks, DAW sync.
+    "crates/daw/daw",
+    "crates/daw/session-format",
+    "crates/daw/standalone",
+    "features/adapters/reaper/dawfile-reaper",
+    "features/dsp/builtin",
+    "features/plugin-host",
+    "features/sync",
 ]
 
 [workspace.package]
@@ -46,6 +56,35 @@ daw-transport-sync = { path = "crates/daw/transport-sync" }
 fts-sample = { path = "features/audio/sample", default-features = false }
 midi = { path = "features/midi" }
 utils = { path = "crates/daw/utils" }
+# The engine.
+builtin = { path = "features/dsp/builtin" }
+daw = { path = "crates/daw/daw" }
+daw-standalone = { path = "crates/daw/standalone" }
+daw-sync = { path = "features/sync" }
+dawfile-reaper = { path = "features/adapters/reaper/dawfile-reaper" }
+session-format = { path = "crates/daw/session-format" }
+signal-plugin-host = { path = "features/plugin-host", default-features = false }
+
+# ── FastTrackStudios/fts-fx: the effects, every crate at one rev ──────
+# The engine depends on the effects (dsp's stretch render; builtin wraps the
+# effect plugins as engine blocks); fts-fx depends on nothing here. Move
+# this rev with Studio's.
+dsp = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012" }
+dsp-core = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012" }
+comp-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
+delay-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
+eq-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
+gate-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
+level-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
+limiter-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
+meter-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
+mic-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
+modulation-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
+pitch-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
+reverb-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
+saturate-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
+tune-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
+unison-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
 
 # ── External, exactly as Studio declares them ─────────────────────────
 # architect: one tag for the whole framework, the tag Studio pins.
@@ -103,6 +142,49 @@ wasm-bindgen = "=0.2.127"
 wasm-bindgen-futures = "0.4"
 web-sys = "0.3.98"
 web-time = "1"
+# What the engine adds, exactly as Studio declares them.
+async-trait = "0.1"
+base64 = "0.22.1"
+clack-extensions = { git = "https://github.com/prokopyl/clack", rev = "f874e858ad576c601367b3038af5088a4e671744", features = [
+    "clack-host",
+    # Bridge host windows (winit 0.30) into CLAP embedded GUIs (fts-clap-host, in Studio).
+    "raw-window-handle_06",
+    "audio-ports",
+    "note-ports",
+    # Piano-roll key labels (FTS Guide names its click/count/section keys).
+    "note-name",
+    "params",
+    "state",
+    "latency",
+    "gui",
+    "timer",
+    "log",
+    "thread-check",
+    "tail",
+] }
+clack-host = { git = "https://github.com/prokopyl/clack", rev = "f874e858ad576c601367b3038af5088a4e671744" }
+crdt = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.12.6" }
+criterion = "0.5"
+facet-postcard = { version = "0.50.0-rc.5" }
+gloo-timers = { version = "0.3", features = ["futures"] }
+libloading = "0.8"
+loro = { version = "1.12", default-features = false }
+# nice-plug: fts-baseview-03 is a branch pin, as in Studio and fts-fx.
+nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
+nom = "8"
+num-traits = "0.2"
+pollster = "0.4.0"
+raw-window-handle-06 = { version = "0.6", package = "raw-window-handle" }
+realfft = "3.0"
+rusty_link = "0.4"
+ruzstd = "0.8"
+sha2 = "0.10"
+styx-format = { version = "5.0.0-rc.5" }
+tempfile = "3.8"
+turso = { version = "0.8.2", default-features = false }
+ureq = "2"
+vst3 = "0.3"
+zstd = "0.13"
 
 [patch.crates-io]
 # Studio's [patch] tables, minus the entries nothing here reaches: a
@@ -116,6 +198,12 @@ web-time = "1"
 # Surfaced by daw's architect v0.7.1 bump (which pulls vox). Drop the
 # vendor once upstream removes/fixes the check. See vendor's README.
 vox-phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.3.0" }
+# baseview 0.3.3 with one fix (the macOS frame timer in the common run-loop
+# modes, so a live resize does not freeze the editor), from
+# FastTrackStudios/vendor (baseview/FTS-PATCH.md). The effect plugins the
+# built-in effects wrap reach it through nice-plug-dioxus, which is written
+# against 0.3.3.
+baseview = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.6.1" }
 # pipewire-rs one commit past its v0.10.0 release. PipeWire 1.6 rewrote
 # constants like SPA_ID_INVALID from a bare `0xffffffff` into a cast form,
 # `((uint32_t)0xffffffff)`, which bindgen's own macro evaluator cannot fold —
@@ -293,6 +381,15 @@ debug = false
 opt-level = 3
 [profile.dev.package.audio]
 opt-level = 3
+[profile.dev.package.daw-standalone]
+opt-level = 3
+[profile.dev.package.builtin]
+opt-level = 3
+# The effects (fts-fx), run by the engine.
+[profile.dev.package.dsp-core]
+opt-level = 3
+[profile.dev.package.dsp]
+opt-level = 3
 
 # Audio-thread dependencies (Studio's allowlist, the ones in this graph).
 [profile.dev.package.rubato]
@@ -300,6 +397,8 @@ opt-level = 3
 [profile.dev.package.fixed-resample]
 opt-level = 3
 [profile.dev.package.fast-interleave]
+opt-level = 3
+[profile.dev.package.dasp_frame]
 opt-level = 3
 [profile.dev.package.dasp_sample]
 opt-level = 3
@@ -325,6 +424,10 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.symphonia-format-riff]
 opt-level = 3
+[profile.dev.package.zstd-safe]
+opt-level = 3
+[profile.dev.package.zstd-sys]
+opt-level = 3
 [profile.dev.package.blake3]
 opt-level = 3
 [profile.dev.package.phon]
@@ -332,4 +435,38 @@ opt-level = 3
 [profile.dev.package.phon-engine]
 opt-level = 3
 [profile.dev.package.phon-jit]
+opt-level = 3
+
+# The engine's browser build (the audio worklet: daw-standalone `web`),
+# Studio's two wasm profiles with the entries that name crates here.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+[profile.wasm-release.package.daw-audio-graph]
+opt-level = 3
+[profile.wasm-release.package.daw-standalone]
+opt-level = 3
+[profile.wasm-release.package.fts-sample]
+opt-level = 3
+[profile.wasm-release.package.symphonia-core]
+opt-level = 3
+[profile.wasm-release.package.symphonia-format-ogg]
+opt-level = 3
+[profile.wasm-release.package.symphonia-codec-vorbis]
+opt-level = 3
+
+[profile.wasm-dev]
+inherits = "dev"
+debug = false
+strip = "debuginfo"
+
+[profile.wasm-dev.package."*"]
+opt-level = 3
+[profile.wasm-dev.package.daw-audio-graph]
+opt-level = 3
+[profile.wasm-dev.package.daw-standalone]
 opt-level = 3
