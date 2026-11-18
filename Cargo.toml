@@ -49,8 +49,9 @@ midi = { workspace = true }
 # The comparison tools (examples/: eq_match, reverb_match, the probes and
 # checks, chart). They were examples of `dsp` until the effects moved to
 # FastTrackStudios/fts-fx (studio#510); they drive a commercial plugin
-# through signal-plugin-host and read its presets with signal-import, both
-# Studio's, so they stay here.
+# through signal-plugin-host. The ones that translate its presets with
+# signal-import (eq_match, reverb_match, proq_params, and the eq_sweep and
+# preset_sweep drivers that run them) are signal-import's examples.
 anyhow = { workspace = true }
 dsp = { workspace = true, features = ["analyzer", "hits"] }
 dsp-core = { workspace = true, features = ["audio", "golden", "modulation"] }
@@ -58,6 +59,5 @@ fts-sample = { workspace = true, features = ["decode-compressed"] }
 hound = { workspace = true }
 realfft = { workspace = true }
 serde_json = { workspace = true }
-signal-import = { workspace = true }
 signal-plugin-host = { workspace = true, features = ["clap-host", "vst3-host"] }
 
