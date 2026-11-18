@@ -1,14 +1,20 @@
 # daw: agent instructions
 
-This repo holds the base crates of FastTrackStudios' audio stack (the
-table in `README.md`). They depend on nothing above them; Studio
+This repo holds the DAW of FastTrackStudios' audio stack: its base crates
+and the engine that plays a session (the tables in `README.md`). Studio
 (FastTrackStudios/studio) and the repos split out of it (studio#510) take
 them by git.
 
 - **Nothing here may depend on a crate from Studio or from any repo that
-  depends on this one.** A crate that needs one does not belong here.
+  depends on this one.** A crate that needs one does not belong here. The
+  one repo this depends on is FastTrackStudios/fts-fx (the effects: the
+  engine's stretch render, `builtin`'s blocks), pinned by `rev` at
+  Studio's; fts-fx must never depend on this repo, or the two would pin
+  each other.
 - **The paths are Studio's** (`crates/daw/...`, `features/midi`,
-  `features/audio`), so history, docs and skills line up. Do not move them.
+  `features/audio`, `features/plugin-host`, `features/sync`,
+  `features/dsp/builtin`, `features/adapters/reaper/dawfile-reaper`), so
+  history, docs and skills line up. Do not move them.
 - **One of everything across the fleet.** The root `Cargo.toml` declares
   each external dependency with Studio's version, git pin and features,
   and the `[patch]` tables are Studio's (a git dependency's `[patch]` does
@@ -23,9 +29,14 @@ them by git.
   adds the audio-thread lints; Studio's `features/{dsp,rigs}/clippy.toml`
   are copies of it.
 - **Wasm**: `daw-proto`, `daw-control`, `daw-module`, `daw-transport-sync`,
-  `utils`, `midi`, `audio` and `fts-sample` are in Studio's browser builds.
-  CI checks them for `wasm32-unknown-unknown` with the features those
-  builds ask for (`.github/workflows/checks.yml`).
+  `utils`, `midi`, `audio`, `fts-sample`, and the engine's `daw`,
+  `daw-standalone`, `session-format` and `dawfile-reaper`, are in
+  Studio's browser builds. CI checks them for `wasm32-unknown-unknown` with
+  the features those builds ask for (`.github/workflows/checks.yml`).
+- **Timing tests**: the engine's `sync::daw::tests` and
+  `audio_engine::ahead::tests` have millisecond wall-clock budgets; they
+  fail on a loaded machine and pass alone. nextest runs them alone
+  (`.config/nextest.toml`).
 - Rust 1.99.1 (`rust-toolchain.toml`), the fleet's pin. Licence:
   GPL-3.0-or-later, inherited with `license.workspace = true`.
 - A PR that changes a crate adds a change file in `.changes/`
