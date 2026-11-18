@@ -42,6 +42,9 @@ them by git.
   GPL-3.0-or-later, inherited with `license.workspace = true`.
 - A PR that changes a crate adds a change file in `.changes/`
   (`.changes/README`).
+- CI runs on ready PRs only: on a draft PR `Build + test` is skipped. To
+  get checks, mark the PR ready (`gh pr ready`); it runs then and on every
+  push after. An agent waiting for green marks its PR ready first.
 
 ## Check
 
