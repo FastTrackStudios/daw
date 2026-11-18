@@ -49,6 +49,11 @@ jobs:
         run: cargo check --workspace --all-targets --locked
       - name: cargo test --workspace
         run: cargo test --workspace --locked
+      # midi with its midir backend alone, as a crate that wants only that
+      # asks for it (signal's `kontrol`): the workspace's own builds unify
+      # more of midi's features and would hide a gap.
+      - name: cargo check -p midi (midir alone)
+        run: cargo check --locked -p midi --no-default-features --features midir
       # What Studio's browser builds take from here, with the features they
       # ask for (session-daw-web, session-web, signal-web, the Signal remote).
       - name: wasm32 check (the base)

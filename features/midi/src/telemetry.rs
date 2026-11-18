@@ -178,7 +178,12 @@ pub fn rescan_stream_instrumented(
     // empty scan; this brings the polled path in line. A genuine unplug is
     // not lost, only deferred to the next poll, where a *stable* empty list
     // still reads as empty.
-    if had_stream && !before.is_empty() && crate::input_ports().is_empty() {
+    //
+    // The same enumeration `rescan_stream` reads (midir's): the guard must
+    // see the list the rescan would act on, and `crate::input_ports` (the
+    // platform's native input, CoreMIDI or PipeWire) exists only with the
+    // `native` feature.
+    if had_stream && !before.is_empty() && crate::midir::input_ports().is_empty() {
         tracing::warn!(
             midi.rig = rig,
             midi.ports_before = before.len(),
