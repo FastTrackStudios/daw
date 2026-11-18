@@ -48,10 +48,30 @@ jobs:
         run: cargo test --workspace --locked
       # What Studio's browser builds take from here, with the features they
       # ask for (session-daw-web, session-web, signal-web, the Signal remote).
-      - name: wasm32 check
+      - name: wasm32 check (the base)
         run: >
           cargo check --locked --target wasm32-unknown-unknown
           -p daw-control -p daw-proto -p daw-module -p daw-transport-sync
           -p utils -p midi -p audio -p fts-sample
           --no-default-features
           --features daw-proto/vox,midi/vox,midi/native,midi/ui,audio/io,audio/monitor,fts-sample/load,fts-sample/write,fts-sample/engine-core,fts-sample/decode-compressed
+      # The engine in Studio's browser builds: session-daw-web (the DAW in a
+      # browser: load, decode, save, the .rpp reader) and signal-web / the
+      # Signal remote (decode, the built-in effects), with the features each
+      # turns on (`cargo tree -e features --target wasm32-unknown-unknown` in
+      # Studio).
+      - name: wasm32 check (the engine, as session-daw-web takes it)
+        run: >
+          cargo check --locked --target wasm32-unknown-unknown
+          -p daw -p daw-standalone -p session-format -p dawfile-reaper
+          --features daw/standalone-audio,daw/standalone-bootstrap,daw/standalone-decode,daw/standalone-save,daw/standalone-session-file,daw-standalone/reapeaks,daw-standalone/rpp-project-wasm,daw-standalone/stream-ogg,dawfile-reaper/session,session-format/read,daw-proto/vox,midi/vox,fts-sample/write
+      - name: wasm32 check (the engine, as signal-web takes it)
+        run: >
+          cargo check --locked --target wasm32-unknown-unknown
+          -p daw -p builtin -p dawfile-reaper -p audio -p midi
+          --features daw/standalone-decode,audio/io,audio/monitor,midi/native,midi/ui,midi/vox,midi/webmidi,daw-proto/vox
+      # The AudioWorklet renderer (the browser setlist player; README).
+      - name: wasm32 check (the engine's worklet renderer)
+        run: >
+          cargo check --locked --target wasm32-unknown-unknown
+          -p daw-standalone --lib --no-default-features --features decode,web

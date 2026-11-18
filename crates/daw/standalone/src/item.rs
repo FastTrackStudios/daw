@@ -1,0 +1,703 @@
+//! `impl Items for Standalone` — post-architect::rpc port.
+//!
+//! Backed by `ProjectState::items` (HashMap<item_guid, ItemEntry>) plus
+//! `ProjectState::items_by_track` (ordering per track). The old
+//! `StandaloneItem` async service struct and parallel item state were
+//! retired with the port.
+
+use crate::sync::EnvelopeKey;
+use daw_proto::Items;
+use daw_proto::event_bus::DawEvent;
+use daw_proto::item::ItemEvent;
+use daw_proto::{
+    BeatAttachMode, DawError, DawResult, Duration, FadeShape, Item, ItemRef, ItemSpan,
+    PositionInSeconds, ProjectContext, TrackRef,
+};
+use uuid::Uuid;
+
+use crate::sync::{ItemEntry, ProjectState, Standalone};
+
+/// Publish an item change onto the cross-domain event bus so subscribers
+/// (the sync engine, inspectors) see it. Item events carry `project_guid`
+/// per variant, so no separate envelope is needed.
+pub(crate) fn publish_item_event(daw: &Standalone, event: ItemEvent) {
+    daw.bus_events.publish(DawEvent::Item(event));
+}
+
+/// Mutate one item in place. The closure — given the project guid, item
+/// guid, and a mutable item (old values readable before it writes) —
+/// returns the [`ItemEvent`] describing the change, which is published on
+/// the bus. Keeps old-value capture, mutation, and publish in one place.
+fn mutate_item_evt<F>(
+    daw: &Standalone,
+    project: &ProjectContext,
+    item: &ItemRef,
+    f: F,
+) -> DawResult<()>
+where
+    F: FnOnce(&str, &str, &mut Item) -> ItemEvent,
+{
+    let guid = resolve_project(daw, project).ok_or_else(no_project)?;
+    let event = daw.with_project_mut(&guid, |p| {
+        let item_guid = item_guid_from_ref(p, item)
+            .ok_or_else(|| DawError::not_found("Item", &format!("{item:?}")))?;
+        let entry = p
+            .items
+            .get_mut(&item_guid)
+            .ok_or_else(|| DawError::not_found("Item", &item_guid))?;
+        let event = f(&guid, &item_guid, &mut entry.item);
+        Ok::<ItemEvent, DawError>(event)
+    })??;
+    publish_item_event(daw, event);
+    Ok(())
+}
+
+fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
+    match ctx {
+        ProjectContext::Project(guid) => Some(guid.clone()),
+        ProjectContext::Current => daw.current_project_guid(),
+    }
+}
+
+fn no_project() -> DawError {
+    DawError::not_found("Project", "context")
+}
+
+fn resolve_track_guid(p: &ProjectState, track: &TrackRef) -> Option<String> {
+    match track {
+        TrackRef::Guid(g) => Some(g.clone()),
+        TrackRef::Index(idx) => p.tracks.get(*idx as usize).map(|t| t.guid.clone()),
+        TrackRef::Master => None,
+    }
+}
+
+/// The item as stored, with the active take's `start_offset` filled in.
+///
+/// Derived on read rather than mirrored into `ItemEntry`, so there is
+/// one place the offset lives and `set_start_offset` cannot leave the
+/// item saying something the take disagrees with. Zero when the item
+/// has no takes.
+fn with_start_offset(p: &ProjectState, guid: &str, item: &Item) -> Item {
+    let mut item = item.clone();
+    item.start_offset = p
+        .takes
+        .get(guid)
+        .and_then(|list| list.takes.get(list.active_idx as usize))
+        .map_or(daw_proto::primitives::Duration::ZERO, |take| {
+            take.start_offset
+        });
+    item
+}
+
+/// The index a new item on `track` takes: past the last one there, so a
+/// track's indices stay in its order and never repeat (a delete leaves a
+/// gap rather than renumbering the rest).
+fn next_index(p: &ProjectState, track: &str) -> u32 {
+    p.items_by_track
+        .get(track)
+        .and_then(|order| order.last())
+        .and_then(|g| p.items.get(g))
+        .map_or(0, |e| e.item.index.saturating_add(1))
+}
+
+fn item_guid_from_ref(p: &ProjectState, item: &ItemRef) -> Option<String> {
+    match item {
+        ItemRef::Guid(g) => Some(g.clone()),
+        ItemRef::ProjectIndex(idx) => {
+            // Loose mapping: take the Nth item by insertion order.
+            p.items.keys().nth(*idx as usize).cloned()
+        }
+        ItemRef::Index(_) => None,
+    }
+}
+
+/// Mutate an item in place and publish [`ItemEvent::Changed`] — for the
+/// properties no specific variant names, so every setter announces
+/// itself and a subscriber that re-reads on item events misses nothing.
+fn mutate_item_changed<F>(
+    daw: &Standalone,
+    project: &ProjectContext,
+    item: &ItemRef,
+    f: F,
+) -> DawResult<()>
+where
+    F: FnOnce(&mut Item),
+{
+    mutate_item_evt(daw, project, item, |pg, ig, i| {
+        f(i);
+        ItemEvent::Changed {
+            project_guid: pg.to_string(),
+            item_guid: ig.to_string(),
+        }
+    })
+}
+
+/// Make an item on `track` — the body of both `add_item` and
+/// `add_item_with_guid`, so an item made with a caller's guid is the
+/// same item `add_item` makes and announces itself the same way.
+/// `guid: None` mints the engine's own; a guid an item of the project
+/// already has is refused.
+fn insert_item(
+    daw: &Standalone,
+    project: &ProjectContext,
+    track: &TrackRef,
+    guid: Option<String>,
+    span: ItemSpan,
+) -> DawResult<String> {
+    let project_guid = resolve_project(daw, project).ok_or_else(no_project)?;
+    let (item_guid, track_guid, item) = daw.with_project_mut(&project_guid, |p| {
+        let track_guid = resolve_track_guid(p, track)
+            .filter(|g| p.tracks.iter().any(|t| &t.guid == g))
+            .ok_or_else(|| DawError::not_found("Track", &format!("{track:?}")))?;
+        let item_guid = match guid {
+            Some(g) if p.items.contains_key(&g) => {
+                return Err(DawError::already_exists("Item", &g));
+            }
+            Some(g) => g,
+            None => p.mint_item_guid(),
+        };
+        let index = next_index(p, &track_guid);
+        p.items_by_track
+            .entry(track_guid.clone())
+            .or_default()
+            .push(item_guid.clone());
+        let mut item = Item::default();
+        item.guid = item_guid.clone();
+        item.track_guid = track_guid.clone();
+        item.index = index;
+        item.position = span.position;
+        item.length = span.length;
+        p.items
+            .insert(item_guid.clone(), ItemEntry { item: item.clone() });
+        Ok((item_guid, track_guid, item))
+    })??;
+    publish_item_event(
+        daw,
+        ItemEvent::Created {
+            project_guid,
+            track_guid,
+            item,
+        },
+    );
+    Ok(item_guid)
+}
+
+impl Items for Standalone {
+    fn get_items(&self, project: ProjectContext, track: TrackRef) -> Vec<Item> {
+        let Some(guid) = resolve_project(self, &project) else {
+            return Vec::new();
+        };
+        self.with_project(&guid, |p| {
+            let Some(track_guid) = resolve_track_guid(p, &track) else {
+                return Vec::new();
+            };
+            p.items_by_track
+                .get(&track_guid)
+                .map(|guids| {
+                    // With the take's offset, as `get_item` gives it: a
+                    // track's items read without it all claimed to play
+                    // their source from the start.
+                    guids
+                        .iter()
+                        .filter_map(|g| p.items.get(g).map(|e| with_start_offset(p, g, &e.item)))
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+    }
+
+    fn get_item(&self, project: ProjectContext, item: ItemRef) -> Option<Item> {
+        let guid = resolve_project(self, &project)?;
+        self.with_project(&guid, |p| {
+            let item_guid = item_guid_from_ref(p, &item)?;
+            p.items
+                .get(&item_guid)
+                .map(|e| with_start_offset(p, &item_guid, &e.item))
+        })
+        .ok()
+        .flatten()
+    }
+
+    fn get_all_items(&self, project: ProjectContext) -> Vec<Item> {
+        let Some(guid) = resolve_project(self, &project) else {
+            return Vec::new();
+        };
+        self.with_project(&guid, |p| {
+            p.items
+                .iter()
+                .map(|(guid, e)| with_start_offset(p, guid, &e.item))
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
+    fn get_selected_items(&self, project: ProjectContext) -> Vec<Item> {
+        let Some(guid) = resolve_project(self, &project) else {
+            return Vec::new();
+        };
+        self.with_project(&guid, |p| {
+            p.items
+                .values()
+                .filter(|e| e.item.selected)
+                .map(|e| e.item.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
+    fn item_count(&self, project: ProjectContext, track: TrackRef) -> u32 {
+        let Some(guid) = resolve_project(self, &project) else {
+            return 0;
+        };
+        self.with_project(&guid, |p| {
+            let Some(track_guid) = resolve_track_guid(p, &track) else {
+                return 0;
+            };
+            p.items_by_track
+                .get(&track_guid)
+                .map(|v| v.len() as u32)
+                .unwrap_or(0)
+        })
+        .unwrap_or(0)
+    }
+
+    fn add_item(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        position: PositionInSeconds,
+        length: Duration,
+    ) -> Option<String> {
+        insert_item(
+            self,
+            &project,
+            &track,
+            None,
+            ItemSpan::new(position, length),
+        )
+        .ok()
+    }
+
+    fn add_item_with_guid(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        guid: &str,
+        span: ItemSpan,
+    ) -> DawResult<String> {
+        crate::check_new_guid("Item", guid)?;
+        insert_item(self, &project, &track, Some(guid.to_string()), span)
+    }
+
+    fn delete_item(&self, project: ProjectContext, item: ItemRef) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(no_project)?;
+        let (item_guid, track_guid) = self.with_project_mut(&guid, |p| {
+            let item_guid = item_guid_from_ref(p, &item)
+                .ok_or_else(|| DawError::not_found("Item", &format!("{item:?}")))?;
+            let track_guid =
+                delete_in(p, &item_guid).ok_or_else(|| DawError::not_found("Item", &item_guid))?;
+            Ok::<(String, String), DawError>((item_guid, track_guid))
+        })??;
+        publish_item_event(
+            self,
+            ItemEvent::Deleted {
+                project_guid: guid,
+                track_guid,
+                item_guid,
+            },
+        );
+        Ok(())
+    }
+
+    fn duplicate_item(&self, project: ProjectContext, item: ItemRef) -> Option<String> {
+        let guid = resolve_project(self, &project)?;
+        let created = self
+            .with_project_mut(&guid, |p| {
+                let source = item_guid_from_ref(p, &item)?;
+                let into = p.mint_item_guid();
+                copy_item_in(p, &source, into)
+            })
+            .ok()
+            .flatten();
+        let new_item = created?;
+        let new_guid = new_item.guid.clone();
+        publish_item_event(
+            self,
+            ItemEvent::Created {
+                project_guid: guid,
+                track_guid: new_item.track_guid.clone(),
+                item: new_item,
+            },
+        );
+        Some(new_guid)
+    }
+
+    fn set_position(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        position: PositionInSeconds,
+    ) -> DawResult<()> {
+        mutate_item_evt(self, &project, &item, |pg, ig, i| {
+            let old = i.position.as_seconds();
+            i.position = position;
+            ItemEvent::PositionChanged {
+                project_guid: pg.to_string(),
+                item_guid: ig.to_string(),
+                old_position: old,
+                new_position: position.as_seconds(),
+            }
+        })
+    }
+
+    fn set_length(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        length: Duration,
+    ) -> DawResult<()> {
+        mutate_item_evt(self, &project, &item, |pg, ig, i| {
+            let old = i.length.as_seconds();
+            i.length = length;
+            ItemEvent::LengthChanged {
+                project_guid: pg.to_string(),
+                item_guid: ig.to_string(),
+                old_length: old,
+                new_length: length.as_seconds(),
+            }
+        })
+    }
+
+    fn move_to_track(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        track: TrackRef,
+    ) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(no_project)?;
+        let (item_guid, old_track, new_track) = self.with_project_mut(&guid, |p| {
+            let item_guid = item_guid_from_ref(p, &item)
+                .ok_or_else(|| DawError::not_found("Item", &format!("{item:?}")))?;
+            let track_guid = resolve_track_guid(p, &track)
+                .ok_or_else(|| DawError::not_found("Track", &format!("{track:?}")))?;
+            // Remove from current track's ordering.
+            let entry = p
+                .items
+                .get(&item_guid)
+                .ok_or_else(|| DawError::not_found("Item", &item_guid))?;
+            let prev_track = entry.item.track_guid.clone();
+            if let Some(order) = p.items_by_track.get_mut(&prev_track) {
+                order.retain(|g| g != &item_guid);
+            }
+            // Insert into new track.
+            let new_index = next_index(p, &track_guid);
+            p.items_by_track
+                .entry(track_guid.clone())
+                .or_default()
+                .push(item_guid.clone());
+            if let Some(e) = p.items.get_mut(&item_guid) {
+                e.item.track_guid = track_guid.clone();
+                e.item.index = new_index;
+            }
+            Ok::<(String, String, String), DawError>((item_guid, prev_track, track_guid))
+        })??;
+        publish_item_event(
+            self,
+            ItemEvent::MovedToTrack {
+                project_guid: guid,
+                item_guid,
+                old_track_guid: old_track,
+                new_track_guid: new_track,
+            },
+        );
+        Ok(())
+    }
+
+    fn set_snap_offset(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        offset: Duration,
+    ) -> DawResult<()> {
+        mutate_item_changed(self, &project, &item, |i| i.snap_offset = offset)
+    }
+
+    fn set_muted(&self, project: ProjectContext, item: ItemRef, muted: bool) -> DawResult<()> {
+        mutate_item_evt(self, &project, &item, |pg, ig, i| {
+            i.muted = muted;
+            ItemEvent::MuteChanged {
+                project_guid: pg.to_string(),
+                item_guid: ig.to_string(),
+                muted,
+            }
+        })
+    }
+
+    fn set_selected(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        selected: bool,
+    ) -> DawResult<()> {
+        mutate_item_evt(self, &project, &item, |pg, ig, i| {
+            i.selected = selected;
+            ItemEvent::SelectionChanged {
+                project_guid: pg.to_string(),
+                item_guid: ig.to_string(),
+                selected,
+            }
+        })
+    }
+
+    fn set_locked(&self, project: ProjectContext, item: ItemRef, locked: bool) -> DawResult<()> {
+        mutate_item_changed(self, &project, &item, |i| i.locked = locked)
+    }
+
+    fn select_all_items(&self, project: ProjectContext, selected: bool) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(no_project)?;
+        // One event per item whose selection actually flipped: the ones
+        // already in that state did not change.
+        let flipped = self.with_project_mut(&guid, |p| {
+            // Only those that flip are written (each noted in the
+            // journal): a deselect is not every item in the song changed.
+            let flipped: Vec<String> = p
+                .items
+                .iter()
+                .filter(|(_, entry)| entry.item.selected != selected)
+                .map(|(item_guid, _)| item_guid.clone())
+                .collect();
+            for item_guid in &flipped {
+                if let Some(entry) = p.items.get_mut(item_guid) {
+                    entry.item.selected = selected;
+                }
+            }
+            flipped
+        })?;
+        for item_guid in flipped {
+            publish_item_event(
+                self,
+                ItemEvent::SelectionChanged {
+                    project_guid: guid.clone(),
+                    item_guid,
+                    selected,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    fn set_volume(&self, project: ProjectContext, item: ItemRef, volume: f64) -> DawResult<()> {
+        mutate_item_evt(self, &project, &item, |pg, ig, i| {
+            i.volume = volume;
+            ItemEvent::VolumeChanged {
+                project_guid: pg.to_string(),
+                item_guid: ig.to_string(),
+                volume,
+            }
+        })
+    }
+
+    fn set_fade_in(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        length: Duration,
+        shape: FadeShape,
+    ) -> DawResult<()> {
+        mutate_item_changed(self, &project, &item, |i| {
+            i.fade_in_length = length;
+            i.fade_in_shape = shape;
+        })
+    }
+
+    fn set_fade_out(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        length: Duration,
+        shape: FadeShape,
+    ) -> DawResult<()> {
+        mutate_item_changed(self, &project, &item, |i| {
+            i.fade_out_length = length;
+            i.fade_out_shape = shape;
+        })
+    }
+
+    fn set_loop_source(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        loop_source: bool,
+    ) -> DawResult<()> {
+        mutate_item_changed(self, &project, &item, |i| i.loop_source = loop_source)
+    }
+
+    fn set_beat_attach_mode(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        mode: BeatAttachMode,
+    ) -> DawResult<()> {
+        mutate_item_changed(self, &project, &item, |i| i.beat_attach_mode = mode)
+    }
+
+    fn set_auto_stretch(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        auto_stretch: bool,
+    ) -> DawResult<()> {
+        mutate_item_changed(self, &project, &item, |i| i.auto_stretch = auto_stretch)
+    }
+
+    fn set_color(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        color: Option<u32>,
+    ) -> DawResult<()> {
+        mutate_item_changed(self, &project, &item, |i| i.color = color)
+    }
+
+    fn label(&self, project: ProjectContext, item: ItemRef) -> Option<String> {
+        Items::get_item(self, project, item).and_then(|i| i.label)
+    }
+
+    fn set_label(&self, project: ProjectContext, item: ItemRef, label: &str) -> DawResult<()> {
+        let label = label.to_string();
+        mutate_item_changed(self, &project, &item, |i| i.label = Some(label))
+    }
+
+    fn set_group_id(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        group_id: Option<u32>,
+    ) -> DawResult<()> {
+        mutate_item_changed(self, &project, &item, |i| i.group_id = group_id)
+    }
+
+    fn set_fixed_lane(&self, project: ProjectContext, item: ItemRef, lane: u32) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(no_project)?;
+        let item_guid = self.with_project_mut(&guid, |p| {
+            let item_guid = item_guid_from_ref(p, &item)
+                .ok_or_else(|| DawError::not_found("Item", &format!("{item:?}")))?;
+            let track_guid = p
+                .items
+                .get(&item_guid)
+                .map(|e| e.item.track_guid.clone())
+                .ok_or_else(|| DawError::not_found("Item", &item_guid))?;
+            let lane_count = p
+                .tracks
+                .iter()
+                .find(|t| t.guid == track_guid)
+                .map(|t| t.lane_count)
+                .unwrap_or(0);
+            crate::track::check_lane(lane, lane_count)?;
+            if let Some(entry) = p.items.get_mut(&item_guid) {
+                entry.item.fixed_lane = Some(lane);
+            }
+            Ok::<String, DawError>(item_guid)
+        })??;
+        publish_item_event(
+            self,
+            ItemEvent::Changed {
+                project_guid: guid,
+                item_guid,
+            },
+        );
+        Ok(())
+    }
+}
+
+/// Item `source` copied as `into` on its own track and lane, with its takes
+/// and everything kept per take — each take under a fresh guid. The copy,
+/// or `None` with no such item. The body of `duplicate_item` and of an
+/// [`crate::item_ops::ItemOp::Copy`].
+pub(crate) fn copy_item_in(p: &mut ProjectState, source: &str, into: String) -> Option<Item> {
+    let src = p.items.get(source)?.item.clone();
+    let index = next_index(p, &src.track_guid);
+    p.items_by_track
+        .entry(src.track_guid.clone())
+        .or_default()
+        .push(into.clone());
+    let mut copy = src;
+    copy.guid = into.clone();
+    copy.index = index;
+    copy.selected = false;
+    p.items
+        .insert(into.clone(), ItemEntry { item: copy.clone() });
+    // The takes come with it. An item without them is not a duplicate of
+    // anything: `take_count` was copied and says 1, so the copy *claims* a
+    // take, and every take call on it then fails with "item not found".
+    if let Some(mut takes) = p.takes.get(source).cloned() {
+        for take in &mut takes.takes {
+            // Take guids are minted fresh: two takes sharing one means
+            // `TakeRef::Guid` resolves to whichever comes first, and an
+            // edit aimed at the copy lands on the original.
+            let old = std::mem::replace(&mut take.guid, Uuid::new_v4().to_string());
+            take.item_guid = into.clone();
+            copy_take_in(p, (source, &old), (&into, &take.guid));
+        }
+        p.takes.insert(into, takes);
+    }
+    Some(copy)
+}
+
+/// Everything kept per take, copied from take `old` of item `source` to
+/// take `new` of item `into`: its envelopes (by their keys, not a search of
+/// every envelope in the song), its audio source (an `Arc`), its stretch
+/// markers and mode, its MIDI — or a split's right half plays silent,
+/// unwarped, without the left's volume curve, or loses every note.
+fn copy_take_in(p: &mut ProjectState, (source, old): (&str, &str), (into, new): (&str, &str)) {
+    for kind in daw_proto::TakeEnvelopeKind::ALL {
+        let key = |item: &str, take: &str| {
+            (
+                String::new(),
+                EnvelopeKey::Take {
+                    item_guid: item.to_owned(),
+                    take_guid: take.to_owned(),
+                    kind,
+                },
+            )
+        };
+        if let Some(curve) = p.envelopes.get(&key(source, old)).cloned() {
+            p.envelopes.insert(key(into, new), curve);
+        }
+    }
+    #[cfg(any(feature = "audio", feature = "decode"))]
+    if let Some(audio) = p.audio_sources.get(old).cloned() {
+        p.audio_sources.insert(new.to_owned(), audio);
+    }
+    copy_keyed(&mut p.stretch_markers, old, new);
+    copy_keyed(&mut p.stretch_modes, old, new);
+    copy_keyed(&mut p.midi_notes, old, new);
+    copy_keyed(&mut p.midi_ccs, old, new);
+    copy_keyed(&mut p.midi_pitch_bends, old, new);
+    copy_keyed(&mut p.midi_program_changes, old, new);
+    copy_keyed(&mut p.midi_sysex, old, new);
+    copy_keyed(&mut p.midi_channel_pressures, old, new);
+    copy_keyed(&mut p.midi_poly_pressures, old, new);
+    copy_keyed(&mut p.midi_note_expressions, old, new);
+}
+
+/// Item `guid` gone, with its takes: its track, or `None` with no such
+/// item. The others on the track keep their indices — they stay in order,
+/// and an index is only the tiebreak between two items at one place.
+pub(crate) fn delete_in(p: &mut ProjectState, guid: &str) -> Option<String> {
+    let entry = p.items.remove(guid)?;
+    let track = entry.item.track_guid;
+    if let Some(order) = p.items_by_track.get_mut(&track) {
+        order.retain(|g| g != guid);
+    }
+    p.takes.remove(guid);
+    Some(track)
+}
+
+/// `map[to]` as a copy of `map[from]`, when there is one.
+fn copy_keyed<T: Clone>(map: &mut crate::journal::Journaled<String, T>, from: &str, to: &str) {
+    if let Some(value) = map.get(from).cloned() {
+        map.insert(to.to_owned(), value);
+    }
+}

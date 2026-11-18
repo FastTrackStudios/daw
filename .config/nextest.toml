@@ -1,0 +1,23 @@
+# nextest, for the engine's timing tests (they came from Studio's
+# .config/nextest.toml with daw-standalone, studio#510). `cargo test` does
+# not read this file; with plain `cargo test`, run them alone when the box
+# is loaded: `cargo test -p daw-standalone -- sync::daw::tests`.
+[profile.default]
+slow-timeout = { period = "60s", terminate-after = 2 }
+
+# The run-ahead engine's real-time tests hand the start of a run to the
+# ahead worker thread within MAX_PRIME blocks; when the box is too busy to
+# schedule that thread in time the window comes up empty and plays as
+# silence, by design. Alone they pass every time (18/18, four runs in a
+# row); beside a full suite at load ~100 they flaked. They run alone.
+[[profile.default.overrides]]
+filter = 'package(daw-standalone) & test(/audio_engine::ahead::tests::/)'
+threads-required = 'num-test-threads'
+
+# The per-project lock tests time how long one song's readers wait while
+# another is edited (a few µs alone). Beside the whole suite on CI's pool
+# a busy box let a read wait 5.4 ms against its 5 ms budget: the wait was
+# the scheduler's, not a lock's. They run alone.
+[[profile.default.overrides]]
+filter = 'package(daw-standalone) & test(/sync::daw::tests::/)'
+threads-required = 'num-test-threads'
