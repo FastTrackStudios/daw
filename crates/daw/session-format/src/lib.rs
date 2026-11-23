@@ -91,9 +91,9 @@ pub mod id;
 pub mod objects;
 pub mod oplog;
 pub mod project;
-pub mod sniff;
 #[cfg(feature = "read")]
 pub mod read;
+pub mod sniff;
 #[cfg(feature = "store")]
 pub mod store;
 pub mod styx;
@@ -107,7 +107,7 @@ pub use edit::{DocumentEdit, DocumentQuery};
 pub use error::{DawError, DawResult};
 pub use id::{EntityId, ObjectId};
 pub use objects::ObjectStore;
-pub use sniff::{FileFormat, sniff, sniff_path};
 pub use project::{
     DAW_EXTENSION, DawProject, OBJECTS_DIR, PROJECT_EXTENSIONS, SESSION_EXTENSION, choose_manifest,
 };
+pub use sniff::{FileFormat, sniff, sniff_path};
