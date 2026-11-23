@@ -13,8 +13,30 @@ pub use sqlite::SqliteError;
 /// The branch every project has: the song itself.
 pub const MAIN: &str = "main";
 
+/// The part the session primitive's document is kept in (the store's
+/// `SESSION`).
+pub const SESSION: &str = "session";
+
+/// The `meta` key the song's id is kept under (the store's `ID_KEY`).
+pub const ID_KEY: &str = "id";
+
 /// The schema this reader understands (`meta.schema`).
 const SCHEMA: i64 = 1;
+
+/// The song's id (`meta.id`) from a project file's bytes — or only its
+/// first pages: the meta table is near the start of the file, so a reader
+/// scanning many folders need not read whole songs. `None` when the bytes
+/// are not a store, hold no id, or stop before the meta table does.
+#[must_use]
+pub fn song_id(bytes: &[u8]) -> Option<String> {
+    let db = sqlite::Db::new(bytes).ok()?;
+    db.rows("meta")
+        .ok()?
+        .into_iter()
+        .find(|row| row.get(0).text() == Some(ID_KEY))
+        .and_then(|row| row.get(1).text().map(|v| v.trim().to_owned()))
+        .filter(|v| !v.is_empty())
+}
 
 /// Why a project file could not be read.
 #[derive(Debug, thiserror::Error)]
@@ -55,6 +77,12 @@ pub struct ProjectFile {
     /// (seq, branch, update packed), in seq order.
     updates: Vec<(i64, String, Vec<u8>)>,
     blobs: HashMap<String, Vec<u8>>,
+    /// `meta.id`: the song's id.
+    id: Option<String>,
+    /// (part, branch) → (the last update the snapshot covers, packed).
+    part_snapshots: HashMap<(String, String), (i64, Vec<u8>)>,
+    /// (seq, part, branch, update packed), in seq order.
+    part_updates: Vec<(i64, String, String, Vec<u8>)>,
 }
 
 impl ProjectFile {
@@ -65,11 +93,14 @@ impl ProjectFile {
     /// malformed.
     pub fn read(bytes: &[u8]) -> Result<Self> {
         let db = sqlite::Db::new(bytes)?;
-        let schema = db
-            .rows("meta")?
-            .into_iter()
-            .find(|row| row.get(0).text() == Some("schema"))
-            .and_then(|row| row.get(1).text().and_then(|v| v.parse().ok()));
+        let meta = db.rows("meta")?;
+        let meta_value = |key: &str| {
+            meta.iter()
+                .find(|row| row.get(0).text() == Some(key))
+                .and_then(|row| row.get(1).text().map(str::to_owned))
+        };
+        let schema = meta_value("schema").and_then(|v| v.parse().ok());
+        let id = meta_value(crate::read::ID_KEY);
         if let Some(found) = schema
             && found != SCHEMA
         {
@@ -120,12 +151,99 @@ impl ProjectFile {
                 Ok((hash, data))
             })
             .collect::<Result<_>>()?;
+        // A file written before parts has no tables for them: no parts.
+        let optional = |name: &str| match db.rows(name) {
+            Ok(rows) => Ok(rows),
+            Err(SqliteError::NoTable(_)) => Ok(Vec::new()),
+            Err(e) => Err(ReadError::File(e)),
+        };
+        let part_snapshots = optional("part_snapshots")?
+            .into_iter()
+            .map(|mut row| {
+                let part = text(row.take(0)).ok_or(ReadError::Column("part_snapshots"))?;
+                let branch = text(row.take(1)).ok_or(ReadError::Column("part_snapshots"))?;
+                let upto = row
+                    .get(2)
+                    .int()
+                    .ok_or(ReadError::Column("part_snapshots"))?;
+                let data = row
+                    .take(4)
+                    .into_bytes()
+                    .ok_or(ReadError::Column("part_snapshots"))?;
+                Ok(((part, branch), (upto, data)))
+            })
+            .collect::<Result<_>>()?;
+        let part_updates = optional("part_updates")?
+            .into_iter()
+            .map(|mut row| {
+                let part = text(row.take(1)).ok_or(ReadError::Column("part_updates"))?;
+                let branch = text(row.take(2)).ok_or(ReadError::Column("part_updates"))?;
+                let data = row
+                    .take(4)
+                    .into_bytes()
+                    .ok_or(ReadError::Column("part_updates"))?;
+                Ok((row.rowid, part, branch, data))
+            })
+            .collect::<Result<_>>()?;
         Ok(Self {
             branches,
             snapshots,
             updates,
             blobs,
+            id,
+            part_snapshots,
+            part_updates,
         })
+    }
+
+    /// The song's id (`meta.id`), when it has one.
+    #[must_use]
+    pub fn song_id(&self) -> Option<&str> {
+        self.id.as_deref()
+    }
+
+    /// Whether `branch` holds anything of part `part`.
+    #[must_use]
+    pub fn has_part(&self, part: &str, branch: &str) -> bool {
+        self.part_snapshots
+            .contains_key(&(part.to_owned(), branch.to_owned()))
+            || self
+                .part_updates
+                .iter()
+                .any(|(_, p, b, _)| p == part && b == branch)
+    }
+
+    /// Part `part` of `branch` (the session's document is [`SESSION`]):
+    /// its snapshot, then every update after it, as
+    /// [`crate::store::Store::load_part`] has it. Empty when it holds
+    /// none.
+    ///
+    /// # Errors
+    /// Its history would not decompress or import.
+    pub fn part(&self, part: &str, branch: &str) -> Result<loro::LoroDoc> {
+        let doc = loro::LoroDoc::new();
+        let upto = match self
+            .part_snapshots
+            .get(&(part.to_owned(), branch.to_owned()))
+        {
+            Some((upto, packed)) => {
+                doc.import(&unpack(packed)?)
+                    .map_err(|e| ReadError::Loro(e.to_string()))?;
+                *upto
+            }
+            None => 0,
+        };
+        let updates = self
+            .part_updates
+            .iter()
+            .filter(|(seq, p, b, _)| p == part && b == branch && *seq > upto)
+            .map(|(_, _, _, packed)| unpack(packed))
+            .collect::<Result<Vec<_>>>()?;
+        if !updates.is_empty() {
+            doc.import_batch(&updates)
+                .map_err(|e| ReadError::Loro(e.to_string()))?;
+        }
+        Ok(doc)
     }
 
     /// `branch`'s doc: its snapshot if it has one, else its parent forked

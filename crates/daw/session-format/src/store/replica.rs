@@ -185,3 +185,86 @@ impl crdt::Persistence for Replica {
         })
     }
 }
+
+/// A song file's parts as a [`crdt::Persistence`]: each part of each
+/// branch a synced doc of its own, named by its doc id
+/// ([`Store::part_id`]; the song's session on `main` is the song's id).
+/// The session primitive's document opens over it
+/// (`session::file::SessionFile::over_persistence`), so its edits are
+/// rows of the song's one file, and what a sync session receives is
+/// appended there too.
+pub struct PartReplica {
+    store: std::sync::Arc<std::sync::Mutex<Store>>,
+}
+
+impl PartReplica {
+    /// The parts of the song file `store` holds open; the store stays
+    /// shared with the rest of what the app does with the file.
+    #[must_use]
+    pub const fn new(store: std::sync::Arc<std::sync::Mutex<Store>>) -> Self {
+        Self { store }
+    }
+
+    fn with<T>(&self, f: impl FnOnce(&Store) -> T) -> T {
+        let store = self
+            .store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        f(&store)
+    }
+
+    fn part(store: &Store, id: Uuid) -> Result<super::PartRef, crdt::PersistError> {
+        store.part_of(id).map_err(backend)?.ok_or_else(|| {
+            crdt::PersistError::Backend(format!("doc {id} is not a part of this song"))
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl crdt::Persistence for PartReplica {
+    async fn load_snapshot(&self, doc_id: Uuid) -> Result<Option<Vec<u8>>, crdt::PersistError> {
+        self.with(|store| {
+            let Some(p) = store.part_of(doc_id).map_err(backend)? else {
+                return Ok(None);
+            };
+            if !store.has_part(&p.part, &p.branch).map_err(backend)? {
+                return Ok(None);
+            }
+            let doc = store.load_part(&p.part, &p.branch).map_err(backend)?;
+            doc.export(loro::ExportMode::Snapshot)
+                .map(Some)
+                .map_err(|e| crdt::PersistError::Backend(e.to_string()))
+        })
+    }
+
+    async fn write_snapshot(&self, doc_id: Uuid, bytes: &[u8]) -> Result<(), crdt::PersistError> {
+        self.compact(doc_id, bytes).await
+    }
+
+    async fn append_update(&self, doc_id: Uuid, bytes: &[u8]) -> Result<(), crdt::PersistError> {
+        self.with(|store| {
+            let p = Self::part(store, doc_id)?;
+            store
+                .append_part_update(&p.part, &p.branch, bytes)
+                .map_err(backend)
+        })
+    }
+
+    async fn load_updates(&self, _doc_id: Uuid) -> Result<Vec<Vec<u8>>, crdt::PersistError> {
+        Ok(Vec::new())
+    }
+
+    async fn compact(&self, doc_id: Uuid, snapshot: &[u8]) -> Result<(), crdt::PersistError> {
+        self.with(|store| {
+            let p = Self::part(store, doc_id)?;
+            // What the file holds and what is handed in, both: a compaction
+            // never drops an update appended since the caller's export.
+            let doc = store.load_part(&p.part, &p.branch).map_err(backend)?;
+            doc.import(snapshot)
+                .map_err(|e| crdt::PersistError::Backend(e.to_string()))?;
+            store
+                .compact_part(&p.part, &p.branch, &doc)
+                .map_err(backend)
+        })
+    }
+}
