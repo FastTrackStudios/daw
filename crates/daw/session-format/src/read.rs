@@ -23,6 +23,21 @@ pub const ID_KEY: &str = "id";
 /// The schema this reader understands (`meta.schema`).
 const SCHEMA: i64 = 1;
 
+/// The song's id (`meta.id`) from a project file's bytes — or only its
+/// first pages: the meta table is near the start of the file, so a reader
+/// scanning many folders need not read whole songs. `None` when the bytes
+/// are not a store, hold no id, or stop before the meta table does.
+#[must_use]
+pub fn song_id(bytes: &[u8]) -> Option<String> {
+    let db = sqlite::Db::new(bytes).ok()?;
+    db.rows("meta")
+        .ok()?
+        .into_iter()
+        .find(|row| row.get(0).text() == Some(ID_KEY))
+        .and_then(|row| row.get(1).text().map(|v| v.trim().to_owned()))
+        .filter(|v| !v.is_empty())
+}
+
 /// Why a project file could not be read.
 #[derive(Debug, thiserror::Error)]
 pub enum ReadError {

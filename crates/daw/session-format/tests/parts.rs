@@ -216,3 +216,34 @@ fn a_file_from_before_parts_reads_with_none() {
         LoroValue::Map(Default::default())
     );
 }
+
+#[test]
+fn the_id_reads_from_the_files_first_pages() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("Song.session");
+    let id = Uuid::new_v4();
+    {
+        let store = Store::open(&path).unwrap();
+        store.set_song_id(id).unwrap();
+        // Enough to push the file well past its first pages: bytes zstd
+        // cannot shrink.
+        let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+        for _ in 0..8 {
+            let blob: Vec<u8> = (0..64 * 1024)
+                .map(|_| {
+                    x ^= x << 13;
+                    x ^= x >> 7;
+                    x ^= x << 17;
+                    x.to_le_bytes()[0]
+                })
+                .collect();
+            store.put_blob("fx", &blob).unwrap();
+        }
+        store.close().unwrap();
+    }
+    let bytes = std::fs::read(&path).unwrap();
+    assert!(bytes.len() > 256 * 1024);
+    let head = &bytes[..64 * 1024];
+    assert_eq!(session_format::read::song_id(head), Some(id.to_string()));
+    assert_eq!(session_format::read::song_id(b"ARCHDOC\0"), None);
+}
