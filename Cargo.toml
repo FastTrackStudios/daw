@@ -93,7 +93,7 @@ unison-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5ba
 # carries.
 anyhow = "1.0"
 arc-swap = "1.7"
-architect = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.12.6" }
+architect = { git = "https://github.com/FastTrackStudios/architect", rev = "eaa969f150b4c558b4722c09e7cf619d9fa4bede" }
 atomic_float = "1.1"
 claxon = "0.4"
 core-foundation = "0.10"
@@ -163,7 +163,7 @@ clack-extensions = { git = "https://github.com/prokopyl/clack", rev = "f874e858a
     "tail",
 ] }
 clack-host = { git = "https://github.com/prokopyl/clack", rev = "f874e858ad576c601367b3038af5088a4e671744" }
-crdt = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.12.6" }
+crdt = { git = "https://github.com/FastTrackStudios/architect", rev = "eaa969f150b4c558b4722c09e7cf619d9fa4bede" }
 criterion = "0.5"
 facet-postcard = { version = "0.50.0-rc.5" }
 gloo-timers = { version = "0.3", features = ["futures"] }
