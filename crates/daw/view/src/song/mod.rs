@@ -106,18 +106,21 @@ pub trait Plans: Send + Sync + 'static {
     fn as_any(&self) -> &dyn std::any::Any;
 }
 
-/// Every row as the project has it, no folder shut: what a view plans
-/// with when the app gave it no [`Plans`] (a test, a bench).
+/// The plan every app starts from, with no layout of its own: the tracks
+/// the track panel shows (a hidden folder hides what it holds), the
+/// window's shut folders ([`crate::folds`]), and a shut folder's children's
+/// items folded onto its row. What a view plans with when the app gave it
+/// no [`Plans`] (a test, a bench).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AsItIs;
 
 impl Plans for AsItIs {
     fn rows(&self, raw: &Project, _scene: Option<&str>) -> (ProjectRef, RowsRef) {
-        (ProjectRef(Arc::new(raw.clone())), self.strips(raw, None))
+        plain(raw)
     }
 
     fn strips(&self, raw: &Project, _scene: Option<&str>) -> RowsRef {
-        RowsRef(Arc::new(depths(&raw.tracks)))
+        RowsRef(Arc::new(crate::folds::apply(visible(&raw.tracks))))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -125,18 +128,46 @@ impl Plans for AsItIs {
     }
 }
 
-/// `tracks` with their folder depths, from each track's change of depth
-/// (`folder_depth`: 1 opens a folder, -n closes n).
-fn depths(tracks: &[Track]) -> Vec<(Track, u32)> {
+/// [`AsItIs`]'s plan of `raw`.
+#[must_use]
+pub fn plain(raw: &Project) -> (ProjectRef, RowsRef) {
+    let mut project = ProjectRef(Arc::new(raw.clone()));
+    let planned = crate::folds::apply(visible(&raw.tracks));
+    let shown: Vec<Track> = planned.iter().map(|(t, _)| t.clone()).collect();
+    let folded = Arc::make_mut(&mut project.0);
+    folded::refold_lanes(
+        folded,
+        &shown,
+        crate::settings::Settings::default().folded_takes,
+        &|tracks, folder| crate::lanes::folder_view(tracks, folder).is_some(),
+    );
+    if !crate::folds::cuts_shown() {
+        folded::join_seams(folded);
+    }
+    (project, RowsRef(Arc::new(planned)))
+}
+
+/// The tracks the track panel shows, with their folder depths: a track
+/// hidden from it is left out, and a hidden folder hides what it holds.
+#[must_use]
+pub fn visible(tracks: &[Track]) -> Vec<(Track, u32)> {
+    let mut out = Vec::new();
     let mut depth = 0_u32;
-    tracks
-        .iter()
-        .map(|track| {
-            let here = depth;
-            depth = depth.saturating_add_signed(track.folder_depth);
-            (track.clone(), here)
-        })
-        .collect()
+    let mut hidden_below: Option<u32> = None;
+    for track in tracks {
+        if hidden_below.is_some_and(|parent| depth <= parent) {
+            hidden_below = None;
+        }
+        if hidden_below.is_none() {
+            if track.visible_in_tcp {
+                out.push((track.clone(), depth));
+            } else if track.folder_depth > 0 {
+                hidden_below = Some(depth);
+            }
+        }
+        depth = depth.saturating_add_signed(track.folder_depth);
+    }
+    out
 }
 
 /// The row plan's inputs: the project as the engine had it (before the
@@ -473,19 +504,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_folder_s_children_sit_one_deeper() {
-        let track = |name: &str, change: i32| Track {
+    fn a_folder_s_children_sit_one_deeper_and_a_hidden_one_hides_them() {
+        let track = |name: &str, change: i32, shown: bool| Track {
             name: name.to_owned(),
             folder_depth: change,
+            visible_in_tcp: shown,
             ..Track::default()
         };
-        let rows = depths(&[
-            track("Drums", 1),
-            track("Kick", 0),
-            track("Snare", -1),
-            track("Bass", 0),
+        let rows = visible(&[
+            track("Drums", 1, true),
+            track("Kick", 0, true),
+            track("Snare", -1, true),
+            track("Bus", 1, false),
+            track("Hidden", -1, true),
+            track("Bass", 0, true),
         ]);
-        let got: Vec<u32> = rows.iter().map(|(_, d)| *d).collect();
-        assert_eq!(got, [0, 1, 1, 0]);
+        let got: Vec<(&str, u32)> = rows.iter().map(|(t, d)| (t.name.as_str(), *d)).collect();
+        assert_eq!(got, [("Drums", 0), ("Kick", 1), ("Snare", 1), ("Bass", 0)]);
     }
 }
