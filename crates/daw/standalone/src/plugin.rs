@@ -479,6 +479,10 @@ pub struct LoadOptions {
     /// `com.fasttrackstudio.host-actions/1` (signal#26).
     #[cfg(feature = "clap-host")]
     pub actions: Option<std::sync::Arc<dyn daw_clap_ext::host::HostActions>>,
+    /// The host's automation, offered to a CLAP as
+    /// `com.fasttrackstudio.host-automation/1`: its own parameters' lanes.
+    #[cfg(feature = "clap-host")]
+    pub automation: Option<std::sync::Arc<dyn daw_clap_ext::automation::HostAutomation>>,
 }
 
 /// [`load_plugin`], offering the plugin what `options` holds.
@@ -504,6 +508,9 @@ fn load_clap(
     let mut host = ClapHost::default();
     if let Some(actions) = &options.actions {
         host = host.with_actions(actions.clone());
+    }
+    if let Some(automation) = &options.automation {
+        host = host.with_automation(automation.clone());
     }
     let plugin = host
         .load(Path::new(path), 0)
