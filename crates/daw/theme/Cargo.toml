@@ -1,0 +1,19 @@
+[package]
+name = "daw-theme"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "The theme spec of a DAW's views: tokens, parts and fields; a pack's loader, installs from a link, validation, fallbacks and live reload"
+
+[dependencies]
+# The documents a pack is made of, compiled against the spec's fields.
+frame = { workspace = true, features = ["theme"] }
+# A pack's manifest (pack.styx) and the host's library (JSON).
+facet = { workspace = true }
+facet-styx = { workspace = true }
+facet-json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

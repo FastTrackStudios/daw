@@ -21,6 +21,7 @@ being split out of it (studio#510), take them from here by git.
 | `midi` | `features/midi` | MIDI events, the byte codec, each platform's input behind a feature |
 | `audio` | `features/audio` | Audio devices, sample IO, the core audio types |
 | `fts-sample` | `features/audio/sample` | Sample loading, the pack engine |
+| `daw-theme` | `crates/daw/theme` | The theme spec of the views (tokens, parts, fields, versioned) and theme packs: loading one from a folder or a GitHub link pinned by commit, checking it against the spec, fallbacks, live reload |
 
 ## The engine
 
