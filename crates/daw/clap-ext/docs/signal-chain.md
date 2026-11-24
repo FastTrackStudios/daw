@@ -7,11 +7,15 @@ works the same in Studio, REAPER or Bitwig.
 
 `revision()` (thread-safe) increases on every change to anything below
 except `value`/`normalized`/`text` (those are CLAP parameter values, read
-and set through the ordinary params extension and its rescan). A host
-polls `revision()` (cheap) and re-reads `chain()` when it moves. When the
-blocks or their parameters change, the plugin also calls the host's
-`clap_host_params.rescan(CLAP_PARAM_RESCAN_INFO | CLAP_PARAM_RESCAN_TEXT)`,
-and a host that implements `host-actions/1` gets a `chain` event too.
+and set through the ordinary params extension and its rescan), and on
+every state load. A host polls `revision()` (cheap) and re-reads `chain()`
+when it moves. When the blocks or their parameters change, the plugin also
+calls the host's `clap_host_params.rescan(CLAP_PARAM_RESCAN_INFO |
+CLAP_PARAM_RESCAN_TEXT)`, and, when the host offers `host-actions/1`, runs
+its action `SIGNAL_CHAIN_CHANGED {"port": <port or null>, "revision": n}`
+(host-actions/1 has no plugin-to-host event channel; an action is the
+event; a host without the action answers an error, which the plugin
+ignores).
 
 ```jsonc
 {
@@ -31,7 +35,7 @@ and a host that implements `host-actions/1` gets a `chain` event too.
       "makeup_db": 1.7,                  // the phase's gain-neutral make-up
       "blocks": [
         {
-          "id": "rescue.gate",           // stable across sessions and rebuilds
+          "id": "rescue.gate",           // `<phase>.<block id>`: stable across sessions and rebuilds; a move to another phase changes the prefix
           "kind": "gate",                // eq | comp | gate | saturate | reverb | delay | nam | sampler | trigger | clap | …
           "name": "Gate",
           "bypass": false,
@@ -52,12 +56,30 @@ and a host that implements `host-actions/1` gets a `chain` event too.
             { "id": "gain_reduction", "name": "GR", "unit": "dB", "index": 3 }
           ]
         }
+      ],
+      "meters": [                        // the phase's output, dB, K-weighted over the last block
+        { "id": "level", "name": "Rescue level", "unit": "dB", "index": 7 }
       ]
     }
   ],
   "macros": [ { "id": "macro_1", "name": "Punch", "clap_id": "macro_1", "targets": ["tone.comp.ratio"] } ]
 }
 ```
+
+- **Phases** are the mix method's, in order: `rescue`, `tone`, `polish`,
+  `relational`, `depth`, `creative` (Studio's `MixPhase` slugs; Balance
+  is the faders and has no blocks). A block outside them, one that makes
+  sound rather than processing it (a sampler on a Sample track), is in a
+  phase `{"id": "source", "name": "Source"}`, first; its `bypass` and
+  `makeup_db` are always `false` and `0`.
+- **`key.via`**: `hits`, a trigger's detected hits; `midi`, hit notes (a
+  piece with notes ignores its trigger's detection while the notes come);
+  `self`, no hit for ten seconds, so a gate keys from its own input.
+- **A meter's `index`** is its position in `mod_source_count`/
+  `mod_source_info`: blocks' sources and phases' levels share one list.
+- **The kit mode** (one instance running several lanes) has `"phases": []`
+  and `"lanes": [{"lane": "<path>", "phases": [...]}, ...]`, each lane a
+  strip.
 
 ## Editing from a view
 
@@ -70,7 +92,25 @@ and a host that implements `host-actions/1` gets a `chain` event too.
   - `SIGNAL_BLOCK_ADD {"phase": "tone", "kind": "eq", "after": "tone.comp"}`
   - `SIGNAL_BLOCK_REMOVE {"block": "tone.eq"}`, `SIGNAL_BLOCK_MOVE {"block": …, "phase": …, "after": …}`
   Each answers the new `signal.chain/1` and bumps `revision`.
+- `SIGNAL_CHAIN {}` answers the chain (as `chain()`); `SIGNAL_ALGORITHMS
+  {"kind": "eq"}` a family's algorithms, `[{"id", "name"}]`, for
+  `SIGNAL_SET {"block", "algorithm"}` and `SIGNAL_BLOCK_ADD`'s
+  `"algorithm"`.
 - **The whole kit** (a Signal editor showing every port of the session):
   `run_action("SIGNAL_SESSION", {})` answers
   `{"session": …, "ports": [<signal.chain/1>, …]}`, every instance in the
   process that shares this one's session.
+
+## What Signal subscribes to (`host-actions/1`)
+
+When the host offers `host-actions/1`, a Signal instance reads its files
+through `load_file` (the disk when the host doesn't resolve one) and
+subscribes to:
+
+- `transport`: `{"playing": bool, "frame": <song position, samples>}`, the
+  clock its hits are stamped with when the plugin API gives no transport;
+- `hits:<piece>` for each piece a block of it is keyed to, `<piece>` the
+  piece's track path in the kit (`Drums/Kick`, `Drums/Toms/Tom 1`): each
+  hit `{"frame": <song position>, "velocity": 0-1}`, the host's hit
+  markers, published to the session as notes (they key gates as MIDI
+  does).
