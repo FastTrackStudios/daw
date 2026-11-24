@@ -17,12 +17,19 @@
 //!   and how sure, the hits that are no hit of their own, the hits that
 //!   ride another, and the few a person should look at.
 //!
+//! Beside the methods, what every edit and view shares: [`scope`], what an
+//! edit acts on (tracks and stretches of time, and the profile they are
+//! edited with), and [`drums`], how a kit's tracks are read (the role
+//! each mic plays).
+//!
 //! A provider names its action for a method `<PREFIX>_<METHOD>` (Architect
 //! services: an extension whose actions are `RHYTHM_*` answers `PLACE` as
 //! `RHYTHM_PLACE`).
 
+pub mod drums;
 pub mod placement;
 pub mod plan;
+pub mod scope;
 
 use serde::{Deserialize, Serialize};
 

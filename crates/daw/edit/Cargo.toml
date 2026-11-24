@@ -3,10 +3,13 @@ name = "daw-edit"
 version = "0.3.2"
 edition = "2024"
 license.workspace = true
-description = "The DAW's editing contract: how an edit algorithm (hit placement, …) is asked and what it answers, and the built-in algorithms"
+description = "The DAW's editing contract: how an edit algorithm (hit placement, …) is asked and what it answers, what an edit acts on (its scope), and how a kit's tracks are read (the drum roles)"
 
 [dependencies]
 serde = { workspace = true }
+# The selection scope (`scope`) is on the wire between a view and its
+# engine as Facet.
+facet = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
