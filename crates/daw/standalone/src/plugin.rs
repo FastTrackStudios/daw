@@ -286,6 +286,20 @@ pub trait PluginInstance: Send {
     /// and then.
     fn pump_main_thread(&mut self) {}
 
+    /// Whether the plugin asked for [`pump_main_thread`](Self::pump_main_thread)
+    /// since it last ran (a CLAP's `request_callback`). `false` from a
+    /// backend that never asks.
+    fn wants_main_thread(&self) -> bool {
+        false
+    }
+
+    /// Where the host delivers the events this plugin subscribed to
+    /// (`com.fasttrackstudio.host-events/1`), if it has it. Main thread.
+    #[cfg(feature = "clap-host")]
+    fn event_sink(&self) -> Option<daw_clap_ext::host::EventSink> {
+        None
+    }
+
     /// Increases each time the plugin renames or re-describes its
     /// parameters (a CLAP's rescan of info or text): re-read
     /// [`params`](Self::params) when it moves. 0 from a backend that never
@@ -727,7 +741,15 @@ impl PluginCell {
 /// holds the map for writing moves them in and out as before plugins had
 /// cells of their own.
 #[derive(Default)]
-pub struct PluginMap(std::collections::HashMap<String, PluginCell>);
+pub struct PluginMap {
+    plugins: std::collections::HashMap<String, PluginCell>,
+    /// Bumped on every change that may put another instance under a guid
+    /// (an insert, a removal, a plugin reached mutably): a holder of the
+    /// map for reading who kept something from an instance (a CLAP
+    /// extension's client) knows it still points at a live plugin while
+    /// this has not moved.
+    generation: u64,
+}
 
 impl PluginMap {
     /// Put `plugin` under `fx_guid`; the one it replaces, if any.
@@ -736,38 +758,53 @@ impl PluginMap {
         fx_guid: String,
         plugin: Box<dyn PluginInstance>,
     ) -> Option<Box<dyn PluginInstance>> {
-        self.0
+        self.generation = self.generation.wrapping_add(1);
+        self.plugins
             .insert(fx_guid, PluginCell::new(plugin))
             .map(PluginCell::into_inner)
     }
 
     pub fn remove(&mut self, fx_guid: &str) -> Option<Box<dyn PluginInstance>> {
-        self.0.remove(fx_guid).map(PluginCell::into_inner)
+        self.generation = self.generation.wrapping_add(1);
+        self.plugins.remove(fx_guid).map(PluginCell::into_inner)
     }
 
     pub fn get_mut(&mut self, fx_guid: &str) -> Option<&mut Box<dyn PluginInstance>> {
-        self.0.get_mut(fx_guid).map(PluginCell::get_mut)
+        self.generation = self.generation.wrapping_add(1);
+        self.plugins.get_mut(fx_guid).map(PluginCell::get_mut)
     }
 
     /// The cell under `fx_guid`, for a holder of the map for reading.
     #[must_use]
     pub fn cell(&self, fx_guid: &str) -> Option<&PluginCell> {
-        self.0.get(fx_guid)
+        self.plugins.get(fx_guid)
     }
 
     #[must_use]
     pub fn contains_key(&self, fx_guid: &str) -> bool {
-        self.0.contains_key(fx_guid)
+        self.plugins.contains_key(fx_guid)
+    }
+
+    /// See [`PluginMap::generation`]'s field: moves whenever an instance
+    /// under a guid may have been replaced or dropped.
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Every FX guid with a loaded plugin.
+    pub fn guids(&self) -> impl Iterator<Item = &str> {
+        self.plugins.keys().map(String::as_str)
     }
 
     #[must_use]
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.plugins.len()
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.plugins.is_empty()
     }
 }
 
@@ -911,6 +948,28 @@ mod plugins_tests {
                 .and_then(|c| c.try_lock_spinning(1))
                 .is_none()
         );
+    }
+
+    /// The generation moves on whatever may put another plugin under a
+    /// guid, and stays put while the map is only read and run.
+    #[test]
+    fn the_generation_moves_when_an_instance_may_change() {
+        let plugins = Plugins::default();
+        let at = |p: &Plugins| p.read().generation();
+        let start = at(&plugins);
+        plugins.write().insert("a".into(), Box::new(Probe(0)));
+        let inserted = at(&plugins);
+        assert_ne!(inserted, start);
+        plugins.with("a", |p| {
+            let _ = p.process_block(&[], &[], &mut [], &mut [], &PluginEvents::EMPTY);
+        });
+        assert_eq!(at(&plugins), inserted, "running a plugin changes nothing");
+        assert_eq!(plugins.read().guids().collect::<Vec<_>>(), ["a"]);
+        let _ = plugins.write().get_mut("a");
+        let reached = at(&plugins);
+        assert_ne!(reached, inserted, "a plugin reached mutably may be swapped");
+        let _ = plugins.write().remove("a");
+        assert_ne!(at(&plugins), reached);
     }
 
     /// A plugin run through its cell and taken back out is the same one.

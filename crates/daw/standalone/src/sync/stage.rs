@@ -33,6 +33,7 @@ impl Standalone {
             plugin_instances: Arc::clone(&self.plugin_instances),
             loaded_plugins: Arc::clone(&self.loaded_plugins),
             fx_factory: Arc::clone(&self.fx_factory),
+            load_options: Arc::clone(&self.load_options),
             bay_resolver: Arc::clone(&self.bay_resolver),
             track_events: self.track_events.clone(),
             marker_events: self.marker_events.clone(),

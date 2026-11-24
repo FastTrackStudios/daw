@@ -128,6 +128,10 @@ mod window_manager;
 
 // All per-service impls are on `Standalone` directly post-port.
 // Old `Standalone*` per-service structs retired.
+/// FastTrackStudio's CLAP extensions (`host-actions/1`, `signal/1`), as the
+/// engine hosts them: what an embedder implements and calls.
+#[cfg(feature = "clap-host")]
+pub use daw_clap_ext as clap_ext;
 pub use project::project_guids;
 pub use shared_state::SharedProjectState;
 pub use sync::{ItemChanges, Stage, Standalone};

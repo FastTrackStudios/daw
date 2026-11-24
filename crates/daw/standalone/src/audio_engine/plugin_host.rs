@@ -127,6 +127,10 @@ struct DawHostShared {
     /// `com.fasttrackstudio.host-actions/1` (signal#26). `None`: the
     /// extension isn't offered.
     actions: Option<Arc<dyn daw_clap_ext::host::HostActions>>,
+    /// The plugin this host serves, once its instance is made: where a
+    /// subscription's events go. Null while the plugin initializes, so a
+    /// subscription asked for inside `init` is refused.
+    plugin: Arc<std::sync::atomic::AtomicPtr<clap_sys::plugin::clap_plugin>>,
 }
 
 /// `com.fasttrackstudio.host-actions/1`, offered by this host when its
@@ -160,6 +164,20 @@ impl daw_clap_ext::host::HostActionsLookup for DawActionsLookup {
             })
         }
         .flatten()
+    }
+
+    unsafe fn event_sink(
+        host: *const clap_sys::host::clap_host,
+    ) -> Option<daw_clap_ext::host::EventSink> {
+        // SAFETY: as `lookup`.
+        let plugin = unsafe {
+            clack_host::extensions::wrapper::HostWrapper::<DawHost>::handle(host, |h| {
+                Ok(h.shared().plugin.load(Ordering::Acquire))
+            })
+        }?;
+        // SAFETY: the instance's own plugin, initialized (it was stored
+        // after `init`), on the main thread the plugin called from.
+        unsafe { daw_clap_ext::host::EventSink::query(plugin) }
     }
 }
 
@@ -477,7 +495,9 @@ impl ClapHost {
             restart: restart.clone(),
             notices: notices.clone(),
             actions: self.actions.clone(),
+            plugin: Arc::default(),
         };
+        let plugin_slot = shared.plugin.clone();
         let main_notices = notices.clone();
         let instance = PluginInstance::<DawHost>::new(
             |_| shared.clone(),
@@ -493,6 +513,7 @@ impl ClapHost {
         let raw: *const clap_sys::plugin::clap_plugin = instance.raw_instance();
         // SAFETY: the instance's own plugin, on the thread that made it.
         let signal = unsafe { daw_clap_ext::host::SignalPluginClient::query(raw) };
+        plugin_slot.store(raw.cast_mut(), Ordering::Release);
 
         Ok(LoadedClapPlugin {
             instance,
@@ -1058,6 +1079,14 @@ impl LoadedClapPlugin {
     /// [`pump_main_thread`](Self::pump_main_thread).
     pub fn wants_main_thread(&self) -> bool {
         self.notices.callback.load(Ordering::Acquire)
+    }
+
+    /// The plugin's `com.fasttrackstudio.host-events/1`: where the events
+    /// it subscribed to are delivered. Main thread.
+    pub fn event_sink(&self) -> Option<daw_clap_ext::host::EventSink> {
+        let raw: *const clap_sys::plugin::clap_plugin = self.instance.raw_instance();
+        // SAFETY: this instance's own plugin, alive while `self` is.
+        unsafe { daw_clap_ext::host::EventSink::query(raw) }
     }
 
     /// Main-thread `clap_plugin_params.flush` for GUI-only hosts (plugin
@@ -1835,6 +1864,12 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
     }
     fn param_info_revision(&self) -> u64 {
         LoadedClapPlugin::param_info_revision(self)
+    }
+    fn wants_main_thread(&self) -> bool {
+        LoadedClapPlugin::wants_main_thread(self)
+    }
+    fn event_sink(&self) -> Option<daw_clap_ext::host::EventSink> {
+        LoadedClapPlugin::event_sink(self)
     }
     fn prepare(&mut self, sr: f64, bs: u32) -> Result<(), crate::plugin::PluginError> {
         LoadedClapPlugin::prepare(self, sr, bs).map_err(map_err)

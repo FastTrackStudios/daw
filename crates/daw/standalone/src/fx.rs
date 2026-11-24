@@ -136,7 +136,10 @@ pub(crate) fn instantiate(
     daw: &Standalone,
     name: &str,
 ) -> Option<Box<dyn crate::plugin::PluginInstance>> {
-    if let Some(p) = crate::plugin::load_plugin(name).ok().flatten() {
+    if let Some(p) = crate::plugin::load_plugin_with(name, &daw.plugin_load_options())
+        .ok()
+        .flatten()
+    {
         return Some(p);
     }
     // Instances are re-`prepare`d at the stream's real rate by the

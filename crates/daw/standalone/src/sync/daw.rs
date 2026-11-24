@@ -884,6 +884,10 @@ pub struct Standalone {
     /// the app installs one (`set_fx_factory`) — built-in names then
     /// fall back to synthetic no-DSP entries, as before.
     pub(crate) fx_factory: Arc<Mutex<Option<Arc<dyn crate::plugin::FxFactory>>>>,
+    /// What every plugin this engine loads is offered
+    /// ([`Standalone::set_plugin_load_options`]): the embedder's actions,
+    /// as a CLAP's `com.fasttrackstudio.host-actions/1`.
+    pub(crate) load_options: Arc<Mutex<crate::plugin::LoadOptions>>,
     /// Track-domain stream hub. Mutating `Tracks` methods publish
     /// here; the architect stream layer attaches every subscriber
     /// sink (`TracksStreamSource`).
@@ -987,6 +991,7 @@ impl Standalone {
             plugin_instances: Arc::new(crate::plugin::Plugins::default()),
             loaded_plugins: Arc::new(Mutex::new(std::collections::HashMap::new())),
             fx_factory: Arc::new(Mutex::new(None)),
+            load_options: Arc::new(Mutex::new(crate::plugin::LoadOptions::default())),
             track_events: architect::PubSub::sliding(1024),
             marker_events: architect::PubSub::sliding(1024),
             region_events: architect::PubSub::sliding(1024),
@@ -1515,6 +1520,38 @@ impl Standalone {
             .fx_factory
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(factory);
+    }
+
+    /// What every plugin this engine loads from now on is offered (the
+    /// embedder's actions, to a CLAP). Set it before the first song opens:
+    /// a plugin already loaded keeps what it was offered.
+    pub fn set_plugin_load_options(&self, options: crate::plugin::LoadOptions) {
+        *self
+            .load_options
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = options;
+    }
+
+    /// What a plugin this engine loads is offered: pass it to
+    /// [`crate::plugin::load_plugin_with`] when loading one by hand (a
+    /// rebuilt bundle swapped in).
+    #[must_use]
+    pub fn plugin_load_options(&self) -> crate::plugin::LoadOptions {
+        self.load_options
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Read the loaded plugins as a whole, without taking any plugin's own
+    /// lock: their guids, and the map's generation
+    /// ([`crate::plugin::PluginMap::generation`]). While `f` runs no
+    /// instance is replaced or dropped, so a client kept from one (a CLAP
+    /// extension's) may be called if the generation has not moved — the
+    /// way to read a plugin's thread-safe values (meters) beside a render.
+    /// Keep `f` short: a structural change waits for it.
+    pub fn with_plugin_map<R>(&self, f: impl FnOnce(&crate::plugin::PluginMap) -> R) -> R {
+        f(&self.plugin_instances.read())
     }
 
     /// The installed built-in FX factory, if any.
