@@ -456,10 +456,9 @@ impl IEventListTrait for HostEventList {
 // the current block. The plugin walks the changes at process() time
 // and applies sample-accurate ramps internally.
 //
-// Our host build accepts (param_id, plain_value) pairs at sample 0
-// from the renderer and emits one point per parameter. Multi-point
-// automation is a thin extension of this code (push more points into
-// the queue from per-sample envelope evaluation).
+// The renderer's automation arrives as points at their frames
+// (`process_block_timed`), each parameter's into its own queue; a plain
+// `process_block` puts one point per parameter at sample 0.
 
 struct HostParamValueQueue {
     id: RefCell<ParamID>,
@@ -471,7 +470,9 @@ impl HostParamValueQueue {
     fn new() -> Self {
         Self {
             id: RefCell::new(0),
-            points: RefCell::new(Vec::with_capacity(4)),
+            // Room for a lane moving through a whole block (one point per
+            // 32 frames of 4096) before it grows.
+            points: RefCell::new(Vec::with_capacity(160)),
         }
     }
 
@@ -559,24 +560,30 @@ impl HostParameterChanges {
         *self.used.borrow_mut() = 0;
     }
 
-    /// Append a `(param_id, normalized_value)` change at sample 0.
-    fn push_point(&self, id: ParamID, normalized_value: ParamValue) {
+    /// Add a `(param_id, normalized_value)` change at `sample_offset`, to
+    /// the parameter's queue this block (made on its first change).
+    fn push_point(&self, id: ParamID, sample_offset: int32, normalized_value: ParamValue) {
         let mut used = self.used.borrow_mut();
         let mut queues = self.queues.borrow_mut();
-        // Reuse an existing queue (next slot) or grow.
-        if *used >= queues.len() {
-            queues.push(ComWrapper::new(HostParamValueQueue::new()));
-        }
-        let q = &queues[*used];
-        q.reset(id);
+        let slot = match queues[..*used].iter().position(|q| *q.id.borrow() == id) {
+            Some(slot) => slot,
+            None => {
+                // Reuse an existing queue (next slot) or grow.
+                if *used >= queues.len() {
+                    queues.push(ComWrapper::new(HostParamValueQueue::new()));
+                }
+                queues[*used].reset(id);
+                *used += 1;
+                *used - 1
+            }
+        };
         // SAFETY: COM call into our own implementation; the queue
         // lives as long as `queues` does.
         unsafe {
             // ignore return; addPoint never fails in our impl
             let mut _index: int32 = 0;
-            let _ = (**q).addPoint(0, normalized_value, &mut _index);
+            let _ = (*queues[slot]).addPoint(sample_offset, normalized_value, &mut _index);
         }
-        *used += 1;
     }
 }
 
@@ -1125,8 +1132,8 @@ impl LoadedVst3Plugin {
 
     /// Process one block of stereo audio. `events.midi` is delivered
     /// to the plugin via a host-implemented `IEventList` (required
-    /// for VST3i instrument plugins to make sound). `events.params`
-    /// is not yet plumbed — `IParameterChanges` lands in a follow-up.
+    /// for VST3i instrument plugins to make sound); `events.params` go
+    /// through `IParameterChanges`, each at sample 0.
     pub fn process_block(
         &mut self,
         in_l: &[f32],
@@ -1135,6 +1142,65 @@ impl LoadedVst3Plugin {
         out_r: &mut [f32],
         events: &PluginEvents<'_>,
     ) -> Result<(), Vst3HostError> {
+        let params =
+            events
+                .params
+                .iter()
+                .map(|&(param_id, value)| crate::plugin::PluginParamEvent {
+                    offset: 0,
+                    param_id,
+                    kind: crate::plugin::PluginParamEventKind::Value(value),
+                });
+        self.process_events(
+            in_l,
+            in_r,
+            out_l,
+            out_r,
+            params,
+            events.midi,
+            events.note_expressions,
+        )
+    }
+
+    /// [`process_block`](Self::process_block) with each parameter change
+    /// at its frame: a point in its `IParamValueQueue` at that sample
+    /// offset. VST3 has no modulation event, so a `Mod` is not sent.
+    pub fn process_block_timed(
+        &mut self,
+        in_l: &[f32],
+        in_r: &[f32],
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        events: &crate::plugin::TimedPluginEvents<'_>,
+    ) -> Result<(), Vst3HostError> {
+        let params = events.params.iter().copied();
+        self.process_events(
+            in_l,
+            in_r,
+            out_l,
+            out_r,
+            params,
+            events.midi,
+            events.note_expressions,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)] // the four buffers, then the three event lists
+    fn process_events(
+        &mut self,
+        in_l: &[f32],
+        in_r: &[f32],
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        params: impl Iterator<Item = crate::plugin::PluginParamEvent>,
+        midi: &[crate::plugin::PluginMidiEvent],
+        note_expressions: &[crate::plugin::PluginNoteExpression],
+    ) -> Result<(), Vst3HostError> {
+        let events = PluginEvents {
+            params: &[],
+            midi,
+            note_expressions,
+        };
         let Some(act) = self.activation.as_mut() else {
             return Err(Vst3HostError::NotActivated);
         };
@@ -1210,9 +1276,13 @@ impl LoadedVst3Plugin {
         // — the canonical pattern is documented in the VST3 SDK.
         act.param_changes_owner.reset();
         if let Some(c) = self.controller.as_ref() {
-            for &(id, plain) in events.params {
-                let normalized = unsafe { c.ptr.plainParamToNormalized(id, plain) };
-                act.param_changes_owner.push_point(id, normalized);
+            for p in params {
+                let crate::plugin::PluginParamEventKind::Value(plain) = p.kind else {
+                    continue;
+                };
+                let normalized = unsafe { c.ptr.plainParamToNormalized(p.param_id, plain) };
+                act.param_changes_owner
+                    .push_point(p.param_id, p.offset as int32, normalized);
             }
             if let Some(mm) = c.midi_mapping.as_ref() {
                 for ev in events.midi {
@@ -1229,7 +1299,11 @@ impl LoadedVst3Plugin {
                             )
                         };
                         if res == kResultOk || res == kResultTrue {
-                            act.param_changes_owner.push_point(param_id, normalized);
+                            act.param_changes_owner.push_point(
+                                param_id,
+                                ev.offset as int32,
+                                normalized,
+                            );
                         }
                     }
                 }
@@ -1697,6 +1771,19 @@ impl crate::plugin::PluginInstance for SendableVst3Plugin {
         ev: &crate::plugin::PluginEvents<'_>,
     ) -> Result<(), crate::plugin::PluginError> {
         LoadedVst3Plugin::process_block(self, il, ir, ol, or, ev).map_err(map_err)
+    }
+    fn takes_timed_params(&self) -> bool {
+        true
+    }
+    fn process_block_timed(
+        &mut self,
+        il: &[f32],
+        ir: &[f32],
+        ol: &mut [f32],
+        or: &mut [f32],
+        events: &crate::plugin::TimedPluginEvents<'_>,
+    ) -> Result<(), crate::plugin::PluginError> {
+        LoadedVst3Plugin::process_block_timed(self, il, ir, ol, or, events).map_err(map_err)
     }
     fn deactivate(&mut self) {
         LoadedVst3Plugin::deactivate(self)
