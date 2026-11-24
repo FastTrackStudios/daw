@@ -141,3 +141,9 @@ every Signal build sends it.
    it fell back, `"fallback": "no hits for 10 s"` (a short reason).
 6. **Host side (Studio's `FX_SET`)**: a parameter is named by its CLAP id as
    `"@<clap_id>"` (`"@b014"`), as well as by name or `#index`.
+7. **`clap_id` is the CLAP parameter id** (`clap_param_info.id`, a
+   `uint32`) written as a decimal string (`"1407"`), exactly what the
+   host's params extension reports, never a nice-plug string id or a slot
+   label. Studio's `FX_SET "@1407"` matches it first. (A slot label such as
+   `b014` is the parameter's `id` field's business, not `clap_id`'s: a label
+   of hex digits would read as a number.)
