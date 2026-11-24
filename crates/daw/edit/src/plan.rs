@@ -151,6 +151,10 @@ pub struct Settings {
     pub lock_runs: bool,
     #[serde(default)]
     pub prefer: Prefer,
+    /// Fills with no grid of their own are planned like the groove
+    /// (straight or triplet per beat) instead of left as played.
+    #[serde(default)]
+    pub plan_fills: bool,
 }
 
 const fn yes() -> bool {
@@ -164,6 +168,7 @@ impl Default for Settings {
             anchors: Vec::new(),
             lock_runs: true,
             prefer: Prefer::Midi,
+            plan_fills: false,
         }
     }
 }
