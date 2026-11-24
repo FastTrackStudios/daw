@@ -96,6 +96,15 @@ impl RenderSnapshot {
         Self::build_adjusted(p, played_live, None)
     }
 
+    /// The realtime render's snapshot: [`build_hinted`](Self::build_hinted)
+    /// with the tracks whose MIDI a plugin claimed marked so.
+    pub(crate) fn build_live(p: &ProjectState, hints: &LiveHints) -> Arc<Self> {
+        let claim = |t: &mut TrackSnapshot| {
+            t.midi_claimed = hints.midi_claimed.iter().any(|g| *g == t.guid);
+        };
+        Self::build_adjusted(p, &hints.played_live, Some(&claim))
+    }
+
     /// [`build_hinted`](Self::build_hinted), each track's snapshot changed
     /// by `adjust` before anything is worked out from them (the order, the
     /// solo mask): an offline render's own solos and bypasses, the song
@@ -177,8 +186,21 @@ impl RenderSnapshot {
     }
 }
 
+/// What the realtime render knows beside the project: the tracks played
+/// live lately, and the tracks whose MIDI a plugin claimed
+/// ([`Standalone::live_hints`](crate::Standalone::live_hints)).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct LiveHints {
+    pub(crate) played_live: Vec<String>,
+    pub(crate) midi_claimed: Vec<String>,
+}
+
 /// Snapshot of routing-relevant track data.
 pub(crate) struct TrackSnapshot {
+    /// A plugin on the track plays its MIDI from the track's timeline
+    /// (`host-timeline/1`'s playback claim): the items' notes and
+    /// controllers are not delivered as events, only live MIDI is.
+    pub(crate) midi_claimed: bool,
     /// Project track guid. Carried so the live-MIDI drain can resolve a
     /// programmatic event's target track guid → snapshot index.
     pub(crate) guid: String,
@@ -432,6 +454,13 @@ impl TempoMap {
             });
         }
         Self { segments }
+    }
+
+    /// Its segments, in order: `(start_seconds, start_beat, bpm)`.
+    pub(crate) fn segments(&self) -> impl Iterator<Item = (f64, f64, f64)> + '_ {
+        self.segments
+            .iter()
+            .map(|s| (s.start_seconds, s.start_beat, s.bpm))
     }
 
     /// Its segments, into a fingerprint.
@@ -911,6 +940,7 @@ fn snapshot_track(
 
     let aux_taps = sends.iter().any(|s| s.from_pair > 0);
     TrackSnapshot {
+        midi_claimed: false,
         guid: t.guid.clone(),
         name: t.name.clone(),
         volume: t.volume,

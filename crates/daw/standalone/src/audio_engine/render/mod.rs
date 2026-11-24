@@ -53,6 +53,26 @@ use midi::{collect_midi_events_into, collect_note_expressions};
 use parallel::{LaneJob, PluginPtr};
 pub use part::Feed;
 pub(crate) use part::Part;
+pub(crate) use snapshot::{LiveHints, TempoMap};
+
+/// Test seam: the realtime render's snapshot, built as it builds it.
+#[cfg(all(test, feature = "clap-host"))]
+pub(crate) use snapshot::RenderSnapshot as RenderSnapshotFor;
+
+/// Test seam: the item MIDI the render hands snapshot track `ti`'s chain
+/// for `[start, end)` seconds.
+#[cfg(all(test, feature = "clap-host"))]
+pub(crate) fn collect_track_midi(
+    out: &mut Vec<crate::plugin::PluginMidiEvent>,
+    snap: &RenderSnapshot,
+    ti: usize,
+    start: f64,
+    end: f64,
+    frames_per_second: f64,
+) {
+    let frames = ((end - start) * frames_per_second) as usize;
+    collect_midi_events_into(out, &snap.tracks[ti], start, end, frames_per_second, frames);
+}
 use snapshot::{RenderSnapshot, TrackSnapshot};
 
 use crate::sync::Standalone;
@@ -937,9 +957,9 @@ impl ProjectRenderer {
                         if w.swap(NO_REVISION, Ordering::AcqRel) == NO_REVISION {
                             continue;
                         }
-                        let played = daw.played_live();
+                        let hints = daw.live_hints();
                         let built = daw.read_project(&guid, |p| {
-                            (p.revision, RenderSnapshot::build_hinted(p, &played))
+                            (p.revision, RenderSnapshot::build_live(p, &hints))
                         });
                         if let Some(built) = built {
                             // The one it replaces is dropped here, on this
@@ -1000,9 +1020,9 @@ impl ProjectRenderer {
             }
             (None, _) => {
                 // Nothing to play yet: the first snapshot is built here.
-                let played = self.daw.played_live();
+                let hints = self.daw.live_hints();
                 let built = self.daw.read_project(&self.project_guid, |p| {
-                    (p.revision, RenderSnapshot::build_hinted(p, &played))
+                    (p.revision, RenderSnapshot::build_live(p, &hints))
                 })?;
                 *current = Some(built);
             }
@@ -1106,6 +1126,7 @@ impl ProjectRenderer {
             if seg.playing {
                 Some(self.render_block_varispeed(seg.start_samples, seg.frames, seg.rate))
             } else if render_stopped {
+                let _stopped = crate::plugin::StoppedRender::enter();
                 Some(self.render_block_varispeed(
                     seg.start_samples.max(0.0).floor(),
                     seg.frames,
@@ -1161,13 +1182,16 @@ impl ProjectRenderer {
             [seg] if seg.playing => {
                 self.render_part_into(seg.start_samples, seg.frames, seg.rate, Part::Whole, out);
             }
-            [seg] if render_stopped => self.render_part_into(
-                seg.start_samples.max(0.0).floor(),
-                seg.frames,
-                1.0,
-                Part::Whole,
-                out,
-            ),
+            [seg] if render_stopped => {
+                let _stopped = crate::plugin::StoppedRender::enter();
+                self.render_part_into(
+                    seg.start_samples.max(0.0).floor(),
+                    seg.frames,
+                    1.0,
+                    Part::Whole,
+                    out,
+                );
+            }
             _ => *out = self.render_plan(plan, render_stopped),
         }
     }
@@ -1271,7 +1295,10 @@ impl ProjectRenderer {
         let start_seconds = start_samples / self.sample_rate as f64;
         let end_seconds = start_seconds + (frames as f64 * rate / self.sample_rate as f64);
         // Every plugin of this block is told the same clock.
-        _frame.set_transport(snap.transport_at(start_seconds));
+        _frame.set_transport(crate::plugin::RenderTransport {
+            playing: !crate::plugin::rendering_stopped(),
+            ..snap.transport_at(start_seconds)
+        });
         // Output frames per timeline second (MIDI event offsets).
         let frames_per_second = self.sample_rate as f64 / rate;
         let any_soloed = snap.solo_pass.is_some();

@@ -131,6 +131,67 @@ struct DawHostShared {
     /// subscription's events go. Null while the plugin initializes, so a
     /// subscription asked for inside `init` is refused.
     plugin: Arc<std::sync::atomic::AtomicPtr<clap_sys::plugin::clap_plugin>>,
+    /// The track timeline offered as `com.fasttrackstudio.host-timeline/1`,
+    /// when the embedder offers it ([`ClapHost::with_timeline`]): empty
+    /// until the embedder binds this instance to its track
+    /// ([`LoadedClapPlugin::bind_timeline`]). `None`: not offered.
+    timeline: Option<Arc<TimelineSlot>>,
+}
+
+/// One instance's [`HostTimeline`](daw_clap_ext::host::HostTimeline),
+/// bound after the instance is placed on a track. Read lock-free: a
+/// plugin may ask for the revision from its audio thread.
+#[derive(Default)]
+pub struct TimelineSlot(arc_swap::ArcSwapOption<TimelineBinding>);
+
+/// What a [`TimelineSlot`] holds.
+pub struct TimelineBinding(Arc<dyn daw_clap_ext::host::HostTimeline>);
+
+/// `com.fasttrackstudio.host-timeline/1`, offered by this host when its
+/// embedder asked for it ([`ClapHost::with_timeline`]).
+#[derive(Copy, Clone)]
+struct HostTimelineExtension;
+
+// SAFETY: the identifier is the extension's, and the host side's raw
+// pointer is never read through this type.
+unsafe impl clack_host::extensions::Extension for HostTimelineExtension {
+    const IDENTIFIERS: &'static [&'static std::ffi::CStr] =
+        &[daw_clap_ext::sys::FTS_EXT_HOST_TIMELINE];
+    type ExtensionSide = clack_host::extensions::HostExtensionSide;
+
+    unsafe fn from_raw(_raw: clack_host::extensions::RawExtension<Self::ExtensionSide>) -> Self {
+        Self
+    }
+}
+
+/// Finds an instance's bound timeline from the raw host it calls with.
+struct DawTimelineLookup;
+
+impl daw_clap_ext::host::HostTimelineLookup for DawTimelineLookup {
+    unsafe fn lookup(
+        host: *const clap_sys::host::clap_host,
+    ) -> Option<Arc<dyn daw_clap_ext::host::HostTimeline>> {
+        // SAFETY: the plugin's call, with the host clack created for it.
+        // `handle` reads the shared state only (no lock), so this is as
+        // thread-safe as the slot's lock-free load.
+        unsafe {
+            clack_host::extensions::wrapper::HostWrapper::<DawHost>::handle(host, |h| {
+                Ok(h.shared()
+                    .timeline
+                    .as_ref()
+                    .and_then(|slot| slot.0.load().as_ref().map(|b| b.0.clone())))
+            })
+        }
+        .flatten()
+    }
+}
+
+// SAFETY: the implementation is the header's `fts_host_timeline_t`.
+unsafe impl clack_host::extensions::ExtensionImplementation<DawHost> for HostTimelineExtension {
+    const IMPLEMENTATION: clack_host::extensions::RawExtensionImplementation =
+        clack_host::extensions::RawExtensionImplementation::new(
+            &daw_clap_ext::host::HostTimelineVtable::<DawTimelineLookup>::VTABLE,
+        );
 }
 
 /// `com.fasttrackstudio.host-actions/1`, offered by this host when its
@@ -332,6 +393,9 @@ impl HostHandlers for DawHost {
         if shared.actions.is_some() {
             builder.register::<HostActionsExtension>();
         }
+        if shared.timeline.is_some() {
+            builder.register::<HostTimelineExtension>();
+        }
     }
 }
 
@@ -347,6 +411,8 @@ pub struct ClapHost {
     version: String,
     /// Offered to every plugin this host loads, as `host-actions/1`.
     actions: Option<Arc<dyn daw_clap_ext::host::HostActions>>,
+    /// Offer `host-timeline/1` (each instance bound to its track later).
+    timeline: bool,
 }
 
 impl Default for ClapHost {
@@ -357,6 +423,7 @@ impl Default for ClapHost {
             url: String::new(),
             version: env!("CARGO_PKG_VERSION").to_string(),
             actions: None,
+            timeline: false,
         }
     }
 }
@@ -369,6 +436,7 @@ impl ClapHost {
             url: String::new(),
             version: env!("CARGO_PKG_VERSION").to_string(),
             actions: None,
+            timeline: false,
         }
     }
 
@@ -377,6 +445,16 @@ impl ClapHost {
     #[must_use]
     pub fn with_actions(mut self, actions: Arc<dyn daw_clap_ext::host::HostActions>) -> Self {
         self.actions = Some(actions);
+        self
+    }
+
+    /// Offer `com.fasttrackstudio.host-timeline/1` to the plugins this host
+    /// loads. Each instance's timeline is its track's, bound once it is on
+    /// one ([`LoadedClapPlugin::bind_timeline`]); until then the plugin
+    /// reads revision 0 and no timeline.
+    #[must_use]
+    pub fn with_timeline(mut self) -> Self {
+        self.timeline = true;
         self
     }
 
@@ -496,7 +574,9 @@ impl ClapHost {
             notices: notices.clone(),
             actions: self.actions.clone(),
             plugin: Arc::default(),
+            timeline: self.timeline.then(Arc::default),
         };
+        let timeline = shared.timeline.clone();
         let plugin_slot = shared.plugin.clone();
         let main_notices = notices.clone();
         let instance = PluginInstance::<DawHost>::new(
@@ -518,6 +598,7 @@ impl ClapHost {
         Ok(LoadedClapPlugin {
             instance,
             signal,
+            timeline,
             notices,
             gui_resize,
             restart,
@@ -686,6 +767,8 @@ pub struct LoadedClapPlugin {
     instance: PluginInstance<DawHost>,
     /// The plugin's `com.fasttrackstudio.signal/1`, if it has it.
     signal: Option<daw_clap_ext::host::SignalPluginClient>,
+    /// Its `host-timeline/1` binding, when the host offers the extension.
+    timeline: Option<Arc<TimelineSlot>>,
     /// Rescans and main-thread requests from the plugin.
     notices: Arc<HostNotices>,
     /// Shared with the instance's host handler — see [`PendingGuiResize`].
@@ -1079,6 +1162,28 @@ impl LoadedClapPlugin {
     /// [`pump_main_thread`](Self::pump_main_thread).
     pub fn wants_main_thread(&self) -> bool {
         self.notices.callback.load(Ordering::Acquire)
+    }
+
+    /// Bind this instance's `host-timeline/1` to `timeline` (its track's),
+    /// or unbind it (`None`). `false` when the host didn't offer the
+    /// extension to this instance. Any thread: the swap is lock-free.
+    pub fn bind_timeline(
+        &self,
+        timeline: Option<Arc<dyn daw_clap_ext::host::HostTimeline>>,
+    ) -> bool {
+        let Some(slot) = &self.timeline else {
+            return false;
+        };
+        slot.0.store(timeline.map(|t| Arc::new(TimelineBinding(t))));
+        true
+    }
+
+    /// Whether this instance's `host-timeline/1` is bound to a track.
+    #[must_use]
+    pub fn timeline_bound(&self) -> bool {
+        self.timeline
+            .as_ref()
+            .is_some_and(|slot| slot.0.load().is_some())
     }
 
     /// The plugin's `com.fasttrackstudio.host-events/1`: where the events
@@ -1870,6 +1975,15 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
     }
     fn event_sink(&self) -> Option<daw_clap_ext::host::EventSink> {
         LoadedClapPlugin::event_sink(self)
+    }
+    fn bind_timeline(
+        &mut self,
+        timeline: Option<Arc<dyn daw_clap_ext::host::HostTimeline>>,
+    ) -> bool {
+        LoadedClapPlugin::bind_timeline(self, timeline)
+    }
+    fn timeline_bound(&self) -> bool {
+        LoadedClapPlugin::timeline_bound(self)
     }
     fn prepare(&mut self, sr: f64, bs: u32) -> Result<(), crate::plugin::PluginError> {
         LoadedClapPlugin::prepare(self, sr, bs).map_err(map_err)

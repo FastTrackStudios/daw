@@ -41,6 +41,11 @@ pub(crate) fn collect_midi_events_into(
     use daw_proto::live_midi::{Channel, KeyNumber, MidiEvent, Velocity};
 
     out.clear();
+    // A plugin plays this track's MIDI from its timeline (host-timeline/1):
+    // only live MIDI (merged by the caller) reaches the chain.
+    if track.midi_claimed {
+        return;
+    }
     let to_sample = |t_seconds: f64| -> u32 {
         let frame = ((t_seconds - start_seconds) * frames_per_second).floor() as i64;
         frame.clamp(0, (frames as i64).saturating_sub(1)) as u32
@@ -114,6 +119,9 @@ pub(crate) fn collect_note_expressions(
     frames: usize,
 ) -> Vec<crate::plugin::PluginNoteExpression> {
     let mut out: Vec<crate::plugin::PluginNoteExpression> = Vec::new();
+    if track.midi_claimed {
+        return out;
+    }
     let to_sample = |t_seconds: f64| -> u32 {
         let frame = ((t_seconds - start_seconds) * frames_per_second).floor() as i64;
         frame.clamp(0, (frames as i64).saturating_sub(1)) as u32

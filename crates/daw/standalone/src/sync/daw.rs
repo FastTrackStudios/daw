@@ -969,6 +969,11 @@ pub struct Standalone {
     /// while after (see [`played_live`](Self::played_live)).
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) played_live: Arc<Mutex<HashMap<String, std::time::Instant>>>,
+    /// Tracks whose MIDI a plugin plays from the track's timeline
+    /// (`host-timeline/1`): their items' notes and controllers aren't
+    /// delivered to the chain as events (see
+    /// [`set_track_midi_claimed`](Self::set_track_midi_claimed)).
+    pub(crate) midi_claims: Arc<Mutex<std::collections::BTreeSet<String>>>,
 }
 
 impl Default for Standalone {
@@ -1019,6 +1024,61 @@ impl Standalone {
             recorder: Arc::default(),
             #[cfg(not(target_arch = "wasm32"))]
             played_live: Arc::default(),
+            midi_claims: Arc::default(),
+        }
+    }
+
+    /// A plugin on `track` claims (or gives back) the playback of the
+    /// track's MIDI (`host-timeline/1`): while claimed, the realtime render
+    /// delivers only live MIDI to the track's chain. A change moves the
+    /// track's project revision on, so the next snapshot has it. Returns
+    /// whether it changed.
+    pub fn set_track_midi_claimed(&self, track: &str, claimed: bool) -> bool {
+        let changed = {
+            let mut claims = self
+                .midi_claims
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if claimed {
+                claims.insert(track.to_owned())
+            } else {
+                claims.remove(track)
+            }
+        };
+        if changed {
+            for cell in self.cells() {
+                cell.write(|slot| {
+                    let project = &mut slot.project;
+                    if project.tracks.iter().any(|t| t.guid == track) {
+                        project.revision = project.revision.wrapping_add(1);
+                    }
+                });
+            }
+        }
+        changed
+    }
+
+    /// Whether a plugin claimed `track`'s MIDI playback.
+    #[must_use]
+    pub fn track_midi_claimed(&self, track: &str) -> bool {
+        self.midi_claims
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(track)
+    }
+
+    /// What the realtime render's snapshot takes beside the project.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn live_hints(&self) -> crate::audio_engine::render::LiveHints {
+        crate::audio_engine::render::LiveHints {
+            played_live: self.played_live(),
+            midi_claimed: self
+                .midi_claims
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .cloned()
+                .collect(),
         }
     }
 
