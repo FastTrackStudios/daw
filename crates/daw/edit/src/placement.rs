@@ -1,4 +1,6 @@
-//! The types of hit placement (`daw.edit`'s `PLACE`): a hit and how far it
+//! The types of hit placement (`daw.edit`'s `PLACE`).
+//!
+//! A hit and how far it
 //! moves, how a cut is made around an attack, and a piece of the recording
 //! laid on the timeline. The algorithm is an extension's (rhythm's, or
 //! another), never the DAW's: the DAW only applies the pieces it answers.

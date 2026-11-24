@@ -12,12 +12,17 @@
 //! - [`METHOD_PLACE`]: where a performance's audio plays once its hits are
 //!   moved ([`PlaceRequest`] → [`PlaceAnswer`]): the pieces of the
 //!   recording to lay on the timeline, cut, shifted and drawn out.
+//! - [`METHOD_PLAN`]: where a kit's played hits should go
+//!   ([`PlanRequest`] → [`PlanAnswer`]): a target for every hit, with why
+//!   and how sure, the hits that are no hit of their own, the hits that
+//!   ride another, and the few a person should look at.
 //!
 //! A provider names its action for a method `<PREFIX>_<METHOD>` (Architect
 //! services: an extension whose actions are `RHYTHM_*` answers `PLACE` as
 //! `RHYTHM_PLACE`).
 
 pub mod placement;
+pub mod plan;
 
 use serde::{Deserialize, Serialize};
 
@@ -25,10 +30,12 @@ use serde::{Deserialize, Serialize};
 /// contract.
 pub const SERVICE: &str = "daw.edit";
 /// This contract's version: a provider declares `[provides] "daw.edit" =
-/// "0.1.0"`, a host asks for `^0.1`.
-pub const VERSION: &str = "0.1.0";
+/// "0.2.0"`, a host asks for `^0.2` (0.2 added [`METHOD_PLAN`]).
+pub const VERSION: &str = "0.2.0";
 /// Placing a performance's hits: [`PlaceRequest`] → [`PlaceAnswer`].
 pub const METHOD_PLACE: &str = "PLACE";
+/// Planning where a kit's hits go: [`PlanRequest`] → [`PlanAnswer`].
+pub const METHOD_PLAN: &str = "PLAN";
 
 /// Where the hits of one recorded performance (every mic of a kit, phase
 /// locked) should play, over `span` of the recording.
@@ -57,6 +64,29 @@ pub struct PlaceAnswer {
     pub pieces: Vec<placement::Piece>,
 }
 
+/// Where a kit's played hits should go: the hits as they play now, the
+/// part as written, the bars, the sections and zones, and how to plan.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PlanRequest {
+    /// The kit's hits that play, any order.
+    pub hits: Vec<plan::PlayedHit>,
+    /// The drum part as written, each note mapped to its piece (none:
+    /// planned on the grid alone).
+    #[serde(default)]
+    pub notes: Vec<plan::Note>,
+    /// The bars, in order, covering the hits.
+    pub bars: Vec<plan::BarLine>,
+    #[serde(default)]
+    pub sections: Vec<plan::Section>,
+    #[serde(default)]
+    pub zones: Vec<plan::Zone>,
+    #[serde(default)]
+    pub settings: plan::Settings,
+}
+
+/// The plan: a target for every hit, in an apply's shape.
+pub type PlanAnswer = plan::Plan;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,5 +109,35 @@ mod tests {
         };
         let text = serde_json::to_string(&answer).unwrap();
         assert_eq!(serde_json::from_str::<PlaceAnswer>(&text).unwrap(), answer);
+    }
+
+    #[test]
+    fn a_plan_request_needs_only_hits_and_bars() {
+        let text = r#"{"hits":[{"id":"k1","piece":"Kick","time":1.5}],
+            "bars":[{"bar":1,"at":1.5,"beats":4,"unit":4,"beat":0.375}]}"#;
+        let request: PlanRequest = serde_json::from_str(text).unwrap();
+        assert!(request.settings.lock_runs);
+        assert_eq!(request.hits[0].heard, plan::Heard::Unknown);
+        let back = serde_json::to_string(&request).unwrap();
+        assert_eq!(serde_json::from_str::<PlanRequest>(&back).unwrap(), request);
+    }
+
+    #[test]
+    fn reasons_cross_as_their_words() {
+        use plan::Reason;
+        for (reason, word) in [
+            (Reason::Midi, "midi"),
+            (Reason::DoubleRun, "double-run"),
+            (Reason::Rides("s1".into()), "rides s1"),
+            (Reason::FlamGrace("s2".into()), "flam-grace s2"),
+            (Reason::FillGrid(24), "fill-grid 24"),
+            (Reason::FalseDouble, "false-double"),
+            (Reason::SeamDouble, "seam-double"),
+        ] {
+            let text = serde_json::to_string(&reason).unwrap();
+            assert_eq!(text, format!("\"{word}\""));
+            assert_eq!(serde_json::from_str::<Reason>(&text).unwrap(), reason);
+        }
+        assert!(serde_json::from_str::<Reason>("\"rides\"").is_err());
     }
 }
