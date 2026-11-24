@@ -35,6 +35,8 @@
 mod envelope;
 mod graph;
 mod item_mix;
+#[cfg(any(feature = "decode", feature = "audio"))]
+pub mod live_tap;
 mod midi;
 pub mod offline;
 mod parallel;
@@ -1407,6 +1409,41 @@ impl ProjectRenderer {
             .offline
             .as_ref()
             .map_or(&[][..], |o| o.probes.as_slice());
+        // Live taps (a song playing, not an offline render): which track and
+        // point each open one reads, worked out once a block.
+        #[cfg(any(feature = "decode", feature = "audio"))]
+        let (live_taps, live_plan) = {
+            let taps = &*self.daw.live_taps;
+            let mut plan = [None; live_tap::SLOTS];
+            if self.offline.is_none() && taps.any() {
+                taps.plan(
+                    &self.project_guid,
+                    |g| tracks.iter().position(|t| t.guid == g),
+                    &mut plan,
+                );
+            }
+            (taps, plan)
+        };
+        #[cfg(any(feature = "decode", feature = "audio"))]
+        let live_on = live_plan.iter().any(Option::is_some);
+        #[cfg(not(any(feature = "decode", feature = "audio")))]
+        let live_on = false;
+        let probing = !asked.is_empty() || live_on;
+        // A track tapped live before or inside its chain runs its chain in
+        // the topo loop, where those points are read — never in the lane
+        // pool, which runs a depth's chains before the loop reaches them.
+        #[cfg(any(feature = "decode", feature = "audio"))]
+        let tapped_inside = |ti: usize| {
+            live_plan.iter().flatten().any(|(t, at)| {
+                *t == ti
+                    && matches!(
+                        at,
+                        offline::Probe::PreFx | offline::Probe::FxIn(_) | offline::Probe::FxOut(_)
+                    )
+            })
+        };
+        #[cfg(not(any(feature = "decode", feature = "audio")))]
+        let tapped_inside = |_: usize| false;
         // A track an earlier render recorded, played in its place.
         let fed_of = |ti: usize| -> Option<&offline::Fed> {
             let fed = &self.offline.as_ref()?.fed;
@@ -1421,6 +1458,12 @@ impl ProjectRenderer {
                 if *track == Some(ti) && p.at == at {
                     let n = dst.len().min(bus.len());
                     dst[..n].copy_from_slice(&bus[..n]);
+                }
+            }
+            #[cfg(any(feature = "decode", feature = "audio"))]
+            for (slot, planned) in live_plan.iter().enumerate() {
+                if *planned == Some((ti, at)) {
+                    live_taps.write(slot, &bus[..(frames * 2).min(bus.len())]);
                 }
             }
         };
@@ -1602,7 +1645,7 @@ impl ProjectRenderer {
 
         // An offline render's input probes: each track's own media alone,
         // before children, sends or FX add to it.
-        if !asked.is_empty() {
+        if probing {
             for (ti, bus) in buses.iter().enumerate() {
                 probe(probes, ti, offline::Probe::Input, &bus.samples);
             }
@@ -1710,6 +1753,7 @@ impl ProjectRenderer {
                     if !covers(ti)
                         || !passes(ti)
                         || keyed[ti]
+                        || tapped_inside(ti)
                         || t.fx_chain.is_empty()
                         || t.sends
                             .iter()
@@ -1869,7 +1913,7 @@ impl ProjectRenderer {
                     .sends
                     .iter()
                     .any(|s| s.mode == daw_proto::routing::SendMode::PreFx);
-                if !asked.is_empty() {
+                if probing {
                     probe(probes, ti, offline::Probe::PreFx, &buses[ti].samples);
                 }
                 if has_pre_fx_tap {
@@ -1936,7 +1980,7 @@ impl ProjectRenderer {
                     let mut chain_latency = 0u32;
                     for (i, fx_guid) in chain.iter().enumerate() {
                         // What goes into FX `i` is what came out of `i - 1`.
-                        if !asked.is_empty() {
+                        if probing {
                             probe(probes, ti, offline::Probe::FxIn(i), &bus.samples);
                             if let Some(before) = i.checked_sub(1) {
                                 probe(probes, ti, offline::Probe::FxOut(before), &bus.samples);
@@ -2043,7 +2087,7 @@ impl ProjectRenderer {
                         // so the bus can carry signal even with no items.
                         dirty[ti] = true;
                     }
-                    if let (false, Some(last)) = (asked.is_empty(), chain.len().checked_sub(1)) {
+                    if let (true, Some(last)) = (probing, chain.len().checked_sub(1)) {
                         probe(probes, ti, offline::Probe::FxOut(last), &bus.samples);
                     }
                     // A muted chain not run keeps the latency it had.
@@ -2072,7 +2116,7 @@ impl ProjectRenderer {
                 {
                     tap.copy_from_slice(&buses[ti].samples[..frames * 2]);
                 }
-                if !asked.is_empty() {
+                if probing {
                     probe(probes, ti, offline::Probe::PreFader, &buses[ti].samples);
                 }
 
@@ -2228,7 +2272,7 @@ impl ProjectRenderer {
                 {
                     tap.copy_from_slice(&src[..frames * 2]);
                 }
-                if !asked.is_empty() {
+                if probing {
                     probe(probes, ti, offline::Probe::PostFader, src);
                 }
 
@@ -3144,6 +3188,57 @@ pub(crate) mod folder_routing_tests {
         );
         assert!(other < 1e-9, "a track not rendered is silent: {read:?}");
         assert!(rms(&master.samples) > 0.0);
+    }
+
+    // A live tap: while the song plays (not an offline render), a point of
+    // a track is copied into its ring, block by block — what an offline
+    // probe of the same point reads — and a ring too small drops blocks
+    // and says how many.
+    #[test]
+    fn a_live_tap_hands_over_what_plays_through_its_point() {
+        use offline::{Offline, Probe, ProbeAt};
+        let (daw, guid) = seeded();
+        let kick = guid_of(&daw, &guid, "Kick");
+        let at = ProbeAt {
+            track: kick.clone(),
+            at: Probe::PostFader,
+        };
+        let mut tap = daw.live_taps().open(&guid, at.clone(), 48_000).unwrap();
+        let mut small = daw.live_taps().open(&guid, at.clone(), 600).unwrap();
+        let playing = ProjectRenderer::new(&daw, &guid, 48_000);
+        for b in 0..4u64 {
+            playing.render_block(b * 512, 512);
+        }
+        let mut heard = Vec::new();
+        tap.drain(&mut heard);
+        let offline = ProjectRenderer::offline(
+            &daw,
+            &guid,
+            48_000,
+            Offline {
+                probes: vec![at],
+                ..Offline::default()
+            },
+        );
+        let mut want = Vec::new();
+        for b in 0..4u64 {
+            offline.render_block(b * 512, 512);
+            offline.with_probes(|p| want.extend_from_slice(&p[0]));
+        }
+        assert!(rms(&heard) > 0.01);
+        assert_eq!(heard, want);
+        assert_eq!(tap.dropped(), 0);
+        // 600 frames hold one 512-frame block: the other three are dropped.
+        let mut some = Vec::new();
+        small.drain(&mut some);
+        assert_eq!(some.len(), 1_024);
+        assert_eq!(small.dropped(), 3);
+        // Closed, nothing more arrives.
+        daw.live_taps().close(tap.slot);
+        playing.render_block(4 * 512, 512);
+        let mut after = Vec::new();
+        tap.drain(&mut after);
+        assert!(after.is_empty());
     }
 
     // A track's output recorded by one render and fed into the next in
