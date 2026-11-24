@@ -30,8 +30,11 @@ use serde::{Deserialize, Serialize};
 /// contract.
 pub const SERVICE: &str = "daw.edit";
 /// This contract's version: a provider declares `[provides] "daw.edit" =
-/// "0.2.0"`, a host asks for `^0.2` (0.2 added [`METHOD_PLAN`]).
-pub const VERSION: &str = "0.2.0";
+/// "0.3.0"`, a host asks for `^0.3` (0.2 added [`METHOD_PLAN`]; 0.3 the
+/// gap fill: [`PlaceRequest::takes`] and [`PlaceRequest::fill`] in,
+/// pieces that crossfade and stretch only their last span, and
+/// [`PlaceAnswer::fills`] out).
+pub const VERSION: &str = "0.3.0";
 /// Placing a performance's hits: [`PlaceRequest`] → [`PlaceAnswer`].
 pub const METHOD_PLACE: &str = "PLACE";
 /// Planning where a kit's hits go: [`PlanRequest`] → [`PlanAnswer`].
@@ -55,6 +58,13 @@ pub struct PlaceRequest {
     /// audio that plays either side, untouched), when they may.
     #[serde(default)]
     pub bounds: (Option<f64>, Option<f64>),
+    /// The takes the recording over `span` is made of, in order (none: one
+    /// take throughout): a gap's fill never reaches across a take's end.
+    #[serde(default)]
+    pub takes: Vec<placement::Take>,
+    /// How a gap is filled.
+    #[serde(default)]
+    pub fill: placement::Fill,
 }
 
 /// The pieces of the recording to lay on the timeline, in the order they
@@ -62,6 +72,9 @@ pub struct PlaceRequest {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PlaceAnswer {
     pub pieces: Vec<placement::Piece>,
+    /// What was done at each gap (0.3).
+    #[serde(default)]
+    pub fills: Vec<placement::Filled>,
 }
 
 /// Where a kit's played hits should go: the hits as they play now, the
@@ -95,20 +108,63 @@ mod tests {
     fn a_request_and_its_answer_cross_as_json() {
         let request = PlaceRequest {
             hits: vec![
-                placement::Hit { at: 1.0, shift: 0.0 },
-                placement::Hit { at: 2.0, shift: 0.01 },
+                placement::Hit {
+                    at: 1.0,
+                    shift: 0.0,
+                },
+                placement::Hit {
+                    at: 2.0,
+                    shift: 0.01,
+                },
             ],
             span: (0.0, 3.0),
             cut: placement::Cut::default(),
             bounds: (None, Some(4.0)),
+            takes: vec![placement::Take { from: 0.0, to: 3.0 }],
+            fill: placement::Fill::default(),
         };
         let text = serde_json::to_string(&request).unwrap();
-        assert_eq!(serde_json::from_str::<PlaceRequest>(&text).unwrap(), request);
+        assert_eq!(
+            serde_json::from_str::<PlaceRequest>(&text).unwrap(),
+            request
+        );
         let answer = PlaceAnswer {
-            pieces: vec![placement::Piece { start: 0.0, end: 3.0, shift: 0.0, drawn_to: None }],
+            pieces: vec![placement::Piece {
+                start: 0.0,
+                end: 3.0,
+                shift: 0.0,
+                drawn_to: None,
+                drawn_from: None,
+                crossfade: Some(0.004),
+            }],
+            fills: vec![placement::Filled {
+                at: 2.01,
+                recorded: 2.0,
+                gap: 0.01,
+                stretched: Some(placement::Stretched {
+                    from: 1.9,
+                    over: 0.05,
+                    rate: 0.8,
+                }),
+                ..placement::Filled::default()
+            }],
         };
         let text = serde_json::to_string(&answer).unwrap();
         assert_eq!(serde_json::from_str::<PlaceAnswer>(&text).unwrap(), answer);
+    }
+
+    #[test]
+    fn a_02_request_and_answer_still_read() {
+        let request: PlaceRequest =
+            serde_json::from_str(r#"{"hits":[{"at":1.0,"shift":0.0}],"span":[0.0,2.0]}"#).unwrap();
+        assert!(request.takes.is_empty());
+        assert!((request.fill.least_rate - 0.8).abs() < 1e-12);
+        let answer: PlaceAnswer = serde_json::from_str(
+            r#"{"pieces":[{"start":0.0,"end":2.0,"shift":0.0,"drawn_to":null}]}"#,
+        )
+        .unwrap();
+        assert!(answer.fills.is_empty());
+        assert_eq!(answer.pieces[0].crossfade, None);
     }
 
     #[test]
