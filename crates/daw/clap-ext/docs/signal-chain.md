@@ -114,3 +114,30 @@ subscribes to:
   hit `{"frame": <song position>, "velocity": 0-1}`, the host's hit
   markers, published to the session as notes (they key gates as MIDI
   does).
+
+## Additions (2026-11-24, from the mixer view)
+
+These are part of `signal.chain/1`; a reader treats each as optional until
+every Signal build sends it.
+
+1. **A block's running algorithm**: `"algorithm": "<id>"` on every block
+   whose family has algorithms (the id `SIGNAL_ALGORITHMS` lists).
+2. **Values move a second counter.** `values_revision()` is not in the C
+   header yet; until it is, the chain carries `"values_revision": n`, bumped
+   whenever any parameter value changes (a set, automation, a macro), and
+   the host's live feed carries it beside `revision`. A view re-reads only
+   `value`/`normalized`/`text` when it moves. A chain read always has
+   current values.
+3. **Each meter says how to draw it**: `"kind": "reduction" | "level" |
+   "state"` (`reduction`: dB of gain taken away, 0 = none, drawn downwards;
+   `level`: dBFS or LU, drawn upwards; `state`: 0 or 1, a gate open), with
+   `"min"` and `"max"` in its unit.
+4. **Kit mode addressing**: block ids are unique within a lane only. Every
+   structural action (`SIGNAL_SET`, `SIGNAL_BLOCK_ADD`, `SIGNAL_BLOCK_REMOVE`,
+   `SIGNAL_BLOCK_MOVE`) takes an optional `"lane": "<path>"`, required in
+   kit mode.
+5. **`key` says what it wanted and what it uses**: `"from"` is the source
+   configured (the Trig track, or `null`), `"via"` what keys it now; when
+   it fell back, `"fallback": "no hits for 10 s"` (a short reason).
+6. **Host side (Studio's `FX_SET`)**: a parameter is named by its CLAP id as
+   `"@<clap_id>"` (`"@b014"`), as well as by name or `#index`.
