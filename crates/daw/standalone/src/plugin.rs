@@ -114,6 +114,22 @@ pub struct PluginEvents<'a> {
     pub note_expressions: &'a [PluginNoteExpression],
 }
 
+/// Per-block inputs to [`PluginInstance::process_block_timed`]: what
+/// [`PluginEvents`] carries, with each parameter change at its frame.
+///
+/// `params` is sorted by offset, at most one event per parameter per
+/// frame, each value in the parameter's plain domain. It restates every
+/// parameter the block touches at frame 0, so a plugin that loses its
+/// event state between blocks still holds the right values.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TimedPluginEvents<'a> {
+    pub params: &'a [PluginParamEvent],
+    /// Sorted-by-offset MIDI events for this block.
+    pub midi: &'a [PluginMidiEvent],
+    /// Sorted-by-offset per-note expression events for this block.
+    pub note_expressions: &'a [PluginNoteExpression],
+}
+
 impl<'a> PluginEvents<'a> {
     pub const EMPTY: PluginEvents<'static> = PluginEvents {
         params: &[],
@@ -273,6 +289,30 @@ pub trait PluginInstance: Send {
             note_expressions: &[],
         };
         self.process_block(in_l, in_r, out_l, out_r, &events)
+    }
+
+    /// Whether [`process_block_timed`](Self::process_block_timed) places
+    /// each parameter event at its frame. The renderer then plays an
+    /// automation lane as events inside the block (sample-accurate);
+    /// otherwise it sends each lane's value at the block's start through
+    /// [`process_block`](Self::process_block). `false` by default.
+    fn takes_timed_params(&self) -> bool {
+        false
+    }
+
+    /// [`process_block`](Self::process_block) with each parameter change
+    /// at its frame. Called only on a plugin whose
+    /// [`takes_timed_params`](Self::takes_timed_params) is `true`; the
+    /// default refuses, rather than playing the events at the wrong frame.
+    fn process_block_timed(
+        &mut self,
+        _in_l: &[f32],
+        _in_r: &[f32],
+        _out_l: &mut [f32],
+        _out_r: &mut [f32],
+        _events: &TimedPluginEvents<'_>,
+    ) -> Result<(), PluginError> {
+        Err(PluginError::UnsupportedFormat(self.descriptor().format))
     }
 
     /// The plugin's `com.fasttrackstudio.signal/1`, if it has it.
