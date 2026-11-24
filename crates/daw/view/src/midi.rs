@@ -919,7 +919,7 @@ fn stream_version() -> u64 {
 /// no cache of its original's to draw from (the stretch decoded near the
 /// playhead, silent everywhere else), or one with no audio attached yet (a
 /// streamed song's takes before their streams are).
-#[cfg(feature = "local")]
+#[cfg(feature = "standalone")]
 pub fn streaming_partial(
     daw: &daw::standalone::sync::Standalone,
     project: &daw::service::ProjectContext,

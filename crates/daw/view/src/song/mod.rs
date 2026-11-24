@@ -65,6 +65,20 @@ pub trait Plans: Send + Sync + 'static {
     /// A mixer's strips for `raw` beside the arrangement, by `scene`.
     fn strips(&self, raw: &Project, scene: Option<&str>) -> RowsRef;
 
+    /// The mixer's rows for `raw`: the scene laid out for the mixer, each
+    /// track as wide as it opens, then as the window's folds leave it.
+    /// `extent` is the panel's height.
+    fn mixer(
+        &self,
+        raw: &Project,
+        scene: Option<&str>,
+        settings: crate::settings::Settings,
+        extent: f64,
+    ) -> RowsRef {
+        let _ = (settings, extent);
+        self.strips(raw, scene)
+    }
+
     /// A scene's name, as a notice says it (`None`: no such scene).
     fn scene_name(&self, _slug: &str) -> Option<&'static str> {
         None
@@ -152,6 +166,20 @@ impl Planner {
     #[must_use]
     pub fn plan_strips(&self, raw: &Project) -> RowsRef {
         self.plans.strips(raw, self.scene)
+    }
+
+    /// The mixer's rows for `raw`, by `scene` (this planner's when
+    /// `None`); `extent` is the panel's height.
+    #[must_use]
+    pub fn plan_mixer(
+        &self,
+        raw: &Project,
+        scene: Option<&str>,
+        settings: crate::settings::Settings,
+        extent: f64,
+    ) -> RowsRef {
+        self.plans
+            .mixer(raw, scene.or(self.scene), settings, extent)
     }
 
     /// How this planner plans.

@@ -57,7 +57,10 @@ web = ["vox", "dep:web-sys", "dep:wasm-bindgen-futures", "dep:gloo-timers", "dep
 # The engine in this process: what a window that owns its engine reads
 # from it directly (waveforms, MIDI previews, grouping). A view never asks
 # for it; the app that runs the engine does.
-local = ["native", "daw/standalone-rpp", "dep:builtin", "dep:daw-standalone", "daw-standalone/reapeaks"]
+local = ["native", "standalone", "daw/standalone-rpp", "dep:builtin"]
+# The engine's types, for an app whose engine runs in the same process or
+# page (whether a streamed take's peaks have all arrived).
+standalone = ["daw/standalone-decode", "dep:daw-standalone", "daw-standalone/reapeaks"]
 
 [lints]
 workspace = true

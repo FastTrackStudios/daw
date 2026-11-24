@@ -22,9 +22,13 @@
 //!   engine's [`body`] and the app's [`host`].
 
 pub mod actions;
+#[cfg(any(feature = "native", feature = "web"))]
+pub mod arrange_actions;
 pub mod automation;
+pub mod automation_actions;
 pub mod body;
 pub mod changes;
+pub mod edit_actions;
 pub mod edit_state;
 pub mod engine;
 pub mod folds;
@@ -35,6 +39,8 @@ pub mod kit_gate;
 pub mod lanes;
 pub mod leveler;
 pub mod midi;
+#[cfg(feature = "native")]
+pub mod notes_actions;
 pub mod num;
 pub mod open;
 pub mod open_progress;
@@ -46,8 +52,10 @@ pub mod play_return;
 pub mod poi;
 pub mod routes;
 pub mod scale;
+pub mod settings;
 pub mod song;
 pub mod stretch;
+pub mod take_colors;
 pub mod track_regions;
 pub mod view;
 #[cfg(feature = "native")]
