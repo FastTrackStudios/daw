@@ -182,3 +182,72 @@ pub(crate) fn color_from_service(c: u32) -> Option<u32> {
     }
     Some(c & 0x00ff_ffff)
 }
+
+/// The test binary's allocator: the system's, counting what each thread
+/// allocates while it asks — how a test shows the audio path allocates
+/// nothing.
+#[cfg(test)]
+#[allow(unsafe_code)]
+pub(crate) mod alloc_count {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    struct Counting;
+
+    thread_local! {
+        static COUNTING: Cell<bool> = const { Cell::new(false) };
+        static COUNT: Cell<u64> = const { Cell::new(0) };
+    }
+
+    fn note() {
+        // `try_with`: a thread being torn down has no locals left.
+        let _ = COUNTING.try_with(|on| {
+            if on.get() {
+                let _ = COUNT.try_with(|n| n.set(n.get() + 1));
+            }
+        });
+    }
+
+    // SAFETY: every call goes straight to the system allocator.
+    unsafe impl GlobalAlloc for Counting {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            note();
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            note();
+            unsafe { System.alloc_zeroed(layout) }
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            note();
+            unsafe { System.realloc(ptr, layout, new_size) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(ptr, layout) }
+        }
+    }
+
+    #[global_allocator]
+    static ALLOCATOR: Counting = Counting;
+
+    /// Run `f`, and how many allocations this thread made in it.
+    pub(crate) fn allocations<R>(f: impl FnOnce() -> R) -> (R, u64) {
+        COUNT.with(|n| n.set(0));
+        COUNTING.with(|on| on.set(true));
+        let r = f();
+        COUNTING.with(|on| on.set(false));
+        (r, COUNT.with(Cell::get))
+    }
+
+    #[test]
+    fn it_counts_what_this_thread_allocates() {
+        let (v, n) = allocations(|| std::hint::black_box(vec![1u8; 64]));
+        assert_eq!((v.len(), n), (64, 1));
+        let ((), n) = allocations(|| {
+            std::thread::spawn(|| std::hint::black_box(vec![1u8; 64]))
+                .join()
+                .ok();
+        });
+        assert!(n >= 1, "spawning allocates on this thread");
+    }
+}

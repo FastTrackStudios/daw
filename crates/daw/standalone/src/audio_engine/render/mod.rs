@@ -32,6 +32,7 @@
 //! mixer in `mixer.rs` wraps this on native; an AudioWorklet shim can
 //! wrap it on the web.
 
+mod automate;
 mod envelope;
 mod graph;
 mod item_mix;
@@ -47,6 +48,7 @@ mod snapshot;
 
 use std::sync::Arc;
 
+pub use automate::automation_events;
 use envelope::EnvelopeCursor;
 use item_mix::mix_item_into_bus;
 #[cfg(test)]
@@ -349,9 +351,9 @@ struct RenderScratch {
     key_l: Vec<f32>,
     key_r: Vec<f32>,
     /// One FX's parameters this block, its automation applied
-    /// ([`envelope::params_at`]): kept across blocks so it does not
+    /// ([`automate::FxParams`]): kept across blocks so it does not
     /// allocate on the audio thread.
-    fx_param_events: Vec<(u32, f64)>,
+    fx_param_events: automate::FxParams,
     /// FX guids whose plugin panicked inside `process_block`/`prepare`.
     /// Once here they are bypassed forever (this engine run) — a plugin
     /// that panics once can't be trusted on the audio thread again.
@@ -1280,6 +1282,14 @@ impl ProjectRenderer {
         _frame.set_transport(snap.transport_at(start_seconds));
         // Output frames per timeline second (MIDI event offsets).
         let frames_per_second = self.sample_rate as f64 / rate;
+        // Where FX automation is read: the same clock for every plugin, and
+        // for an offline render as for the live one.
+        let clock = envelope::BlockClock {
+            start: start_seconds,
+            seconds_per_frame: rate / self.sample_rate as f64,
+            frames: frames as u32,
+            sample_rate: self.sample_rate as f64,
+        };
         let any_soloed = snap.solo_pass.is_some();
         let pass = |i: usize| -> graph::Pass {
             match &snap.solo_pass {
@@ -1797,7 +1807,7 @@ impl ProjectRenderer {
                         continue;
                     }
                     job.ti = ti;
-                    job.at = start_seconds;
+                    job.clock = clock;
                     job.bus = buses[ti].samples.as_mut_ptr() as usize;
                     job.aux = if t.aux_taps {
                         aux_sized(&mut aux[ti], frames);
@@ -2042,30 +2052,30 @@ impl ProjectRenderer {
                             }
                             plugin.set_sidechain(key_l, key_r);
                         }
-                        let fixed = t.fx_params.get(i).map(Vec::as_slice).unwrap_or(&[]);
-                        let param_events = match t.fx_envs.get(i) {
-                            Some(envs) if !envs.is_empty() => {
-                                envelope::params_at(fixed, envs, start_seconds, fx_param_events);
-                                fx_param_events.as_slice()
-                            }
-                            _ => fixed,
-                        };
-                        plugin.set_tempo(snap.tempo_map.tempo_at(start_seconds));
-                        let events = crate::plugin::PluginEvents {
-                            params: param_events,
+                        let block = automate::FxBlock {
+                            fixed: t.fx_params.get(i).map(Vec::as_slice).unwrap_or(&[]),
+                            envelopes: t.fx_envs.get(i).map(Vec::as_slice).unwrap_or(&[]),
+                            clock,
                             midi: midi_events.as_slice(),
                             note_expressions: &note_expr_events,
                         };
+                        plugin.set_tempo(snap.tempo_map.tempo_at(start_seconds));
                         // catch_unwind so a panicking third-party plugin bypasses
                         // (bus keeps its pre-plugin signal — pass-through) instead
                         // of unwinding across the extern "C" audio callback and
                         // aborting mid-song. No allocation on the happy path.
                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            plugin.process_block(in_l, in_r, out_l, out_r, &events)
+                            let io = automate::Io {
+                                in_l: &in_l[..frames],
+                                in_r: &in_r[..frames],
+                                out_l: &mut out_l[..frames],
+                                out_r: &mut out_r[..frames],
+                            };
+                            fx_param_events.process(plugin, io, &block)
                         }));
                         match result {
-                            Ok(Ok(())) => {}
-                            Ok(Err(_)) => continue,
+                            Ok((Ok(()), schedule)) => automate::record(schedule),
+                            Ok((Err(_), _)) => continue,
                             Err(_) => {
                                 panicked_fx.insert(fx_guid.clone());
                                 tracing::error!(
@@ -2927,6 +2937,9 @@ pub(crate) fn balance(pan: f64) -> (f64, f64) {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod pdc_tests;
+
+#[cfg(all(test, feature = "clap-host", not(target_arch = "wasm32")))]
+mod automation_tests;
 
 #[cfg(test)]
 mod poison_recovery_tests {

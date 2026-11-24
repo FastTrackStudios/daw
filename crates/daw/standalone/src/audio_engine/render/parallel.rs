@@ -274,10 +274,11 @@ pub(super) struct LaneJob {
     pub(super) out_l: Vec<f32>,
     pub(super) out_r: Vec<f32>,
     pub(super) midi: Vec<crate::plugin::PluginMidiEvent>,
-    /// Where the block starts, seconds: what its FX automation is read at.
-    pub(super) at: f64,
+    /// Where the block sits on the timeline: what its FX automation is
+    /// read at.
+    pub(super) clock: super::envelope::BlockClock,
     /// One FX's parameters, its automation applied (reused across blocks).
-    pub(super) params: Vec<(u32, f64)>,
+    pub(super) params: super::automate::FxParams,
     pub(super) note_expr: Vec<crate::plugin::PluginNoteExpression>,
     /// A plugin processed (the bus may now carry signal).
     pub(super) ran: bool,
@@ -322,27 +323,26 @@ impl LaneJob {
             }
             self.out_l[..frames].fill(0.0);
             self.out_r[..frames].fill(0.0);
-            let fixed = t.fx_params.get(*i).map(Vec::as_slice).unwrap_or(&[]);
-            let params = match t.fx_envs.get(*i) {
-                Some(envs) if !envs.is_empty() => {
-                    super::envelope::params_at(fixed, envs, self.at, &mut self.params);
-                    self.params.as_slice()
-                }
-                _ => fixed,
-            };
-            let events = crate::plugin::PluginEvents {
-                params,
+            let block = super::automate::FxBlock {
+                fixed: t.fx_params.get(*i).map(Vec::as_slice).unwrap_or(&[]),
+                envelopes: t.fx_envs.get(*i).map(Vec::as_slice).unwrap_or(&[]),
+                clock: self.clock,
                 midi: &self.midi,
                 note_expressions: &self.note_expr,
             };
-            let (in_l, in_r) = (&self.in_l[..frames], &self.in_r[..frames]);
-            let (out_l, out_r) = (&mut self.out_l[..frames], &mut self.out_r[..frames]);
+            let io = super::automate::Io {
+                in_l: &self.in_l[..frames],
+                in_r: &self.in_r[..frames],
+                out_l: &mut self.out_l[..frames],
+                out_r: &mut self.out_r[..frames],
+            };
+            let params = &mut self.params;
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                plugin.process_block(in_l, in_r, out_l, out_r, &events)
+                params.process(plugin, io, &block)
             }));
             match result {
-                Ok(Ok(())) => {}
-                Ok(Err(_)) => continue,
+                Ok((Ok(()), schedule)) => super::automate::record(schedule),
+                Ok((Err(_), _)) => continue,
                 Err(_) => {
                     self.panicked.get_or_insert(*i);
                     continue;
