@@ -1,0 +1,15 @@
+[package]
+name = "daw-edit"
+version = "0.3.2"
+edition = "2024"
+license.workspace = true
+description = "The DAW's editing contract: how an edit algorithm (hit placement, …) is asked and what it answers, and the built-in algorithms"
+
+[dependencies]
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

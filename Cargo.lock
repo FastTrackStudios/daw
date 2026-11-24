@@ -3517,6 +3517,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-edit"
+version = "0.3.2"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "daw-module"
 version = "26.10.3"
 dependencies = [
