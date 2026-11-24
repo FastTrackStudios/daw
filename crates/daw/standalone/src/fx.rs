@@ -141,6 +141,79 @@ fn instantiate(daw: &Standalone, name: &str) -> Option<Box<dyn crate::plugin::Pl
     daw.fx_factory()?.create(name, 48_000.0)
 }
 
+/// Whether the FX `fx_guid` on chain `key` is a plugin loaded from a
+/// bundle (CLAP / VST3) with a live instance: the plugin, not the stored
+/// chunk, is what holds its state. A built-in of the injected factory is
+/// left to its own path (`session_file`'s built-in states).
+fn hosts_bundle_state(
+    daw: &Standalone,
+    project_guid: &str,
+    key: &FxChainKey,
+    fx_guid: &str,
+) -> bool {
+    if !daw.plugin_instances.read().contains_key(fx_guid) {
+        return false;
+    }
+    let factory = daw.fx_factory();
+    daw.with_project(project_guid, |p| {
+        p.fx_chains
+            .get(key)
+            .and_then(|c| c.iter().find(|e| e.fx.guid == fx_guid))
+            .is_some_and(|e| {
+                matches!(
+                    e.fx.plugin_type,
+                    daw_proto::fx::FxType::Clap | daw_proto::fx::FxType::Vst3
+                ) && !factory.as_ref().is_some_and(|f| f.provides(&e.fx.name))
+            })
+    })
+    .unwrap_or(false)
+}
+
+/// A bundle plugin's state, from the plugin itself (`save_state`): what a
+/// save writes and a reopen loads. `None` when the FX is not one, or the
+/// plugin would not say.
+fn live_state(
+    daw: &Standalone,
+    project_guid: &str,
+    key: &FxChainKey,
+    fx_guid: &str,
+) -> Option<Vec<u8>> {
+    if !hosts_bundle_state(daw, project_guid, key, fx_guid) {
+        return None;
+    }
+    daw.save_plugin_state(fx_guid).ok()
+}
+
+/// Load `state` into a bundle plugin (`load_state`). `None` when the FX
+/// is not one (the caller stores the chunk as text); an empty state is
+/// nothing to load.
+fn load_live_state(
+    daw: &Standalone,
+    project_guid: &str,
+    key: &FxChainKey,
+    target: &FxTarget,
+    state: &[u8],
+) -> Option<DawResult<()>> {
+    let fx_guid = daw
+        .with_project(project_guid, |p| {
+            let chain = p.fx_chains.get(key)?;
+            let i = find_fx_index(chain, &target.fx)?;
+            Some(chain[i].fx.guid.clone())
+        })
+        .ok()
+        .flatten()?;
+    if !hosts_bundle_state(daw, project_guid, key, &fx_guid) {
+        return None;
+    }
+    if state.is_empty() {
+        return Some(Ok(()));
+    }
+    Some(
+        daw.apply_plugin_state(&fx_guid, state)
+            .map_err(|e| DawError::operation_failed(e.to_string())),
+    )
+}
+
 impl Effects for Standalone {
     fn list_installed(&self) -> Vec<InstalledFx> {
         let mut list = built_in_installed();
@@ -578,13 +651,18 @@ impl Effects for Standalone {
     fn state_chunk(&self, project: ProjectContext, target: FxTarget) -> Option<Vec<u8>> {
         let guid = resolve_project(self, &project)?;
         let key: FxChainKey = (&target.context).into();
-        self.with_project(&guid, |p| {
-            let chain = p.fx_chains.get(&key)?;
-            let i = find_fx_index(chain, &target.fx)?;
-            Some(chain[i].state_chunk.clone().into_bytes())
-        })
-        .ok()
-        .flatten()
+        let (fx_guid, stored) = self
+            .with_project(&guid, |p| {
+                let chain = p.fx_chains.get(&key)?;
+                let i = find_fx_index(chain, &target.fx)?;
+                Some((
+                    chain[i].fx.guid.clone(),
+                    chain[i].state_chunk.clone().into_bytes(),
+                ))
+            })
+            .ok()
+            .flatten()?;
+        Some(live_state(self, &guid, &key, &fx_guid).unwrap_or(stored))
     }
 
     fn set_state_chunk(
@@ -595,6 +673,9 @@ impl Effects for Standalone {
     ) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
         let key: FxChainKey = (&target.context).into();
+        if let Some(loaded) = load_live_state(self, &guid, &key, &target, &chunk) {
+            return loaded;
+        }
         let text = String::from_utf8(chunk)
             .map_err(|_| DawError::operation_failed("non-UTF8 state chunk"))?;
         self.with_project_mut(&guid, |p| {
@@ -607,15 +688,8 @@ impl Effects for Standalone {
 
     fn state_chunk_encoded(&self, project: ProjectContext, target: FxTarget) -> Option<String> {
         use base64::Engine;
-        let guid = resolve_project(self, &project)?;
-        let key: FxChainKey = (&target.context).into();
-        self.with_project(&guid, |p| {
-            let chain = p.fx_chains.get(&key)?;
-            let i = find_fx_index(chain, &target.fx)?;
-            Some(base64::engine::general_purpose::STANDARD.encode(chain[i].state_chunk.as_bytes()))
-        })
-        .ok()
-        .flatten()
+        let bytes = Effects::state_chunk(self, project, target)?;
+        Some(base64::engine::general_purpose::STANDARD.encode(bytes))
     }
 
     fn set_state_chunk_encoded(
@@ -631,6 +705,9 @@ impl Effects for Standalone {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(encoded.as_bytes())
             .map_err(|e| DawError::operation_failed(format!("base64 decode: {e}")))?;
+        if let Some(loaded) = load_live_state(self, &guid, &key, &target, &bytes) {
+            return loaded;
+        }
         let text = String::from_utf8(bytes)
             .map_err(|_| DawError::operation_failed("decoded state chunk is not UTF-8"))?;
         self.with_project_mut(&guid, |p| {
@@ -998,4 +1075,62 @@ fn param_ranges(
             .map(|info| (info.id, info.min, info.max))
             .collect()
     })
+}
+
+#[cfg(all(test, feature = "clap-host"))]
+mod clap_state_tests {
+    use daw_proto::fx::{Effects, FxChainContext, FxRef, FxTarget, SetParameterRequest};
+    use daw_proto::{ProjectContext, Tracks};
+
+    /// A CLAP in the user's folder, when there is one to test with.
+    fn a_clap() -> Option<String> {
+        let home = std::env::var_os("HOME")?;
+        ["FTS EQ.clap", "DragonflyRoomReverb.clap", "ZamComp.clap"]
+            .iter()
+            .map(|name| std::path::Path::new(&home).join(".clap").join(name))
+            .find(|p| p.exists())
+            .and_then(|p| p.to_str().map(str::to_owned))
+    }
+
+    #[test]
+    fn a_clap_s_state_chunk_is_the_plugin_s_own() {
+        let Some(clap) = a_clap() else {
+            return;
+        };
+        let daw = crate::sync::Standalone::new();
+        let song = daw.seed_project(daw_proto::ProjectInfo {
+            guid: "clap-state".into(),
+            name: "Clap".into(),
+            path: String::new(),
+        });
+        let ctx = ProjectContext::Project(song);
+        let track = Tracks::add(&daw, ctx.clone(), "Kick", None).expect("a track");
+        let chain = FxChainContext::Track(track);
+        let fx = Effects::add(&daw, ctx.clone(), chain.clone(), &clap).expect("the CLAP");
+        let target = FxTarget {
+            context: chain,
+            fx: FxRef::Guid(fx.clone()),
+        };
+        let before = daw
+            .state_chunk(ctx.clone(), target.clone())
+            .expect("a state");
+        assert!(
+            !before.is_empty(),
+            "the plugin's own state, not the stored text"
+        );
+        // A parameter moved in the plugin, then the old state loaded back.
+        let first = daw.parameters(ctx.clone(), target.clone())[0].clone();
+        daw.set_parameter(
+            ctx.clone(),
+            SetParameterRequest {
+                target: target.clone(),
+                index: first.index,
+                value: if first.value > 0.5 { 0.1 } else { 0.9 },
+            },
+        )
+        .expect("set");
+        daw.set_state_chunk(ctx.clone(), target.clone(), before.clone())
+            .expect("loaded");
+        assert_eq!(daw.state_chunk(ctx, target), Some(before));
+    }
 }
