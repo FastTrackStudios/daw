@@ -367,6 +367,15 @@ pub trait PluginInstance: Send {
     /// Release activation. Idempotent — calling twice is fine.
     fn deactivate(&mut self);
 
+    /// Clear what the plugin carries from the audio it processed — its
+    /// buffers, voices, envelopes, filters' memory — staying activated, so
+    /// the next block starts as from silence without the cost of
+    /// activating again. Whether it could: `false` (the default) for a
+    /// plugin that cannot, which its caller then deactivates instead.
+    fn reset(&mut self) -> bool {
+        false
+    }
+
     /// Downcast hook for native (built-in Rust DSP) instances whose control
     /// surface isn't expressed as host params. Hosts that mutate a concrete
     /// instance in place (e.g. Signal's NAM amp trims via

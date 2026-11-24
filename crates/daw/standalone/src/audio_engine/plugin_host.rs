@@ -1593,6 +1593,20 @@ impl LoadedClapPlugin {
         self.activation.as_ref().map(|a| a.block_size)
     }
 
+    /// CLAP's `reset`: the plugin clears its buffers, voices and
+    /// envelopes and stays activated. Called where the render calls
+    /// `process` (an offline render's thread). Whether it was activated
+    /// to reset.
+    pub fn reset(&mut self) -> bool {
+        match self.activation.as_mut() {
+            Some(act) => {
+                act.processor.reset();
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Release activation. The plugin instance stays loaded; call
     /// `prepare` again to resume processing.
     pub fn deactivate(&mut self) {
@@ -1889,6 +1903,9 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
     }
     fn deactivate(&mut self) {
         LoadedClapPlugin::deactivate(self)
+    }
+    fn reset(&mut self) -> bool {
+        LoadedClapPlugin::reset(self)
     }
     fn load_state(&mut self, state: &[u8]) -> Result<(), crate::plugin::PluginError> {
         LoadedClapPlugin::load_state(self, state).map_err(map_err)

@@ -32,7 +32,7 @@ pub enum Tap {
 
 /// Where a [`ProbeAt`] reads a track's signal, in the order the signal
 /// passes them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Probe {
     /// Its own media (items, MIDI-free audio) alone, before anything is
     /// added to it.
@@ -52,7 +52,7 @@ pub enum Probe {
 
 /// One track's signal read at one point, every block
 /// ([`ProjectRenderer::with_probes`]).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ProbeAt {
     /// The track, by guid.
     pub track: String,
