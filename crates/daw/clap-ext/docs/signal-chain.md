@@ -162,7 +162,7 @@ They sit in the chain like any block (bypass, move, remove). Today:
   "analysis": {
     "state": "none" | "fresh" | "stale" | "running",
     "range": { "from": 0.0, "to": 241.3 },     // project seconds analysed; null before
-    "at": 1795545600.0,                        // when, Unix seconds
+    "at": 1795478400.0,                        // when, Unix seconds
     "source_revision": "9f2c…",                // the host's name for the audio it was made from
     "playback": "host" | "self",               // who plays the lanes (below)
     "stale": [{ "from": 31.0, "to": 44.5 }],   // where the audio changed since
@@ -202,7 +202,7 @@ They sit in the chain like any block (bypass, move, remove). Today:
     - no `audio`: captured while the song plays through once, analysed
       when the transport stops (or on `finish: true`).
     - `values`: set an alignment found elsewhere (Studio's `LISTEN_ALIGN`)
-      as the block's result.
+      as the block's result (`allpass`, `first_order` as below).
     - `from`/`to`: only that part again, the rest kept (a `level` block
       rides it to the levels the whole analysis found).
   - `SIGNAL_ANALYSIS {block?}`: the analysis with its lanes' points,
@@ -216,9 +216,13 @@ They sit in the chain like any block (bypass, move, remove). Today:
     `ess` (dB: the gain of a band at `ess_hz`, `ess_q`), and each lane's
     `*_amount` (0–200 %: the leveler's dials).
   - `align`: `delay_samples` (either way; an advance is reported as
-    latency, fixed when the block is built), `invert`, `rotate_hz`,
-    `rotate_deg`, `rotate_q` (an all-pass, flat, whose phase at `rotate_hz`
-    is `-rotate_deg`).
+    latency, fixed when the block is built; with none the latency is 0),
+    `invert`, and its phase correction: up to two second-order all-pass
+    sections (`ap1_hz`/`ap1_q`, `ap2_hz`/`ap2_q`: RBJ all-pass biquads) and
+    one first-order one (`ap0_hz`), each off at 0 Hz — magnitude flat,
+    no latency. `SIGNAL_ANALYZE`'s `values` take it as `LISTEN_ALIGN`
+    says it: `{"delay_samples": -136, "invert": false, "allpass":
+    [{"hz": 50, "q": 0.7}], "first_order": {"hz": 120}}`.
 
 ### What works where
 
