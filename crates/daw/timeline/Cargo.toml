@@ -1,0 +1,12 @@
+[package]
+name = "daw-timeline"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+description = "The DAW's timeline state, shared by every view and the engine: the play and edit cursors, the time selection and where Stop leaves the cursor, what is selected, and the clipboard"
+
+[dependencies]
+web-time = { workspace = true }
+
+[lints]
+workspace = true
