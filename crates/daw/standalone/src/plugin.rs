@@ -270,6 +270,19 @@ pub trait PluginInstance: Send {
         None
     }
 
+    /// Run what the plugin asked its host's main thread to (a CLAP's
+    /// `request_callback`). The embedder calls it from its main thread now
+    /// and then.
+    fn pump_main_thread(&mut self) {}
+
+    /// Increases each time the plugin renames or re-describes its
+    /// parameters (a CLAP's rescan of info or text): re-read
+    /// [`params`](Self::params) when it moves. 0 from a backend that never
+    /// does.
+    fn param_info_revision(&self) -> u64 {
+        0
+    }
+
     /// The sidechain for the next [`process_block`](Self::process_block)
     /// only: what the track received on channels 3/4 this block (a
     /// drum's trigger keying its gate). Not called on a block with

@@ -99,9 +99,23 @@ impl PendingGuiResize {
     }
 }
 
+/// What a plugin has told its host about its parameters and its main
+/// thread, for the embedder to act on.
+#[derive(Default)]
+pub struct HostNotices {
+    /// Bumped on every rescan of parameter info or text (a renamed
+    /// parameter): an embedder showing names re-reads them when it moves.
+    param_info: AtomicU64,
+    /// Bumped on every rescan of parameter values.
+    param_values: AtomicU64,
+    /// The plugin asked for its main-thread callback (`request_callback`).
+    callback: std::sync::atomic::AtomicBool,
+}
+
 #[derive(Clone, Default)]
 struct DawHostShared {
     gui_resize: Arc<PendingGuiResize>,
+    notices: Arc<HostNotices>,
     /// The embedder's actions, offered to the plugin as
     /// `com.fasttrackstudio.host-actions/1` (signal#26). `None`: the
     /// extension isn't offered.
@@ -153,7 +167,17 @@ unsafe impl clack_host::extensions::ExtensionImplementation<DawHost> for HostAct
 impl<'a> SharedHandler<'a> for DawHostShared {
     fn request_restart(&self) {}
     fn request_process(&self) {}
-    fn request_callback(&self) {}
+    /// Parked for the embedder: [`LoadedClapPlugin::pump_main_thread`] runs
+    /// it. A plugin built on nice-plug delivers its rescans this way.
+    fn request_callback(&self) {
+        self.notices.callback.store(true, Ordering::Release);
+    }
+}
+
+/// Host-side `params`: a plugin's rescans reach the embedder as revisions
+/// ([`LoadedClapPlugin::param_info_revision`]).
+impl HostParamsImplShared for DawHostShared {
+    fn request_flush(&self) {}
 }
 
 /// Host-side `log` extension. The plugin calls this when it wants
@@ -221,9 +245,25 @@ impl HostGuiImpl for DawHostShared {
     fn closed(&self, _was_destroyed: bool) {}
 }
 
-struct DawHostMainThread;
+struct DawHostMainThread {
+    notices: Arc<HostNotices>,
+}
 
 impl<'a> MainThreadHandler<'a> for DawHostMainThread {}
+
+impl HostParamsImplMainThread for DawHostMainThread {
+    fn rescan(&mut self, flags: ParamRescanFlags) {
+        if flags.intersects(ParamRescanFlags::INFO | ParamRescanFlags::TEXT | ParamRescanFlags::ALL)
+        {
+            self.notices.param_info.fetch_add(1, Ordering::AcqRel);
+        }
+        if flags.intersects(ParamRescanFlags::VALUES | ParamRescanFlags::ALL) {
+            self.notices.param_values.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    fn clear(&mut self, _param_id: ClapId, _flags: ParamClearFlags) {}
+}
 
 /// Host-side `timer-support` extension. We accept register / unregister
 /// requests but don't actually fire callbacks — plugins use timers
@@ -259,7 +299,8 @@ impl HostHandlers for DawHost {
             .register::<HostLog>()
             .register::<HostThreadCheck>()
             .register::<HostTimer>()
-            .register::<HostGui>();
+            .register::<HostGui>()
+            .register::<HostParams>();
         if shared.actions.is_some() {
             builder.register::<HostActionsExtension>();
         }
@@ -419,13 +460,18 @@ impl ClapHost {
         let host_info = self.host_info()?;
 
         let gui_resize = Arc::<PendingGuiResize>::default();
+        let notices = Arc::<HostNotices>::default();
         let shared = DawHostShared {
             gui_resize: gui_resize.clone(),
+            notices: notices.clone(),
             actions: self.actions.clone(),
         };
+        let main_notices = notices.clone();
         let instance = PluginInstance::<DawHost>::new(
             |_| shared.clone(),
-            |_| DawHostMainThread,
+            move |_| DawHostMainThread {
+                notices: main_notices.clone(),
+            },
             &entry,
             id,
             &host_info,
@@ -439,6 +485,7 @@ impl ClapHost {
         Ok(LoadedClapPlugin {
             instance,
             signal,
+            notices,
             gui_resize,
             activation: None,
             descriptor: ClapPluginDescriptor {
@@ -604,6 +651,8 @@ pub struct LoadedClapPlugin {
     instance: PluginInstance<DawHost>,
     /// The plugin's `com.fasttrackstudio.signal/1`, if it has it.
     signal: Option<daw_clap_ext::host::SignalPluginClient>,
+    /// Rescans and main-thread requests from the plugin.
+    notices: Arc<HostNotices>,
     /// Shared with the instance's host handler — see [`PendingGuiResize`].
     gui_resize: Arc<PendingGuiResize>,
     /// Persists the active processor + scratch buffers across
@@ -646,6 +695,17 @@ impl LoadedClapPlugin {
     /// plugin without it.
     pub fn signal(&self) -> Option<daw_clap_ext::host::SignalPluginClient> {
         self.signal
+    }
+
+    /// Increases each time the plugin rescans its parameters' info or text
+    /// (renamed them): re-read [`params`](Self::params) when it moves.
+    pub fn param_info_revision(&self) -> u64 {
+        self.notices.param_info.load(Ordering::Acquire)
+    }
+
+    /// Increases each time the plugin rescans its parameters' values.
+    pub fn param_values_revision(&self) -> u64 {
+        self.notices.param_values.load(Ordering::Acquire)
     }
 
     /// All parameters this plugin exposes. Safe to call before /
@@ -968,7 +1028,14 @@ impl LoadedClapPlugin {
     /// this at UI rate — it's what REAPER's timer does; nice-plug routes
     /// param/GUI tasks through it.
     pub fn pump_main_thread(&mut self) {
+        self.notices.callback.store(false, Ordering::Release);
         self.instance.call_on_main_thread_callback();
+    }
+
+    /// Whether the plugin asked for its main-thread callback since the last
+    /// [`pump_main_thread`](Self::pump_main_thread).
+    pub fn wants_main_thread(&self) -> bool {
+        self.notices.callback.load(Ordering::Acquire)
     }
 
     /// Main-thread `clap_plugin_params.flush` for GUI-only hosts (plugin
@@ -1674,6 +1741,12 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
     }
     fn signal(&self) -> Option<daw_clap_ext::host::SignalPluginClient> {
         LoadedClapPlugin::signal(self)
+    }
+    fn pump_main_thread(&mut self) {
+        LoadedClapPlugin::pump_main_thread(self);
+    }
+    fn param_info_revision(&self) -> u64 {
+        LoadedClapPlugin::param_info_revision(self)
     }
     fn prepare(&mut self, sr: f64, bs: u32) -> Result<(), crate::plugin::PluginError> {
         LoadedClapPlugin::prepare(self, sr, bs).map_err(map_err)
