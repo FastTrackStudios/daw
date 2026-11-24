@@ -313,3 +313,76 @@ impl HostActionsClient {
         }
     }
 }
+
+// ── host-timeline/1 ─────────────────────────────────────────────────────
+
+/// The host's `host-timeline/1`, from the plugin's side. `revision` may be
+/// called from any thread; `read` and `set_playback_claimed` on the main
+/// thread only.
+#[derive(Clone, Copy)]
+pub struct HostTimelineClient {
+    host: *const clap_host,
+    ext: *const sys::fts_host_timeline,
+}
+
+// SAFETY: as `HostActionsClient`; `revision` is [thread-safe] by contract,
+// the rest is called where only the main thread calls it.
+unsafe impl Send for HostTimelineClient {}
+// SAFETY: as above.
+unsafe impl Sync for HostTimelineClient {}
+
+impl HostTimelineClient {
+    /// Ask `host` for `host-timeline/1`. `None` from a host without it.
+    ///
+    /// # Safety
+    ///
+    /// `host` is the plugin's valid `clap_host`, called on the main thread.
+    #[must_use]
+    pub unsafe fn query(host: *const clap_host) -> Option<Self> {
+        if host.is_null() {
+            return None;
+        }
+        // SAFETY: the caller's contract.
+        let get = unsafe { (*host).get_extension }?;
+        let ext = unsafe { get(host, sys::FTS_EXT_HOST_TIMELINE.as_ptr()) }
+            .cast::<sys::fts_host_timeline>();
+        (!ext.is_null()).then_some(Self { host, ext })
+    }
+
+    fn ext(&self) -> &sys::fts_host_timeline {
+        // SAFETY: non-null, valid for the plugin's life (`query`).
+        unsafe { &*self.ext }
+    }
+
+    /// The timeline's revision; 0 while the host has none. Any thread,
+    /// lock-free.
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        // SAFETY: the host's function and host.
+        self.ext().revision.map_or(0, |f| unsafe { f(self.host) })
+    }
+
+    /// The whole timeline. Main thread.
+    ///
+    /// # Errors
+    ///
+    /// When the host has none yet, or its stream doesn't decode.
+    pub fn read(&self) -> Result<crate::timeline::Timeline, ExtError> {
+        let f = self.ext().read.ok_or(ExtError::Unsupported)?;
+        let out = VecOstream::new();
+        // SAFETY: the host's function, its host, our stream.
+        if !unsafe { f(self.host, out.as_raw()) } {
+            return Err(ExtError::NotFound("timeline".into()));
+        }
+        crate::timeline::Timeline::decode(&out.into_bytes())
+    }
+
+    /// Claim the timeline's playback (or give it back). Main thread.
+    /// `false`: the host keeps delivering the track's events.
+    #[must_use]
+    pub fn set_playback_claimed(&self, claimed: bool) -> bool {
+        self.ext()
+            .set_playback_claimed
+            .is_some_and(|f| unsafe { f(self.host, claimed) })
+    }
+}

@@ -6,6 +6,7 @@
 //! | `com.fasttrackstudio.host-actions/1` | the plugin calls the host: actions (JSON in, JSON out), events, files | Studio's engine over its Action List ([`host::HostActions`]) |
 //! | `com.fasttrackstudio.host-events/1` | the host delivers subscribed events to the plugin | the plugin |
 //! | `com.fasttrackstudio.signal/1` | the host drives the plugin: actions, the chain as data, stable parameter ids, modulation sources | the Signal CLAP and each block's CLAP ([`plugin::SignalPlugin`]) |
+//! | `com.fasttrackstudio.host-timeline/1` | the plugin reads its track's whole MIDI and tempo map ahead of the playhead, and may claim its playback ([`timeline`], `docs/host-timeline.md`) | Studio's engine per instance ([`host::HostTimeline`]); read by [`plugin::HostTimelineClient`] |
 //!
 //! - [`sys`]: the header's `#[repr(C)]` types.
 //! - [`plugin`]: the plugin's side, over clap-sys: [`plugin::SignalVtable`]
@@ -21,6 +22,7 @@ pub mod host;
 pub mod plugin;
 pub mod stream;
 pub mod sys;
+pub mod timeline;
 
 use std::fmt;
 
