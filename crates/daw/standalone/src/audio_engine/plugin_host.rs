@@ -46,7 +46,8 @@ use clack_host::events::EventHeader;
 use clack_host::events::Match;
 use clack_host::events::event_types::{
     MidiEvent as ClapMidiEvent, MidiSysExEvent as ClapSysExEvent, NoteExpressionEvent,
-    NoteExpressionType, NoteOffEvent, NoteOnEvent, ParamValueEvent, TransportEvent, TransportFlags,
+    NoteExpressionType, NoteOffEvent, NoteOnEvent, ParamModEvent, ParamValueEvent, TransportEvent,
+    TransportFlags,
 };
 use clack_host::prelude::*;
 use clack_host::utils::Cookie;
@@ -100,6 +101,19 @@ impl PendingGuiResize {
     }
 }
 
+/// What a plugin has told its host about its parameters and its main
+/// thread, for the embedder to act on.
+#[derive(Default)]
+pub struct HostNotices {
+    /// Bumped on every rescan of parameter info or text (a renamed
+    /// parameter): an embedder showing names re-reads them when it moves.
+    param_info: AtomicU64,
+    /// Bumped on every rescan of parameter values.
+    param_values: AtomicU64,
+    /// The plugin asked for its main-thread callback (`request_callback`).
+    callback: std::sync::atomic::AtomicBool,
+}
+
 #[derive(Clone, Default)]
 struct DawHostShared {
     gui_resize: Arc<PendingGuiResize>,
@@ -108,6 +122,53 @@ struct DawHostShared {
     /// active, after a state load say. Serviced on a control thread
     /// ([`LoadedClapPlugin::restart_if_requested`]), never on the audio one.
     restart: Arc<std::sync::atomic::AtomicBool>,
+    notices: Arc<HostNotices>,
+    /// The embedder's actions, offered to the plugin as
+    /// `com.fasttrackstudio.host-actions/1` (signal#26). `None`: the
+    /// extension isn't offered.
+    actions: Option<Arc<dyn daw_clap_ext::host::HostActions>>,
+}
+
+/// `com.fasttrackstudio.host-actions/1`, offered by this host when its
+/// embedder gave it actions ([`ClapHost::with_actions`]).
+#[derive(Copy, Clone)]
+struct HostActionsExtension;
+
+// SAFETY: the identifier is the extension's, and the host side's raw
+// pointer is never read through this type.
+unsafe impl clack_host::extensions::Extension for HostActionsExtension {
+    const IDENTIFIERS: &'static [&'static std::ffi::CStr] =
+        &[daw_clap_ext::sys::FTS_EXT_HOST_ACTIONS];
+    type ExtensionSide = clack_host::extensions::HostExtensionSide;
+
+    unsafe fn from_raw(_raw: clack_host::extensions::RawExtension<Self::ExtensionSide>) -> Self {
+        Self
+    }
+}
+
+/// Finds the embedder's actions from the raw host the plugin calls with.
+struct DawActionsLookup;
+
+impl daw_clap_ext::host::HostActionsLookup for DawActionsLookup {
+    unsafe fn lookup(
+        host: *const clap_sys::host::clap_host,
+    ) -> Option<Arc<dyn daw_clap_ext::host::HostActions>> {
+        // SAFETY: the plugin's call, with the host clack created for it.
+        unsafe {
+            clack_host::extensions::wrapper::HostWrapper::<DawHost>::handle(host, |h| {
+                Ok(h.shared().actions.clone())
+            })
+        }
+        .flatten()
+    }
+}
+
+// SAFETY: the implementation is the header's `fts_host_actions_t`.
+unsafe impl clack_host::extensions::ExtensionImplementation<DawHost> for HostActionsExtension {
+    const IMPLEMENTATION: clack_host::extensions::RawExtensionImplementation =
+        clack_host::extensions::RawExtensionImplementation::new(
+            &daw_clap_ext::host::HostActionsVtable::<DawActionsLookup>::VTABLE,
+        );
 }
 
 impl<'a> SharedHandler<'a> for DawHostShared {
@@ -116,7 +177,17 @@ impl<'a> SharedHandler<'a> for DawHostShared {
             .store(true, std::sync::atomic::Ordering::Release);
     }
     fn request_process(&self) {}
-    fn request_callback(&self) {}
+    /// Parked for the embedder: [`LoadedClapPlugin::pump_main_thread`] runs
+    /// it. A plugin built on nice-plug delivers its rescans this way.
+    fn request_callback(&self) {
+        self.notices.callback.store(true, Ordering::Release);
+    }
+}
+
+/// Host-side `params`: a plugin's rescans reach the embedder as revisions
+/// ([`LoadedClapPlugin::param_info_revision`]).
+impl HostParamsImplShared for DawHostShared {
+    fn request_flush(&self) {}
 }
 
 /// Host-side `log` extension. The plugin calls this when it wants
@@ -184,9 +255,25 @@ impl HostGuiImpl for DawHostShared {
     fn closed(&self, _was_destroyed: bool) {}
 }
 
-struct DawHostMainThread;
+struct DawHostMainThread {
+    notices: Arc<HostNotices>,
+}
 
 impl<'a> MainThreadHandler<'a> for DawHostMainThread {}
+
+impl HostParamsImplMainThread for DawHostMainThread {
+    fn rescan(&mut self, flags: ParamRescanFlags) {
+        if flags.intersects(ParamRescanFlags::INFO | ParamRescanFlags::TEXT | ParamRescanFlags::ALL)
+        {
+            self.notices.param_info.fetch_add(1, Ordering::AcqRel);
+        }
+        if flags.intersects(ParamRescanFlags::VALUES | ParamRescanFlags::ALL) {
+            self.notices.param_values.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    fn clear(&mut self, _param_id: ClapId, _flags: ParamClearFlags) {}
+}
 
 /// Host-side `timer-support` extension. We accept register / unregister
 /// requests but don't actually fire callbacks — plugins use timers
@@ -214,7 +301,7 @@ impl HostHandlers for DawHost {
     type MainThread<'a> = DawHostMainThread;
     type AudioProcessor<'a> = DawHostAudioProcessor;
 
-    fn declare_extensions(builder: &mut HostExtensions<Self>, _shared: &Self::Shared<'_>) {
+    fn declare_extensions(builder: &mut HostExtensions<Self>, shared: &Self::Shared<'_>) {
         // Expose the host services we implement. Plugins query
         // these by name during instantiation; missing ones just
         // return null (plugin works without them).
@@ -222,7 +309,11 @@ impl HostHandlers for DawHost {
             .register::<HostLog>()
             .register::<HostThreadCheck>()
             .register::<HostTimer>()
-            .register::<HostGui>();
+            .register::<HostGui>()
+            .register::<HostParams>();
+        if shared.actions.is_some() {
+            builder.register::<HostActionsExtension>();
+        }
     }
 }
 
@@ -236,6 +327,8 @@ pub struct ClapHost {
     vendor: String,
     url: String,
     version: String,
+    /// Offered to every plugin this host loads, as `host-actions/1`.
+    actions: Option<Arc<dyn daw_clap_ext::host::HostActions>>,
 }
 
 impl Default for ClapHost {
@@ -245,6 +338,7 @@ impl Default for ClapHost {
             vendor: "com.fasttrackstudio.daw".into(),
             url: String::new(),
             version: env!("CARGO_PKG_VERSION").to_string(),
+            actions: None,
         }
     }
 }
@@ -256,7 +350,16 @@ impl ClapHost {
             vendor: vendor.into(),
             url: String::new(),
             version: env!("CARGO_PKG_VERSION").to_string(),
+            actions: None,
         }
+    }
+
+    /// Offer `actions` to the plugins this host loads, as
+    /// `com.fasttrackstudio.host-actions/1` (signal#26).
+    #[must_use]
+    pub fn with_actions(mut self, actions: Arc<dyn daw_clap_ext::host::HostActions>) -> Self {
+        self.actions = Some(actions);
+        self
     }
 
     fn host_info(&self) -> Result<HostInfo, ClapHostError> {
@@ -368,21 +471,33 @@ impl ClapHost {
 
         let gui_resize = Arc::<PendingGuiResize>::default();
         let restart = Arc::<std::sync::atomic::AtomicBool>::default();
+        let notices = Arc::<HostNotices>::default();
         let shared = DawHostShared {
             gui_resize: gui_resize.clone(),
             restart: restart.clone(),
+            notices: notices.clone(),
+            actions: self.actions.clone(),
         };
+        let main_notices = notices.clone();
         let instance = PluginInstance::<DawHost>::new(
             |_| shared.clone(),
-            |_| DawHostMainThread,
+            move |_| DawHostMainThread {
+                notices: main_notices.clone(),
+            },
             &entry,
             id,
             &host_info,
         )
         .map_err(|_| ClapHostError::Instantiate)?;
+        // `signal/1`, if the plugin answers it (it's initialized now).
+        let raw: *const clap_sys::plugin::clap_plugin = instance.raw_instance();
+        // SAFETY: the instance's own plugin, on the thread that made it.
+        let signal = unsafe { daw_clap_ext::host::SignalPluginClient::query(raw) };
 
         Ok(LoadedClapPlugin {
             instance,
+            signal,
+            notices,
             gui_resize,
             restart,
             latency: 0,
@@ -548,6 +663,10 @@ pub struct ClapGuiSmokeResult {
 /// the audio thread.
 pub struct LoadedClapPlugin {
     instance: PluginInstance<DawHost>,
+    /// The plugin's `com.fasttrackstudio.signal/1`, if it has it.
+    signal: Option<daw_clap_ext::host::SignalPluginClient>,
+    /// Rescans and main-thread requests from the plugin.
+    notices: Arc<HostNotices>,
     /// Shared with the instance's host handler — see [`PendingGuiResize`].
     gui_resize: Arc<PendingGuiResize>,
     /// Shared with the instance's host handler: the plugin asked for a
@@ -591,6 +710,24 @@ struct ActivationGuard {
 impl LoadedClapPlugin {
     pub fn descriptor(&self) -> &ClapPluginDescriptor {
         &self.descriptor
+    }
+
+    /// The plugin's `com.fasttrackstudio.signal/1`: Signal's actions, the
+    /// chain, stable parameter ids, modulation sources. `None` for a
+    /// plugin without it.
+    pub fn signal(&self) -> Option<daw_clap_ext::host::SignalPluginClient> {
+        self.signal
+    }
+
+    /// Increases each time the plugin rescans its parameters' info or text
+    /// (renamed them): re-read [`params`](Self::params) when it moves.
+    pub fn param_info_revision(&self) -> u64 {
+        self.notices.param_info.load(Ordering::Acquire)
+    }
+
+    /// Increases each time the plugin rescans its parameters' values.
+    pub fn param_values_revision(&self) -> u64 {
+        self.notices.param_values.load(Ordering::Acquire)
     }
 
     /// All parameters this plugin exposes. Safe to call before /
@@ -913,7 +1050,14 @@ impl LoadedClapPlugin {
     /// this at UI rate — it's what REAPER's timer does; nice-plug routes
     /// param/GUI tasks through it.
     pub fn pump_main_thread(&mut self) {
+        self.notices.callback.store(false, Ordering::Release);
         self.instance.call_on_main_thread_callback();
+    }
+
+    /// Whether the plugin asked for its main-thread callback since the last
+    /// [`pump_main_thread`](Self::pump_main_thread).
+    pub fn wants_main_thread(&self) -> bool {
+        self.notices.callback.load(Ordering::Acquire)
     }
 
     /// Main-thread `clap_plugin_params.flush` for GUI-only hosts (plugin
@@ -1091,23 +1235,6 @@ impl LoadedClapPlugin {
         out_r: &mut [f32],
         events: &PluginEvents<'_>,
     ) -> Result<(), ClapHostError> {
-        let Some(act) = self.activation.as_mut() else {
-            return Err(ClapHostError::NotActivated);
-        };
-        let frames = in_l.len().min(in_r.len()).min(out_l.len()).min(out_r.len());
-        if frames > act.block_size as usize {
-            return Err(ClapHostError::BlockTooLarge);
-        }
-
-        let (n_in, n_out) = (act.input_ports, act.output_ports);
-
-        // Copy inputs into scratch (clack wants mutable input slices
-        // even for read-only channels).
-        let scratch_l_full = &mut act.scratch_l[..frames];
-        let scratch_r_full = &mut act.scratch_r[..frames];
-        scratch_l_full.copy_from_slice(&in_l[..frames]);
-        scratch_r_full.copy_from_slice(&in_r[..frames]);
-
         let mut input_events = EventBuffer::new();
         for &(param_id, value) in events.params {
             input_events.push(&ParamValueEvent::new(
@@ -1131,6 +1258,70 @@ impl LoadedClapPlugin {
         for ne in events.note_expressions {
             push_clap_note_expression(&mut input_events, ne);
         }
+        self.process_with_events(in_l, in_r, out_l, out_r, &input_events)
+    }
+
+    /// [`process_block`](Self::process_block) with sample-accurate
+    /// parameter events: values (`CLAP_EVENT_PARAM_VALUE`) and
+    /// modulation offsets (`CLAP_EVENT_PARAM_MOD`, which keep the
+    /// parameter's own value), each at its frame. `params` and `midi` are
+    /// each sorted by offset; they are merged in time order, as CLAP
+    /// requires.
+    pub fn process_block_param_events(
+        &mut self,
+        in_l: &[f32],
+        in_r: &[f32],
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        params: &[crate::plugin::PluginParamEvent],
+        midi: &[crate::plugin::PluginMidiEvent],
+    ) -> Result<(), ClapHostError> {
+        let mut input_events = EventBuffer::new();
+        let mut params = params.iter().peekable();
+        let mut midi = midi.iter().peekable();
+        loop {
+            let take_param = match (params.peek(), midi.peek()) {
+                (Some(p), Some(m)) => p.offset <= m.offset,
+                (Some(_), None) => true,
+                (None, Some(_)) => false,
+                (None, None) => break,
+            };
+            if take_param {
+                if let Some(p) = params.next() {
+                    push_clap_param(&mut input_events, p);
+                }
+            } else if let Some(m) = midi.next() {
+                push_clap_midi(&mut input_events, m);
+            }
+        }
+        self.process_with_events(in_l, in_r, out_l, out_r, &input_events)
+    }
+
+    fn process_with_events(
+        &mut self,
+        in_l: &[f32],
+        in_r: &[f32],
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        input_events: &EventBuffer,
+    ) -> Result<(), ClapHostError> {
+        let Some(act) = self.activation.as_mut() else {
+            return Err(ClapHostError::NotActivated);
+        };
+        let frames = in_l.len().min(in_r.len()).min(out_l.len()).min(out_r.len());
+        if frames > act.block_size as usize {
+            return Err(ClapHostError::BlockTooLarge);
+        }
+
+        let (n_in, n_out) = (act.input_ports, act.output_ports);
+
+        // Copy inputs into scratch (clack wants mutable input slices
+        // even for read-only channels).
+        let scratch_l_full = &mut act.scratch_l[..frames];
+        let scratch_r_full = &mut act.scratch_r[..frames];
+        scratch_l_full.copy_from_slice(&in_l[..frames]);
+        scratch_r_full.copy_from_slice(&in_r[..frames]);
+
         let mut output_events = EventBuffer::new();
 
         let mut input_ports = AudioPorts::with_capacity(2, n_in);
@@ -1508,6 +1699,25 @@ fn push_clap_note_expression(buf: &mut EventBuffer, ne: &crate::plugin::PluginNo
     ));
 }
 
+fn push_clap_param(buf: &mut EventBuffer, ev: &crate::plugin::PluginParamEvent) {
+    match ev.kind {
+        crate::plugin::PluginParamEventKind::Value(value) => buf.push(&ParamValueEvent::new(
+            ev.offset,
+            ClapId::from(ev.param_id),
+            Pckn::match_all(),
+            value,
+            Cookie::empty(),
+        )),
+        crate::plugin::PluginParamEventKind::Mod(amount) => buf.push(&ParamModEvent::new(
+            ev.offset,
+            ClapId::from(ev.param_id),
+            Pckn::match_all(),
+            amount,
+            Cookie::empty(),
+        )),
+    }
+}
+
 fn push_clap_midi(buf: &mut EventBuffer, ev: &crate::plugin::PluginMidiEvent) {
     use daw_proto::{MidiEvent, MidiEventExt};
     let t = ev.offset;
@@ -1604,6 +1814,27 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
     }
     fn restart_if_requested(&mut self) -> bool {
         LoadedClapPlugin::restart_if_requested(self)
+    }
+    fn process_block_param_events(
+        &mut self,
+        il: &[f32],
+        ir: &[f32],
+        ol: &mut [f32],
+        or: &mut [f32],
+        params: &[crate::plugin::PluginParamEvent],
+        midi: &[crate::plugin::PluginMidiEvent],
+    ) -> Result<(), crate::plugin::PluginError> {
+        LoadedClapPlugin::process_block_param_events(self, il, ir, ol, or, params, midi)
+            .map_err(map_err)
+    }
+    fn signal(&self) -> Option<daw_clap_ext::host::SignalPluginClient> {
+        LoadedClapPlugin::signal(self)
+    }
+    fn pump_main_thread(&mut self) {
+        LoadedClapPlugin::pump_main_thread(self);
+    }
+    fn param_info_revision(&self) -> u64 {
+        LoadedClapPlugin::param_info_revision(self)
     }
     fn prepare(&mut self, sr: f64, bs: u32) -> Result<(), crate::plugin::PluginError> {
         LoadedClapPlugin::prepare(self, sr, bs).map_err(map_err)

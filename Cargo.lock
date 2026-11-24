@@ -3492,6 +3492,13 @@ name = "daw-audio-graph"
 version = "26.10.3"
 
 [[package]]
+name = "daw-clap-ext"
+version = "0.1.0"
+dependencies = [
+ "clap-sys",
+]
+
+[[package]]
 name = "daw-control"
 version = "0.1.0"
 dependencies = [
@@ -3543,7 +3550,9 @@ dependencies = [
  "base64 0.22.1",
  "clack-extensions",
  "clack-host",
+ "clap-sys",
  "cpal",
+ "daw-clap-ext",
  "daw-control",
  "daw-proto",
  "daw-standalone",
