@@ -918,6 +918,10 @@ pub struct Standalone {
     /// What each track's media and FX have cost the realtime renders.
     #[cfg(any(feature = "decode", feature = "audio"))]
     pub(crate) track_costs: Arc<crate::audio_engine::perf::TrackCosts>,
+    /// Points of tracks read while the song plays, handed off the audio
+    /// thread through lock-free rings ([`Self::live_taps`]).
+    #[cfg(any(feature = "decode", feature = "audio"))]
+    pub(crate) live_taps: Arc<crate::audio_engine::render::live_tap::LiveTaps>,
     /// Meter-frame stream hub (`PeaksStreamSource`). A process-wide
     /// pump (spawned lazily by the first `set_meters`, i.e. when an
     /// audio engine attaches) reads the meter bank at ~30 Hz and
@@ -1003,6 +1007,8 @@ impl Standalone {
             block_profile: Arc::default(),
             #[cfg(any(feature = "decode", feature = "audio"))]
             track_costs: Arc::default(),
+            #[cfg(any(feature = "decode", feature = "audio"))]
+            live_taps: Arc::default(),
             meter_events: architect::PubSub::sliding(64),
             meter_pump_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             meters_installed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1108,6 +1114,15 @@ impl Standalone {
         let plugins = self.plugin_instances.read();
         let mut plugin = plugins.cell(fx_guid)?.try_lock_spinning(1)?;
         Some(plugin.latency())
+    }
+
+    /// The engine's live taps: open one on a point of a track and read
+    /// what plays through it, off the audio thread
+    /// ([`crate::audio_engine::render::live_tap`]).
+    #[cfg(any(feature = "decode", feature = "audio"))]
+    #[must_use]
+    pub fn live_taps(&self) -> &crate::audio_engine::render::live_tap::LiveTaps {
+        &self.live_taps
     }
 
     pub fn meters(&self) -> Arc<crate::metering::Meters> {
