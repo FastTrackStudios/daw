@@ -454,6 +454,15 @@ impl Previews {
         self.known.lock().ok()?.get(guid).cloned()
     }
 
+    /// Notes for items, as given rather than read: a picture of a known
+    /// song (the gallery's golden session, a test) drawn with no engine.
+    pub fn put_notes(&self, notes: impl IntoIterator<Item = (String, Vec<Note>)>) {
+        if let Ok(mut known) = self.known.lock() {
+            known.extend(notes);
+        }
+        self.arrived();
+    }
+
     /// How many times notes or waveforms have arrived: a holder of a
     /// picture drawn from them records it again when this has moved.
     #[must_use]
