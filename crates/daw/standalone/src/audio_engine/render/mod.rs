@@ -2501,9 +2501,23 @@ impl ProjectRenderer {
         // Build + revision in ONE lock pass so the cached pair is
         // always internally consistent.
         let offline = self.offline.as_ref();
+        // A render of the song's own instances honours their claims on
+        // their tracks' MIDI; an offline render plays its own copies,
+        // which claim nothing.
+        #[cfg(not(target_arch = "wasm32"))]
+        let hints = offline.is_none().then(|| LiveHints {
+            played_live: Vec::new(),
+            ..self.daw.live_hints()
+        });
         let (revision, snap) = self.daw.read_project(&self.project_guid, |p| {
             let snap = match offline {
                 Some(o) => RenderSnapshot::build_adjusted(p, &[], Some(&|t| o.adjust(t))),
+                #[cfg(not(target_arch = "wasm32"))]
+                None => match &hints {
+                    Some(h) => RenderSnapshot::build_live(p, h),
+                    None => RenderSnapshot::build(p),
+                },
+                #[cfg(target_arch = "wasm32")]
                 None => RenderSnapshot::build(p),
             };
             (p.revision, snap)
