@@ -152,6 +152,17 @@ impl Standalone {
         self.track_events.publish(event);
     }
 
+    /// A plugin on `context` re-described itself (a CLAP's parameter
+    /// rescan: renamed slots, new ranges): every view re-reads the chain,
+    /// as after any change to its tree.
+    pub fn announce_fx_chain_changed(
+        &self,
+        project_guid: &str,
+        context: daw_proto::FxChainContext,
+    ) {
+        self.publish_fx_event(project_guid, FxEvent::TreeStructureChanged { context });
+    }
+
     pub(crate) fn publish_fx_event(&self, project_guid: &str, event: FxEvent) {
         // FX has no per-domain stream service yet — events reach
         // consumers via the cross-domain event-bus hub.

@@ -42,10 +42,12 @@ use clack_extensions::params::*;
 use clack_extensions::state::PluginState as PluginStateExt;
 use clack_extensions::thread_check::{HostThreadCheck, HostThreadCheckImpl};
 use clack_extensions::timer::{HostTimer, HostTimerImpl, TimerId};
+use clack_host::events::EventHeader;
 use clack_host::events::Match;
 use clack_host::events::event_types::{
     MidiEvent as ClapMidiEvent, MidiSysExEvent as ClapSysExEvent, NoteExpressionEvent,
-    NoteExpressionType, NoteOffEvent, NoteOnEvent, ParamModEvent, ParamValueEvent,
+    NoteExpressionType, NoteOffEvent, NoteOnEvent, ParamModEvent, ParamValueEvent, TransportEvent,
+    TransportFlags,
 };
 use clack_host::prelude::*;
 use clack_host::utils::Cookie;
@@ -115,11 +117,20 @@ pub struct HostNotices {
 #[derive(Clone, Default)]
 struct DawHostShared {
     gui_resize: Arc<PendingGuiResize>,
+    /// Set when the plugin asks to be restarted (deactivated and activated
+    /// again) — what a CLAP does when its latency changes while it is
+    /// active, after a state load say. Serviced on a control thread
+    /// ([`LoadedClapPlugin::restart_if_requested`]), never on the audio one.
+    restart: Arc<std::sync::atomic::AtomicBool>,
     notices: Arc<HostNotices>,
     /// The embedder's actions, offered to the plugin as
     /// `com.fasttrackstudio.host-actions/1` (signal#26). `None`: the
     /// extension isn't offered.
     actions: Option<Arc<dyn daw_clap_ext::host::HostActions>>,
+    /// The plugin this host serves, once its instance is made: where a
+    /// subscription's events go. Null while the plugin initializes, so a
+    /// subscription asked for inside `init` is refused.
+    plugin: Arc<std::sync::atomic::AtomicPtr<clap_sys::plugin::clap_plugin>>,
 }
 
 /// `com.fasttrackstudio.host-actions/1`, offered by this host when its
@@ -154,6 +165,20 @@ impl daw_clap_ext::host::HostActionsLookup for DawActionsLookup {
         }
         .flatten()
     }
+
+    unsafe fn event_sink(
+        host: *const clap_sys::host::clap_host,
+    ) -> Option<daw_clap_ext::host::EventSink> {
+        // SAFETY: as `lookup`.
+        let plugin = unsafe {
+            clack_host::extensions::wrapper::HostWrapper::<DawHost>::handle(host, |h| {
+                Ok(h.shared().plugin.load(Ordering::Acquire))
+            })
+        }?;
+        // SAFETY: the instance's own plugin, initialized (it was stored
+        // after `init`), on the main thread the plugin called from.
+        unsafe { daw_clap_ext::host::EventSink::query(plugin) }
+    }
 }
 
 // SAFETY: the implementation is the header's `fts_host_actions_t`.
@@ -165,7 +190,10 @@ unsafe impl clack_host::extensions::ExtensionImplementation<DawHost> for HostAct
 }
 
 impl<'a> SharedHandler<'a> for DawHostShared {
-    fn request_restart(&self) {}
+    fn request_restart(&self) {
+        self.restart
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
     fn request_process(&self) {}
     /// Parked for the embedder: [`LoadedClapPlugin::pump_main_thread`] runs
     /// it. A plugin built on nice-plug delivers its rescans this way.
@@ -460,12 +488,16 @@ impl ClapHost {
         let host_info = self.host_info()?;
 
         let gui_resize = Arc::<PendingGuiResize>::default();
+        let restart = Arc::<std::sync::atomic::AtomicBool>::default();
         let notices = Arc::<HostNotices>::default();
         let shared = DawHostShared {
             gui_resize: gui_resize.clone(),
+            restart: restart.clone(),
             notices: notices.clone(),
             actions: self.actions.clone(),
+            plugin: Arc::default(),
         };
+        let plugin_slot = shared.plugin.clone();
         let main_notices = notices.clone();
         let instance = PluginInstance::<DawHost>::new(
             |_| shared.clone(),
@@ -481,12 +513,15 @@ impl ClapHost {
         let raw: *const clap_sys::plugin::clap_plugin = instance.raw_instance();
         // SAFETY: the instance's own plugin, on the thread that made it.
         let signal = unsafe { daw_clap_ext::host::SignalPluginClient::query(raw) };
+        plugin_slot.store(raw.cast_mut(), Ordering::Release);
 
         Ok(LoadedClapPlugin {
             instance,
             signal,
             notices,
             gui_resize,
+            restart,
+            latency: 0,
             activation: None,
             descriptor: ClapPluginDescriptor {
                 id: id.to_string_lossy().into_owned(),
@@ -655,6 +690,14 @@ pub struct LoadedClapPlugin {
     notices: Arc<HostNotices>,
     /// Shared with the instance's host handler — see [`PendingGuiResize`].
     gui_resize: Arc<PendingGuiResize>,
+    /// Shared with the instance's host handler: the plugin asked for a
+    /// restart (see [`DawHostShared::restart`]).
+    restart: Arc<std::sync::atomic::AtomicBool>,
+    /// The latency the plugin last reported, samples: asked on a control
+    /// thread (at activation, after a state load, after a restart) — the
+    /// CLAP `latency.get` is a main-thread call — and read from here by the
+    /// renderer's delay compensation on the audio thread.
+    latency: u32,
     /// Persists the active processor + scratch buffers across
     /// `process_block` calls when prepared.
     activation: Option<ActivationGuard>,
@@ -1038,6 +1081,14 @@ impl LoadedClapPlugin {
         self.notices.callback.load(Ordering::Acquire)
     }
 
+    /// The plugin's `com.fasttrackstudio.host-events/1`: where the events
+    /// it subscribed to are delivered. Main thread.
+    pub fn event_sink(&self) -> Option<daw_clap_ext::host::EventSink> {
+        let raw: *const clap_sys::plugin::clap_plugin = self.instance.raw_instance();
+        // SAFETY: this instance's own plugin, alive while `self` is.
+        unsafe { daw_clap_ext::host::EventSink::query(raw) }
+    }
+
     /// Main-thread `clap_plugin_params.flush` for GUI-only hosts (plugin
     /// NOT activated): without a process loop, GUI-issued parameter
     /// gestures sit in the wrapper's output queue forever — the editor
@@ -1093,12 +1144,54 @@ impl LoadedClapPlugin {
         None
     }
 
+    /// The latency the plugin reported when last asked (at activation,
+    /// after a state load or a restart): what the renderer compensates.
+    /// Never calls into the plugin, so the audio thread may read it.
     pub fn latency(&mut self) -> u32 {
+        self.latency
+    }
+
+    /// Ask the plugin its latency now (`latency.get`, a main-thread call,
+    /// valid while it is active or being activated) and keep the answer.
+    pub fn refresh_latency(&mut self) -> u32 {
         let mut handle = self.instance.plugin_handle();
-        handle
+        self.latency = handle
             .get_extension::<PluginLatency>()
             .map(|ext| ext.get(&mut handle))
-            .unwrap_or(0)
+            .unwrap_or(0);
+        self.latency
+    }
+
+    /// Restart the plugin if it asked to be (its latency changed while it
+    /// was active): deactivated and activated again at the same rate and
+    /// block size, its latency asked anew. Control threads only. Whether
+    /// it was restarted.
+    pub fn restart_if_requested(&mut self) -> bool {
+        if !self
+            .restart
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
+        {
+            return false;
+        }
+        let Some((rate, block)) = self
+            .activation
+            .as_ref()
+            .map(|a| (a.sample_rate, a.block_size))
+        else {
+            self.refresh_latency();
+            return false;
+        };
+        let was = self.latency;
+        let restarted = self.prepare(rate, block).is_ok();
+        tracing::debug!(
+            target: "clap_plugin",
+            plugin = %self.descriptor.name,
+            latency.before = was,
+            latency.after = self.latency,
+            restarted,
+            "clap: restarted on the plugin's request"
+        );
+        restarted
     }
 
     /// Activate the plugin at the given audio config and start its
@@ -1152,6 +1245,10 @@ impl LoadedClapPlugin {
             aux_in: vec![vec![0.0; block_size as usize]; (input_ports - 1) * 2],
             aux_out: vec![vec![0.0; block_size as usize]; (output_ports - 1) * 2],
         });
+        // A restart asked for before this activation is answered by it.
+        self.restart
+            .store(false, std::sync::atomic::Ordering::Release);
+        self.refresh_latency();
         Ok(())
     }
 
@@ -1334,8 +1431,20 @@ impl LoadedClapPlugin {
 
         let in_evs = input_events.as_input();
         let mut out_evs = output_events.as_output();
+        // Every plugin of a block is told the same clock: the block's first
+        // timeline frame as its steady time, and the song's transport there
+        // (see `crate::plugin::render_transport`).
+        let steady = crate::plugin::render_frame();
+        let transport = crate::plugin::render_transport().map(clap_transport);
         act.processor
-            .process(&inputs, &mut outputs, &in_evs, &mut out_evs, None, None)
+            .process(
+                &inputs,
+                &mut outputs,
+                &in_evs,
+                &mut out_evs,
+                steady,
+                transport.as_ref(),
+            )
             .map_err(|_| ClapHostError::Process)?;
         Ok(())
     }
@@ -1468,6 +1577,11 @@ impl LoadedClapPlugin {
         let mut reader = std::io::Cursor::new(state);
         ext.load(&mut handle, &mut reader)
             .map_err(|_| ClapHostError::LoadState)?;
+        // A state can change the plugin's latency (a lookahead switched
+        // on): restart it if it asked, else ask its latency again.
+        if !self.restart_if_requested() && self.activation.is_some() {
+            self.refresh_latency();
+        }
         Ok(())
     }
 
@@ -1477,6 +1591,20 @@ impl LoadedClapPlugin {
 
     pub fn block_size(&self) -> Option<u32> {
         self.activation.as_ref().map(|a| a.block_size)
+    }
+
+    /// CLAP's `reset`: the plugin clears its buffers, voices and
+    /// envelopes and stays activated. Called where the render calls
+    /// `process` (an offline render's thread). Whether it was activated
+    /// to reset.
+    pub fn reset(&mut self) -> bool {
+        match self.activation.as_mut() {
+            Some(act) => {
+                act.processor.reset();
+                true
+            }
+            None => false,
+        }
     }
 
     /// Release activation. The plugin instance stays loaded; call
@@ -1727,6 +1855,9 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
     fn latency(&mut self) -> u32 {
         LoadedClapPlugin::latency(self)
     }
+    fn restart_if_requested(&mut self) -> bool {
+        LoadedClapPlugin::restart_if_requested(self)
+    }
     fn process_block_param_events(
         &mut self,
         il: &[f32],
@@ -1748,6 +1879,12 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
     fn param_info_revision(&self) -> u64 {
         LoadedClapPlugin::param_info_revision(self)
     }
+    fn wants_main_thread(&self) -> bool {
+        LoadedClapPlugin::wants_main_thread(self)
+    }
+    fn event_sink(&self) -> Option<daw_clap_ext::host::EventSink> {
+        LoadedClapPlugin::event_sink(self)
+    }
     fn prepare(&mut self, sr: f64, bs: u32) -> Result<(), crate::plugin::PluginError> {
         LoadedClapPlugin::prepare(self, sr, bs).map_err(map_err)
     }
@@ -1766,6 +1903,9 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
     }
     fn deactivate(&mut self) {
         LoadedClapPlugin::deactivate(self)
+    }
+    fn reset(&mut self) -> bool {
+        LoadedClapPlugin::reset(self)
     }
     fn load_state(&mut self, state: &[u8]) -> Result<(), crate::plugin::PluginError> {
         LoadedClapPlugin::load_state(self, state).map_err(map_err)
@@ -1849,4 +1989,32 @@ pub enum ClapHostError {
     GuiShow,
     #[error("no matching plugin descriptor found")]
     DescriptorNotFound,
+}
+
+/// The CLAP transport event for the song's clock at a block's start.
+fn clap_transport(t: crate::plugin::RenderTransport) -> TransportEvent {
+    use clack_host::utils::{BeatTime, SecondsTime};
+    let mut flags = TransportFlags::HAS_TEMPO
+        | TransportFlags::HAS_BEATS_TIMELINE
+        | TransportFlags::HAS_SECONDS_TIMELINE
+        | TransportFlags::HAS_TIME_SIGNATURE;
+    if t.playing {
+        flags |= TransportFlags::IS_PLAYING;
+    }
+    TransportEvent {
+        header: EventHeader::new_core(0, clack_host::events::EventFlags::empty()),
+        flags,
+        song_pos_beats: BeatTime::from_float(t.beats),
+        song_pos_seconds: SecondsTime::from_float(t.seconds),
+        tempo: t.bpm,
+        tempo_inc: 0.0,
+        loop_start_beats: BeatTime::from_int(0),
+        loop_end_beats: BeatTime::from_int(0),
+        loop_start_seconds: SecondsTime::from_int(0),
+        loop_end_seconds: SecondsTime::from_int(0),
+        bar_start: BeatTime::from_float(t.bar_start_beats),
+        bar_number: t.bar,
+        time_signature_numerator: t.numerator,
+        time_signature_denominator: t.denominator,
+    }
 }

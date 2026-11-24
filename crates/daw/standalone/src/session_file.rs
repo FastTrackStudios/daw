@@ -975,16 +975,20 @@ static NO_STATES: std::sync::LazyLock<HashMap<String, Vec<u8>>> =
 /// Each built-in FX's state, by FX guid, from the plugins themselves — so
 /// a saved session carries what they were set to (a sampler's kit, a
 /// rig's capture), and loads them so again.
+///
+/// A CLAP loaded from a bundle path is asked too: its state is written in
+/// its `<CLAP>` block ([`bundle_fx_node`]), which the loader loads back.
 fn builtin_states(daw: &Standalone, project_guid: &str) -> HashMap<String, Vec<u8>> {
-    let Some(factory) = daw.fx_factory() else {
-        return HashMap::new();
-    };
+    let factory = daw.fx_factory();
     let guids: Vec<String> = daw
         .read_project(project_guid, |p| {
             p.fx_chains
                 .values()
                 .flatten()
-                .filter(|entry| factory.provides(&entry.fx.name))
+                .filter(|entry| {
+                    factory.as_ref().is_some_and(|f| f.provides(&entry.fx.name))
+                        || entry.fx.plugin_type == daw_proto::fx::FxType::Clap
+                })
                 .map(|entry| entry.fx.guid.clone())
                 .collect()
         })
@@ -2200,7 +2204,7 @@ impl<'a> Writer<'a> {
                 let mut node = builtin_fx_node(fx, self.states.get(&fx.guid));
                 node.param_envelopes = self.param_envelopes(&e.guid, &fx.guid);
                 nodes.push(FxChainNode::Plugin(node));
-            } else if let Some(node) = bundle_fx_node(fx) {
+            } else if let Some(node) = bundle_fx_node(fx, self.states.get(&fx.guid)) {
                 nodes.push(FxChainNode::Plugin(node));
             } else {
                 self.skipped_fx
@@ -2715,9 +2719,10 @@ fn builtin_fx_node(fx: &daw_proto::fx::Fx, state: Option<&Vec<u8>>) -> FxPlugin 
 
 /// A CLAP / VST3 plugin the engine loaded from a bundle path, written so
 /// the loader finds the same bundle again (an absolute `file` that exists
-/// is taken as is). Its state is not written: the engine does not keep a
-/// plugin's state in a form a project file can carry.
-fn bundle_fx_node(fx: &daw_proto::fx::Fx) -> Option<FxPlugin> {
+/// is taken as is). A CLAP's state (`state`, what the plugin saved) goes
+/// in its block as the loader reads it back; a VST3's is not written (the
+/// engine's VST3 blob is not REAPER's).
+fn bundle_fx_node(fx: &daw_proto::fx::Fx, state: Option<&Vec<u8>>) -> Option<FxPlugin> {
     use daw_proto::fx::FxType;
     let (plugin_type, name) = match fx.plugin_type {
         FxType::Clap => (PluginType::Clap, fx.plugin_name.clone()),
@@ -2727,7 +2732,8 @@ fn bundle_fx_node(fx: &daw_proto::fx::Fx) -> Option<FxPlugin> {
     if !Path::new(&fx.name).exists() {
         return None;
     }
-    let mut node = builtin_fx_node(fx, None);
+    let state = state.filter(|_| plugin_type == PluginType::Clap);
+    let mut node = builtin_fx_node(fx, state);
     node.plugin_type = plugin_type;
     node.name = name;
     Some(node)

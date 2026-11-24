@@ -865,9 +865,9 @@ impl DualRender {
         let mut ahead = ProjectRenderer::new(live.daw(), live.project_guid(), sample_rate);
         // The song meters, or not, as one.
         ahead.share_metering(&live);
-        let ahead = Arc::new(ahead);
-        // One snapshot an edit, for both.
+        // One snapshot an edit (and one latency table), for both.
         ahead.share_snapshots(&live);
+        let ahead = Arc::new(ahead);
         ahead.set_realtime_ahead();
         // Which live set a block is of is known before it is rendered.
         live.hold();

@@ -23,7 +23,15 @@
 //!            frontiers                and the doc's frontier after it —
 //!                                     never folded, so a step stays
 //!                                     reachable after any compaction
+//! part_updates,                       the song's other documents (the
+//! part_snapshots                      session's timing, sections, chart,
+//!                                     cues), one per branch ([`parts`])
 //! ```
+//!
+//! `meta.id` is the song's id: what a setlist names it by, kept however
+//! the file is moved or copied. The file is the whole song; closed
+//! ([`Store::close`]) its write-ahead log is folded in, and the one file
+//! opens anywhere.
 //!
 //! A branch is Logic's alternative: `Organized` forked from the song when
 //! the organizing was done, edited on its own after. It shares everything
@@ -42,10 +50,12 @@
 
 use sha2::{Digest, Sha256};
 
+mod parts;
+pub use parts::{ID_KEY, PartRef, SESSION};
 #[cfg(feature = "sync")]
 mod replica;
 #[cfg(feature = "sync")]
-pub use replica::{Replica, SYNC_LABEL};
+pub use replica::{PartReplica, Replica, SYNC_LABEL};
 
 /// How long a write waits for another connection's lock on the file.
 const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -120,6 +130,8 @@ pub enum StoreError {
     Schema { found: i64 },
     #[error("no branch {0}")]
     NoBranch(String),
+    #[error("the song is {had}, not {asked}: an id names one song for good")]
+    IdTaken { had: String, asked: String },
 }
 
 /// The song's own branch: what it is when nothing else is named.
@@ -284,7 +296,10 @@ impl Store {
                 "CREATE TABLE IF NOT EXISTS history (seq INTEGER PRIMARY KEY AUTOINCREMENT, \
                  branch TEXT NOT NULL, kind TEXT NOT NULL, label TEXT NOT NULL, \
                  action TEXT, at INTEGER NOT NULL, frontiers BLOB NOT NULL)",
-            ] {
+            ]
+            .into_iter()
+            .chain(parts::TABLES)
+            {
                 conn.execute(sql, ()).await?;
             }
             conn.execute(
@@ -468,12 +483,17 @@ impl Store {
     /// The database refused the write.
     pub fn fork(&self, name: &str, parent: &str, doc: &loro::LoroDoc) -> StoreResult<()> {
         let base = doc.state_frontiers().encode();
+        // The parent's parts (the session's timing, the chart) as they are
+        // now: small, so copied whole, history and all.
+        let parts = self.part_snapshots_of(parent)?;
         run(async {
             self.conn.execute("BEGIN", ()).await?;
             for sql in [
                 "DELETE FROM updates WHERE branch = ?1",
                 "DELETE FROM snapshots WHERE branch = ?1",
                 "DELETE FROM history WHERE branch = ?1",
+                "DELETE FROM part_updates WHERE branch = ?1",
+                "DELETE FROM part_snapshots WHERE branch = ?1",
                 "DELETE FROM branches WHERE name = ?1",
             ] {
                 self.conn.execute(sql, (name,)).await?;
@@ -484,6 +504,15 @@ impl Store {
                     (name, parent, base, now()),
                 )
                 .await?;
+            for (part, data) in parts {
+                self.conn
+                    .execute(
+                        "INSERT INTO part_snapshots (part, branch, upto, at, data) \
+                         VALUES (?1, ?2, 0, ?3, ?4)",
+                        (part.as_str(), name, now(), data),
+                    )
+                    .await?;
+            }
             self.conn.execute("COMMIT", ()).await?;
             StoreResult::Ok(())
         })
@@ -503,6 +532,8 @@ impl Store {
                 "DELETE FROM updates WHERE branch = ?1",
                 "DELETE FROM snapshots WHERE branch = ?1",
                 "DELETE FROM history WHERE branch = ?1",
+                "DELETE FROM part_updates WHERE branch = ?1",
+                "DELETE FROM part_snapshots WHERE branch = ?1",
                 "DELETE FROM branches WHERE name = ?1",
             ] {
                 self.conn.execute(sql, (name,)).await?;

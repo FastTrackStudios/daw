@@ -17,7 +17,7 @@ impl PluginLoading for Standalone {
             }
         }
 
-        match crate::plugin::load_plugin(path) {
+        match crate::plugin::load_plugin_with(path, &self.plugin_load_options()) {
             Ok(Some(_plugin)) => {
                 let mut loaded = self.loaded_plugins.lock().expect("loaded_plugins poisoned");
                 loaded.insert(

@@ -55,6 +55,13 @@ impl EventSink {
         crate::automation::Caller::of(self.plugin)
     }
 
+    /// Whether this sink delivers to the same plugin as `other`: how a host
+    /// finds which of its instances a subscription belongs to.
+    #[must_use]
+    pub fn same_plugin(&self, other: &Self) -> bool {
+        std::ptr::eq(self.plugin, other.plugin)
+    }
+
     /// Deliver an event. Main thread.
     pub fn send(&self, subscription: u64, topic: &str, event_json: &str) {
         // SAFETY: non-null (`query`).

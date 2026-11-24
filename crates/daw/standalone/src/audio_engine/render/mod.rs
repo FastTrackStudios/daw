@@ -36,8 +36,10 @@ mod envelope;
 mod graph;
 mod item_mix;
 mod midi;
+pub mod offline;
 mod parallel;
 mod part;
+mod pdc;
 mod print;
 mod snapshot;
 
@@ -375,6 +377,22 @@ struct RenderScratch {
     /// Per track: its chain's time last block, to hand out the longest
     /// lanes first.
     lane_cost: Vec<u32>,
+    /// This block's delay compensation ([`pdc::plan`]).
+    plan: pdc::Plan,
+    /// Per track, one delay line per edge out of it (its parent or master,
+    /// then each send), as [`pdc::Plan::edges`] numbers them; and one for
+    /// a soloed track heard straight at master.
+    delays: Vec<Vec<pdc::Delay>>,
+    monitor_delays: Vec<pdc::Delay>,
+    /// One edge's signal, delayed.
+    delayed: Vec<f32>,
+    /// An offline render's taps: each track's signal this block
+    /// ([`offline::Tap`]), when it taps.
+    taps: Vec<Vec<f32>>,
+    /// An offline render's probes ([`offline::Offline::probes`]), each its
+    /// signal this block, and the track index each reads this block.
+    probes: Vec<Vec<f32>>,
+    probe_tracks: Vec<Option<usize>>,
 }
 
 impl RenderScratch {
@@ -730,6 +748,14 @@ pub struct ProjectRenderer {
     /// The bank a renderer that does not meter writes into: empty, so
     /// every write is a no-op. Made once here, never on the audio thread.
     no_meters: Arc<crate::metering::Meters>,
+    /// Each track's chain latency, as last measured ([`pdc`]): shared with
+    /// a render ahead's renderer of the same song, so both plan alike.
+    latencies: Arc<pdc::ChainLatencies>,
+    /// What reached master in the last block was this many samples late.
+    song_latency: std::sync::atomic::AtomicU32,
+    /// An offline render's own plugins, solos, bypasses and taps
+    /// ([`offline`]); `None` for the song's own renders.
+    offline: Option<offline::Offline>,
 }
 
 /// Which tracks a snapshot renders live, and what its tracks ahead are, as
@@ -795,7 +821,17 @@ impl ProjectRenderer {
             held: std::sync::atomic::AtomicBool::new(false),
             metering: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             no_meters: crate::metering::Meters::empty(),
+            latencies: Arc::default(),
+            song_latency: std::sync::atomic::AtomicU32::new(0),
+            offline: None,
         }
+    }
+
+    /// How late what reaches master was in the last block rendered,
+    /// samples: the song's plugin delay, compensated everywhere inside it
+    /// ([`pdc`]). A bounce takes this many samples off its front.
+    pub fn latency(&self) -> u32 {
+        self.song_latency.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Whether this renderer's blocks write the backend's meter bank (on
@@ -839,10 +875,12 @@ impl ProjectRenderer {
     /// an edit is built once for both, and both see the same snapshot.
     /// Before this one goes realtime.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn share_snapshots(&self, from: &ProjectRenderer) {
+    pub(crate) fn share_snapshots(&mut self, from: &ProjectRenderer) {
         if let Some(builder) = from.realtime.get() {
             let _ = self.realtime.set(builder.clone());
         }
+        // One latency table for both: their plans agree.
+        self.latencies = from.latencies.clone();
     }
 
     /// Hold this realtime renderer's snapshot: it moves on only at
@@ -1236,6 +1274,8 @@ impl ProjectRenderer {
         let n = tracks.len();
         let start_seconds = start_samples / self.sample_rate as f64;
         let end_seconds = start_seconds + (frames as f64 * rate / self.sample_rate as f64);
+        // Every plugin of this block is told the same clock.
+        _frame.set_transport(snap.transport_at(start_seconds));
         // Output frames per timeline second (MIDI event offsets).
         let frames_per_second = self.sample_rate as f64 / rate;
         let any_soloed = snap.solo_pass.is_some();
@@ -1262,6 +1302,51 @@ impl ProjectRenderer {
         // death mid-song). The guarded state is plain buffers/maps — safe to
         // keep using after another thread's panic.
         scratch.reset(n, frames, self.sample_rate);
+        // Delay compensation for this block, from the latencies the chains
+        // reported last block.
+        {
+            let latencies = &self.latencies;
+            pdc::plan(
+                &snap.tracks,
+                &snap.order,
+                |ti| latencies.get(ti),
+                &mut scratch.plan,
+            );
+            self.song_latency
+                .store(scratch.plan.master, std::sync::atomic::Ordering::Relaxed);
+            let s = &mut *scratch;
+            s.delays.resize_with(n, Vec::new);
+            s.monitor_delays.resize_with(n, pdc::Delay::default);
+            for (lines, edges) in s.delays.iter_mut().zip(&s.plan.edges) {
+                lines.resize_with(edges.len(), pdc::Delay::default);
+            }
+            if s.delayed.len() != frames * 2 {
+                s.delayed.resize(frames * 2, 0.0);
+            }
+            let tapping = self.offline.as_ref().is_some_and(|o| o.tap.is_some());
+            if tapping {
+                s.taps.resize_with(n, Vec::new);
+                for tap in &mut s.taps {
+                    tap.clear();
+                    tap.resize(frames * 2, 0.0);
+                }
+            }
+            let asked = self
+                .offline
+                .as_ref()
+                .map_or(&[][..], |o| o.probes.as_slice());
+            s.probes.resize_with(asked.len(), Vec::new);
+            for probe in &mut s.probes {
+                probe.clear();
+                probe.resize(frames * 2, 0.0);
+            }
+            s.probe_tracks.clear();
+            s.probe_tracks.extend(
+                asked
+                    .iter()
+                    .map(|p| tracks.iter().position(|t| t.guid == p.track)),
+            );
+        }
         // The meter bank. In realtime mode, re-read only when its lock is
         // free (its readers are UI polls) — the cached one otherwise.
         #[cfg(not(target_arch = "wasm32"))]
@@ -1309,8 +1394,42 @@ impl ProjectRenderer {
             fed: _,
             chain_done,
             lane_cost,
+            plan,
+            delays,
+            monitor_delays,
+            delayed,
+            taps,
+            probes,
+            probe_tracks,
             ..
         } = &mut *scratch;
+        let asked = self
+            .offline
+            .as_ref()
+            .map_or(&[][..], |o| o.probes.as_slice());
+        // A track an earlier render recorded, played in its place.
+        let fed_of = |ti: usize| -> Option<&offline::Fed> {
+            let fed = &self.offline.as_ref()?.fed;
+            if fed.is_empty() {
+                return None;
+            }
+            fed.get(&tracks[ti].guid)
+        };
+        // Copy `bus` into every probe on track `ti` at `at`.
+        let probe = |probes: &mut [Vec<f32>], ti: usize, at: offline::Probe, bus: &[f32]| {
+            for ((p, track), dst) in asked.iter().zip(probe_tracks.iter()).zip(probes.iter_mut()) {
+                if *track == Some(ti) && p.at == at {
+                    let n = dst.len().min(bus.len());
+                    dst[..n].copy_from_slice(&bus[..n]);
+                }
+            }
+        };
+        let latencies = &*self.latencies;
+        let tap_point = self.offline.as_ref().and_then(|o| o.tap);
+        // Whether a track's delay lines still hold signal to let out.
+        let hot = |delays: &[Vec<pdc::Delay>], monitor: &[pdc::Delay], ti: usize| {
+            delays[ti].iter().any(pdc::Delay::hot) || monitor[ti].hot()
+        };
 
         // What the tracks rendered ahead handed over: their sums onto the
         // live buses and master, their meters as of these frames.
@@ -1444,6 +1563,10 @@ impl ProjectRenderer {
             }
             let t_items = Stamp::now();
             let bus = &mut buses[ti];
+            // What feeds this track arrives late (its plugins' delay): its
+            // own items play that much later, to meet it.
+            let late = f64::from(plan.input[ti]) * rate / self.sample_rate as f64;
+            let (item_start, item_end) = (start_seconds - late, end_seconds - late);
             for item in &t.items {
                 if item.muted {
                     continue;
@@ -1461,8 +1584,8 @@ impl ProjectRenderer {
                     bus,
                     audio,
                     item,
-                    start_seconds,
-                    end_seconds,
+                    item_start,
+                    item_end,
                     self.sample_rate,
                     rate,
                 );
@@ -1474,6 +1597,14 @@ impl ProjectRenderer {
             items_us = items_us.saturating_add(us);
             if us > slowest_items.1 {
                 slowest_items = (ti as u32, us);
+            }
+        }
+
+        // An offline render's input probes: each track's own media alone,
+        // before children, sends or FX add to it.
+        if !asked.is_empty() {
+            for (ti, bus) in buses.iter().enumerate() {
+                probe(probes, ti, offline::Probe::Input, &bus.samples);
             }
         }
 
@@ -1528,8 +1659,9 @@ impl ProjectRenderer {
         // the spin still costs one dry block, not an underrun.
         let t_lock = Stamp::now();
         let plugins = self
-            .daw
-            .plugin_instances
+            .offline
+            .as_ref()
+            .map_or(&self.daw.plugin_instances, |o| &o.plugins)
             .try_read_spinning(PLUGIN_LOCK_SPINS);
 
         if plugins.is_none() {
@@ -1590,6 +1722,7 @@ impl ProjectRenderer {
                     }
                     let job = &mut lane_jobs[jobs];
                     job.chain.clear();
+                    job.latency = 0;
                     let mut ok = true;
                     for (i, fx_guid) in t.fx_chain.iter().enumerate() {
                         if !t.fx_enabled.get(i).copied().unwrap_or(true)
@@ -1611,6 +1744,7 @@ impl ProjectRenderer {
                             break;
                         }
                         plugin.set_tempo(tempo);
+                        job.latency = job.latency.saturating_add(plugin.latency());
                         drop(plugin);
                         job.chain.push((i, PluginPtr::new(cell)));
                     }
@@ -1666,6 +1800,7 @@ impl ProjectRenderer {
                     for job in &mut lane_jobs[..jobs] {
                         let ti = job.ti;
                         chain_done[ti] = true;
+                        latencies.set(ti, job.latency);
                         dirty[ti] |= job.ran;
                         aux_live[ti] |= job.aux_ran;
                         lane_cost[ti] = job.us;
@@ -1710,11 +1845,19 @@ impl ProjectRenderer {
                     meter(&meters, ahead.as_deref_mut(), ti, &[]);
                     continue;
                 }
+                let fed = fed_of(ti);
+                if let Some(fed) = fed {
+                    dirty[ti] = true;
+                    latencies.set(ti, fed.latency);
+                }
                 // Clean bus = all zeros: gain scales nothing, sends add
                 // nothing, parent sums add nothing. Skip the per-frame
                 // work entirely; only active tracks cost CPU. (A track
                 // with FX must still run — synths generate from MIDI.)
-                if !dirty[ti] && t.fx_chain.is_empty() {
+                if t.fx_chain.is_empty() && fed.is_none() {
+                    latencies.set(ti, 0);
+                }
+                if !dirty[ti] && t.fx_chain.is_empty() && !hot(delays, monitor_delays, ti) {
                     meter(&meters, ahead.as_deref_mut(), ti, &[]);
                     continue;
                 }
@@ -1726,6 +1869,9 @@ impl ProjectRenderer {
                     .sends
                     .iter()
                     .any(|s| s.mode == daw_proto::routing::SendMode::PreFx);
+                if !asked.is_empty() {
+                    probe(probes, ti, offline::Probe::PreFx, &buses[ti].samples);
+                }
                 if has_pre_fx_tap {
                     pre_fx_tap.clear();
                     pre_fx_tap.extend_from_slice(&buses[ti].samples);
@@ -1787,7 +1933,15 @@ impl ProjectRenderer {
                     if t.aux_taps {
                         aux_sized(&mut aux[ti], frames);
                     }
+                    let mut chain_latency = 0u32;
                     for (i, fx_guid) in chain.iter().enumerate() {
+                        // What goes into FX `i` is what came out of `i - 1`.
+                        if !asked.is_empty() {
+                            probe(probes, ti, offline::Probe::FxIn(i), &bus.samples);
+                            if let Some(before) = i.checked_sub(1) {
+                                probe(probes, ti, offline::Probe::FxOut(before), &bus.samples);
+                            }
+                        }
                         if !t.fx_enabled.get(i).copied().unwrap_or(true) {
                             continue;
                         }
@@ -1827,6 +1981,7 @@ impl ProjectRenderer {
                                 }
                             }
                         }
+                        chain_latency = chain_latency.saturating_add(plugin.latency());
                         // De-interleave → process → re-interleave.
                         for f in 0..frames {
                             in_l[f] = bus.samples[f * 2];
@@ -1888,6 +2043,13 @@ impl ProjectRenderer {
                         // so the bus can carry signal even with no items.
                         dirty[ti] = true;
                     }
+                    if let (false, Some(last)) = (asked.is_empty(), chain.len().checked_sub(1)) {
+                        probe(probes, ti, offline::Probe::FxOut(last), &bus.samples);
+                    }
+                    // A muted chain not run keeps the latency it had.
+                    if !chain.is_empty() || t.fx_chain.is_empty() {
+                        latencies.set(ti, chain_latency);
+                    }
                 }
                 if !t.fx_chain.is_empty() && !chain_done[ti] {
                     let us = t_fx.us();
@@ -1899,9 +2061,19 @@ impl ProjectRenderer {
                         slowest = (ti as u32, us);
                     }
                 }
-                if !dirty[ti] {
+                if !dirty[ti] && !hot(delays, monitor_delays, ti) {
                     meter(&meters, ahead.as_deref_mut(), ti, &[]);
                     continue;
+                }
+
+                // An offline render's pre-fader tap: post-FX, before the gain.
+                if tap_point == Some(offline::Tap::PreFader)
+                    && let Some(tap) = taps.get_mut(ti)
+                {
+                    tap.copy_from_slice(&buses[ti].samples[..frames * 2]);
+                }
+                if !asked.is_empty() {
+                    probe(probes, ti, offline::Probe::PreFader, &buses[ti].samples);
                 }
 
                 // Pre-fader send tap: post-FX, before the gain stage.
@@ -2044,10 +2216,21 @@ impl ProjectRenderer {
                 // post-fader source once so we can mutably borrow dest buses.)
                 src.clear();
                 src.extend_from_slice(&buses[ti].samples);
+                if let Some(fed) = fed {
+                    fed.read(start_samples.max(0.0) as u64, src);
+                }
 
                 // Meter the post-fader signal (folder children already
                 // summed in — topo order guarantees the bus is complete).
                 meter(&meters, ahead.as_deref_mut(), ti, src);
+                if tap_point == Some(offline::Tap::PostFader)
+                    && let Some(tap) = taps.get_mut(ti)
+                {
+                    tap.copy_from_slice(&src[..frames * 2]);
+                }
+                if !asked.is_empty() {
+                    probe(probes, ti, offline::Probe::PostFader, src);
+                }
 
                 if debug {
                     let v = (src.iter().map(|s| (*s as f64) * (*s as f64)).sum::<f64>()
@@ -2071,11 +2254,12 @@ impl ProjectRenderer {
                         );
                     }
                 }
-                for snd in &t.sends {
+                for (si, snd) in t.sends.iter().enumerate() {
                     if snd.muted {
                         continue;
                     }
                     let Some(di) = snd.dest_idx else { continue };
+                    let delay = plan.edges[ti].get(si + 1).copied().unwrap_or(0) as usize;
                     // From a plugin's own outputs (3/4, 5/6): taken post-FX,
                     // and through the fader when the send is post-fader — the
                     // track's mute and level, not its envelopes.
@@ -2105,6 +2289,14 @@ impl ProjectRenderer {
                             }
                             _ => src,
                         }
+                    };
+                    // Late enough to meet the rest of what its destination sums.
+                    let send_src: &[f32] = match delays[ti].get_mut(si + 1) {
+                        Some(line) if delay > 0 || line.hot() => {
+                            line.run(delay, send_src, delayed, frames);
+                            &delayed[..frames * 2]
+                        }
+                        _ => send_src,
                     };
                     let dest_bus: &mut [f32] = if snd.to_sidechain {
                         let sidechain = &mut sidechains[di];
@@ -2149,6 +2341,27 @@ impl ProjectRenderer {
                 // only feeds what is soloed; and straight to master for one
                 // soloed with no way there of its own (`graph::Pass`).
                 let mode = pass(ti);
+                // The edge to the parent (or master), delayed to meet the
+                // rest of that sum.
+                let src: &[f32] = if mode == graph::Pass::Monitor {
+                    let delay = plan.to_master[ti] as usize;
+                    let line = &mut monitor_delays[ti];
+                    if delay > 0 || line.hot() {
+                        line.run(delay, src, delayed, frames);
+                        &delayed[..frames * 2]
+                    } else {
+                        src
+                    }
+                } else {
+                    let delay = plan.edges[ti].first().copied().unwrap_or(0) as usize;
+                    match delays[ti].first_mut() {
+                        Some(line) if delay > 0 || line.hot() => {
+                            line.run(delay, src, delayed, frames);
+                            &delayed[..frames * 2]
+                        }
+                        _ => src,
+                    }
+                };
                 if mode == graph::Pass::Monitor {
                     for (m, smp) in master.samples.iter_mut().zip(src.iter()) {
                         *m += *smp;
@@ -2337,8 +2550,13 @@ impl ProjectRenderer {
         }
         // Build + revision in ONE lock pass so the cached pair is
         // always internally consistent.
+        let offline = self.offline.as_ref();
         let (revision, snap) = self.daw.read_project(&self.project_guid, |p| {
-            (p.revision, RenderSnapshot::build(p))
+            let snap = match offline {
+                Some(o) => RenderSnapshot::build_adjusted(p, &[], Some(&|t| o.adjust(t))),
+                None => RenderSnapshot::build(p),
+            };
+            (p.revision, snap)
         })?;
         if let Ok(mut cache) = self.cache.lock() {
             *cache = Some((revision, snap.clone()));
@@ -2663,6 +2881,9 @@ pub(crate) fn balance(pan: f64) -> (f64, f64) {
     ((1.0 - pan).min(1.0), (1.0 + pan).min(1.0))
 }
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod pdc_tests;
+
 #[cfg(test)]
 mod poison_recovery_tests {
     use super::*;
@@ -2871,6 +3092,110 @@ pub(crate) mod folder_routing_tests {
                 "folder mute must cascade exactly like muting its children"
             );
         }
+    }
+
+    // An offline render of only what feeds a point, read at each point
+    // along a track: what is left out is silent and runs nothing.
+    #[test]
+    fn an_offline_render_of_only_some_tracks_probes_them_along_the_way() {
+        use offline::{Offline, Probe, ProbeAt};
+        let (daw, guid) = seeded();
+        let ctx = ProjectContext::Project(guid.clone());
+        let drums = guid_of(&daw, &guid, "Drums");
+        let kick = guid_of(&daw, &guid, "Kick");
+        let lead = guid_of(&daw, &guid, "Lead");
+        Tracks::set_volume(&daw, ctx, TrackRef::Guid(kick.clone()), 0.5).unwrap();
+        let at = |track: &str, at| ProbeAt {
+            track: track.to_owned(),
+            at,
+        };
+        let renderer = ProjectRenderer::offline(
+            &daw,
+            &guid,
+            48_000,
+            Offline {
+                only: Some([drums.clone(), kick.clone()].into_iter().collect()),
+                probes: vec![
+                    at(&kick, Probe::Input),
+                    at(&kick, Probe::PreFader),
+                    at(&kick, Probe::PostFader),
+                    at(&drums, Probe::PreFx),
+                    at(&lead, Probe::PreFx),
+                ],
+                ..Offline::default()
+            },
+        );
+        let master = renderer.render_block(0, 512);
+        let read = renderer.with_probes(|p| p.iter().map(|s| rms(s)).collect::<Vec<_>>());
+        let (input, pre, post, folder, other) = (read[0], read[1], read[2], read[3], read[4]);
+        assert!(input > 0.01, "the kick's media: {read:?}");
+        assert!(
+            (pre - input).abs() < 1e-6,
+            "no FX: pre-fader is its input: {read:?}"
+        );
+        let (l, _) = balance(0.0);
+        assert!(
+            (post - input * 0.5 * l).abs() < 1e-4,
+            "post-fader is its input through the fader: {read:?}"
+        );
+        assert!(
+            (folder - post).abs() < 1e-4,
+            "the folder's input is the kick alone, the snare left out: {read:?}"
+        );
+        assert!(other < 1e-9, "a track not rendered is silent: {read:?}");
+        assert!(rms(&master.samples) > 0.0);
+    }
+
+    // A track's output recorded by one render and fed into the next in
+    // its place: what it feeds hears exactly what it heard.
+    #[test]
+    fn a_fed_track_sounds_as_it_did_when_it_was_rendered() {
+        use offline::{Fed, Offline, Probe, ProbeAt};
+        let (daw, guid) = seeded();
+        let drums = guid_of(&daw, &guid, "Drums");
+        let kick = guid_of(&daw, &guid, "Kick");
+        let at = |track: &str, at| ProbeAt {
+            track: track.to_owned(),
+            at,
+        };
+        let probes = vec![at(&kick, Probe::PostFader), at(&drums, Probe::PreFx)];
+        let render = |fed| {
+            let renderer = ProjectRenderer::offline(
+                &daw,
+                &guid,
+                48_000,
+                Offline {
+                    probes: probes.clone(),
+                    fed,
+                    ..Offline::default()
+                },
+            );
+            let mut out = vec![Vec::new(); probes.len()];
+            for b in 0..4u64 {
+                renderer.render_block(b * 512, 512);
+                renderer.with_probes(|p| {
+                    for (o, s) in out.iter_mut().zip(p) {
+                        o.extend_from_slice(s);
+                    }
+                });
+            }
+            out
+        };
+        let first = render(std::collections::HashMap::new());
+        let fed = [(
+            kick.clone(),
+            Fed {
+                start: 0,
+                samples: first[0].clone().into(),
+                latency: 0,
+            },
+        )]
+        .into_iter()
+        .collect();
+        let again = render(fed);
+        assert!(rms(&first[1]) > 0.01);
+        assert_eq!(first[1], again[1], "the folder hears the kick as it was");
+        assert_eq!(first[0], again[0]);
     }
 
     // (d) Soloing a leaf must isolate it.

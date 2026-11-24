@@ -49,9 +49,18 @@ that drive a live REAPER) stays in Studio with the REAPER adapter.
 
 ## Build
 
+Builds go through the fleet's devenv shell (`devenv.yaml`, `devenv.nix`):
+Rust 1.99.1 at the same nix store path as every FastTrackStudios repo (so
+kache shares builds across them), mold, and on Linux the audio (ALSA, JACK,
+PipeWire) and desktop libraries the crates link. Enter it with
+`devenv shell`, let direnv do it (`direnv allow`; `.envrc` loads it), or run
+one command with `devenv shell -- <command>`. `devenv shell -- fleet-doctor`
+prints the rustc path, the compiler wrapper (kache) and the linker, and
+fails if rustc is off the fleet pin.
+
 ```bash
-cargo check --workspace --all-targets
-cargo test --workspace
+devenv shell -- cargo check --workspace --all-targets
+devenv shell -- cargo test --workspace
 ```
 
 Several crates are in Studio's browser builds; CI also checks them for
@@ -79,7 +88,8 @@ wasm-bindgen --target web --out-dir ../task/apps/web/assets/worklet \
     --out-name daw_standalone target/wasm32-unknown-unknown/release/daw_standalone.wasm
 ```
 
-Rust 1.99.1 (`rust-toolchain.toml`). The root `Cargo.toml` declares every
+Rust 1.99.1: the devenv shell's, and `rust-toolchain.toml` for rustup
+outside it (CI's). The root `Cargo.toml` declares every
 dependency with the versions, git pins and patches Studio uses, so the
 fleet builds one of each: change a pin here and in Studio together.
 

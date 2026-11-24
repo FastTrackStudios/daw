@@ -199,8 +199,19 @@ pub trait PluginInstance: Send {
         Vec::new()
     }
 
-    /// Reported plugin latency in samples (0 if not reported).
+    /// Reported plugin latency in samples (0 if not reported). The
+    /// renderer's delay compensation reads it on the audio thread, every
+    /// block: a backend whose plugin API answers this on a main thread
+    /// only (CLAP) keeps the last answer and returns that.
     fn latency(&mut self) -> u32;
+
+    /// Service a restart the plugin asked for (its latency changed while
+    /// it was active): deactivate and activate it again, its latency asked
+    /// anew. Control threads only — a state load, an FX edit. Whether it
+    /// was restarted; nothing to do by default.
+    fn restart_if_requested(&mut self) -> bool {
+        false
+    }
 
     /// Activate the plugin at the given audio config. Must be called
     /// before any `process_block` calls.
@@ -275,6 +286,20 @@ pub trait PluginInstance: Send {
     /// and then.
     fn pump_main_thread(&mut self) {}
 
+    /// Whether the plugin asked for [`pump_main_thread`](Self::pump_main_thread)
+    /// since it last ran (a CLAP's `request_callback`). `false` from a
+    /// backend that never asks.
+    fn wants_main_thread(&self) -> bool {
+        false
+    }
+
+    /// Where the host delivers the events this plugin subscribed to
+    /// (`com.fasttrackstudio.host-events/1`), if it has it. Main thread.
+    #[cfg(feature = "clap-host")]
+    fn event_sink(&self) -> Option<daw_clap_ext::host::EventSink> {
+        None
+    }
+
     /// Increases each time the plugin renames or re-describes its
     /// parameters (a CLAP's rescan of info or text): re-read
     /// [`params`](Self::params) when it moves. 0 from a backend that never
@@ -341,6 +366,15 @@ pub trait PluginInstance: Send {
 
     /// Release activation. Idempotent — calling twice is fine.
     fn deactivate(&mut self);
+
+    /// Clear what the plugin carries from the audio it processed — its
+    /// buffers, voices, envelopes, filters' memory — staying activated, so
+    /// the next block starts as from silence without the cost of
+    /// activating again. Whether it could: `false` (the default) for a
+    /// plugin that cannot, which its caller then deactivates instead.
+    fn reset(&mut self) -> bool {
+        false
+    }
 
     /// Downcast hook for native (built-in Rust DSP) instances whose control
     /// surface isn't expressed as host params. Hosts that mutate a concrete
@@ -541,7 +575,46 @@ pub fn render_cycle() -> Option<u64> {
         .map(|(cycle, _)| cycle)
 }
 
-/// Publishes [`render_frame`] for the life of the guard.
+/// The song's clock at the start of the block being processed — what a
+/// hosted plugin's transport says (a CLAP's `clap_event_transport`): the
+/// same for every plugin of the block. `Some` only while the project
+/// renderer is calling plugins.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RenderTransport {
+    /// The block's start on the timeline, seconds.
+    pub seconds: f64,
+    /// The same, in quarter-note beats along the tempo map.
+    pub beats: f64,
+    /// The tempo there, bpm.
+    pub bpm: f64,
+    /// Where the bar the block starts in begins, beats.
+    pub bar_start_beats: f64,
+    /// That bar's number, from 0.
+    pub bar: i32,
+    pub numerator: u16,
+    pub denominator: u16,
+    /// The timeline moves under the block (it is rendered at a frozen
+    /// position otherwise: input monitored while stopped).
+    pub playing: bool,
+}
+
+std::thread_local! {
+    static RENDER_TRANSPORT: std::cell::Cell<Option<RenderTransport>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// The song's clock for the block being processed ([`RenderTransport`]).
+#[must_use]
+pub fn render_transport() -> Option<RenderTransport> {
+    RENDER_TRANSPORT.with(std::cell::Cell::get)
+}
+
+/// A render's context on its thread, for a worker of the same block to
+/// [`adopt`](RenderFrameGuard::adopt): the block's frame and its clock.
+pub(crate) type RenderContext = (Option<(u64, u64)>, Option<RenderTransport>);
+
+/// Publishes [`render_frame`] (and, once set, [`render_transport`]) for the
+/// life of the guard.
 pub(crate) struct RenderFrameGuard;
 
 impl RenderFrameGuard {
@@ -554,21 +627,32 @@ impl RenderFrameGuard {
 
 impl RenderFrameGuard {
     /// This thread's render context, for a worker to [`adopt`](Self::adopt).
-    pub(crate) fn current() -> Option<(u64, u64)> {
-        RENDER_FRAME.with(std::cell::Cell::get)
+    pub(crate) fn current() -> RenderContext {
+        (
+            RENDER_FRAME.with(std::cell::Cell::get),
+            RENDER_TRANSPORT.with(std::cell::Cell::get),
+        )
     }
 
     /// Publish the render thread's context on a worker rendering part of
     /// the same block — the same cycle, not a new one.
-    pub(crate) fn adopt(context: Option<(u64, u64)>) -> Self {
-        RENDER_FRAME.with(|c| c.set(context));
+    pub(crate) fn adopt(context: RenderContext) -> Self {
+        RENDER_FRAME.with(|c| c.set(context.0));
+        RENDER_TRANSPORT.with(|c| c.set(context.1));
         Self
+    }
+
+    /// Publish the block's clock ([`render_transport`]) until the guard
+    /// drops.
+    pub(crate) fn set_transport(&self, transport: RenderTransport) {
+        RENDER_TRANSPORT.with(|c| c.set(Some(transport)));
     }
 }
 
 impl Drop for RenderFrameGuard {
     fn drop(&mut self) {
         RENDER_FRAME.with(|c| c.set(None));
+        RENDER_TRANSPORT.with(|c| c.set(None));
     }
 }
 
@@ -666,7 +750,15 @@ impl PluginCell {
 /// holds the map for writing moves them in and out as before plugins had
 /// cells of their own.
 #[derive(Default)]
-pub struct PluginMap(std::collections::HashMap<String, PluginCell>);
+pub struct PluginMap {
+    plugins: std::collections::HashMap<String, PluginCell>,
+    /// Bumped on every change that may put another instance under a guid
+    /// (an insert, a removal, a plugin reached mutably): a holder of the
+    /// map for reading who kept something from an instance (a CLAP
+    /// extension's client) knows it still points at a live plugin while
+    /// this has not moved.
+    generation: u64,
+}
 
 impl PluginMap {
     /// Put `plugin` under `fx_guid`; the one it replaces, if any.
@@ -675,38 +767,53 @@ impl PluginMap {
         fx_guid: String,
         plugin: Box<dyn PluginInstance>,
     ) -> Option<Box<dyn PluginInstance>> {
-        self.0
+        self.generation = self.generation.wrapping_add(1);
+        self.plugins
             .insert(fx_guid, PluginCell::new(plugin))
             .map(PluginCell::into_inner)
     }
 
     pub fn remove(&mut self, fx_guid: &str) -> Option<Box<dyn PluginInstance>> {
-        self.0.remove(fx_guid).map(PluginCell::into_inner)
+        self.generation = self.generation.wrapping_add(1);
+        self.plugins.remove(fx_guid).map(PluginCell::into_inner)
     }
 
     pub fn get_mut(&mut self, fx_guid: &str) -> Option<&mut Box<dyn PluginInstance>> {
-        self.0.get_mut(fx_guid).map(PluginCell::get_mut)
+        self.generation = self.generation.wrapping_add(1);
+        self.plugins.get_mut(fx_guid).map(PluginCell::get_mut)
     }
 
     /// The cell under `fx_guid`, for a holder of the map for reading.
     #[must_use]
     pub fn cell(&self, fx_guid: &str) -> Option<&PluginCell> {
-        self.0.get(fx_guid)
+        self.plugins.get(fx_guid)
     }
 
     #[must_use]
     pub fn contains_key(&self, fx_guid: &str) -> bool {
-        self.0.contains_key(fx_guid)
+        self.plugins.contains_key(fx_guid)
+    }
+
+    /// See [`PluginMap::generation`]'s field: moves whenever an instance
+    /// under a guid may have been replaced or dropped.
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Every FX guid with a loaded plugin.
+    pub fn guids(&self) -> impl Iterator<Item = &str> {
+        self.plugins.keys().map(String::as_str)
     }
 
     #[must_use]
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.plugins.len()
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.plugins.is_empty()
     }
 }
 
@@ -850,6 +957,28 @@ mod plugins_tests {
                 .and_then(|c| c.try_lock_spinning(1))
                 .is_none()
         );
+    }
+
+    /// The generation moves on whatever may put another plugin under a
+    /// guid, and stays put while the map is only read and run.
+    #[test]
+    fn the_generation_moves_when_an_instance_may_change() {
+        let plugins = Plugins::default();
+        let at = |p: &Plugins| p.read().generation();
+        let start = at(&plugins);
+        plugins.write().insert("a".into(), Box::new(Probe(0)));
+        let inserted = at(&plugins);
+        assert_ne!(inserted, start);
+        plugins.with("a", |p| {
+            let _ = p.process_block(&[], &[], &mut [], &mut [], &PluginEvents::EMPTY);
+        });
+        assert_eq!(at(&plugins), inserted, "running a plugin changes nothing");
+        assert_eq!(plugins.read().guids().collect::<Vec<_>>(), ["a"]);
+        let _ = plugins.write().get_mut("a");
+        let reached = at(&plugins);
+        assert_ne!(reached, inserted, "a plugin reached mutably may be swapped");
+        let _ = plugins.write().remove("a");
+        assert_ne!(at(&plugins), reached);
     }
 
     /// A plugin run through its cell and taken back out is the same one.

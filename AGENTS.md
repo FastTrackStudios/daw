@@ -42,12 +42,25 @@ them by git.
   GPL-3.0-or-later, inherited with `license.workspace = true`.
 - A PR that changes a crate adds a change file in `.changes/`
   (`.changes/README`).
+- CI runs on ready PRs only: on a draft PR `Build + test` is skipped. To
+  get checks, mark the PR ready (`gh pr ready`); it runs then and on every
+  push after. An agent waiting for green marks its PR ready first.
 
 ## Check
 
+Inside the fleet's devenv shell: `devenv shell -- <command>`, or direnv
+through `.envrc` (`eval "$(devenv direnvrc)"` then `use devenv`; a bare
+`use devenv` fails silently in an agent shell and leaves the host's rustc).
+devenv-fleet's `rust` module (devenv.yaml) is the toolchain; check it with
+`devenv shell -- fleet-doctor` (rustc store path, wrapper, linker; fails off
+the pin). devenv.nix adds what the crates link. Move the pins only with
+devenv-fleet's `scripts/fleet-pins --write .`, never by hand; never set or
+unset `RUSTC_WRAPPER` or `CARGO_HOME`; keep `.cargo/config.toml`'s rustflags
+tables the fleet's, flag for flag.
+
 ```bash
-cargo check --workspace --all-targets
-cargo test --workspace
+devenv shell -- cargo check --workspace --all-targets
+devenv shell -- cargo test --workspace
 ```
 
 and the wasm check from `checks.yml`.
