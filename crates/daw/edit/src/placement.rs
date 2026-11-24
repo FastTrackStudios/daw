@@ -23,6 +23,14 @@
 //! if it must, down to [`Fill::least_rate_leftover`]; only past both is a
 //! short dip left, each side fading within itself (a piece's `crossfade`
 //! of `Some(0.0)`), never a hard cut: [`Filled::left`].
+//!
+//! 0.3.2, the owner's rule: an edit never leaves silence. The replay may
+//! reach as close to the previous stroke's attack as it must — at least
+//! [`Fill::keep`] past it if it can, never nearer than [`Fill::keep_min`]
+//! (some of the attack's body sounds twice, never its transient:
+//! [`Filled::replay_from_attack`]); whatever is still left is stretched
+//! at whatever rate fills it, below [`Fill::least_rate_leftover`] only if
+//! it must ([`Filled::forced_rate`]). [`Filled::left`] is 0.
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Cut {
@@ -70,8 +78,17 @@ pub struct Fill {
     pub keep: f64,
     /// The slowest a stretch of what is still left after the replay may
     /// play (0.5: the owner's floor), when [`Fill::least_rate`] does not
-    /// reach (0.3.1; a 0.3.0 request reads as 0.5).
+    /// reach (0.3.1; a 0.3.0 request reads as 0.5). Since 0.3.2 the
+    /// preferred floor: below it a stretch still fills, flagged
+    /// [`Filled::forced_rate`].
     pub least_rate_leftover: f64,
+    /// The nearest the piece after may start past the previous stroke's
+    /// attack when it must replay that stroke's decay closer than
+    /// [`Fill::keep`], seconds: the attack's body may sound twice, never
+    /// its transient (0.3.2; default 0.010). Also the nearest past its own
+    /// attack a stretch of the piece before may start when its decay past
+    /// `keep` is too short.
+    pub keep_min: f64,
 }
 
 impl Default for Fill {
@@ -82,6 +99,7 @@ impl Default for Fill {
             most_crossfade: 0.010,
             keep: 0.030,
             least_rate_leftover: 0.5,
+            keep_min: 0.010,
         }
     }
 }
@@ -157,6 +175,12 @@ pub struct Filled {
     /// decay played again, never its first [`Fill::keep`] (0.3.1).
     #[serde(default)]
     pub replayed_decay: f64,
+    /// Where the piece after starts, past the previous stroke's attack in
+    /// its recording, seconds, when it replayed that stroke's decay
+    /// (0.3.2): at least [`Fill::keep`] if it could, never under
+    /// [`Fill::keep_min`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay_from_attack: Option<f64>,
     /// How long the two sound together, crossfaded.
     pub crossfade: f64,
     /// What was still left and stretched: how long the stretched span
@@ -166,8 +190,13 @@ pub struct Filled {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stretched: Option<Stretched>,
     /// What nothing covers: the dip between the two sides' audio, seconds
-    /// (the fades within each side not counted).
+    /// (the fades within each side not counted). 0 since 0.3.2: an edit
+    /// never leaves silence.
     pub left: f64,
+    /// The stretch had to play slower than [`Fill::least_rate_leftover`]
+    /// to fill the gap (0.3.2): its rate is `stretched.rate`.
+    #[serde(default)]
+    pub forced_rate: bool,
     /// Whether the fill met a take switch, and what it did there.
     #[serde(default)]
     pub take_switch: TakeSwitch,

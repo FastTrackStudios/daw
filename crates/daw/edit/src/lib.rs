@@ -30,13 +30,15 @@ use serde::{Deserialize, Serialize};
 /// contract.
 pub const SERVICE: &str = "daw.edit";
 /// This contract's version: a provider declares `[provides] "daw.edit" =
-/// "0.3.1"`, a host asks for `^0.3` (0.2 added [`METHOD_PLAN`]; 0.3 the
+/// "0.3.2"`, a host asks for `^0.3` (0.2 added [`METHOD_PLAN`]; 0.3 the
 /// gap fill: [`PlaceRequest::takes`] and [`PlaceRequest::fill`] in,
 /// pieces that crossfade and stretch only their last span, and
 /// [`PlaceAnswer::fills`] out; 0.3.1 what the fill leaves: the previous
 /// stroke's decay replayed, a slower stretch down to
-/// [`placement::Fill::least_rate_leftover`], a faded dip).
-pub const VERSION: &str = "0.3.1";
+/// [`placement::Fill::least_rate_leftover`], a faded dip; 0.3.2 never a
+/// silence: the replay down to [`placement::Fill::keep_min`], a stretch at
+/// whatever rate fills, flagged [`placement::Filled::forced_rate`]).
+pub const VERSION: &str = "0.3.2";
 /// Placing a performance's hits: [`PlaceRequest`] → [`PlaceAnswer`].
 pub const METHOD_PLACE: &str = "PLACE";
 /// Planning where a kit's hits go: [`PlanRequest`] → [`PlanAnswer`].
@@ -181,6 +183,9 @@ mod tests {
         )
         .unwrap();
         assert!(answer.fills[0].replayed_decay.abs() < 1e-12);
+        assert!((request.fill.keep_min - 0.010).abs() < 1e-12);
+        assert_eq!(answer.fills[0].replay_from_attack, None);
+        assert!(!answer.fills[0].forced_rate);
     }
 
     #[test]
