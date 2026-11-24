@@ -132,7 +132,10 @@ fn built_in_installed() -> Vec<InstalledFx> {
 /// Instantiate `name` as a live DSP instance: plugin-file backends
 /// first (CLAP/VST3 by path), then the injected built-in FX factory
 /// ([`crate::plugin::FxFactory`]). `None` ⇒ synthetic fallback.
-fn instantiate(daw: &Standalone, name: &str) -> Option<Box<dyn crate::plugin::PluginInstance>> {
+pub(crate) fn instantiate(
+    daw: &Standalone,
+    name: &str,
+) -> Option<Box<dyn crate::plugin::PluginInstance>> {
     if let Some(p) = crate::plugin::load_plugin(name).ok().flatten() {
         return Some(p);
     }

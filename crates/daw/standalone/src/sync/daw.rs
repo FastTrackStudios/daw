@@ -1770,7 +1770,13 @@ impl Standalone {
         state: &[u8],
     ) -> Result<(), crate::plugin::PluginError> {
         self.plugin_instances
-            .with(fx_guid, |p| p.load_state(state))
+            .with(fx_guid, |p| {
+                p.load_state(state)?;
+                // Its latency may have moved with its state (a lookahead
+                // switched on): restarted here, off the audio thread.
+                p.restart_if_requested();
+                Ok(())
+            })
             .unwrap_or_else(|| {
                 Err(crate::plugin::PluginError::LoadFailed(format!(
                     "no plugin instance for fx_guid {fx_guid}"

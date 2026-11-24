@@ -93,6 +93,18 @@ impl RenderSnapshot {
     /// [`build`](Self::build), the tracks `played_live` (played over live
     /// MIDI lately) rendered live.
     pub(crate) fn build_hinted(p: &ProjectState, played_live: &[String]) -> Arc<Self> {
+        Self::build_adjusted(p, played_live, None)
+    }
+
+    /// [`build_hinted`](Self::build_hinted), each track's snapshot changed
+    /// by `adjust` before anything is worked out from them (the order, the
+    /// solo mask): an offline render's own solos and bypasses, the song
+    /// left as it is.
+    pub(crate) fn build_adjusted(
+        p: &ProjectState,
+        played_live: &[String],
+        adjust: Option<&dyn Fn(&mut TrackSnapshot)>,
+    ) -> Arc<Self> {
         let tempo_map = TempoMap::from_state(p);
         let idx_by_guid: HashMap<&str, usize> = p
             .tracks
@@ -103,7 +115,13 @@ impl RenderSnapshot {
         let tracks: Vec<TrackSnapshot> = p
             .tracks
             .iter()
-            .map(|t| snapshot_track(p, t, &tempo_map, &idx_by_guid, played_live))
+            .map(|t| {
+                let mut snap = snapshot_track(p, t, &tempo_map, &idx_by_guid, played_live);
+                if let Some(adjust) = adjust {
+                    adjust(&mut snap);
+                }
+                snap
+            })
             .collect();
         let mut order = graph::topo_order(&tracks);
         let depth = graph::depths(&tracks, &order);
@@ -133,6 +151,29 @@ impl RenderSnapshot {
             ahead_print,
             input_channels,
         })
+    }
+}
+
+impl RenderSnapshot {
+    /// The song's clock at `seconds`, as a hosted plugin's transport
+    /// gives it: its beat along the tempo map, the tempo, the bar.
+    pub(crate) fn transport_at(&self, seconds: f64) -> crate::plugin::RenderTransport {
+        let beats = self.tempo_map.seconds_to_beat(seconds);
+        let numerator = self.beats_per_measure.max(1);
+        let denominator = self.time_sig_den.max(1);
+        // A bar in quarter notes: 4/4 four, 6/8 three.
+        let bar_beats = f64::from(numerator) * 4.0 / f64::from(denominator);
+        let bar = (beats / bar_beats).floor();
+        crate::plugin::RenderTransport {
+            seconds,
+            beats,
+            bpm: self.tempo_map.tempo_at(seconds),
+            bar_start_beats: bar * bar_beats,
+            bar: bar as i32,
+            numerator: u16::try_from(numerator).unwrap_or(4),
+            denominator: u16::try_from(denominator).unwrap_or(4),
+            playing: true,
+        }
     }
 }
 

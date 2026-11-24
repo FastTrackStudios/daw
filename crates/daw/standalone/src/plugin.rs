@@ -181,8 +181,19 @@ pub trait PluginInstance: Send {
         Vec::new()
     }
 
-    /// Reported plugin latency in samples (0 if not reported).
+    /// Reported plugin latency in samples (0 if not reported). The
+    /// renderer's delay compensation reads it on the audio thread, every
+    /// block: a backend whose plugin API answers this on a main thread
+    /// only (CLAP) keeps the last answer and returns that.
     fn latency(&mut self) -> u32;
+
+    /// Service a restart the plugin asked for (its latency changed while
+    /// it was active): deactivate and activate it again, its latency asked
+    /// anew. Control threads only — a state load, an FX edit. Whether it
+    /// was restarted; nothing to do by default.
+    fn restart_if_requested(&mut self) -> bool {
+        false
+    }
 
     /// Activate the plugin at the given audio config. Must be called
     /// before any `process_block` calls.
@@ -446,7 +457,46 @@ pub fn render_cycle() -> Option<u64> {
         .map(|(cycle, _)| cycle)
 }
 
-/// Publishes [`render_frame`] for the life of the guard.
+/// The song's clock at the start of the block being processed — what a
+/// hosted plugin's transport says (a CLAP's `clap_event_transport`): the
+/// same for every plugin of the block. `Some` only while the project
+/// renderer is calling plugins.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RenderTransport {
+    /// The block's start on the timeline, seconds.
+    pub seconds: f64,
+    /// The same, in quarter-note beats along the tempo map.
+    pub beats: f64,
+    /// The tempo there, bpm.
+    pub bpm: f64,
+    /// Where the bar the block starts in begins, beats.
+    pub bar_start_beats: f64,
+    /// That bar's number, from 0.
+    pub bar: i32,
+    pub numerator: u16,
+    pub denominator: u16,
+    /// The timeline moves under the block (it is rendered at a frozen
+    /// position otherwise: input monitored while stopped).
+    pub playing: bool,
+}
+
+std::thread_local! {
+    static RENDER_TRANSPORT: std::cell::Cell<Option<RenderTransport>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// The song's clock for the block being processed ([`RenderTransport`]).
+#[must_use]
+pub fn render_transport() -> Option<RenderTransport> {
+    RENDER_TRANSPORT.with(std::cell::Cell::get)
+}
+
+/// A render's context on its thread, for a worker of the same block to
+/// [`adopt`](RenderFrameGuard::adopt): the block's frame and its clock.
+pub(crate) type RenderContext = (Option<(u64, u64)>, Option<RenderTransport>);
+
+/// Publishes [`render_frame`] (and, once set, [`render_transport`]) for the
+/// life of the guard.
 pub(crate) struct RenderFrameGuard;
 
 impl RenderFrameGuard {
@@ -459,21 +509,32 @@ impl RenderFrameGuard {
 
 impl RenderFrameGuard {
     /// This thread's render context, for a worker to [`adopt`](Self::adopt).
-    pub(crate) fn current() -> Option<(u64, u64)> {
-        RENDER_FRAME.with(std::cell::Cell::get)
+    pub(crate) fn current() -> RenderContext {
+        (
+            RENDER_FRAME.with(std::cell::Cell::get),
+            RENDER_TRANSPORT.with(std::cell::Cell::get),
+        )
     }
 
     /// Publish the render thread's context on a worker rendering part of
     /// the same block — the same cycle, not a new one.
-    pub(crate) fn adopt(context: Option<(u64, u64)>) -> Self {
-        RENDER_FRAME.with(|c| c.set(context));
+    pub(crate) fn adopt(context: RenderContext) -> Self {
+        RENDER_FRAME.with(|c| c.set(context.0));
+        RENDER_TRANSPORT.with(|c| c.set(context.1));
         Self
+    }
+
+    /// Publish the block's clock ([`render_transport`]) until the guard
+    /// drops.
+    pub(crate) fn set_transport(&self, transport: RenderTransport) {
+        RENDER_TRANSPORT.with(|c| c.set(Some(transport)));
     }
 }
 
 impl Drop for RenderFrameGuard {
     fn drop(&mut self) {
         RENDER_FRAME.with(|c| c.set(None));
+        RENDER_TRANSPORT.with(|c| c.set(None));
     }
 }
 

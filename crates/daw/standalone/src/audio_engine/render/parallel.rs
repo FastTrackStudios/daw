@@ -286,6 +286,8 @@ pub(super) struct LaneJob {
     /// Plugins bypassed this block: a control thread held them.
     pub(super) busy: u32,
     pub(super) us: u32,
+    /// The chain's latency, samples: what its plugins report.
+    pub(super) latency: u32,
 }
 
 impl LaneJob {
@@ -294,7 +296,12 @@ impl LaneJob {
     /// # Safety
     /// `bus` is live and used by no other thread for the duration; every
     /// plugin cell outlives it (the map held for reading).
-    unsafe fn run(&mut self, t: &TrackSnapshot, frames: usize, context: Option<(u64, u64)>) {
+    unsafe fn run(
+        &mut self,
+        t: &TrackSnapshot,
+        frames: usize,
+        context: crate::plugin::RenderContext,
+    ) {
         let started = Stamp::now();
         let _frame = (crate::plugin::RenderFrameGuard::current() != context)
             .then(|| crate::plugin::RenderFrameGuard::adopt(context));
