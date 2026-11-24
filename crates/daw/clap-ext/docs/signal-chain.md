@@ -147,3 +147,90 @@ every Signal build sends it.
    label. Studio's `FX_SET "@1407"` matches it first. (A slot label such as
    `b014` is the parameter's `id` field's business, not `clap_id`'s: a label
    of hex digits would read as a number.)
+
+## Addition 8 (2026-11-24): offline blocks
+
+Some blocks run their DSP **once**, over the track's whole audio, like
+ARA, and leave **raw automation** behind; a cheap apply stage plays it.
+They sit in the chain like any block (bypass, move, remove). Today:
+`level` (the vocal leveler) and `align`.
+
+- **Every block says its mode**: `"mode": "realtime" | "offline"`.
+- **An offline block says where its analysis stands**:
+
+  ```jsonc
+  "analysis": {
+    "state": "none" | "fresh" | "stale" | "running",
+    "range": { "from": 0.0, "to": 241.3 },     // project seconds analysed; null before
+    "at": 1795545600.0,                        // when, Unix seconds
+    "source_revision": "9f2c…",                // the host's name for the audio it was made from
+    "playback": "host" | "self",               // who plays the lanes (below)
+    "stale": [{ "from": 31.0, "to": 44.5 }],   // where the audio changed since
+    "lanes": [                                  // curves on the block's own parameters
+      { "param": "ride", "clap_id": "1407", "points": 312,
+        "edited": [{ "from": 60.0, "to": 64.0 }] }   // where the user redrew it (null: nowhere)
+    ],
+    "values": { "target_db": -19.2, "level_db": -16.0, "makeup_db": 3.1 }  // static results (align: delay_samples, invert)
+  }
+  ```
+
+  `lanes[].points` is a count: `SIGNAL_ANALYSIS` gives the points
+  (`curve: [[seconds, plain value], …]`). A block analysing says
+  `"running"` whatever it was.
+- **The lanes are automation on the block's own parameters**, each one a
+  `params[]` entry with its `clap_id`. Where they live depends on the host:
+  - `"playback": "host"`: written as the host's ordinary automation of
+    this FX's parameters through `com.fasttrackstudio.host-automation/1`
+    (`include/fts/clap-ext.h`), all of one analysis in one
+    `begin_edit`/`end_edit` (one undo step), the user's redrawn points kept
+    (`KEEP_USER_EDITS`). The host shows, plays, edits and undoes them, and
+    they move with edits. A user's edit of one comes back on the
+    `automation` topic, and the block's `edited` says where.
+  - `"playback": "self"`: a host without host-automation/1. Signal keeps
+    the lanes in its state and plays them itself against the transport,
+    setting the block's parameters exactly as host automation would (each
+    frame plays the curve at its own time).
+- **Actions** (`run_action`; Studio wraps them as its own `SIGNAL_ANALYZE`
+  and `SIGNAL_ANALYSIS`):
+  - `SIGNAL_ANALYZE {block, lane?, from?, to?, audio?, reference?, values?, finish?, source_revision?, replace_user_edits?, consistency?, range_db?, target_db?}`
+    answers `{"job": n, "state": "running"}`; the DSP runs on a worker,
+    and the result lands on the plugin's next main-thread call.
+    - `audio: {path, sample_rate, start_s, at?}`: the audio arriving, a WAV
+      file the host rendered offline (no playback). `at: "fx_input"`: it is
+      the FX's input, and the plugin runs its own blocks before the
+      offline block over it.
+    - no `audio`: captured while the song plays through once, analysed
+      when the transport stops (or on `finish: true`).
+    - `values`: set an alignment found elsewhere (Studio's `LISTEN_ALIGN`)
+      as the block's result.
+    - `from`/`to`: only that part again, the rest kept (a `level` block
+      rides it to the levels the whole analysis found).
+  - `SIGNAL_ANALYSIS {block?}`: the analysis with its lanes' points,
+    after landing whatever finished:
+    `{blocks: [...], finished: [{job, block, ok, made, analysis_ms, lanes_written}]}`.
+  - `SIGNAL_ANALYSIS_CLEAR {block}`: forgotten, its host lanes cleared.
+  - `SIGNAL_ANALYSIS_STALE {block?, from?, to?, source_revision?}`: the
+    audio changed; stale where the revision is not what it was made from.
+- **The kinds' parameters**:
+  - `level`: `gate`, `breath`, `ride` (dB, summed to one full-band gain),
+    `ess` (dB: the gain of a band at `ess_hz`, `ess_q`), and each lane's
+    `*_amount` (0–200 %: the leveler's dials).
+  - `align`: `delay_samples` (either way; an advance is reported as
+    latency, fixed when the block is built), `invert`, `rotate_hz`,
+    `rotate_deg`, `rotate_q` (an all-pass, flat, whose phase at `rotate_hz`
+    is `-rotate_deg`).
+
+### What works where
+
+| | Studio | another DAW (REAPER, Bitwig, …) |
+|---|---|---|
+| reading the audio | rendered offline for the range, no playback, while stopped or playing | played through once while Signal captures it |
+| the lanes | the host's automation of the FX's parameters: shown, edited, undone, moved with edits | kept and played by Signal; shown in Signal's editor |
+| one undo step for an analysis | yes (`begin_edit`/`end_edit`) | — |
+| a user's redraw kept | yes (host-automation/1 says who wrote each point) | — |
+| stale after an edit | Studio tells the FX after each edit step (`SIGNAL_ANALYSIS_STALE`) | not noticed: analyse again by hand |
+| ARA | — | not used. ARA 2.3 does define a CLAP mapping, but only MultitrackStudio hosts it today, and it would hand over the clips, not the audio arriving at an insert (see the follow-up in the offline-blocks report) |
+
+A "print" (Signal sending its lanes to a host recording automation, so
+that host gets them as its own) is not built yet. In another DAW the lanes
+play from Signal's state.
