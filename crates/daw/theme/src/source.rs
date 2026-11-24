@@ -89,6 +89,23 @@ impl Source {
     }
 }
 
+/// The first-party packs, by the short names a host takes for them.
+pub const FIRST_PARTY: &[(&str, &str)] = &[
+    ("fts", "FastTrackStudios/studio-fts-theme"),
+    ("reaper", "FastTrackStudios/studio-reaper-theme"),
+    ("ableton", "FastTrackStudios/studio-ableton-theme"),
+];
+
+/// `name`'s link when it is a first-party pack's short name, else `name`
+/// itself: `fts` is `FastTrackStudios/studio-fts-theme`.
+#[must_use]
+pub fn first_party(name: &str) -> &str {
+    FIRST_PARTY
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map_or(name, |(_, link)| link)
+}
+
 /// `~/x` as a path under the home folder.
 fn expand_home(link: &str) -> PathBuf {
     match (link.strip_prefix("~/"), std::env::var_os("HOME")) {
@@ -221,6 +238,15 @@ mod tests {
             owner: owner.into(),
             repo: repo.into(),
             rev: rev.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn a_first_party_name_is_its_link_and_anything_else_itself() {
+        assert_eq!(first_party("fts"), "FastTrackStudios/studio-fts-theme");
+        assert_eq!(first_party("owner/repo@v1"), "owner/repo@v1");
+        for (_, link) in FIRST_PARTY {
+            assert!(Source::parse(link).is_ok(), "{link}");
         }
     }
 

@@ -14,12 +14,15 @@
 //!   leaves it out.
 //! - [`watch`]: noticing a theme's files change, for live reload.
 //! - [`library`]: the packs a host installed and the theme it shows.
+//! - [`gallery`]: the showcase shots every pack is pictured in, held to
+//!   the spec, and the page a pack keeps beside the pictures.
 //!
 //! The views implement the spec (Studio's `daw-view-kit`); the packs are
 //! `studio-<name>-theme` repositories of Frame documents. Every view loads
 //! the same pack, so a mute looks the same on a strip as in the track panel.
 
 pub mod check;
+pub mod gallery;
 pub mod library;
 pub mod pack;
 pub mod source;
