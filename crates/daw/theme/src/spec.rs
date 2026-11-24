@@ -198,6 +198,7 @@ pub const TOKENS: &[Token] = &[
     color("ruler.ink", Host, "the ruler's bar numbers"),
     color("ruler.ink_dim", Host, "the ruler's beats"),
     color("playhead", Host, "the play cursor"),
+    color("cursor.edit", Host, "the edit cursor"),
     color("clip.edge", Host, "a clip's outline"),
     number("clip.alpha", Host, "how opaque a clip's body is, 0 to 1"),
     color(
