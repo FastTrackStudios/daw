@@ -94,6 +94,7 @@ pub const FIRST_PARTY: &[(&str, &str)] = &[
     ("fts", "FastTrackStudios/studio-fts-theme"),
     ("reaper", "FastTrackStudios/studio-reaper-theme"),
     ("ableton", "FastTrackStudios/studio-ableton-theme"),
+    ("protools", "FastTrackStudios/studio-protools-theme"),
 ];
 
 /// `name`'s link when it is a first-party pack's short name, else `name`

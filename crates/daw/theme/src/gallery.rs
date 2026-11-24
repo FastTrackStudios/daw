@@ -35,6 +35,14 @@ pub enum View {
     Drums,
     /// The MIDI editor, its notes on a piano roll.
     Piano,
+    /// The MIDI editor on the piano roll's take, its controller lanes
+    /// and expression strip opened out.
+    Controllers,
+    /// The editor on a sung (pitched audio) take: its waveform behind the
+    /// notes, a note's handles and zones.
+    Vocal,
+    /// The editor's stacked lanes: a tracked kit, mic by mic.
+    Stack,
 }
 
 impl View {
@@ -45,7 +53,7 @@ impl View {
             Self::Arrangement => "arrangement",
             Self::Mixer => "mixer",
             Self::Fx => "fx",
-            Self::Drums | Self::Piano => "editor",
+            Self::Drums | Self::Piano | Self::Controllers | Self::Vocal | Self::Stack => "editor",
         }
     }
 }
@@ -91,6 +99,15 @@ pub enum Overlay {
     Menu,
 }
 
+/// Which strips the mixer lays out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Strips {
+    /// The full strips of mixing.
+    Full,
+    /// The live (performance) strips: the short band.
+    Live,
+}
+
 /// How a view is framed for a shot.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Frame {
@@ -102,6 +119,7 @@ pub struct Frame {
     /// The rows' height against the view's own, 1 being as it opens.
     pub zoom_y: f64,
     pub overlay: Overlay,
+    pub strips: Strips,
 }
 
 impl Frame {
@@ -111,6 +129,7 @@ impl Frame {
         first: None,
         zoom_y: 1.0,
         overlay: Overlay::None,
+        strips: Strips::Full,
     };
 }
 
@@ -339,7 +358,7 @@ pub const SHOTS: &[Shot] = &[
             }),
             first: Some("States"),
             zoom_y: 1.0,
-            overlay: Overlay::None,
+            ..Frame::OPENING
         },
         tokens: &[INK, PANEL, &["mute", "solo", "rec", "pan", "combo"]],
         parts: &[&["tcp.row"], CONTROLS],
@@ -357,7 +376,7 @@ pub const SHOTS: &[Shot] = &[
             }),
             first: Some("Clips"),
             zoom_y: 1.4,
-            overlay: Overlay::None,
+            ..Frame::OPENING
         },
         tokens: &[INK, LANES, CLIPS, &["selected"]],
         parts: &[&["tcp.row"]],
@@ -391,7 +410,7 @@ pub const SHOTS: &[Shot] = &[
             }),
             first: Some("Automation"),
             zoom_y: 1.0,
-            overlay: Overlay::None,
+            ..Frame::OPENING
         },
         tokens: &[INK, LANES, &["surface.sunken", "tcp.column"]],
         parts: &[&["tcp.row"]],
@@ -409,7 +428,7 @@ pub const SHOTS: &[Shot] = &[
             }),
             first: Some("States"),
             zoom_y: 2.5,
-            overlay: Overlay::None,
+            ..Frame::OPENING
         },
         tokens: &[INK, PANEL, PAGE_TYPE, &["mute", "solo", "rec", "pan"]],
         parts: &[&["tcp.row", "controls"], CONTROLS],
@@ -503,11 +522,11 @@ pub const SHOTS: &[Shot] = &[
     Shot {
         name: "fx.phases",
         title: "FX phases",
-        about: "The FX view on the kick: each mix phase's header and its macros.",
+        about: "The FX view on the snare: each mix phase's header and its macros.",
         view: View::Fx,
         size: DESKTOP,
         frame: Frame {
-            first: Some("Kick"),
+            first: Some("Snare"),
             ..Frame::OPENING
         },
         tokens: &[INK, &["surface.raised", "hardware", "hardware.mark"]],
@@ -516,20 +535,24 @@ pub const SHOTS: &[Shot] = &[
     Shot {
         name: "editor.drums",
         title: "Drum lanes",
-        about: "The drum groove on the kit's lanes, every piece in its colour, velocities in the strip below.",
+        about: "The drum groove on the kit's lanes, every piece in its colour: accents and ghost notes, a flam, a tom fill, bar 2's snares selected, velocities in the strip and the song's markers on the ruler.",
         view: View::Drums,
         size: DESKTOP,
         frame: Frame {
             first: Some("Drum MIDI"),
             ..Frame::OPENING
         },
-        tokens: &[EDITOR, KIT, &["editor.row_a", "editor.row_b"]],
+        tokens: &[
+            EDITOR,
+            KIT,
+            &["editor.row_a", "editor.row_b", "editor.gold"],
+        ],
         parts: &[EDITOR_PAGES, &["editor.keygroup"]],
     },
     Shot {
         name: "editor.piano",
         title: "Piano roll",
-        about: "The melody on a piano roll: the keys, a line at every C, each pitch in its colour, velocities below.",
+        about: "The melody on a piano roll: notes from C1 to C7, every pitch class in its colour, velocities from soft to hard, triplets on a triplet grid, a held chord selected, a razor area, the keyboard with a line at every C.",
         view: View::Piano,
         size: DESKTOP,
         frame: Frame {
@@ -546,14 +569,59 @@ pub const SHOTS: &[Shot] = &[
                 "editor.key_black",
                 "editor.key_label",
                 "editor.octave_line",
+                "editor.razor",
+                "editor.gold",
             ],
         ],
         parts: &[EDITOR_PAGES, &["editor.keys", "editor.key"]],
     },
     Shot {
+        name: "editor.cc",
+        title: "Controller lanes",
+        about: "The melody's controller lanes opened out: the mod wheel, expression and the sustain pedal, and the strip on velocity.",
+        view: View::Controllers,
+        size: DESKTOP,
+        frame: Frame {
+            first: Some("Melody"),
+            ..Frame::OPENING
+        },
+        tokens: &[EDITOR, &["editor.row_a", "editor.row_b"]],
+        parts: &[&[
+            "editor.strip",
+            "editor.lane",
+            "editor.ruler",
+            "editor.tick",
+            "editor.bar",
+            "editor.button",
+        ]],
+    },
+    Shot {
+        name: "editor.vocal",
+        title: "Sung take",
+        about: "The editor on a sung take: its waveform behind the notes, a note selected with its drag handles, a long note cut into zones.",
+        view: View::Vocal,
+        size: DESKTOP,
+        frame: Frame::OPENING,
+        tokens: &[
+            EDITOR,
+            &["editor.reference", "editor.handle", "editor.zone"],
+        ],
+        parts: &[&["editor.bar", "editor.ruler", "editor.strip"]],
+    },
+    Shot {
+        name: "editor.stack",
+        title: "Stacked lanes",
+        about: "A tracked kit in the editor's stacked lanes, mic by mic, each lane's waveform under its hits.",
+        view: View::Stack,
+        size: DESKTOP,
+        frame: Frame::OPENING,
+        tokens: &[EDITOR, &["editor.peaks"]],
+        parts: &[&["editor.lane", "editor.bar"]],
+    },
+    Shot {
         name: "editor.menu",
         title: "Editor menu",
-        about: "The editor's context menu, open over the groove.",
+        about: "The editor's context menu, open over the groove, the pointer on an item.",
         view: View::Drums,
         size: CLOSEUP,
         frame: Frame {
@@ -568,6 +636,22 @@ pub const SHOTS: &[Shot] = &[
             "editor.control_hover",
         ]],
         parts: &[&["editor.menu", "editor.menuitem"]],
+    },
+    Shot {
+        name: "mixer.live",
+        title: "Live strips",
+        about: "The mixer's live (performance) strips, the short band a pack draws when it sets `strip.live`.",
+        view: View::Mixer,
+        size: DESKTOP,
+        frame: Frame {
+            strips: Strips::Live,
+            ..Frame::OPENING
+        },
+        tokens: &[
+            INK,
+            &["strip.live", "mute", "solo", "meter.safe", "meter.warn"],
+        ],
+        parts: &[&["mcp.strip"]],
     },
     Shot {
         name: "arrangement.overview.phone",
@@ -596,6 +680,19 @@ pub const SHOTS: &[Shot] = &[
         parts: &[&["mcp.strip", "rails"]],
     },
     Shot {
+        name: "editor.drums.phone",
+        title: "Drum lanes, phone",
+        about: "The drum lanes at a phone's width.",
+        view: View::Drums,
+        size: PHONE,
+        frame: Frame {
+            first: Some("Drum MIDI"),
+            ..Frame::OPENING
+        },
+        tokens: &[EDITOR, KIT],
+        parts: &[&["editor.keygroup", "editor.lane", "editor.strip"]],
+    },
+    Shot {
         name: "editor.piano.phone",
         title: "Piano roll, phone",
         about: "The piano roll at a phone's width.",
@@ -606,45 +703,28 @@ pub const SHOTS: &[Shot] = &[
             ..Frame::OPENING
         },
         tokens: &[EDITOR, &["editor.key_white", "editor.key_black"]],
-        parts: &[&["editor.keys", "editor.lane"]],
+        parts: &[&["editor.keys", "editor.key", "editor.lane"]],
+    },
+    Shot {
+        name: "editor.cc.phone",
+        title: "Controller lanes, phone",
+        about: "The controller lanes at a phone's width.",
+        view: View::Controllers,
+        size: PHONE,
+        frame: Frame {
+            first: Some("Melody"),
+            ..Frame::OPENING
+        },
+        tokens: &[EDITOR],
+        parts: &[&["editor.strip", "editor.lane"]],
     },
 ];
 
 /// The spec's names no shot can show, each with the reason.
-pub const UNSHOWN: &[(&str, &str)] = &[
-    (
-        "strip.live",
-        "a switch, not a look: it says the pack draws the live (performance) strip, which the gallery's mixer does not lay out",
-    ),
-    (
-        "strip.touch",
-        "a switch, not a look: it says the pack draws the touch strip, which only a touchscreen's mixer lays out",
-    ),
-    (
-        "editor.razor",
-        "a razor area exists only while one is dragged; the editor has no headless way to hold one",
-    ),
-    (
-        "editor.gold",
-        "the reference take is a comping state of a stack of takes; the gallery's editor opens one take",
-    ),
-    (
-        "editor.reference",
-        "a reference lane is drawn only beside a stack of takes being compared",
-    ),
-    (
-        "editor.zone",
-        "a zone is drawn by the audio editor's leveling, which the gallery does not open",
-    ),
-    (
-        "editor.handle",
-        "a drag handle shows under the pointer only",
-    ),
-    (
-        "editor.peaks",
-        "a waveform behind notes is drawn when the editor opens an audio take; the gallery opens MIDI",
-    ),
-];
+pub const UNSHOWN: &[(&str, &str)] = &[(
+    "strip.touch",
+    "a switch, not a look: it says the pack draws the touch strip, which only a touchscreen's mixer lays out (a touch-scaled window, which the gallery's still frames are not)",
+)];
 
 /// Every spec name (token or part) that no shot shows and [`UNSHOWN`] does
 /// not explain.
@@ -718,6 +798,28 @@ mod tests {
         );
     }
 
+    /// The editor is a full part of the gallery: every `editor.*` token and
+    /// every editor page is in a shot, none of them explained away.
+    #[test]
+    fn the_editor_is_covered_in_full() {
+        let tokens = spec::TOKENS
+            .iter()
+            .map(|t| t.name)
+            .filter(|n| n.starts_with("editor."));
+        let pages: Vec<&str> = spec::PARTS
+            .iter()
+            .map(|p| p.name)
+            .filter(|n| n.starts_with("editor."))
+            .collect();
+        assert_eq!(pages.len(), 12, "the spec's editor pages");
+        for name in tokens.chain(pages) {
+            assert!(
+                SHOTS.iter().any(|s| s.shows(name)),
+                "`{name}` is in no shot"
+            );
+        }
+    }
+
     #[test]
     fn every_name_a_shot_lists_is_in_the_spec() {
         for shot in SHOTS {
@@ -763,7 +865,13 @@ mod tests {
 
     #[test]
     fn the_main_shots_have_a_phone_version() {
-        for main in ["arrangement.overview", "mixer.overview", "editor.piano"] {
+        for main in [
+            "arrangement.overview",
+            "mixer.overview",
+            "editor.drums",
+            "editor.piano",
+            "editor.cc",
+        ] {
             assert!(Shot::named(main).is_some(), "{main}");
             assert!(
                 Shot::named(&format!("{main}.phone")).is_some(),
