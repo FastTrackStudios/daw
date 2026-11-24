@@ -1429,6 +1429,21 @@ impl ProjectRenderer {
         #[cfg(not(any(feature = "decode", feature = "audio")))]
         let live_on = false;
         let probing = !asked.is_empty() || live_on;
+        // A track tapped live before or inside its chain runs its chain in
+        // the topo loop, where those points are read — never in the lane
+        // pool, which runs a depth's chains before the loop reaches them.
+        #[cfg(any(feature = "decode", feature = "audio"))]
+        let tapped_inside = |ti: usize| {
+            live_plan.iter().flatten().any(|(t, at)| {
+                *t == ti
+                    && matches!(
+                        at,
+                        offline::Probe::PreFx | offline::Probe::FxIn(_) | offline::Probe::FxOut(_)
+                    )
+            })
+        };
+        #[cfg(not(any(feature = "decode", feature = "audio")))]
+        let tapped_inside = |_: usize| false;
         // A track an earlier render recorded, played in its place.
         let fed_of = |ti: usize| -> Option<&offline::Fed> {
             let fed = &self.offline.as_ref()?.fed;
@@ -1738,6 +1753,7 @@ impl ProjectRenderer {
                     if !covers(ti)
                         || !passes(ti)
                         || keyed[ti]
+                        || tapped_inside(ti)
                         || t.fx_chain.is_empty()
                         || t.sends
                             .iter()

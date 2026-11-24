@@ -48,6 +48,9 @@ impl crate::plugin::PluginInstance for Late {
     fn latency(&mut self) -> u32 {
         LATE as u32
     }
+    fn parallel_safe(&self) -> bool {
+        true
+    }
     fn prepare(&mut self, _: f64, _: u32) -> Result<(), crate::plugin::PluginError> {
         Ok(())
     }
@@ -394,4 +397,65 @@ fn an_offline_render_bypasses_and_solos_for_itself_only() {
         .iter()
         .any(|t| t.soloed);
     assert!(!soloed);
+}
+
+// Played live (a realtime render, its chains run in the lane pool), a tap
+// before a track's chain hears its input, and one after the chain's FX
+// hears it through the FX: a track tapped inside its chain runs it in the
+// topo loop, where those points are read.
+#[test]
+fn a_live_tap_before_a_chain_hears_it_unprocessed_in_a_realtime_render() {
+    use super::offline::{Probe, ProbeAt};
+    let (daw, guid) = clicks();
+    // Two chains at one depth: the lane pool runs them.
+    late_on(&daw, &guid, "Kick");
+    late_on(&daw, &guid, "Snare");
+    let kick = guid_of(&daw, &guid, "Kick");
+    let open = |at| {
+        daw.live_taps()
+            .open(
+                &guid,
+                ProbeAt {
+                    track: kick.clone(),
+                    at,
+                },
+                48_000,
+            )
+            .unwrap()
+    };
+    let (mut pre, mut out) = (open(Probe::PreFx), open(Probe::FxOut(0)));
+    let renderer = ProjectRenderer::new(&daw, &guid, 48_000);
+    renderer.set_realtime();
+    // The realtime render builds its snapshot off its thread: play until
+    // the click has come through both taps, the frame each block starts
+    // at kept.
+    let (mut a, mut b) = (Vec::new(), Vec::new());
+    let mut first_heard = None;
+    for block in 0..2_000u64 {
+        let before = a.len();
+        renderer.render_block((block % 64) * 128, 128);
+        pre.drain(&mut a);
+        out.drain(&mut b);
+        if first_heard.is_none() && a.len() > before {
+            first_heard = Some(before);
+        }
+        if a.len() >= 64 * 256 && b.len() >= 64 * 256 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let left = |s: &[f32]| s.chunks_exact(2).map(|f| f[0]).collect::<Vec<_>>();
+    let peak_at = |s: &[f32]| {
+        s.iter()
+            .enumerate()
+            .max_by(|x, y| x.1.abs().total_cmp(&y.1.abs()))
+            .map(|(i, _)| i)
+    };
+    let (a, b) = (left(&a), left(&b));
+    let (pa, pb) = (peak_at(&a).unwrap(), peak_at(&b).unwrap());
+    assert_eq!(
+        pb - pa,
+        LATE,
+        "the FX's output is its input {LATE} late: {pa} {pb} {first_heard:?}"
+    );
 }
