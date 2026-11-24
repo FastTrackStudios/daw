@@ -479,6 +479,16 @@ impl ClapHost {
         plugin_index: usize,
     ) -> Result<LoadedClapPlugin, ClapHostError> {
         let entry = Self::cached_entry(bundle_path)?;
+        self.load_entry(&entry, plugin_index)
+    }
+
+    /// [`load`](Self::load) from an entry already loaded: a bundle's, or a
+    /// plugin built into this binary (the tests').
+    pub(crate) fn load_entry(
+        &self,
+        entry: &PluginEntry,
+        plugin_index: usize,
+    ) -> Result<LoadedClapPlugin, ClapHostError> {
         let factory = entry.get_plugin_factory().ok_or(ClapHostError::NoFactory)?;
         let descriptor = factory
             .plugin_descriptors()
@@ -504,7 +514,7 @@ impl ClapHost {
             move |_| DawHostMainThread {
                 notices: main_notices.clone(),
             },
-            &entry,
+            entry,
             id,
             &host_info,
         )
@@ -711,22 +721,31 @@ struct ActivationGuard {
     processor: StartedPluginAudioProcessor<DawHost>,
     sample_rate: f64,
     block_size: u32,
-    /// Reusable per-block scratch buffers so process_block doesn't
-    /// allocate on the hot path. Length = block_size.
-    scratch_l: Vec<f32>,
-    scratch_r: Vec<f32>,
     /// How many audio ports the plugin declared, captured at activation.
     /// Never zero — see `prepare`.
     input_ports: usize,
     output_ports: usize,
-    /// Two channels per *auxiliary* port, so every port the plugin
-    /// declared is handed a real buffer. Inputs stay silent (nothing is
-    /// routed to a side chain here); outputs are written and discarded.
-    /// Both are allocated at activation, so `process_block` still does not
-    /// allocate on the hot path.
-    aux_in: Vec<Vec<f32>>,
-    aux_out: Vec<Vec<f32>>,
+    /// Two channels per input port, `block_size` long: the main pair (the
+    /// block's input, copied in), then every *auxiliary* port's, so every
+    /// port the plugin declared is handed a real buffer. Auxiliary inputs
+    /// stay silent (nothing is routed to a side chain here).
+    ins: Vec<Vec<f32>>,
+    /// Two channels per *auxiliary* output port: written and discarded
+    /// (the main pair is the caller's).
+    outs: Vec<Vec<f32>>,
+    /// The port lists clack hands the plugin, and the block's events in
+    /// and out: made here, reused by every block, so `process_block`
+    /// allocates nothing on the hot path.
+    in_ports: AudioPorts,
+    out_ports: AudioPorts,
+    events_in: EventBuffer,
+    events_out: EventBuffer,
 }
+
+/// Events an activation's buffers hold before they grow: an FX's
+/// automation at its densest (see the renderer's `FX_EVENT_CAPACITY`)
+/// with MIDI beside it fits.
+const EVENTS_PER_BLOCK: usize = 4096 + 512;
 
 impl LoadedClapPlugin {
     pub fn descriptor(&self) -> &ClapPluginDescriptor {
@@ -827,7 +846,7 @@ impl LoadedClapPlugin {
     pub fn aux_buffer_counts(&self) -> Option<(usize, usize)> {
         self.activation
             .as_ref()
-            .map(|a| (a.aux_in.len(), a.aux_out.len()))
+            .map(|a| (a.ins.len() - 2, a.outs.len()))
     }
 
     /// Number of audio I/O ports the plugin advertises.
@@ -1238,12 +1257,14 @@ impl LoadedClapPlugin {
             processor,
             sample_rate,
             block_size,
-            scratch_l: vec![0.0; block_size as usize],
-            scratch_r: vec![0.0; block_size as usize],
             input_ports,
             output_ports,
-            aux_in: vec![vec![0.0; block_size as usize]; (input_ports - 1) * 2],
-            aux_out: vec![vec![0.0; block_size as usize]; (output_ports - 1) * 2],
+            ins: vec![vec![0.0; block_size as usize]; input_ports * 2],
+            outs: vec![vec![0.0; block_size as usize]; (output_ports - 1) * 2],
+            in_ports: AudioPorts::with_capacity(input_ports * 2, input_ports),
+            out_ports: AudioPorts::with_capacity(output_ports * 2, output_ports),
+            events_in: EventBuffer::with_capacity(EVENTS_PER_BLOCK),
+            events_out: EventBuffer::with_capacity(64),
         });
         // A restart asked for before this activation is answered by it.
         self.restart
@@ -1254,8 +1275,8 @@ impl LoadedClapPlugin {
 
     /// Process one block. `in_l/in_r` and `out_l/out_r` must all be
     /// the same length and ≤ the prepared `block_size`.
-    /// `param_events` is `(param_id, value)` pairs scheduled at frame 0
-    /// — pass `&[]` for no automation this block.
+    /// `events.params` are `(param_id, value)` pairs at frame 0 — `&[]`
+    /// for no automation this block.
     pub fn process_block(
         &mut self,
         in_l: &[f32],
@@ -1264,30 +1285,39 @@ impl LoadedClapPlugin {
         out_r: &mut [f32],
         events: &PluginEvents<'_>,
     ) -> Result<(), ClapHostError> {
-        let mut input_events = EventBuffer::new();
-        for &(param_id, value) in events.params {
-            input_events.push(&ParamValueEvent::new(
-                0,
-                ClapId::from(param_id),
-                Pckn::match_all(),
-                value,
-                Cookie::empty(),
-            ));
-        }
-        // MIDI events: CLAPi (virtual instrument) plugins consume
-        // these via their note port. Translate NoteOn/NoteOff to
-        // CLAP-native NoteOnEvent/NoteOffEvent for best fidelity;
-        // other messages fall through as raw MIDI 1.0 events (CC,
-        // pitch bend, program change, etc).
-        for ev in events.midi {
-            push_clap_midi(&mut input_events, ev);
-        }
-        // Per-note expression — CLAP-native NoteExpressionEvent for
-        // each MPE-style dimension.
-        for ne in events.note_expressions {
-            push_clap_note_expression(&mut input_events, ne);
-        }
-        self.process_with_events(in_l, in_r, out_l, out_r, &input_events)
+        let params =
+            events
+                .params
+                .iter()
+                .map(|&(param_id, value)| crate::plugin::PluginParamEvent {
+                    offset: 0,
+                    param_id,
+                    kind: crate::plugin::PluginParamEventKind::Value(value),
+                });
+        self.process_with_events(in_l, in_r, out_l, out_r, |buf| {
+            fill_input_events(buf, params, events.midi, events.note_expressions);
+        })
+    }
+
+    /// [`process_block`](Self::process_block) with each parameter change
+    /// at its frame (`CLAP_EVENT_PARAM_VALUE` / `PARAM_MOD` with its
+    /// `time`), merged in time order with the MIDI and note expressions.
+    pub fn process_block_timed(
+        &mut self,
+        in_l: &[f32],
+        in_r: &[f32],
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        events: &crate::plugin::TimedPluginEvents<'_>,
+    ) -> Result<(), ClapHostError> {
+        self.process_with_events(in_l, in_r, out_l, out_r, |buf| {
+            fill_input_events(
+                buf,
+                events.params.iter().copied(),
+                events.midi,
+                events.note_expressions,
+            );
+        })
     }
 
     /// [`process_block`](Self::process_block) with sample-accurate
@@ -1305,34 +1335,21 @@ impl LoadedClapPlugin {
         params: &[crate::plugin::PluginParamEvent],
         midi: &[crate::plugin::PluginMidiEvent],
     ) -> Result<(), ClapHostError> {
-        let mut input_events = EventBuffer::new();
-        let mut params = params.iter().peekable();
-        let mut midi = midi.iter().peekable();
-        loop {
-            let take_param = match (params.peek(), midi.peek()) {
-                (Some(p), Some(m)) => p.offset <= m.offset,
-                (Some(_), None) => true,
-                (None, Some(_)) => false,
-                (None, None) => break,
-            };
-            if take_param {
-                if let Some(p) = params.next() {
-                    push_clap_param(&mut input_events, p);
-                }
-            } else if let Some(m) = midi.next() {
-                push_clap_midi(&mut input_events, m);
-            }
-        }
-        self.process_with_events(in_l, in_r, out_l, out_r, &input_events)
+        self.process_with_events(in_l, in_r, out_l, out_r, |buf| {
+            fill_input_events(buf, params.iter().copied(), midi, &[]);
+        })
     }
 
+    /// Run one block: `fill` writes its input events into the activation's
+    /// own buffer, and every buffer the call needs was made at activation,
+    /// so a block allocates nothing.
     fn process_with_events(
         &mut self,
         in_l: &[f32],
         in_r: &[f32],
         out_l: &mut [f32],
         out_r: &mut [f32],
-        input_events: &EventBuffer,
+        fill: impl FnOnce(&mut EventBuffer),
     ) -> Result<(), ClapHostError> {
         let Some(act) = self.activation.as_mut() else {
             return Err(ClapHostError::NotActivated);
@@ -1341,96 +1358,78 @@ impl LoadedClapPlugin {
         if frames > act.block_size as usize {
             return Err(ClapHostError::BlockTooLarge);
         }
+        act.events_in.clear();
+        fill(&mut act.events_in);
+        act.events_out.clear();
 
-        let (n_in, n_out) = (act.input_ports, act.output_ports);
-
-        // Copy inputs into scratch (clack wants mutable input slices
-        // even for read-only channels).
-        let scratch_l_full = &mut act.scratch_l[..frames];
-        let scratch_r_full = &mut act.scratch_r[..frames];
-        scratch_l_full.copy_from_slice(&in_l[..frames]);
-        scratch_r_full.copy_from_slice(&in_r[..frames]);
-
-        let mut output_events = EventBuffer::new();
-
-        let mut input_ports = AudioPorts::with_capacity(2, n_in);
-        let mut output_ports = AudioPorts::with_capacity(2, n_out);
-
-        // The main bus, then one buffer for every auxiliary port the plugin
-        // declared. Handing over fewer than it declared is what corrupted
-        // memory before — see `prepare`.
-        let mut in_bufs = Vec::with_capacity(n_in);
-        in_bufs.push(AudioPortBuffer {
-            latency: 0,
-            channels: AudioPortBufferType::f32_input_only(vec![
-                InputChannel {
-                    buffer: scratch_l_full,
-                    is_constant: false,
-                },
-                InputChannel {
-                    buffer: scratch_r_full,
-                    is_constant: false,
-                },
-            ]),
-        });
-        // Auxiliary inputs are fed silence and flagged constant, which is
-        // exactly what a host reports when nothing is routed to a side chain.
-        // The flag is not cosmetic: a compressor reading a constant-zero side
-        // chain can take its "no external input" path instead of detecting on
-        // digital black.
-        let mut aux = act.aux_in.iter_mut();
-        for _ in 1..n_in {
-            let (Some(l), Some(r)) = (aux.next(), aux.next()) else {
-                break;
-            };
-            let (l, r) = (&mut l[..frames], &mut r[..frames]);
-            // Re-silence: a plugin is free to scribble on its input buffers.
-            l.fill(0.0);
-            r.fill(0.0);
-            in_bufs.push(AudioPortBuffer {
-                latency: 0,
-                channels: AudioPortBufferType::f32_input_only(vec![
-                    InputChannel {
-                        buffer: l,
-                        is_constant: true,
-                    },
-                    InputChannel {
-                        buffer: r,
-                        is_constant: true,
-                    },
-                ]),
-            });
+        // Inputs: the main pair copied in (clack wants mutable input slices
+        // even for read-only channels), then a pair for every auxiliary port
+        // the plugin declared. Handing over fewer than it declared is what
+        // corrupted memory before — see `prepare`. Auxiliary inputs are fed
+        // silence and flagged constant, which is exactly what a host reports
+        // when nothing is routed to a side chain. The flag is not cosmetic: a
+        // compressor reading a constant-zero side chain can take its "no
+        // external input" path instead of detecting on digital black.
+        if let [main_l, main_r, ..] = act.ins.as_mut_slice() {
+            main_l[..frames].copy_from_slice(&in_l[..frames]);
+            main_r[..frames].copy_from_slice(&in_r[..frames]);
         }
-        let inputs = input_ports.with_input_buffers(in_bufs);
+        let inputs = act
+            .in_ports
+            .with_input_buffers(act.ins.chunks_exact_mut(2).enumerate().map(|(port, pair)| {
+                let [l, r] = pair else {
+                    unreachable!("chunks of two");
+                };
+                let (l, r) = (&mut l[..frames], &mut r[..frames]);
+                let aux = port > 0;
+                if aux {
+                    // Re-silence: a plugin is free to scribble on its inputs.
+                    l.fill(0.0);
+                    r.fill(0.0);
+                }
+                AudioPortBuffer {
+                    latency: 0,
+                    channels: AudioPortBufferType::f32_input_only([
+                        InputChannel {
+                            buffer: l,
+                            is_constant: aux,
+                        },
+                        InputChannel {
+                            buffer: r,
+                            is_constant: aux,
+                        },
+                    ]),
+                }
+            }));
 
-        let mut out_bufs = Vec::with_capacity(n_out);
-        out_bufs.push(AudioPortBuffer {
-            latency: 0,
-            channels: AudioPortBufferType::f32_output_only(vec![
-                &mut out_l[..frames],
-                &mut out_r[..frames],
-            ]),
-        });
-        // Auxiliary outputs still need somewhere to land. Nothing reads them
-        // back — this host returns the main bus — but the plugin will write
-        // to them, and it must be into a buffer we own.
-        let mut aux = act.aux_out.iter_mut();
-        for _ in 1..n_out {
-            let (Some(l), Some(r)) = (aux.next(), aux.next()) else {
-                break;
-            };
-            out_bufs.push(AudioPortBuffer {
-                latency: 0,
-                channels: AudioPortBufferType::f32_output_only(vec![
-                    &mut l[..frames],
-                    &mut r[..frames],
-                ]),
-            });
-        }
-        let mut outputs = output_ports.with_output_buffers(out_bufs);
+        // Outputs: the main pair straight into the caller's buffers, then
+        // the auxiliary ones into buffers we own. Nothing reads those back —
+        // this host returns the main bus — but the plugin will write to them,
+        // and it must be into memory we own.
+        let mut main = Some([&mut out_l[..frames], &mut out_r[..frames]]);
+        let mut aux = act.outs.chunks_exact_mut(2);
+        let mut outputs = act
+            .out_ports
+            .with_output_buffers((0..act.output_ports).map(|port| {
+                let pair = if port == 0 {
+                    main.take()
+                } else {
+                    aux.next().map(|pair| {
+                        let [l, r] = pair else {
+                            unreachable!("chunks of two");
+                        };
+                        [&mut l[..frames], &mut r[..frames]]
+                    })
+                };
+                let pair = pair.expect("a buffer for every declared output port");
+                AudioPortBuffer {
+                    latency: 0,
+                    channels: AudioPortBufferType::f32_output_only(pair),
+                }
+            }));
 
-        let in_evs = input_events.as_input();
-        let mut out_evs = output_events.as_output();
+        let in_evs = act.events_in.as_input();
+        let mut out_evs = act.events_out.as_output();
         // Every plugin of a block is told the same clock: the block's first
         // timeline frame as its steady time, and the song's transport there
         // (see `crate::plugin::render_transport`).
@@ -1742,6 +1741,39 @@ fn push_clap_note_expression(buf: &mut EventBuffer, ne: &crate::plugin::PluginNo
     ));
 }
 
+/// A block's input events into `buf`, in time order as CLAP requires: at
+/// one frame, parameter changes first (a note played there hears its new
+/// value), then MIDI, then note expressions. Each list is sorted by offset.
+fn fill_input_events(
+    buf: &mut EventBuffer,
+    params: impl Iterator<Item = crate::plugin::PluginParamEvent>,
+    midi: &[crate::plugin::PluginMidiEvent],
+    notes: &[crate::plugin::PluginNoteExpression],
+) {
+    let mut params = params.peekable();
+    let mut midi = midi.iter().peekable();
+    let mut notes = notes.iter().peekable();
+    loop {
+        let p = params.peek().map_or(u32::MAX, |e| e.offset);
+        let m = midi.peek().map_or(u32::MAX, |e| e.offset);
+        let n = notes.peek().map_or(u32::MAX, |e| e.offset);
+        if p == u32::MAX && m == u32::MAX && n == u32::MAX {
+            break;
+        }
+        if p <= m && p <= n {
+            if let Some(e) = params.next() {
+                push_clap_param(buf, &e);
+            }
+        } else if m <= n {
+            if let Some(e) = midi.next() {
+                push_clap_midi(buf, e);
+            }
+        } else if let Some(e) = notes.next() {
+            push_clap_note_expression(buf, e);
+        }
+    }
+}
+
 fn push_clap_param(buf: &mut EventBuffer, ev: &crate::plugin::PluginParamEvent) {
     match ev.kind {
         crate::plugin::PluginParamEventKind::Value(value) => buf.push(&ParamValueEvent::new(
@@ -1857,6 +1889,19 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
     }
     fn restart_if_requested(&mut self) -> bool {
         LoadedClapPlugin::restart_if_requested(self)
+    }
+    fn takes_timed_params(&self) -> bool {
+        true
+    }
+    fn process_block_timed(
+        &mut self,
+        il: &[f32],
+        ir: &[f32],
+        ol: &mut [f32],
+        or: &mut [f32],
+        events: &crate::plugin::TimedPluginEvents<'_>,
+    ) -> Result<(), crate::plugin::PluginError> {
+        LoadedClapPlugin::process_block_timed(self, il, ir, ol, or, events).map_err(map_err)
     }
     fn process_block_param_events(
         &mut self,
