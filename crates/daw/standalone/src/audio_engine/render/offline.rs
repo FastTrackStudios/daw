@@ -13,7 +13,7 @@
 //! ([`ProjectRenderer::track_latencies`]); what reaches master is late by
 //! [`ProjectRenderer::latency`].
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::snapshot::TrackSnapshot;
@@ -30,6 +30,63 @@ pub enum Tap {
     PostFader,
 }
 
+/// Where a [`ProbeAt`] reads a track's signal, in the order the signal
+/// passes them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Probe {
+    /// Its own media (items, MIDI-free audio) alone, before anything is
+    /// added to it.
+    Input,
+    /// Before its FX: its media, its children's sum and what is sent to it.
+    PreFx,
+    /// Into the FX at this place in its chain (0 is the first).
+    FxIn(usize),
+    /// Out of the FX at this place in its chain (0 is the first): what a
+    /// bypassed FX passes on unchanged.
+    FxOut(usize),
+    /// After its FX, before its fader, pan and mute.
+    PreFader,
+    /// After its fader: what it puts into its parent.
+    PostFader,
+}
+
+/// One track's signal read at one point, every block
+/// ([`ProjectRenderer::with_probes`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProbeAt {
+    /// The track, by guid.
+    pub track: String,
+    pub at: Probe,
+}
+
+/// A track's output as an earlier render of the same frames heard it
+/// (after its fader, before delay compensation lines it up), played in
+/// its place: its media, its FX, its fader and everything feeding it are
+/// not rendered again.
+#[derive(Clone, Debug)]
+pub struct Fed {
+    /// The render frame its first sample was at.
+    pub start: u64,
+    /// Interleaved stereo, from `start` on.
+    pub samples: Arc<[f32]>,
+    /// How late it was, samples (its output's latency then).
+    pub latency: u32,
+}
+
+impl Fed {
+    /// Its samples for the `frames` frames from render frame `at` into
+    /// `dst` (interleaved), silence where it has none.
+    pub(super) fn read(&self, at: u64, dst: &mut [f32]) {
+        let offset = at.checked_sub(self.start).map(|o| o as usize * 2);
+        for (i, d) in dst.iter_mut().enumerate() {
+            *d = offset
+                .and_then(|o| self.samples.get(o + i))
+                .copied()
+                .unwrap_or(0.0);
+        }
+    }
+}
+
 /// What an offline render changes, for itself only.
 #[derive(Default)]
 pub struct Offline {
@@ -42,6 +99,16 @@ pub struct Offline {
     pub solo: Option<HashSet<String>>,
     /// Where it taps each track, if it does.
     pub tap: Option<Tap>,
+    /// The tracks (by guid) it renders; every other one is rendered empty
+    /// (no media, no FX), so what does not feed a point being listened to
+    /// costs nothing. `None` renders every track.
+    pub only: Option<HashSet<String>>,
+    /// Signals it reads each block, wherever they are in a track
+    /// ([`Probe`]).
+    pub probes: Vec<ProbeAt>,
+    /// Tracks (by guid) whose output an earlier render recorded, played in
+    /// their place ([`Fed`]). What feeds only them need not be rendered.
+    pub fed: HashMap<String, Fed>,
 }
 
 impl Offline {
@@ -56,6 +123,19 @@ impl Offline {
         }
         if let Some(solo) = &self.solo {
             t.soloed = solo.contains(&t.guid);
+        }
+        if self.fed.contains_key(&t.guid)
+            || self
+                .only
+                .as_ref()
+                .is_some_and(|only| !only.contains(&t.guid))
+        {
+            t.items.clear();
+            t.fx_chain.clear();
+            t.fx_enabled.clear();
+            t.fx_params.clear();
+            t.fx_envs.clear();
+            t.aux_taps = false;
         }
     }
 }
@@ -197,6 +277,10 @@ impl ProjectRenderer {
             .as_ref()
             .map_or(&self.daw.plugin_instances, |o| &o.plugins);
         for (ti, t) in snap.tracks.iter().enumerate() {
+            if let Some(fed) = self.offline.as_ref().and_then(|o| o.fed.get(&t.guid)) {
+                self.latencies.set(ti, fed.latency);
+                continue;
+            }
             let mut latency = 0u32;
             for (i, fx) in t.fx_chain.iter().enumerate() {
                 if !t.fx_enabled.get(i).copied().unwrap_or(true) {
@@ -254,6 +338,85 @@ impl ProjectRenderer {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         f(&scratch.taps)
+    }
+
+    /// How late each probe's signal is ([`Offline::probes`], in their
+    /// order), samples, once delay compensation has lined the song up: a
+    /// track's media and its input arrive as late as its latest feeder,
+    /// and each FX on the way adds its own (a bypassed one nothing). Asked
+    /// after [`prime`](Self::prime), it holds from the first block.
+    pub fn probe_latencies(&self) -> Vec<u32> {
+        let (Some(snap), Some(offline)) = (self.snapshot(), self.offline.as_ref()) else {
+            return Vec::new();
+        };
+        let mut plan = super::pdc::Plan::default();
+        super::pdc::plan(
+            &snap.tracks,
+            &snap.order,
+            |ti| self.latencies.get(ti),
+            &mut plan,
+        );
+        let through = |t: &TrackSnapshot, fx: usize| -> u32 {
+            t.fx_chain
+                .iter()
+                .zip(&t.fx_enabled)
+                .take(fx)
+                .filter(|(_, on)| **on)
+                .map(|(g, _)| offline.plugins.with(g, |p| p.latency()).unwrap_or(0))
+                .sum()
+        };
+        offline
+            .probes
+            .iter()
+            .map(|p| {
+                let Some(ti) = snap.tracks.iter().position(|t| t.guid == p.track) else {
+                    return 0;
+                };
+                let t = &snap.tracks[ti];
+                let input = plan.input.get(ti).copied().unwrap_or(0);
+                match p.at {
+                    Probe::Input | Probe::PreFx => input,
+                    Probe::FxIn(i) => input + through(t, i),
+                    Probe::FxOut(i) => input + through(t, i + 1),
+                    Probe::PreFader | Probe::PostFader => {
+                        plan.output.get(ti).copied().unwrap_or(input)
+                    }
+                }
+            })
+            .collect()
+    }
+
+    /// Each track's fingerprint as this render sees it, by guid: one
+    /// number that moves whenever anything its render reads does — its
+    /// media, its fader, pan, mute and polarity, its sends, its FX chain,
+    /// their switches, held values and automation — but not its plugins'
+    /// own state (a caller fingerprints that) or what feeds it.
+    pub fn track_prints(&self) -> Vec<(String, u64)> {
+        use super::print::Print as _;
+        self.snapshot()
+            .map(|s| {
+                s.tracks
+                    .iter()
+                    .map(|t| {
+                        let mut h = super::print::Fx::default();
+                        t.print(&mut h);
+                        (t.guid.clone(), std::hash::Hasher::finish(&h))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Run `f` on the last block's probes ([`Offline::probes`]), in the
+    /// order they were asked for: each one's signal that block,
+    /// interleaved stereo — silence for a track that carried nothing, or
+    /// the render does not see.
+    pub fn with_probes<R>(&self, f: impl FnOnce(&[Vec<f32>]) -> R) -> R {
+        let scratch = self
+            .scratch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        f(&scratch.probes)
     }
 
     /// The tracks this render sees, by index: their guids.

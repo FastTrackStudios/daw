@@ -369,6 +369,7 @@ fn an_offline_render_bypasses_and_solos_for_itself_only() {
             bypass_fx: [fx.clone()].into(),
             solo: Some([snare].into()),
             tap: Some(Tap::PreFader),
+            ..Offline::default()
         },
     );
     renderer.prime(128);
