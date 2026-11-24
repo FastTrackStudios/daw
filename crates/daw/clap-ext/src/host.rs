@@ -47,6 +47,14 @@ impl EventSink {
         (!ext.is_null()).then_some(Self { plugin, ext })
     }
 
+    /// The plugin it delivers to, as host-automation/1's
+    /// [`Caller`](crate::automation::Caller) names it: what a host keys
+    /// its per-plugin bookkeeping by, read without calling the plugin.
+    #[must_use]
+    pub fn plugin_key(&self) -> crate::automation::Caller {
+        crate::automation::Caller::of(self.plugin)
+    }
+
     /// Deliver an event. Main thread.
     pub fn send(&self, subscription: u64, topic: &str, event_json: &str) {
         // SAFETY: non-null (`query`).

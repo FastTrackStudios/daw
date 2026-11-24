@@ -6,6 +6,7 @@
 //! | `com.fasttrackstudio.host-actions/1` | the plugin calls the host: actions (JSON in, JSON out), events, files | Studio's engine over its Action List ([`host::HostActions`]) |
 //! | `com.fasttrackstudio.host-events/1` | the host delivers subscribed events to the plugin | the plugin |
 //! | `com.fasttrackstudio.signal/1` | the host drives the plugin: actions, the chain as data, stable parameter ids, modulation sources | the Signal CLAP and each block's CLAP ([`plugin::SignalPlugin`]) |
+//! | `com.fasttrackstudio.host-automation/1` | the plugin reads and writes the host's lanes of its own parameters | Studio's engine ([`automation::HostAutomation`]) |
 //!
 //! - [`sys`]: the header's `#[repr(C)]` types.
 //! - [`plugin`]: the plugin's side, over clap-sys: [`plugin::SignalVtable`]
@@ -17,6 +18,7 @@
 //! Nothing here loads a library or depends on a host framework: daw's clack
 //! host and nice-plug plug these vtables in.
 
+pub mod automation;
 pub mod host;
 pub mod plugin;
 pub mod stream;
