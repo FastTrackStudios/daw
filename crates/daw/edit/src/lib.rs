@@ -30,11 +30,13 @@ use serde::{Deserialize, Serialize};
 /// contract.
 pub const SERVICE: &str = "daw.edit";
 /// This contract's version: a provider declares `[provides] "daw.edit" =
-/// "0.3.0"`, a host asks for `^0.3` (0.2 added [`METHOD_PLAN`]; 0.3 the
+/// "0.3.1"`, a host asks for `^0.3` (0.2 added [`METHOD_PLAN`]; 0.3 the
 /// gap fill: [`PlaceRequest::takes`] and [`PlaceRequest::fill`] in,
 /// pieces that crossfade and stretch only their last span, and
-/// [`PlaceAnswer::fills`] out).
-pub const VERSION: &str = "0.3.0";
+/// [`PlaceAnswer::fills`] out; 0.3.1 what the fill leaves: the previous
+/// stroke's decay replayed, a slower stretch down to
+/// [`placement::Fill::least_rate_leftover`], a faded dip).
+pub const VERSION: &str = "0.3.1";
 /// Placing a performance's hits: [`PlaceRequest`] → [`PlaceAnswer`].
 pub const METHOD_PLACE: &str = "PLACE";
 /// Planning where a kit's hits go: [`PlanRequest`] → [`PlanAnswer`].
@@ -165,6 +167,20 @@ mod tests {
         .unwrap();
         assert!(answer.fills.is_empty());
         assert_eq!(answer.pieces[0].crossfade, None);
+    }
+
+    #[test]
+    fn a_030_fill_and_its_report_still_read() {
+        let request: PlaceRequest = serde_json::from_str(
+            r#"{"hits":[],"span":[0.0,1.0],"fill":{"least_rate":0.8,"crossfade":0.004,"most_crossfade":0.01,"keep":0.03}}"#,
+        )
+        .unwrap();
+        assert!((request.fill.least_rate_leftover - 0.5).abs() < 1e-12);
+        let answer: PlaceAnswer = serde_json::from_str(
+            r#"{"pieces":[],"fills":[{"at":1.0,"recorded":1.0,"gap":0.01,"extended":0.0,"reached_back":0.0,"crossfade":0.0,"left":0.01}]}"#,
+        )
+        .unwrap();
+        assert!(answer.fills[0].replayed_decay.abs() < 1e-12);
     }
 
     #[test]

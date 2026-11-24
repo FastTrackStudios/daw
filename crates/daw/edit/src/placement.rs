@@ -14,6 +14,15 @@
 //! and only what is still left is stretched — never slower than
 //! [`Fill::least_rate`], over the shortest span that allows — or, past
 //! that, left as a gap. A hit is never moved to fill one.
+//!
+//! 0.3.1 fills what that leaves, in this order: the piece after may
+//! replay a bit of the previous stroke's decay in its own recording
+//! (reaching back past [`Cut::guard`], never into that stroke's first
+//! [`Fill::keep`], so no attack sounds twice: [`Filled::replayed_decay`]);
+//! then what is still left is stretched slower than [`Fill::least_rate`]
+//! if it must, down to [`Fill::least_rate_leftover`]; only past both is a
+//! short dip left, each side fading within itself (a piece's `crossfade`
+//! of `Some(0.0)`), never a hard cut: [`Filled::left`].
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Cut {
@@ -56,8 +65,13 @@ pub struct Fill {
     /// The longest crossfade of two decays where they overlap, seconds.
     pub most_crossfade: f64,
     /// How much of a piece's start (its attack) is never stretched,
-    /// seconds.
+    /// seconds; nor, past [`Cut::guard`], played again by the piece after
+    /// replaying the previous stroke's decay.
     pub keep: f64,
+    /// The slowest a stretch of what is still left after the replay may
+    /// play (0.5: the owner's floor), when [`Fill::least_rate`] does not
+    /// reach (0.3.1; a 0.3.0 request reads as 0.5).
+    pub least_rate_leftover: f64,
 }
 
 impl Default for Fill {
@@ -67,6 +81,7 @@ impl Default for Fill {
             crossfade: 0.004,
             most_crossfade: 0.010,
             keep: 0.030,
+            least_rate_leftover: 0.5,
         }
     }
 }
@@ -101,8 +116,10 @@ pub struct Piece {
     pub drawn_from: Option<f64>,
     /// How long it sounds together with the piece before, crossfaded,
     /// seconds: it starts sounding at `start`, the piece before stops at
-    /// `start + crossfade`. None: the host's own seam fade, reaching back
-    /// before `start` (0.2).
+    /// `start + crossfade`. `Some(0.0)`: a dip between the two (what no
+    /// fill covers), each side fading out or in within itself, never a
+    /// hard cut. None: the host's own seam fade, reaching back before
+    /// `start` (0.2).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crossfade: Option<f64>,
 }
@@ -126,19 +143,30 @@ pub struct Filled {
     /// have been cut (just before this hit's old place) to its lead,
     /// seconds.
     pub gap: f64,
-    /// How far the piece before plays on past that, at its own speed.
+    /// How far the piece before plays on past that, at its own speed. The
+    /// old cut is just before this hit's attack, the next in the piece
+    /// before's recording when the two were played one after the other,
+    /// and the piece before never plays an attack again: so this is 0
+    /// unless the hit after was played out of order (the piece before's
+    /// next attack lies further on).
     pub extended: f64,
     /// How far the piece after reaches back before its lead, into its own
-    /// take.
+    /// take (the replay included).
     pub reached_back: f64,
+    /// Of that, how much is past [`Cut::guard`]: the previous stroke's
+    /// decay played again, never its first [`Fill::keep`] (0.3.1).
+    #[serde(default)]
+    pub replayed_decay: f64,
     /// How long the two sound together, crossfaded.
     pub crossfade: f64,
     /// What was still left and stretched: how long the stretched span
-    /// plays and its rate (below 1: slower). None: no stretch.
+    /// plays and its rate (below 1: slower; below [`Fill::least_rate`]
+    /// only for what the replay left, never below
+    /// [`Fill::least_rate_leftover`]). None: no stretch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stretched: Option<Stretched>,
-    /// What not even a stretch at [`Fill::least_rate`] covers: silence,
-    /// seconds.
+    /// What nothing covers: the dip between the two sides' audio, seconds
+    /// (the fades within each side not counted).
     pub left: f64,
     /// Whether the fill met a take switch, and what it did there.
     #[serde(default)]
