@@ -108,7 +108,13 @@ js-sys = { workspace = true, optional = true }
 # `audio` for the audio engine's own tests (the render ahead, the set
 # engine's block loop), which run without a device; `stream-ogg` and
 # `reapeaks` for a streamed take's waveform built from its whole proxy.
-daw-standalone = { path = ".", features = ["rpp-project", "bootstrap", "audio", "stream-ogg", "reapeaks"] }
+# `clap-host` for the automation tests, which host a CLAP gain plugin built
+# into the test binary (`clack-plugin`, loaded through clack-host's
+# `clack-plugin` entry).
+daw-standalone = { path = ".", features = ["rpp-project", "bootstrap", "audio", "stream-ogg", "reapeaks", "clap-host"] }
+clack-plugin = { workspace = true }
+clack-host = { workspace = true, features = ["clack-plugin"] }
+clack-extensions = { workspace = true, features = ["clack-plugin"] }
 daw-proto = { workspace = true }
 daw-control = { workspace = true }
 eyre = { workspace = true }

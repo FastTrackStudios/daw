@@ -1202,7 +1202,7 @@ dependencies = [
  "signature 3.0.0",
  "simd-adler32",
  "simdutf8",
- "skrifa",
+ "skrifa 0.44.0",
  "slab",
  "sledgehammer_bindgen",
  "sledgehammer_bindgen_macro",
@@ -1986,7 +1986,7 @@ dependencies = [
  "percent-encoding",
  "rayon",
  "selectors 0.41.0",
- "skrifa",
+ "skrifa 0.44.0",
  "slotmap",
  "smallvec 1.16.4",
  "stylo",
@@ -1995,7 +1995,7 @@ dependencies = [
  "stylo_taffy",
  "stylo_traits",
  "svgtypes",
- "taffy",
+ "taffy 0.15.0",
  "thin-vec",
  "thread_local",
  "url",
@@ -2043,10 +2043,10 @@ dependencies = [
  "kurbo 0.13.1",
  "parley",
  "peniko",
- "skrifa",
+ "skrifa 0.44.0",
  "smallvec 1.16.4",
  "stylo",
- "taffy",
+ "taffy 0.15.0",
  "usvg",
 ]
 
@@ -2523,6 +2523,7 @@ dependencies = [
  "bitflags 2.13.2",
  "clack-common",
  "clack-host",
+ "clack-plugin",
  "clap-sys",
  "raw-window-handle 0.6.2",
 ]
@@ -2533,9 +2534,19 @@ version = "0.1.0"
 source = "git+https://github.com/prokopyl/clack?rev=f874e858ad576c601367b3038af5088a4e671744#f874e858ad576c601367b3038af5088a4e671744"
 dependencies = [
  "clack-common",
+ "clack-plugin",
  "clap-sys",
  "libloading 0.8.9",
  "objc2-foundation 0.3.2",
+]
+
+[[package]]
+name = "clack-plugin"
+version = "0.1.0"
+source = "git+https://github.com/prokopyl/clack?rev=f874e858ad576c601367b3038af5088a4e671744#f874e858ad576c601367b3038af5088a4e671744"
+dependencies = [
+ "clack-common",
+ "clap-sys",
 ]
 
 [[package]]
@@ -3461,7 +3472,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c54e03a951783e8b327515db3f2a2fd0e3bed362a96b066f341ce66ed49b4ead"
 dependencies = [
  "data-encoding",
- "syn 3.0.10",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -3561,6 +3572,7 @@ dependencies = [
  "base64 0.22.1",
  "clack-extensions",
  "clack-host",
+ "clack-plugin",
  "clap-sys",
  "cpal",
  "daw-clap-ext",
@@ -3614,6 +3626,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "daw-theme"
+version = "26.10.3"
+dependencies = [
+ "facet",
+ "facet-json",
+ "facet-styx",
+ "frame",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -4615,7 +4638,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading 0.8.9",
+ "libloading 0.7.4",
 ]
 
 [[package]]
@@ -5579,6 +5602,15 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "font-types"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fa6a5e5a77b5f3f7f9e32879f484aa5b3632ddfbe568a16266c904a6f32cdaf"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
+name = "font-types"
 version = "0.12.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c92d9081c7ab3bd83ef1eecdfad090f3d966e3ce74106779664114cfe1a6274"
@@ -5622,7 +5654,7 @@ dependencies = [
  "objc2-core-text",
  "objc2-foundation 0.3.2",
  "parlance",
- "read-fonts",
+ "read-fonts 0.41.0",
  "roxmltree 0.21.1",
  "smallvec 1.16.4",
  "windows",
@@ -5686,6 +5718,26 @@ name = "fragile"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8878864ba14bb86e818a412bfd6f18f9eabd4ec0f008a28e8f7eb61db532fcf9"
+
+[[package]]
+name = "frame"
+version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/frame?rev=1f6311abc5eeef87c5226155a4838a6f58984410#1f6311abc5eeef87c5226155a4838a6f58984410"
+dependencies = [
+ "base64 0.22.1",
+ "blake3",
+ "facet",
+ "image",
+ "kurbo 0.13.1",
+ "peniko",
+ "roxmltree 0.20.0",
+ "serde",
+ "serde_json",
+ "skrifa 0.26.6",
+ "taffy 0.7.7",
+ "thiserror 2.0.20",
+ "uuid",
+]
 
 [[package]]
 name = "fs_extra"
@@ -6216,7 +6268,7 @@ dependencies = [
  "hashbrown 0.17.1",
  "log",
  "peniko",
- "skrifa",
+ "skrifa 0.44.0",
  "smallvec 1.16.4",
  "vello_common",
 ]
@@ -6369,6 +6421,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "grid"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36119f3a540b086b4e436bb2b588cf98a68863470e0e880f4d0842f112a3183a"
+
+[[package]]
 name = "gtk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6472,7 +6530,7 @@ checksum = "c03d949a14aa089bbb282f7dd76a498a7f684428e4257202efc119ec010376f9"
 dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
- "read-fonts",
+ "read-fonts 0.41.0",
  "smallvec 1.16.4",
 ]
 
@@ -9983,7 +10041,7 @@ dependencies = [
  "parlance",
  "parley_data",
  "parley_emoji",
- "skrifa",
+ "skrifa 0.44.0",
 ]
 
 [[package]]
@@ -11214,12 +11272,22 @@ dependencies = [
 
 [[package]]
 name = "read-fonts"
+version = "0.25.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6f9e8a4f503e5c8750e4cd3b32a4e090035c46374b305a15c70bad833dca05f"
+dependencies = [
+ "bytemuck",
+ "font-types 0.8.4",
+]
+
+[[package]]
+name = "read-fonts"
 version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "046a7d674daf459825b32f5062056d6882db0d2f5a479fbd76ccfc870ac18709"
 dependencies = [
  "bytemuck",
- "font-types",
+ "font-types 0.12.6",
  "once_cell",
 ]
 
@@ -12434,12 +12502,22 @@ dependencies = [
 
 [[package]]
 name = "skrifa"
+version = "0.26.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cc1aa86c26dbb1b63875a7180aa0819709b33348eb5b1491e4321fae388179d"
+dependencies = [
+ "bytemuck",
+ "read-fonts 0.25.3",
+]
+
+[[package]]
+name = "skrifa"
 version = "0.44.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "819ab7d62b1d3e72d9d9dea5650bac30424f9111364bb94928dbf5ecad1baa68"
 dependencies = [
  "bytemuck",
- "read-fonts",
+ "read-fonts 0.41.0",
 ]
 
 [[package]]
@@ -13155,7 +13233,7 @@ dependencies = [
  "bitflags 2.13.2",
  "stylo",
  "stylo_atoms",
- "taffy",
+ "taffy 0.15.0",
 ]
 
 [[package]]
@@ -13571,6 +13649,18 @@ dependencies = [
 
 [[package]]
 name = "taffy"
+version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab4f4d046dd956a47a7e1a2947083d7ac3e6aa3cfaaead36173ceaa5ab11878c"
+dependencies = [
+ "arrayvec",
+ "grid",
+ "serde",
+ "slotmap",
+]
+
+[[package]]
+name = "taffy"
 version = "0.15.0"
 source = "git+https://github.com/DioxusLabs/taffy?rev=c25605620351786eb6a742b74ea4d289f59ebd84#c25605620351786eb6a742b74ea4d289f59ebd84"
 dependencies = [
@@ -13671,7 +13761,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.6",
  "windows-sys 0.61.2",
@@ -14746,7 +14836,7 @@ dependencies = [
  "roxmltree 0.21.1",
  "simplecss",
  "siphasher",
- "skrifa",
+ "skrifa 0.44.0",
  "strict-num",
  "svgtypes",
  "tiny-skia-path",
@@ -14840,7 +14930,7 @@ dependencies = [
  "log",
  "peniko",
  "png 0.18.1",
- "skrifa",
+ "skrifa 0.44.0",
  "static_assertions",
  "thiserror 2.0.20",
  "vello_encoding",
@@ -14885,7 +14975,7 @@ dependencies = [
  "bytemuck",
  "guillotiere",
  "peniko",
- "skrifa",
+ "skrifa 0.44.0",
  "smallvec 1.16.4",
 ]
 
