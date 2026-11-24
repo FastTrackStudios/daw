@@ -14,6 +14,7 @@ members = [
     "crates/daw/allocator",
     "crates/daw/audio-graph",
     "crates/daw/control",
+    "crates/daw/edit",
     "crates/daw/macros",
     "crates/daw/module",
     "crates/daw/proto",
@@ -44,6 +45,7 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/FastTrackStudios/daw"
 
 [workspace.dependencies]
+daw-edit = { path = "crates/daw/edit" }
 # ── This workspace ────────────────────────────────────────────────────
 audio = { path = "features/audio" }
 daw-allocator = { path = "crates/daw/allocator" }
