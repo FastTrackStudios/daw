@@ -218,8 +218,8 @@ They sit in the chain like any block (bypass, move, remove). Today:
   - `align`: `delay_samples` (either way; an advance is reported as
     latency, fixed when the block is built; with none the latency is 0),
     `invert`, and its phase correction: up to two second-order all-pass
-    sections (`ap1_hz`/`ap1_q`, `ap2_hz`/`ap2_q`: RBJ all-pass biquads) and
-    one first-order one (`ap0_hz`), each off at 0 Hz — magnitude flat,
+    sections (`allpass.0.hz`/`allpass.0.q`, `allpass.1.hz`/`allpass.1.q`: RBJ all-pass biquads) and
+    one first-order one (`allpass.first.hz`), each off at 0 Hz — magnitude flat,
     no latency. `SIGNAL_ANALYZE`'s `values` take it as `LISTEN_ALIGN`
     says it: `{"delay_samples": -136, "invert": false, "allpass":
     [{"hz": 50, "q": 0.7}], "first_order": {"hz": 120}}`.
