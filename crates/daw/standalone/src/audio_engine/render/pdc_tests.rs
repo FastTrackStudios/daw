@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::folder_routing_tests::guid_of;
-use super::offline::{Offline, Tap, copy_plugins};
+use super::offline::{Copying, Offline, Tap, copy_plugins};
 use super::*;
 use crate::audio_engine::decoder::DecodedAudio;
 use crate::audio_engine::materialize::attach_audio_source;
@@ -310,7 +310,7 @@ fn an_offline_render_runs_copies_and_leaves_the_live_plugins_alone() {
             live: true,
         }),
     );
-    let (plugins, copies) = copy_plugins(&daw, &guid, None);
+    let (plugins, copies) = copy_plugins(&daw, &guid, Copying::default());
     assert_eq!(copies.copied, 1);
     assert!(copies.failed.is_empty());
     let renderer = ProjectRenderer::offline(
@@ -358,7 +358,7 @@ fn an_offline_render_runs_copies_and_leaves_the_live_plugins_alone() {
 fn an_offline_render_bypasses_and_solos_for_itself_only() {
     let (daw, guid) = clicks();
     let fx = late_on(&daw, &guid, "Kick");
-    let (plugins, _) = copy_plugins(&daw, &guid, None);
+    let (plugins, _) = copy_plugins(&daw, &guid, Copying::default());
     let snare = guid_of(&daw, &guid, "Snare");
     let renderer = ProjectRenderer::offline(
         &daw,

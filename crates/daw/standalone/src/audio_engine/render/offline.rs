@@ -77,59 +77,94 @@ pub struct Copies {
 /// (its bundle path, then the FX factory) — `None` for that.
 pub type Make<'a> = &'a dyn Fn(&str) -> Option<Box<dyn PluginInstance>>;
 
+/// Rewrites a live instance's state (by the FX's chain name) before its
+/// copy loads it: a plugin whose instances find each other through
+/// something process-wide (a named session) given a name of its own, so
+/// a copy never joins what the live instances share.
+pub type Restate<'a> = &'a dyn Fn(&str, Vec<u8>) -> Vec<u8>;
+
+/// How [`copy_plugins`] makes its copies.
+#[derive(Default, Clone, Copy)]
+pub struct Copying<'a> {
+    pub make: Option<Make<'a>>,
+    pub restate: Option<Restate<'a>>,
+}
+
 /// A copy of every plugin instance on song `project_guid`: each FX's
-/// plugin made again (`make`, else the way the engine makes it), the live
-/// one's state loaded into it. Reading a live instance's state takes its
+/// plugin made again (`how.make`, else the way the engine makes it), the
+/// live one's state (through `how.restate`) loaded into it. Reading a live instance's state takes its
 /// lock for as long as the plugin's save does; the render playing it
 /// renders that plugin dry for a block if that is longer than its spin.
 pub fn copy_plugins(
     daw: &Standalone,
     project_guid: &str,
-    make: Option<Make<'_>>,
+    how: Copying<'_>,
 ) -> (Arc<Plugins>, Copies) {
-    let fxs: Vec<(String, String)> = daw
-        .read_project(project_guid, |p| {
-            p.fx_chains
-                .values()
-                .flatten()
-                .map(|e| (e.fx.guid.clone(), e.fx.name.clone()))
-                .collect()
-        })
-        .unwrap_or_default();
     let plugins = Arc::new(Plugins::default());
     let mut copies = Copies::default();
-    for (guid, name) in fxs {
-        if !daw.has_plugin_instance(&guid) {
-            continue;
-        }
-        let made = make
-            .and_then(|m| m(&name))
-            .or_else(|| crate::fx::instantiate(daw, &name));
-        let Some(mut copy) = made else {
-            copies
-                .failed
-                .push((guid, format!("{name}: would not be made again")));
-            continue;
-        };
-        match daw.save_plugin_state(&guid) {
-            Ok(state) if !state.is_empty() => {
-                if let Err(e) = copy.load_state(&state) {
-                    copies
-                        .failed
-                        .push((guid, format!("{name}: refused its state: {e}")));
-                    continue;
+    for (guid, name) in hosted(daw, project_guid) {
+        let state = daw.save_plugin_state(&guid).unwrap_or_default();
+        match copy_plugin(daw, &name, state, how) {
+            Ok((copy, bytes)) => {
+                if bytes > 0 {
+                    copies.with_state += 1;
+                    copies.state_bytes += bytes as u64;
                 }
-                copies.with_state += 1;
-                copies.state_bytes += state.len() as u64;
+                plugins.write().insert(guid, copy);
+                copies.copied += 1;
             }
-            // A built-in without a state of its own: its parameters are the
-            // song's, sent every block.
-            _ => {}
+            Err(why) => copies.failed.push((guid, why)),
         }
-        plugins.write().insert(guid, copy);
-        copies.copied += 1;
     }
     (plugins, copies)
+}
+
+/// Every FX on song `project_guid` with a live plugin instance: its guid
+/// and its chain name.
+pub fn hosted(daw: &Standalone, project_guid: &str) -> Vec<(String, String)> {
+    daw.read_project(project_guid, |p| {
+        p.fx_chains
+            .values()
+            .flatten()
+            .map(|e| (e.fx.guid.clone(), e.fx.name.clone()))
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_default()
+    .into_iter()
+    .filter(|(guid, _)| daw.has_plugin_instance(guid))
+    .collect()
+}
+
+/// One copy: the FX `name`'s plugin made again (`how.make`, else the way
+/// the engine makes it), `state` (a live instance's, through
+/// `how.restate`) loaded into it. The copy and the state's size.
+///
+/// # Errors
+/// It would not be made, or refused its state.
+pub fn copy_plugin(
+    daw: &Standalone,
+    name: &str,
+    state: Vec<u8>,
+    how: Copying<'_>,
+) -> Result<(Box<dyn PluginInstance>, usize), String> {
+    let mut copy = how
+        .make
+        .and_then(|m| m(name))
+        .or_else(|| crate::fx::instantiate(daw, name))
+        .ok_or_else(|| format!("{name}: would not be made again"))?;
+    // A built-in without a state of its own: its parameters are the
+    // song's, sent every block.
+    if state.is_empty() {
+        return Ok((copy, 0));
+    }
+    let state = match how.restate {
+        Some(restate) => restate(name, state),
+        None => state,
+    };
+    copy.load_state(&state)
+        .map_err(|e| format!("{name}: refused its state: {e}"))?;
+    copy.restart_if_requested();
+    Ok((copy, state.len()))
 }
 
 impl ProjectRenderer {
