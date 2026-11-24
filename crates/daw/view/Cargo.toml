@@ -1,0 +1,63 @@
+[package]
+name = "daw-view"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+description = "The contract a DAW's views are built on: the EngineView protocol and a window's link to its engine, the song model the views draw, the transport, the selection and the overlays an engine publishes. An engine implements it; a view depends on it alone."
+
+[dependencies]
+daw-proto = { workspace = true }
+daw-control = { workspace = true }
+# The facade's service traits and its RPC client; its engine only with
+# `local`.
+daw = { workspace = true }
+daw-edit = { workspace = true }
+daw-timeline = { workspace = true }
+# The level envelopes an automation lane and the leveler read.
+dsp = { workspace = true, features = ["level"] }
+architect = { workspace = true, optional = true, features = ["vox", "platform", "action-list"] }
+vox = { workspace = true }
+facet = { workspace = true }
+facet-json = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+eyre = { workspace = true }
+tracing = { workspace = true }
+web-time = { workspace = true }
+# Waiting for the facade to come up (`song::project::fetch_when_ready`).
+futures-timer = { workspace = true }
+num-traits = { workspace = true }
+rayon = { workspace = true, optional = true }
+dirs = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }
+# A plugin's parameter as its engine block reads it (an automation lane's
+# value labels), with the engine in this process.
+builtin = { workspace = true, optional = true, features = ["engine"] }
+# A streamed take's peaks, read from its proxy's `.reapeaks`, with the
+# engine in this process.
+daw-standalone = { workspace = true, optional = true }
+web-sys = { workspace = true, optional = true, features = ["Window", "Storage"] }
+wasm-bindgen-futures = { workspace = true, optional = true }
+gloo-timers = { workspace = true, optional = true }
+
+# A page: tokio's channels and select only (no runtime, no sockets).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { version = "1.48", default-features = false, features = ["sync", "macros"] }
+
+[features]
+default = ["native"]
+# The protocol's client (architect's RPC macro emits it under `vox`).
+vox = []
+# A window in a native process: its link runs on a tokio runtime, its
+# waveforms on a rayon pool, its choices kept in the app's data folder.
+native = ["vox", "dep:tokio", "dep:rayon", "dep:dirs", "dep:architect", "dep:futures-util"]
+# A window in a browser page.
+web = ["vox", "dep:web-sys", "dep:wasm-bindgen-futures", "dep:gloo-timers", "dep:futures-util", "dep:architect"]
+# The engine in this process: what a window that owns its engine reads
+# from it directly (waveforms, MIDI previews, grouping). A view never asks
+# for it; the app that runs the engine does.
+local = ["native", "daw/standalone-rpp", "dep:builtin", "dep:daw-standalone", "daw-standalone/reapeaks"]
+
+[lints]
+workspace = true

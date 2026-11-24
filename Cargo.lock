@@ -716,6 +716,8 @@ dependencies = [
  "async-channel",
  "eyre",
  "facet",
+ "facet-json",
+ "facet-value",
  "futures",
  "gloo-timers 0.3.0",
  "thiserror 2.0.20",
@@ -2637,7 +2639,7 @@ checksum = "af491d569909a7e4dee0ad7db7f5341fef5c614d5b8ec8cf765732aba3cff681"
 dependencies = [
  "serde",
  "termcolor",
- "unicode-width 0.1.14",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]
@@ -3520,6 +3522,7 @@ dependencies = [
 name = "daw-edit"
 version = "0.3.2"
 dependencies = [
+ "facet",
  "serde",
  "serde_json",
 ]
@@ -3614,9 +3617,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-timeline"
+version = "0.1.0"
+dependencies = [
+ "web-time",
+]
+
+[[package]]
 name = "daw-transport-sync"
 version = "26.10.3"
 dependencies = [
+ "web-time",
+]
+
+[[package]]
+name = "daw-view"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "builtin",
+ "daw",
+ "daw-control",
+ "daw-edit",
+ "daw-proto",
+ "daw-standalone",
+ "daw-timeline",
+ "dirs 6.0.0",
+ "dsp",
+ "eyre",
+ "facet",
+ "facet-json",
+ "futures-timer",
+ "futures-util",
+ "gloo-timers 0.3.0",
+ "num-traits",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "vox",
+ "wasm-bindgen-futures",
+ "web-sys",
  "web-time",
 ]
 
@@ -4506,6 +4548,15 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams 0.5.0",
  "web-sys",
+]
+
+[[package]]
+name = "dirs"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
+dependencies = [
+ "dirs-sys",
 ]
 
 [[package]]
@@ -10765,7 +10816,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -14216,7 +14267,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f5cc5858ecf9574ddd8f0032a2ff7ffd6f7724d2b81e48b9374984b3fd6ddc9"
 dependencies = [
  "crossbeam-channel",
- "dirs",
+ "dirs 7.0.0",
  "libappindicator",
  "muda",
  "objc2 0.6.5",
@@ -16750,7 +16801,7 @@ dependencies = [
  "block2 0.6.2",
  "cookie",
  "crossbeam-channel",
- "dirs",
+ "dirs 7.0.0",
  "dom_query",
  "dpi",
  "dunce",
