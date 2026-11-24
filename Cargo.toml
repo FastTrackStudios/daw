@@ -12,6 +12,7 @@ resolver = "3"
 
 members = [
     "crates/daw/allocator",
+    "crates/daw/clap-ext",
     "crates/daw/audio-graph",
     "crates/daw/control",
     "crates/daw/macros",
@@ -60,6 +61,8 @@ utils = { path = "crates/daw/utils" }
 builtin = { path = "features/dsp/builtin" }
 daw = { path = "crates/daw/daw" }
 daw-standalone = { path = "crates/daw/standalone" }
+# FastTrackStudio's CLAP extensions (host-actions/1, signal/1; signal#26).
+daw-clap-ext = { path = "crates/daw/clap-ext" }
 daw-sync = { path = "features/sync" }
 dawfile-reaper = { path = "features/adapters/reaper/dawfile-reaper" }
 session-format = { path = "crates/daw/session-format" }
@@ -162,6 +165,8 @@ clack-extensions = { git = "https://github.com/prokopyl/clack", rev = "f874e858a
     "thread-check",
     "tail",
 ] }
+# The CLAP ABI, for daw-clap-ext (the version clack and nice-plug use).
+clap-sys = "0.5"
 clack-host = { git = "https://github.com/prokopyl/clack", rev = "f874e858ad576c601367b3038af5088a4e671744" }
 crdt = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.12.6" }
 criterion = "0.5"

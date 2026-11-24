@@ -71,6 +71,24 @@ pub struct PluginMidiEvent {
 /// `NoteExpressionValueEvent` through a single host-side type — the
 /// renderer emits these alongside MIDI; backends translate to the
 /// format-native event.
+/// A parameter event at a frame of the block: what
+/// [`PluginInstance::process_block_param_events`] takes. Sample-accurate,
+/// and with modulation as well as values.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PluginParamEvent {
+    pub offset: u32,
+    pub param_id: u32,
+    pub kind: PluginParamEventKind,
+}
+
+/// A value, or a modulation offset that keeps the parameter's own value
+/// (`CLAP_EVENT_PARAM_MOD`). Both in the plugin's parameter domain.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PluginParamEventKind {
+    Value(f64),
+    Mod(f64),
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct PluginNoteExpression {
     pub offset: u32,
@@ -213,6 +231,44 @@ pub trait PluginInstance: Send {
         out_r: &mut [f32],
         events: &PluginEvents<'_>,
     ) -> Result<(), PluginError>;
+
+    /// [`process_block`](Self::process_block) with sample-accurate
+    /// parameter events: values and modulation offsets, each at its frame
+    /// (`params` and `midi` each sorted by offset). Signal's CLAP backend
+    /// drives a block's CLAP form with it (signal#26).
+    ///
+    /// The default takes values at frame 0 only, and refuses the rest: a
+    /// backend that can't place an event or modulate says so rather than
+    /// playing it at the wrong frame.
+    fn process_block_param_events(
+        &mut self,
+        in_l: &[f32],
+        in_r: &[f32],
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        params: &[PluginParamEvent],
+        midi: &[PluginMidiEvent],
+    ) -> Result<(), PluginError> {
+        let mut values = Vec::with_capacity(params.len());
+        for p in params {
+            match p.kind {
+                PluginParamEventKind::Value(v) if p.offset == 0 => values.push((p.param_id, v)),
+                _ => return Err(PluginError::UnsupportedFormat(self.descriptor().format)),
+            }
+        }
+        let events = PluginEvents {
+            params: &values,
+            midi,
+            note_expressions: &[],
+        };
+        self.process_block(in_l, in_r, out_l, out_r, &events)
+    }
+
+    /// The plugin's `com.fasttrackstudio.signal/1`, if it has it.
+    #[cfg(feature = "clap-host")]
+    fn signal(&self) -> Option<daw_clap_ext::host::SignalPluginClient> {
+        None
+    }
 
     /// The sidechain for the next [`process_block`](Self::process_block)
     /// only: what the track received on channels 3/4 this block (a
@@ -366,19 +422,42 @@ mod thread_serialized {
 /// `Synthetic` returns `Ok(None)` — caller falls back to the
 /// existing synthetic FX path (see `crate::fx`).
 pub fn load_plugin(name_or_path: &str) -> Result<Option<Box<dyn PluginInstance>>, PluginError> {
+    load_plugin_with(name_or_path, &LoadOptions::default())
+}
+
+/// What [`load_plugin_with`] offers the plugin.
+#[derive(Clone, Default)]
+pub struct LoadOptions {
+    /// The host's actions, offered to a CLAP as
+    /// `com.fasttrackstudio.host-actions/1` (signal#26).
+    #[cfg(feature = "clap-host")]
+    pub actions: Option<std::sync::Arc<dyn daw_clap_ext::host::HostActions>>,
+}
+
+/// [`load_plugin`], offering the plugin what `options` holds.
+pub fn load_plugin_with(
+    name_or_path: &str,
+    options: &LoadOptions,
+) -> Result<Option<Box<dyn PluginInstance>>, PluginError> {
     let format = PluginFormat::from_path_or_name(name_or_path);
     match format {
         PluginFormat::Synthetic => Ok(None),
-        PluginFormat::Clap => load_clap(name_or_path),
+        PluginFormat::Clap => load_clap(name_or_path, options),
         PluginFormat::Vst3 => load_vst3(name_or_path),
         PluginFormat::Lv2 => Err(PluginError::UnsupportedFormat(format)),
     }
 }
 
 #[cfg(feature = "clap-host")]
-fn load_clap(path: &str) -> Result<Option<Box<dyn PluginInstance>>, PluginError> {
+fn load_clap(
+    path: &str,
+    options: &LoadOptions,
+) -> Result<Option<Box<dyn PluginInstance>>, PluginError> {
     use crate::audio_engine::plugin_host::ClapHost;
-    let host = ClapHost::default();
+    let mut host = ClapHost::default();
+    if let Some(actions) = &options.actions {
+        host = host.with_actions(actions.clone());
+    }
     let plugin = host
         .load(Path::new(path), 0)
         .map_err(|e| PluginError::LoadFailed(format!("{e:?}")))?;
@@ -389,7 +468,10 @@ fn load_clap(path: &str) -> Result<Option<Box<dyn PluginInstance>>, PluginError>
 }
 
 #[cfg(not(feature = "clap-host"))]
-fn load_clap(_path: &str) -> Result<Option<Box<dyn PluginInstance>>, PluginError> {
+fn load_clap(
+    _path: &str,
+    _options: &LoadOptions,
+) -> Result<Option<Box<dyn PluginInstance>>, PluginError> {
     Err(PluginError::UnsupportedFormat(PluginFormat::Clap))
 }
 

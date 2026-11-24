@@ -60,6 +60,9 @@ ureq = { workspace = true, optional = true }
 
 # CLAP plugin hosting (Rust-native; supports macOS / Linux / Windows
 # .clap bundles and dylibs). Behind `clap-host` feature.
+# FastTrackStudio's CLAP extensions (host-actions/1, signal/1; signal#26).
+daw-clap-ext = { workspace = true, optional = true }
+clap-sys = { workspace = true, optional = true }
 clack-host = { workspace = true, optional = true }
 clack-extensions = { workspace = true, optional = true }
 # rwh 0.6 for bridging host windows into embedded CLAP GUIs — the same
@@ -170,7 +173,7 @@ http-resolver = ["dep:ureq"]
 # Host CLAP plugins (load .clap bundles, inspect params, process audio).
 # Native-only (clack-host dynamically loads native dylibs). A hosted
 # plugin only runs inside the audio engine, so this pulls `audio`.
-clap-host = ["audio", "dep:clack-host", "dep:clack-extensions", "dep:raw-window-handle-06"]
+clap-host = ["audio", "dep:clack-host", "dep:clack-extensions", "dep:raw-window-handle-06", "dep:daw-clap-ext", "dep:clap-sys"]
 # Host VST3 plugins (load .vst3 bundles, inspect descriptor, process audio).
 # Native-only (libloading + native dylibs). Pulls `audio` for the same
 # reason as clap-host — on its own it did not compile.
