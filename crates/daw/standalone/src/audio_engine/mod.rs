@@ -30,6 +30,12 @@
 /// The render ahead: the dual-buffer engine (ASIO-Guard, anticipative FX).
 #[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
 pub mod ahead;
+/// The declick around a jump of the playhead (a locate while playing).
+#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
+mod declick;
+/// Delay compensation and locates, end to end through the callback's render.
+#[cfg(all(test, feature = "audio", not(target_arch = "wasm32")))]
+mod locate_pdc_tests;
 /// Post-render aux hook (guide/click overlays) for project-mode engines.
 #[cfg(feature = "audio")]
 pub mod aux_render;

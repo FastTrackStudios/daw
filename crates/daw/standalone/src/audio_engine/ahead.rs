@@ -832,6 +832,8 @@ pub struct DualRender {
     _ahead: Option<Ahead>,
     /// The block rendered, its buffer kept from block to block.
     out: StereoBuffer,
+    /// The fades around a jump of the playhead ([`super::declick`]).
+    declick: super::declick::Declick,
 }
 
 impl DualRender {
@@ -845,6 +847,7 @@ impl DualRender {
             player: None,
             _ahead: None,
             out: StereoBuffer::zeroed(0, 0),
+            declick: super::declick::Declick::default(),
         }
     }
 
@@ -859,7 +862,11 @@ impl DualRender {
         stats: Arc<EngineStats>,
     ) -> Self {
         let Some(prefs) = prefs else {
-            return Self::whole(live);
+            // The transport kept, for the loop a declick knows of.
+            return Self {
+                shared: Some(shared),
+                ..Self::whole(live)
+            };
         };
         let sample_rate = shared.sample_rate();
         let mut ahead = ProjectRenderer::new(live.daw(), live.project_guid(), sample_rate);
@@ -916,6 +923,7 @@ impl DualRender {
             )),
             _ahead: Some(Ahead { control, thread }),
             out: StereoBuffer::zeroed(0, sample_rate),
+            declick: super::declick::Declick::default(),
         }
     }
 
@@ -930,6 +938,7 @@ impl DualRender {
         if let Some(player) = self.player.as_mut() {
             player.pause();
         }
+        self.declick.rest();
     }
 
     /// The renderer the callback renders the live tracks with.
@@ -943,11 +952,23 @@ impl DualRender {
     /// whole song otherwise (see `ProjectRenderer::render_plan` for
     /// `render_stopped`). The buffer is the dual render's own, kept from
     /// block to block.
+    ///
+    /// A jump of the playhead while playing is declicked where it is heard,
+    /// and play after a stop does not hear what the delays held when it
+    /// stopped ([`super::declick`]).
     pub fn render(&mut self, plan: &BlockPlan, render_stopped: bool) -> &StereoBuffer {
-        self.render_block(plan, render_stopped);
+        let wrap = self
+            .shared
+            .as_deref()
+            .and_then(wrap_of)
+            .map(|w| (w.start, w.end));
+        let latency = self.live.latency() as usize;
+        let plan = self.declick.plan(plan, latency, wrap);
+        self.render_block(&plan, render_stopped);
+        let heard = (self.out.frames * 2).min(self.out.samples.len());
+        self.declick.apply(&mut self.out.samples[..heard]);
         // The first audible block after play is when play was heard.
         let rolling = plan.segments().iter().any(|s| s.playing);
-        let heard = (self.out.frames * 2).min(self.out.samples.len());
         super::first_audio::observe(&self.out.samples[..heard], rolling);
         &self.out
     }
