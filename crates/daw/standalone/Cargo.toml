@@ -19,7 +19,8 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 midi = { workspace = true, optional = true }
 daw-proto = { workspace = true }
 # A stretched take rendered at its own pitch (render/stretch_render).
-dsp = { workspace = true, features = ["stretch"] }
+# The stretch render's map (FastTrackStudios/stretch).
+stretch-pv = { workspace = true }
 # `platform` = the portable async-runtime seam (`architect::platform::{spawn,
 # sleep, JoinHandle}` — tokio on native, browser timers/`spawn_local` on wasm),
 # replacing the retired moire.

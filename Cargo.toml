@@ -34,7 +34,6 @@ members = [
     "crates/daw/session-format",
     "crates/daw/standalone",
     "features/adapters/reaper/dawfile-reaper",
-    "features/dsp/builtin",
     "features/plugin-host",
     "features/sync",
 ]
@@ -66,7 +65,6 @@ fts-sample = { path = "features/audio/sample", default-features = false }
 midi = { path = "features/midi" }
 utils = { path = "crates/daw/utils" }
 # The engine.
-builtin = { path = "features/dsp/builtin" }
 daw = { path = "crates/daw/daw" }
 daw-standalone = { path = "crates/daw/standalone" }
 # FastTrackStudio's CLAP extensions (host-actions/1, signal/1; signal#26).
@@ -76,26 +74,12 @@ dawfile-reaper = { path = "features/adapters/reaper/dawfile-reaper" }
 session-format = { path = "crates/daw/session-format" }
 signal-plugin-host = { path = "features/plugin-host", default-features = false }
 
-# ── FastTrackStudios/fts-fx: the effects, every crate at one rev ──────
-# The engine depends on the effects (dsp's stretch render; builtin wraps the
-# effect plugins as engine blocks); fts-fx depends on nothing here. Move
-# this rev with Studio's.
-dsp = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012" }
-dsp-core = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012" }
-comp-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
-delay-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
-eq-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
-gate-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
-level-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
-limiter-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
-meter-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
-mic-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
-modulation-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
-pitch-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
-reverb-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
-saturate-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
-tune-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
-unison-plugin = { git = "https://github.com/FastTrackStudios/fts-fx", rev = "5bae622f5d874ce58ab04916ab29a8100e883012", default-features = false }
+# ── The DSP daw itself uses (daw has no effects: Studio loads them through Signal) ──
+# daw-view's leveling envelope from FastTrackStudios/dsp; the stretch
+# render's map from FastTrackStudios/stretch (`stretch-pv`).
+dsp = { git = "https://github.com/FastTrackStudios/dsp", rev = "75d475b01e96eed4a5ddad8ad6799396f220dd82" }
+dsp-core = { git = "https://github.com/FastTrackStudios/dsp", rev = "75d475b01e96eed4a5ddad8ad6799396f220dd82" }
+stretch-pv = { git = "https://github.com/FastTrackStudios/stretch", rev = "0ac3f269e53daa8cdde3ba30e3055d15c393bfaf" }
 
 # ── External, exactly as Studio declares them ─────────────────────────
 # architect: one tag for the whole framework, the tag Studio pins.
@@ -191,8 +175,6 @@ facet-postcard = { version = "0.50.0-rc.5" }
 gloo-timers = { version = "0.3", features = ["futures"] }
 libloading = "0.8"
 loro = { version = "1.12", default-features = false }
-# nice-plug: fts-baseview-03 is a branch pin, as in Studio and fts-fx.
-nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
 nom = "8"
 num-traits = "0.2"
 pollster = "0.4.0"
@@ -405,9 +387,6 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.daw-standalone]
 opt-level = 3
-[profile.dev.package.builtin]
-opt-level = 3
-# The effects (fts-fx), run by the engine.
 [profile.dev.package.dsp-core]
 opt-level = 3
 [profile.dev.package.dsp]

@@ -280,16 +280,31 @@ impl Lane {
     }
 }
 
-/// `value` of an envelope of `kind` said in its own terms; a built-in
-/// plugin's parameter (`(fx, index)`) as the plugin writes it.
+/// How an in-process effect's parameter reads at a value: `(fx name,
+/// parameter index, normalized value)` → the plugin's own text, or `None`
+/// for an effect it doesn't know. daw has no effects of its own; the app
+/// installs its effects' reader ([`install_param_reading`]).
+pub type ParamReading = fn(&str, u32, f64) -> Option<String>;
+
+static PARAM_READING: std::sync::OnceLock<ParamReading> = std::sync::OnceLock::new();
+
+/// Install how the app's in-process effects say a parameter's value (for
+/// Studio, Signal's effects). Once per process; a second install keeps the
+/// first.
+pub fn install_param_reading(reading: ParamReading) {
+    let _ = PARAM_READING.set(reading);
+}
+
+/// `value` of an envelope of `kind` said in its own terms; an in-process
+/// effect's parameter (`(fx, index)`) as the effect writes it, when the app
+/// installed a reader.
 #[must_use]
 pub fn say(kind: Kind, param: Option<(&str, u32)>, value: f64) -> String {
-    #[cfg(feature = "local")]
-    if let Some(text) = param.and_then(|(fx, index)| builtin::engine::reading(fx, index, value)) {
+    if let (Some((fx, index)), Some(reading)) = (param, PARAM_READING.get())
+        && let Some(text) = reading(fx, index, value)
+    {
         return text;
     }
-    #[cfg(not(feature = "local"))]
-    let _ = param;
     kind.text(value)
 }
 

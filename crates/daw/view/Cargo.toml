@@ -33,7 +33,6 @@ tokio = { workspace = true, optional = true }
 futures-util = { workspace = true, optional = true }
 # A plugin's parameter as its engine block reads it (an automation lane's
 # value labels), with the engine in this process.
-builtin = { workspace = true, optional = true, features = ["engine"] }
 # A streamed take's peaks, read from its proxy's `.reapeaks`, with the
 # engine in this process.
 daw-standalone = { workspace = true, optional = true }
@@ -57,7 +56,7 @@ web = ["vox", "dep:web-sys", "dep:wasm-bindgen-futures", "dep:gloo-timers", "dep
 # The engine in this process: what a window that owns its engine reads
 # from it directly (waveforms, MIDI previews, grouping). A view never asks
 # for it; the app that runs the engine does.
-local = ["native", "standalone", "daw/standalone-rpp", "dep:builtin"]
+local = ["native", "standalone", "daw/standalone-rpp"]
 # The engine's types, for an app whose engine runs in the same process or
 # page (whether a streamed take's peaks have all arrived).
 standalone = ["daw/standalone-decode", "dep:daw-standalone", "daw-standalone/reapeaks"]
