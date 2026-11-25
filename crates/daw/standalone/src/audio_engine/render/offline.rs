@@ -11,7 +11,9 @@
 //! song. Every track's signal can be tapped ([`Tap`]) after each block
 //! ([`ProjectRenderer::with_taps`]), each late by its own latency
 //! ([`ProjectRenderer::track_latencies`]); what reaches master is late by
-//! [`ProjectRenderer::latency`].
+//! [`ProjectRenderer::latency`]. It renders the song as it was when it
+//! began (its first snapshot holds for all of it): an edit made while it
+//! runs is the next render's, never half of this one's.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

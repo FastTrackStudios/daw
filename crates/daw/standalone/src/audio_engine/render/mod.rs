@@ -2649,6 +2649,16 @@ impl ProjectRenderer {
     /// project's mutation revision moves. (A realtime renderer takes its
     /// snapshots from [`SnapshotBuilder`] instead.)
     fn snapshot(&self) -> Option<Arc<RenderSnapshot>> {
+        // An offline render renders the song as it was when it began: its
+        // first snapshot holds for all of it, whatever is edited while it
+        // runs (an edit made then is the next render's). Its plugin
+        // copies were made from that song too.
+        if self.offline.is_some()
+            && let Ok(cache) = self.cache.lock()
+            && let Some((_, snap)) = cache.as_ref()
+        {
+            return Some(snap.clone());
+        }
         let revision = self.daw.read_project(&self.project_guid, |p| p.revision)?;
         if let Ok(cache) = self.cache.lock()
             && let Some((cached_rev, snap)) = cache.as_ref()
@@ -3269,6 +3279,44 @@ pub(crate) mod folder_routing_tests {
         );
         assert!(other < 1e-9, "a track not rendered is silent: {read:?}");
         assert!(rms(&master.samples) > 0.0);
+    }
+
+    // An offline render is of the song as it was when it began: an edit
+    // made while it renders (a fader, a mute) is not heard in it, block
+    // for block the same as a render nobody touched — while the song's
+    // own renderer hears the edit at once.
+    #[test]
+    fn an_offline_render_keeps_the_song_it_began_with() {
+        use offline::Offline;
+        let (daw, guid) = seeded();
+        let ctx = ProjectContext::Project(guid.clone());
+        let kick = guid_of(&daw, &guid, "Kick");
+        let lead = guid_of(&daw, &guid, "Lead");
+        let blocks = |edit: bool| {
+            let renderer = ProjectRenderer::offline(&daw, &guid, 48_000, Offline::default());
+            let mut out = Vec::new();
+            for b in 0..4u64 {
+                if edit && b == 2 {
+                    Tracks::set_volume(&daw, ctx.clone(), TrackRef::Guid(kick.clone()), 0.1)
+                        .unwrap();
+                    Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(lead.clone()), true)
+                        .unwrap();
+                }
+                out.extend(renderer.render_block(b * 512, 512).samples);
+            }
+            out
+        };
+        let untouched = blocks(false);
+        let edited_during = blocks(true);
+        assert!(rms(&untouched) > 0.01);
+        assert_eq!(edited_during, untouched, "the edit was heard mid-render");
+        // The edit stands: the song's own renderer, and the next offline
+        // render, hear it.
+        let live = ProjectRenderer::new(&daw, &guid, 48_000).render_block(0, 512);
+        let next =
+            ProjectRenderer::offline(&daw, &guid, 48_000, Offline::default()).render_block(0, 512);
+        assert_eq!(live.samples, next.samples);
+        assert_ne!(next.samples[..], untouched[..1_024]);
     }
 
     // A live tap: while the song plays (not an offline render), a point of
