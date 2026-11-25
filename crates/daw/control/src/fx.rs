@@ -508,13 +508,13 @@ impl FxHandle {
         &self.fx_guid
     }
 
-    /// Helper to create project context
-    fn project_context(&self) -> ProjectContext {
+    /// The project this FX is in, as the engine's services take it.
+    pub fn project_context(&self) -> ProjectContext {
         ProjectContext::Project(self.project_id.clone())
     }
 
-    /// Helper to create FX target
-    fn target(&self) -> FxTarget {
+    /// This FX as the engine's services address it: its chain and guid.
+    pub fn target(&self) -> FxTarget {
         FxTarget::new(self.context.clone(), FxRef::Guid(self.fx_guid.clone()))
     }
 

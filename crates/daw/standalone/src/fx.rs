@@ -220,6 +220,132 @@ fn load_live_state(
     )
 }
 
+impl Standalone {
+    /// [`Effects::set_state_chunk`] for many FX at once, on
+    /// `FTS_STATE_LOAD_THREADS` threads (one unless it says more), then
+    /// each hosted plugin
+    /// activated there at the project's rate for the largest block
+    /// ([`PREPARE_FRAMES`](crate::plugin::PREPARE_FRAMES)) —
+    /// so the first block played activates nothing. Each FX is its own
+    /// instance behind its own lock, so the engine makes no load wait on
+    /// another's. The answers come back in `loads`' order; the
+    /// `fx.load_states` span sums each load's and activation's time.
+    pub fn set_state_chunks(
+        &self,
+        project: &ProjectContext,
+        loads: Vec<(FxTarget, Vec<u8>)>,
+    ) -> Vec<DawResult<()>> {
+        use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+        let span = tracing::info_span!(
+            "fx.load_states",
+            fx.count = loads.len(),
+            fx.threads = tracing::field::Empty,
+            fx.failed = tracing::field::Empty,
+            fx.load_ms = tracing::field::Empty,
+            fx.slowest_load_ms = tracing::field::Empty,
+            fx.prepare_ms = tracing::field::Empty,
+            fx.slowest_prepare_ms = tracing::field::Empty,
+        );
+        // Each load's and each activation's own time, summed and the
+        // slowest: what the plugins cost, beside the wall time it took.
+        let (load_us, slowest_load_us) = (AtomicU64::new(0), AtomicU64::new(0));
+        let (prepare_us, slowest_prepare_us) = (AtomicU64::new(0), AtomicU64::new(0));
+        let timed = |sum: &AtomicU64, slowest: &AtomicU64, began: std::time::Instant| {
+            let us = u64::try_from(began.elapsed().as_micros()).unwrap_or(u64::MAX);
+            sum.fetch_add(us, Ordering::Relaxed);
+            slowest.fetch_max(us, Ordering::Relaxed);
+        };
+        let _in = span.enter();
+        // One at a time unless `FTS_STATE_LOAD_THREADS` says more: Signal's
+        // sampler loads (most of the time) wait on each other inside the
+        // plugin, so side by side they took longer (13.1 s against 12.3 s
+        // for Unbreakable's 246, with 6 threads or 32).
+        let threads = std::env::var("FTS_STATE_LOAD_THREADS")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(1)
+            .min(loads.len())
+            .max(1);
+        span.record("fx.threads", threads);
+        let rate = resolve_project(self, project)
+            .map(|guid| f64::from(self.transport_engine_for(&guid).shared.sample_rate()));
+        let next = AtomicUsize::new(0);
+        let answers: Vec<std::sync::Mutex<Option<DawResult<()>>>> =
+            loads.iter().map(|_| std::sync::Mutex::new(None)).collect();
+        let parent = tracing::Span::current();
+        std::thread::scope(|scope| {
+            for _ in 0..threads {
+                scope.spawn(|| {
+                    let _in = parent.enter();
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some((target, chunk)) = loads.get(i) else {
+                            break;
+                        };
+                        let began = std::time::Instant::now();
+                        let loaded = self.set_state_chunk(project.clone(), target.clone(), chunk.clone());
+                        timed(&load_us, &slowest_load_us, began);
+                        if loaded.is_ok()
+                            && let Some(rate) = rate
+                        {
+                            let began = std::time::Instant::now();
+                            self.prepare_ahead(project, target, rate);
+                            timed(&prepare_us, &slowest_prepare_us, began);
+                        }
+                        if let Ok(mut slot) = answers[i].lock() {
+                            *slot = Some(loaded);
+                        }
+                    }
+                });
+            }
+        });
+        let answers: Vec<DawResult<()>> = answers
+            .into_iter()
+            .map(|a| {
+                a.into_inner()
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| Err(DawError::operation_failed("state load did not run")))
+            })
+            .collect();
+        span.record("fx.failed", answers.iter().filter(|a| a.is_err()).count());
+        let ms = |us: &AtomicU64| us.load(Ordering::Relaxed) as f64 / 1e3;
+        span.record("fx.load_ms", ms(&load_us));
+        span.record("fx.slowest_load_ms", ms(&slowest_load_us));
+        span.record("fx.prepare_ms", ms(&prepare_us));
+        span.record("fx.slowest_prepare_ms", ms(&slowest_prepare_us));
+        answers
+    }
+
+    /// Activate the plugin behind `target` at `rate` for the largest block,
+    /// off the audio thread, unless it already is. A failure is left to
+    /// the first block, which tries again and bypasses it.
+    fn prepare_ahead(&self, project: &ProjectContext, target: &FxTarget, rate: f64) {
+        let Some(guid) = resolve_project(self, project) else {
+            return;
+        };
+        let key: FxChainKey = (&target.context).into();
+        let Some(fx_guid) = self
+            .with_project(&guid, |p| {
+                let chain = p.fx_chains.get(&key)?;
+                let i = find_fx_index(chain, &target.fx)?;
+                Some(chain[i].fx.guid.clone())
+            })
+            .ok()
+            .flatten()
+        else {
+            return;
+        };
+        self.plugin_instances.with(&fx_guid, |p| {
+            if !p.is_prepared() {
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    p.prepare(rate, crate::plugin::PREPARE_FRAMES)
+                }));
+            }
+        });
+    }
+}
+
 impl Effects for Standalone {
     fn list_installed(&self) -> Vec<InstalledFx> {
         let mut list = built_in_installed();
