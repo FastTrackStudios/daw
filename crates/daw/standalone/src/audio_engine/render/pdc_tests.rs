@@ -87,9 +87,14 @@ impl crate::plugin::FxFactory for Lates {
         Vec::new()
     }
     fn provides(&self, name: &str) -> bool {
-        name == "Late"
+        name == "Late" || name == "Clock"
     }
     fn create(&self, name: &str, _: f64) -> Option<Box<dyn crate::plugin::PluginInstance>> {
+        if name == "Clock" {
+            return Some(Box::new(Clock {
+                id: CLOCKS.fetch_add(1, Ordering::Relaxed),
+            }));
+        }
         self.provides(name).then(|| {
             Box::new(Late {
                 line: vec![[0.0; 2]; LATE],
@@ -458,4 +463,177 @@ fn a_live_tap_before_a_chain_hears_it_unprocessed_in_a_realtime_render() {
         LATE,
         "the FX's output is its input {LATE} late: {pa} {pb} {first_heard:?}"
     );
+}
+
+/// Clocks made so far: each one's id.
+static CLOCKS: AtomicU32 = AtomicU32::new(0);
+/// What each clock was told, `(id, transport seconds)`, block by block.
+static TOLD: std::sync::Mutex<Vec<(u32, f64)>> = std::sync::Mutex::new(Vec::new());
+
+/// A plugin that passes its input through and notes the transport it is
+/// told each block.
+struct Clock {
+    id: u32,
+}
+
+impl crate::plugin::PluginInstance for Clock {
+    fn descriptor(&self) -> crate::plugin::PluginDescriptor {
+        crate::plugin::PluginDescriptor::default()
+    }
+    fn params(&mut self) -> Vec<crate::plugin::PluginParamInfo> {
+        Vec::new()
+    }
+    fn param_value(&mut self, _: u32) -> Option<f64> {
+        None
+    }
+    fn value_to_text(&mut self, _: u32, _: f64) -> Option<String> {
+        None
+    }
+    fn text_to_value(&mut self, _: u32, _: &str) -> Option<f64> {
+        None
+    }
+    fn latency(&mut self) -> u32 {
+        0
+    }
+    fn prepare(&mut self, _: f64, _: u32) -> Result<(), crate::plugin::PluginError> {
+        Ok(())
+    }
+    fn is_prepared(&self) -> bool {
+        true
+    }
+    fn process_block(
+        &mut self,
+        in_l: &[f32],
+        in_r: &[f32],
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        _: &crate::plugin::PluginEvents<'_>,
+    ) -> Result<(), crate::plugin::PluginError> {
+        if let Some(t) = crate::plugin::render_transport() {
+            TOLD.lock().unwrap().push((self.id, t.seconds));
+        }
+        out_l.copy_from_slice(in_l);
+        out_r.copy_from_slice(in_r);
+        Ok(())
+    }
+    fn deactivate(&mut self) {}
+}
+
+// A plugin is told the song time of the audio it is handed: on a folder
+// whose input delay compensation holds back behind a latent child, the
+// block's start less that latency; after a latent FX on its own track,
+// less that FX's; on a track nothing holds back, the block's start. A
+// plugin keyed to another track's events by song time (Signal's ports by
+// their hits) then lines them up with its audio however the song's
+// latencies fall.
+#[test]
+fn a_plugin_is_told_the_song_time_of_the_audio_it_is_handed() {
+    let (daw, guid) = clicks();
+    let ctx = ProjectContext::Project(guid.clone());
+    let add = |track: &str, name: &str| {
+        Effects::add(
+            &daw,
+            ctx.clone(),
+            FxChainContext::Track(guid_of(&daw, &guid, track)),
+            name,
+        )
+        .expect("the plugin")
+    };
+    let first = CLOCKS.load(Ordering::Relaxed);
+    late_on(&daw, &guid, "Kick");
+    add("Drums", "Clock"); // first: behind Kick's Late
+    add("Snare", "Clock"); // second: nothing before it
+    add("Kick", "Clock"); // third: after Kick's own Late
+    TOLD.lock().unwrap().clear();
+    let renderer = ProjectRenderer::new(&daw, &guid, 48_000);
+    renderer.prime(128);
+    let block = 10 * 128_u64;
+    renderer.render_block(block, 128);
+    let told = TOLD.lock().unwrap().clone();
+    let at = |id: u32| told.iter().find(|(i, _)| *i == first + id).map(|(_, s)| *s);
+    let start = block as f64 / 48_000.0;
+    let late = LATE as f64 / 48_000.0;
+    assert_eq!(at(1), Some(start), "{told:?}");
+    let (drums, kick) = (at(0).unwrap(), at(2).unwrap());
+    assert!(
+        (drums - (start - late)).abs() < 1e-9,
+        "{drums} vs {}",
+        start - late
+    );
+    assert!(
+        (kick - (start - late)).abs() < 1e-9,
+        "{kick} vs {}",
+        start - late
+    );
+}
+
+// Tracks played back from a full render's recordings, a latent one feeding
+// another (Kick, 64 late, into Drums), sound as the full render did: a
+// replayed track is as late as its recording, not its recording's latency
+// on top of what feeds it.
+#[test]
+fn replayed_tracks_keep_the_delay_compensation_of_the_render_they_came_from() {
+    use super::offline::{Fed, Offline, Probe, ProbeAt};
+    let (daw, guid) = clicks();
+    late_on(&daw, &guid, "Kick");
+    // The Bus heard too: master lines Drums up against it.
+    let ctx = ProjectContext::Project(guid.clone());
+    Tracks::set_muted(
+        &daw,
+        ctx,
+        TrackRef::Guid(guid_of(&daw, &guid, "Bus")),
+        false,
+    )
+    .unwrap();
+    let (kick, drums) = (guid_of(&daw, &guid, "Kick"), guid_of(&daw, &guid, "Drums"));
+    let at = |track: &str| ProbeAt {
+        track: track.to_owned(),
+        at: Probe::PostFader,
+    };
+    let render = |fed: std::collections::HashMap<String, Fed>| {
+        let (plugins, _) = copy_plugins(&daw, &guid, Copying::default());
+        let renderer = ProjectRenderer::offline(
+            &daw,
+            &guid,
+            48_000,
+            Offline {
+                plugins,
+                probes: vec![at(&kick), at(&drums)],
+                fed,
+                ..Offline::default()
+            },
+        );
+        renderer.prime(128);
+        let latencies = renderer.probe_latencies();
+        let (mut master, mut probes) = (Vec::new(), vec![Vec::new(), Vec::new()]);
+        for b in 0..24u64 {
+            master.extend(renderer.render_block(b * 128, 128).samples);
+            renderer.with_probes(|p| {
+                for (o, s) in probes.iter_mut().zip(p) {
+                    o.extend_from_slice(s);
+                }
+            });
+        }
+        (master, probes, latencies)
+    };
+    let (full, probes, latencies) = render(std::collections::HashMap::new());
+    assert_eq!(latencies, vec![LATE as u32, LATE as u32]);
+    let fed = [kick.clone(), drums.clone()]
+        .into_iter()
+        .zip(probes)
+        .zip(&latencies)
+        .map(|((g, samples), late)| {
+            (
+                g,
+                Fed {
+                    start: 0,
+                    samples: samples.into(),
+                    latency: *late,
+                },
+            )
+        })
+        .collect();
+    let (again, _, _) = render(fed);
+    assert!(full.iter().any(|s| s.abs() > 0.1));
+    assert_eq!(full, again, "replayed, the song is not what it was");
 }

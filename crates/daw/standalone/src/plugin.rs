@@ -648,10 +648,13 @@ pub fn render_cycle() -> Option<u64> {
         .map(|(cycle, _)| cycle)
 }
 
-/// The song's clock at the start of the block being processed — what a
-/// hosted plugin's transport says (a CLAP's `clap_event_transport`): the
-/// same for every plugin of the block. `Some` only while the project
-/// renderer is calling plugins.
+/// The song's clock at the start of the block a plugin is processing —
+/// what a hosted plugin's transport says (a CLAP's
+/// `clap_event_transport`): the song time of the audio it is handed, so a
+/// plugin on a track delay compensation holds back (its input late behind
+/// its feeders' latency, or behind the FX before it) is told where that
+/// audio is in the song, as every other plugin is of its own. `Some` only
+/// while the project renderer is calling plugins.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RenderTransport {
     /// The block's start on the timeline, seconds.
@@ -704,6 +707,13 @@ impl Drop for StoppedRender {
     fn drop(&mut self) {
         STOPPED.with(|c| c.set(self.0));
     }
+}
+
+/// Tell the plugins called next on this thread `transport`: the render
+/// loop's, before each plugin, its clock held back by how late its audio
+/// is.
+pub(crate) fn set_render_transport(transport: RenderTransport) {
+    RENDER_TRANSPORT.with(|c| c.set(Some(transport)));
 }
 
 /// The song's clock for the block being processed ([`RenderTransport`]).

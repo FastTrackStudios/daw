@@ -262,6 +262,9 @@ pub(super) struct LaneJob {
     pub(super) ti: usize,
     /// `(chain index, plugin)` of every plugin that runs, in chain order.
     pub(super) chain: Vec<(usize, PluginPtr)>,
+    /// Each of `chain`'s clocks: the song time of the audio it is handed
+    /// (the track's input lateness and the FX before it held back).
+    pub(super) transports: Vec<crate::plugin::RenderTransport>,
     /// The track's bus (interleaved stereo), as an address.
     pub(super) bus: usize,
     /// The track's aux buffer ([`super::AUX_PAIRS`] pairs), as an
@@ -309,7 +312,10 @@ impl LaneJob {
         let _muted = crate::plugin::TrackMutedGuard::enter(t.muted);
         // SAFETY: the caller's contract.
         let bus = unsafe { std::slice::from_raw_parts_mut(self.bus as *mut f32, frames * 2) };
-        for (i, PluginPtr(cell)) in &self.chain {
+        for (k, (i, PluginPtr(cell))) in self.chain.iter().enumerate() {
+            if let Some(transport) = self.transports.get(k) {
+                crate::plugin::set_render_transport(*transport);
+            }
             // SAFETY: the caller's contract.
             let cell = unsafe { &**cell };
             let Some(mut plugin) = cell.try_lock_spinning(super::PLUGIN_LOCK_SPINS) else {

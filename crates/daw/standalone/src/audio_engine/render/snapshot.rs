@@ -259,6 +259,11 @@ pub(crate) struct TrackSnapshot {
     /// A send takes one of its plugins' aux outputs (3/4, 5/6), so the
     /// renderer collects them.
     pub(crate) aux_taps: bool,
+    /// An offline render plays an earlier render's output in its place
+    /// ([`super::offline::Fed`]): what feeds it is not heard, so delay
+    /// compensation counts its output as late as that render had it, not
+    /// as late as its feeders now are.
+    pub(crate) replayed: bool,
     /// Volume envelope points, sorted by time. Multiplies the
     /// static `volume` field when present.
     pub(crate) volume_env: Option<Vec<EnvelopePoint>>,
@@ -940,6 +945,7 @@ fn snapshot_track(
 
     let aux_taps = sends.iter().any(|s| s.from_pair > 0);
     TrackSnapshot {
+        replayed: false,
         midi_claimed: false,
         guid: t.guid.clone(),
         name: t.name.clone(),

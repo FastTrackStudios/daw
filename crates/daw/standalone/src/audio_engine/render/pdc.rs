@@ -103,7 +103,13 @@ pub(crate) fn plan(
     // When each sum's inputs arrive: the latest of them.
     for &ti in order {
         let t = &tracks[ti];
-        let output = out.input[ti].saturating_add(latency(ti));
+        // A track played back from a recording is as late as the recording
+        // was: what feeds it isn't heard (`TrackSnapshot::replayed`).
+        let output = if t.replayed {
+            latency(ti)
+        } else {
+            out.input[ti].saturating_add(latency(ti))
+        };
         out.output[ti] = output;
         match t.parent_idx.filter(|_| t.parent_send) {
             Some(p) => out.input[p] = out.input[p].max(output),

@@ -1302,11 +1302,26 @@ impl ProjectRenderer {
         let n = tracks.len();
         let start_seconds = start_samples / self.sample_rate as f64;
         let end_seconds = start_seconds + (frames as f64 * rate / self.sample_rate as f64);
-        // Every plugin of this block is told the same clock.
-        _frame.set_transport(crate::plugin::RenderTransport {
-            playing: !crate::plugin::rendering_stopped(),
+        // The block's clock; each plugin is told it held back by how late
+        // its own audio is (`transport_late`).
+        let playing = !crate::plugin::rendering_stopped();
+        let block_transport = crate::plugin::RenderTransport {
+            playing,
             ..snap.transport_at(start_seconds)
-        });
+        };
+        _frame.set_transport(block_transport);
+        // The clock of audio `late` samples behind the block: what a plugin
+        // on a track delay compensation holds back is processing.
+        let transport_late = |late: u32| {
+            if late == 0 {
+                return block_transport;
+            }
+            crate::plugin::RenderTransport {
+                playing,
+                ..snap
+                    .transport_at(start_seconds - f64::from(late) * rate / self.sample_rate as f64)
+            }
+        };
         // Output frames per timeline second (MIDI event offsets).
         let frames_per_second = self.sample_rate as f64 / rate;
         // Where FX automation is read: the same clock for every plugin, and
@@ -1803,6 +1818,7 @@ impl ProjectRenderer {
                     }
                     let job = &mut lane_jobs[jobs];
                     job.chain.clear();
+                    job.transports.clear();
                     job.latency = 0;
                     let mut ok = true;
                     for (i, fx_guid) in t.fx_chain.iter().enumerate() {
@@ -1825,12 +1841,17 @@ impl ProjectRenderer {
                             break;
                         }
                         plugin.set_tempo(tempo);
+                        // Its clock: its audio as late as the track's input
+                        // and the FX before it make it.
+                        job.transports
+                            .push(transport_late(plan.input[ti].saturating_add(job.latency)));
                         job.latency = job.latency.saturating_add(plugin.latency());
                         drop(plugin);
                         job.chain.push((i, PluginPtr::new(cell)));
                     }
                     if !ok || job.chain.is_empty() {
                         job.chain.clear();
+                        job.transports.clear();
                         continue;
                     }
                     job.ti = ti;
@@ -2062,6 +2083,11 @@ impl ProjectRenderer {
                                 }
                             }
                         }
+                        // Its clock: its audio as late as the track's input
+                        // and the FX before it make it.
+                        crate::plugin::set_render_transport(transport_late(
+                            plan.input[ti].saturating_add(chain_latency),
+                        ));
                         chain_latency = chain_latency.saturating_add(plugin.latency());
                         // De-interleave → process → re-interleave.
                         for f in 0..frames {
@@ -2127,6 +2153,7 @@ impl ProjectRenderer {
                     if let (true, Some(last)) = (probing, chain.len().checked_sub(1)) {
                         probe(probes, ti, offline::Probe::FxOut(last), &bus.samples);
                     }
+                    crate::plugin::set_render_transport(block_transport);
                     // A muted chain not run keeps the latency it had.
                     if !chain.is_empty() || t.fx_chain.is_empty() {
                         latencies.set(ti, chain_latency);

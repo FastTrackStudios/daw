@@ -69,7 +69,8 @@ pub struct Fed {
     pub start: u64,
     /// Interleaved stereo, from `start` on.
     pub samples: Arc<[f32]>,
-    /// How late it was, samples (its output's latency then).
+    /// How late it was, samples (its output's latency then): what delay
+    /// compensation counts it as now, whatever feeds it.
     pub latency: u32,
 }
 
@@ -124,7 +125,8 @@ impl Offline {
         if let Some(solo) = &self.solo {
             t.soloed = solo.contains(&t.guid);
         }
-        if self.fed.contains_key(&t.guid)
+        t.replayed = self.fed.contains_key(&t.guid);
+        if t.replayed
             || self
                 .only
                 .as_ref()
