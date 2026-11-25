@@ -34,6 +34,8 @@
 
 mod automate;
 mod envelope;
+#[cfg(test)]
+mod envelope_bench;
 mod graph;
 mod item_mix;
 #[cfg(any(feature = "decode", feature = "audio"))]
