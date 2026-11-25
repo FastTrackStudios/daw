@@ -383,6 +383,15 @@ pub trait PluginInstance: Send {
         0
     }
 
+    /// What the plugin tells its host between calls, readable from any
+    /// thread without the plugin's lock ([`PluginNotices`]): kept by its
+    /// cell when it is loaded, so the host knows what changed without
+    /// waiting for a render to let the plugin go. `None` (the default)
+    /// from a backend that tells nothing.
+    fn notices(&self) -> Option<std::sync::Arc<PluginNotices>> {
+        None
+    }
+
     /// The sidechain for the next [`process_block`](Self::process_block)
     /// only: what the track received on channels 3/4 this block (a
     /// drum's trigger keying its gate). Not called on a block with
@@ -820,12 +829,101 @@ impl Drop for TrackMutedGuard {
     }
 }
 
+/// What a plugin tells its host between calls, read from any thread
+/// without its lock: a CLAP's `request_callback`, its parameter rescans,
+/// and whether what its state holds may have changed (its
+/// `clap_host_state.mark_dirty`, a parameter value or gesture it sent
+/// from its own side).
+#[derive(Debug, Default)]
+pub struct PluginNotices {
+    /// Bumped on every rescan of parameter info or text (a renamed
+    /// parameter): an embedder showing names re-reads them when it moves.
+    pub(crate) param_info: std::sync::atomic::AtomicU64,
+    /// Bumped on every rescan of parameter values.
+    pub(crate) param_values: std::sync::atomic::AtomicU64,
+    /// The plugin asked for its main-thread callback (`request_callback`).
+    pub(crate) callback: std::sync::atomic::AtomicBool,
+    /// Bumped whenever the plugin says its state changed: what a saved
+    /// copy of its state is checked against.
+    pub(crate) state: std::sync::atomic::AtomicU64,
+}
+
+impl PluginNotices {
+    /// See the field: moves on every rescan of parameter info or text.
+    #[must_use]
+    pub fn param_info(&self) -> u64 {
+        self.param_info.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Whether the plugin asked for its main-thread callback since it last
+    /// ran.
+    #[must_use]
+    pub fn wants_main_thread(&self) -> bool {
+        self.callback.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Moves whenever the plugin says its state changed.
+    #[must_use]
+    pub fn state(&self) -> u64 {
+        self.state.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// The plugin's state changed (it said so, or sent a value of its own).
+    pub fn mark_state_dirty(&self) {
+        self.state.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
+/// Where each [`PluginCell`]'s [`PluginCell::instance`] comes from.
+static NEXT_INSTANCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 /// One loaded plugin, behind a lock of its own: a render takes it for the
 /// plugin's `process_block`, a control thread for a parameter or its state.
 /// Two renders running disjoint tracks — the ahead render and the realtime
 /// one — never meet on a lock, where one lock over every plugin made them
 /// take turns.
-pub struct PluginCell(std::sync::Mutex<Box<dyn PluginInstance>>);
+///
+/// Beside the lock, what can be read without it: the instance's own id,
+/// its [`PluginNotices`], how often a control thread reached it, and
+/// whether its editor is open — what says whether its state may have
+/// changed ([`PluginCell::state_key`]).
+pub struct PluginCell {
+    plugin: std::sync::Mutex<Box<dyn PluginInstance>>,
+    /// This instance, apart from every other loaded in the process.
+    instance: u64,
+    notices: Option<std::sync::Arc<PluginNotices>>,
+    /// Its `signal/1`, kept from the instance as it was loaded: read
+    /// without its lock, valid while the cell lives.
+    #[cfg(feature = "clap-host")]
+    signal: Option<daw_clap_ext::host::SignalPluginClient>,
+    /// Bumped every time a control thread takes the plugin to change it
+    /// ([`PluginCell::lock`]; a render's [`PluginCell::try_lock_spinning`]
+    /// and a read's [`PluginCell::lock_reading`] do not).
+    touched: std::sync::atomic::AtomicU64,
+    /// Its editor is open: edits there may reach its state unseen.
+    gui_open: std::sync::atomic::AtomicBool,
+}
+
+/// What says whether a plugin's state may have changed: two keys equal
+/// mean the same instance, untouched by any control thread between them,
+/// with nothing said by the plugin, its editor closed throughout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PluginStateKey {
+    pub instance: u64,
+    pub touched: u64,
+    /// The plugin's [`PluginNotices::state`]; `None` from a backend that
+    /// tells nothing.
+    pub reported: Option<u64>,
+    pub gui_open: bool,
+}
+
+impl PluginStateKey {
+    /// Whether a state read under `self` still holds at `now`.
+    #[must_use]
+    pub fn still(&self, now: &Self) -> bool {
+        self == now && !now.gui_open
+    }
+}
 
 impl PluginCell {
     /// Locked once here, on the control thread that builds it: on macOS
@@ -835,15 +933,26 @@ impl PluginCell {
     /// (sampler's `rt_alloc` caught it; Linux's futex mutex never allocates).
     #[must_use]
     pub fn new(plugin: Box<dyn PluginInstance>) -> Self {
-        let cell = Self(std::sync::Mutex::new(plugin));
-        drop(cell.lock());
+        let notices = plugin.notices();
+        #[cfg(feature = "clap-host")]
+        let signal = plugin.signal();
+        let cell = Self {
+            plugin: std::sync::Mutex::new(plugin),
+            instance: NEXT_INSTANCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            notices,
+            #[cfg(feature = "clap-host")]
+            signal,
+            touched: std::sync::atomic::AtomicU64::new(0),
+            gui_open: std::sync::atomic::AtomicBool::new(false),
+        };
+        drop(cell.lock_reading());
         cell
     }
 
     /// The plugin back out of its cell.
     #[must_use]
     pub fn into_inner(self) -> Box<dyn PluginInstance> {
-        self.0
+        self.plugin
             .into_inner()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
@@ -851,17 +960,70 @@ impl PluginCell {
     /// The plugin, through a cell nobody else can reach (the map held for
     /// writing): no lock taken.
     pub fn get_mut(&mut self) -> &mut Box<dyn PluginInstance> {
-        self.0
+        *self.touched.get_mut() += 1;
+        self.plugin
             .get_mut()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// The plugin, waiting for whoever has it. Control threads only — a
-    /// render never waits ([`PluginCell::try_lock_spinning`]).
+    /// The plugin, waiting for whoever has it, to change it (a parameter,
+    /// a state, an action): counted as a touch, so a saved copy of its
+    /// state is read again. Control threads only — a render never waits
+    /// ([`PluginCell::try_lock_spinning`]).
     pub fn lock(&self) -> std::sync::MutexGuard<'_, Box<dyn PluginInstance>> {
-        self.0
+        self.touched
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        self.lock_reading()
+    }
+
+    /// The plugin, waiting for whoever has it, only to read it (its state
+    /// saved, its parameters' values and texts): no touch counted.
+    pub fn lock_reading(&self) -> std::sync::MutexGuard<'_, Box<dyn PluginInstance>> {
+        self.plugin
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The plugin's own id, apart from every instance loaded before or
+    /// after it under the same guid.
+    #[must_use]
+    pub const fn instance(&self) -> u64 {
+        self.instance
+    }
+
+    /// What the plugin told its host, read without its lock.
+    #[must_use]
+    pub fn notices(&self) -> Option<&std::sync::Arc<PluginNotices>> {
+        self.notices.as_ref()
+    }
+
+    /// The plugin's `signal/1`, read without its lock: its thread-safe
+    /// calls (revisions, meter values) may be made while the cell lives,
+    /// that is while the map is held and its generation has not moved.
+    #[cfg(feature = "clap-host")]
+    #[must_use]
+    pub const fn signal(&self) -> Option<daw_clap_ext::host::SignalPluginClient> {
+        self.signal
+    }
+
+    /// Its editor opened or closed.
+    pub fn set_gui_open(&self, open: bool) {
+        self.gui_open
+            .store(open, std::sync::atomic::Ordering::Release);
+        self.touched
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    }
+
+    /// Whether its state may have changed since another key: see
+    /// [`PluginStateKey`]. Read without the plugin's lock.
+    #[must_use]
+    pub fn state_key(&self) -> PluginStateKey {
+        PluginStateKey {
+            instance: self.instance,
+            touched: self.touched.load(std::sync::atomic::Ordering::Acquire),
+            reported: self.notices.as_ref().map(|n| n.state()),
+            gui_open: self.gui_open.load(std::sync::atomic::Ordering::Acquire),
+        }
     }
 
     /// The plugin, trying `spins` times (a control thread's hold is a
@@ -872,7 +1034,7 @@ impl PluginCell {
         spins: usize,
     ) -> Option<std::sync::MutexGuard<'_, Box<dyn PluginInstance>>> {
         for _ in 0..spins.max(1) {
-            match self.0.try_lock() {
+            match self.plugin.try_lock() {
                 Ok(guard) => return Some(guard),
                 Err(std::sync::TryLockError::Poisoned(p)) => return Some(p.into_inner()),
                 Err(std::sync::TryLockError::WouldBlock) => std::hint::spin_loop(),
@@ -1018,7 +1180,41 @@ impl Plugins {
         let mut plugin = map.cell(fx_guid)?.lock();
         Some(f(plugin.as_mut()))
     }
+
+    /// [`Plugins::with`], only to read the plugin (its state saved, a
+    /// value or text asked): no touch counted ([`PluginCell::lock_reading`]).
+    pub fn with_reading<R>(
+        &self,
+        fx_guid: &str,
+        f: impl FnOnce(&mut dyn PluginInstance) -> R,
+    ) -> Option<R> {
+        let map = self.read();
+        let mut plugin = map.cell(fx_guid)?.lock_reading();
+        Some(f(plugin.as_mut()))
+    }
+
+    /// [`Plugins::with_reading`], never waiting: `Err(Busy)` while a render
+    /// (or anyone) has the plugin, `Ok(None)` when there is none.
+    ///
+    /// # Errors
+    /// [`PluginBusy`] while the plugin is held.
+    pub fn try_with_reading<R>(
+        &self,
+        fx_guid: &str,
+        f: impl FnOnce(&mut dyn PluginInstance) -> R,
+    ) -> Result<Option<R>, PluginBusy> {
+        let map = self.read();
+        let Some(cell) = map.cell(fx_guid) else {
+            return Ok(None);
+        };
+        let mut plugin = cell.try_lock_spinning(1).ok_or(PluginBusy)?;
+        Ok(Some(f(plugin.as_mut())))
+    }
 }
+
+/// A plugin held by someone else (a render running it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PluginBusy;
 
 #[cfg(test)]
 mod plugins_tests {
@@ -1093,6 +1289,100 @@ mod plugins_tests {
                 .and_then(|c| c.try_lock_spinning(1))
                 .is_none()
         );
+    }
+
+    /// A plugin's state key moves when a control thread reaches it to
+    /// change it, when it says its state changed, or when its editor opens
+    /// — never for a read, a render, or a try turned away.
+    #[test]
+    fn the_state_key_moves_on_a_change_and_holds_for_a_read() {
+        let plugins = Plugins::default();
+        plugins.write().insert("a".into(), Box::new(Probe(0)));
+        let key = |p: &Plugins| p.read().cell("a").unwrap().state_key();
+        let start = key(&plugins);
+        assert_eq!(start.reported, None, "a probe tells nothing");
+        plugins.with_reading("a", |p| p.param_value(0));
+        assert!(start.still(&key(&plugins)), "a read touches nothing");
+        {
+            let map = plugins.read();
+            let _render = map.cell("a").unwrap().try_lock_spinning(1).unwrap();
+            assert_eq!(
+                plugins.try_with_reading("a", |p| p.param_value(0)),
+                Err(PluginBusy),
+                "a busy plugin is not waited for"
+            );
+        }
+        assert!(start.still(&key(&plugins)), "a render touches nothing");
+        plugins.with("a", |p| p.set_param_value(0, 1.0));
+        let touched = key(&plugins);
+        assert!(!start.still(&touched), "a change is a touch");
+        plugins.read().cell("a").unwrap().set_gui_open(true);
+        let open = key(&plugins);
+        assert!(!open.still(&open), "an open editor never holds still");
+        plugins.read().cell("a").unwrap().set_gui_open(false);
+        assert!(!touched.still(&key(&plugins)));
+    }
+
+    /// A plugin that tells (its notices) moves its key by saying so.
+    #[test]
+    fn a_plugin_marking_its_state_dirty_moves_its_key() {
+        struct Telling(std::sync::Arc<PluginNotices>, Probe);
+        impl PluginInstance for Telling {
+            fn descriptor(&self) -> PluginDescriptor {
+                self.1.descriptor()
+            }
+            fn params(&mut self) -> Vec<PluginParamInfo> {
+                Vec::new()
+            }
+            fn param_value(&mut self, _: u32) -> Option<f64> {
+                None
+            }
+            fn value_to_text(&mut self, _: u32, _: f64) -> Option<String> {
+                None
+            }
+            fn text_to_value(&mut self, _: u32, _: &str) -> Option<f64> {
+                None
+            }
+            fn latency(&mut self) -> u32 {
+                0
+            }
+            fn prepare(&mut self, _: f64, _: u32) -> Result<(), PluginError> {
+                Ok(())
+            }
+            fn is_prepared(&self) -> bool {
+                true
+            }
+            fn process_block(
+                &mut self,
+                _: &[f32],
+                _: &[f32],
+                _: &mut [f32],
+                _: &mut [f32],
+                _: &PluginEvents<'_>,
+            ) -> Result<(), PluginError> {
+                Ok(())
+            }
+            fn deactivate(&mut self) {}
+            fn notices(&self) -> Option<std::sync::Arc<PluginNotices>> {
+                Some(self.0.clone())
+            }
+        }
+        let notices = std::sync::Arc::<PluginNotices>::default();
+        let plugins = Plugins::default();
+        plugins
+            .write()
+            .insert("t".into(), Box::new(Telling(notices.clone(), Probe(0))));
+        let key = || plugins.read().cell("t").unwrap().state_key();
+        let start = key();
+        assert_eq!(start.reported, Some(0));
+        notices.mark_state_dirty();
+        assert!(!start.still(&key()), "marked dirty");
+        // Another instance under the same guid is another key.
+        let now = key();
+        plugins
+            .write()
+            .insert("t".into(), Box::new(Telling(notices.clone(), Probe(0))));
+        assert_ne!(now.instance, key().instance);
     }
 
     /// The generation moves on whatever may put another plugin under a

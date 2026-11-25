@@ -101,17 +101,25 @@ impl PendingGuiResize {
     }
 }
 
-/// What a plugin has told its host about its parameters and its main
-/// thread, for the embedder to act on.
-#[derive(Default)]
-pub struct HostNotices {
-    /// Bumped on every rescan of parameter info or text (a renamed
-    /// parameter): an embedder showing names re-reads them when it moves.
-    param_info: AtomicU64,
-    /// Bumped on every rescan of parameter values.
-    param_values: AtomicU64,
-    /// The plugin asked for its main-thread callback (`request_callback`).
-    callback: std::sync::atomic::AtomicBool,
+/// What a plugin has told its host about its parameters, its main thread
+/// and its state, for the embedder to act on — readable without the
+/// plugin's lock ([`crate::plugin::PluginNotices`]).
+pub type HostNotices = crate::plugin::PluginNotices;
+
+/// Whether `events` (what a plugin sent from one `process` or `flush`)
+/// hold a parameter value or gesture of its own: its state moved.
+/// Allocates nothing (an audio thread's).
+fn sent_param_change(events: &EventBuffer) -> bool {
+    events.iter().any(|e| {
+        matches!(
+            e.as_core_event(),
+            Some(
+                clack_host::events::spaces::CoreEventSpace::ParamValue(_)
+                    | clack_host::events::spaces::CoreEventSpace::ParamGestureBegin(_)
+                    | clack_host::events::spaces::CoreEventSpace::ParamGestureEnd(_)
+            )
+        )
+    })
 }
 
 #[derive(Clone, Default)]
@@ -395,6 +403,15 @@ struct DawHostMainThread {
 
 impl<'a> MainThreadHandler<'a> for DawHostMainThread {}
 
+/// Host-side `state`: the plugin's `mark_dirty` — its state changed since
+/// it was last saved or loaded. What a host's saved copy of it is checked
+/// against ([`crate::plugin::PluginCell::state_key`]).
+impl clack_extensions::state::HostStateImpl for DawHostMainThread {
+    fn mark_dirty(&mut self) {
+        self.notices.mark_state_dirty();
+    }
+}
+
 impl HostParamsImplMainThread for DawHostMainThread {
     fn rescan(&mut self, flags: ParamRescanFlags) {
         if flags.intersects(ParamRescanFlags::INFO | ParamRescanFlags::TEXT | ParamRescanFlags::ALL)
@@ -444,7 +461,8 @@ impl HostHandlers for DawHost {
             .register::<HostThreadCheck>()
             .register::<HostTimer>()
             .register::<HostGui>()
-            .register::<HostParams>();
+            .register::<HostParams>()
+            .register::<clack_extensions::state::HostState>();
         if shared.actions.is_some() {
             builder.register::<HostActionsExtension>();
         }
@@ -1312,6 +1330,9 @@ impl LoadedClapPlugin {
             &input_events.as_input(),
             &mut output_events.as_output(),
         );
+        if sent_param_change(&output_events) {
+            self.notices.mark_state_dirty();
+        }
     }
 
     /// Set parameter `param_id` to `value` (plain) in the plugin itself,
@@ -1668,6 +1689,9 @@ impl LoadedClapPlugin {
                 transport.as_ref(),
             )
             .map_err(|_| ClapHostError::Process)?;
+        if sent_param_change(&act.events_out) {
+            self.notices.mark_state_dirty();
+        }
         Ok(())
     }
 
@@ -2161,6 +2185,9 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
     }
     fn param_info_revision(&self) -> u64 {
         LoadedClapPlugin::param_info_revision(self)
+    }
+    fn notices(&self) -> Option<Arc<crate::plugin::PluginNotices>> {
+        Some(Arc::clone(&self.notices))
     }
     fn wants_main_thread(&self) -> bool {
         LoadedClapPlugin::wants_main_thread(self)

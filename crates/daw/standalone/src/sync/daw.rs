@@ -1834,6 +1834,43 @@ impl Standalone {
         self.plugin_instances.with(fx_guid, f)
     }
 
+    /// [`with_plugin_instance`](Self::with_plugin_instance), only to read
+    /// the plugin (its chain, its values, its state): not counted as a
+    /// touch, so a saved copy of its state stands
+    /// ([`crate::plugin::PluginCell::lock_reading`]).
+    pub fn with_plugin_instance_reading<R>(
+        &self,
+        fx_guid: &str,
+        f: impl FnOnce(&mut dyn crate::plugin::PluginInstance) -> R,
+    ) -> Option<R> {
+        self.plugin_instances.with_reading(fx_guid, f)
+    }
+
+    /// [`with_plugin_instance_reading`](Self::with_plugin_instance_reading),
+    /// never waiting for a render that has the plugin: `Err` then, and the
+    /// caller keeps what it read last.
+    ///
+    /// # Errors
+    /// [`crate::plugin::PluginBusy`] while the plugin is held.
+    pub fn try_with_plugin_instance_reading<R>(
+        &self,
+        fx_guid: &str,
+        f: impl FnOnce(&mut dyn crate::plugin::PluginInstance) -> R,
+    ) -> Result<Option<R>, crate::plugin::PluginBusy> {
+        self.plugin_instances.try_with_reading(fx_guid, f)
+    }
+
+    /// Whether `fx_guid`'s state may have changed since a key taken
+    /// earlier ([`crate::plugin::PluginStateKey`]), read without the
+    /// plugin's lock. `None` when no plugin is loaded under it.
+    #[must_use]
+    pub fn plugin_state_key(&self, fx_guid: &str) -> Option<crate::plugin::PluginStateKey> {
+        self.plugin_instances
+            .read()
+            .cell(fx_guid)
+            .map(crate::plugin::PluginCell::state_key)
+    }
+
     /// Run `f` against every live FX instance at once, under one hold of the
     /// `plugin_instances` map for writing — no render is inside a block
     /// meanwhile.
@@ -1900,7 +1937,7 @@ impl Standalone {
     /// `Err` if there's no loaded plugin or its `save_state` failed.
     pub fn save_plugin_state(&self, fx_guid: &str) -> Result<Vec<u8>, crate::plugin::PluginError> {
         self.plugin_instances
-            .with(fx_guid, |p| p.save_state())
+            .with_reading(fx_guid, |p| p.save_state())
             .unwrap_or_else(|| {
                 Err(crate::plugin::PluginError::LoadFailed(format!(
                     "no plugin instance for fx_guid {fx_guid}"

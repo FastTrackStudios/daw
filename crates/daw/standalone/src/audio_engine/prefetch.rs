@@ -31,6 +31,11 @@ const LOOKAHEAD_SECONDS: f64 = 3.0;
 /// is already in costs ~1 ms (a 90-track song).
 const SCAN_INTERVAL: Duration = Duration::from_millis(150);
 
+/// How often the pages around a playhead that has not moved, in a song
+/// that has not changed, are read in again (the kernel may have let them
+/// go): a stopped engine scans nothing in between.
+const STILL_RESCAN: Duration = Duration::from_secs(5);
+
 /// Guard handle: the worker thread runs until this is dropped.
 pub struct PrefetchWorker {
     stop: Arc<AtomicBool>,
@@ -46,9 +51,22 @@ impl PrefetchWorker {
         let _ = std::thread::Builder::new()
             .name("fts-media-prefetch".into())
             .spawn(move || {
+                // The playhead and the song's revision of the last scan,
+                // and when: an unmoved playhead over an unchanged song is
+                // scanned again only every STILL_RESCAN.
+                let mut last: Option<(i64, Option<u64>, std::time::Instant)> = None;
                 while !flag.load(Ordering::Relaxed) {
                     let sr = shared.sample_rate().max(1);
-                    let playhead = shared.playhead_samples().0.max(0) as f64 / sr as f64;
+                    let at = shared.playhead_samples().0;
+                    let revision = daw.read_project(&project_guid, |p| p.revision);
+                    if last.is_some_and(|(a, r, when)| {
+                        a == at && r == revision && when.elapsed() < STILL_RESCAN
+                    }) {
+                        std::thread::sleep(SCAN_INTERVAL);
+                        continue;
+                    }
+                    last = Some((at, revision, std::time::Instant::now()));
+                    let playhead = at.max(0) as f64 / sr as f64;
                     // Prefetch around the playhead even when stopped:
                     // a seek-then-play starts from warm pages.
                     let window_start = playhead;

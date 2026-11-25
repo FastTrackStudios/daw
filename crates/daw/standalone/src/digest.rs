@@ -81,9 +81,11 @@ fn fx_of(p: &ProjectState) -> TrackFx {
 ///
 /// The project's own sections are hashed again only when its revision
 /// moved (every edit moves it); what each FX holds is read from the
-/// plugin every time, since a plugin's state changes without the
-/// project's. Hashed as it is written, never built as text: the same
-/// number as folding [`digest`]'s lines.
+/// plugin again only when it may have changed ([`state_print`]): a
+/// control thread reached it to change it, it said so itself (a CLAP's
+/// `mark_dirty`, a value it sent), its editor is open, or the read is
+/// older than [`STATE_TRUST`]. Hashed as it is written, never built as
+/// text: the same number as folding [`digest`]'s lines.
 #[must_use]
 pub fn fingerprint(daw: &Standalone, project_guid: &str) -> Option<u64> {
     let (hash, fx) = project_print(daw, project_guid)?;
@@ -91,19 +93,86 @@ pub fn fingerprint(daw: &Standalone, project_guid: &str) -> Option<u64> {
     for (track, chain) in fx.iter() {
         let _ = write!(w, "{track}: ");
         for (i, (guid, name, enabled)) in chain.iter().enumerate() {
-            let state = daw.save_plugin_state(guid).unwrap_or_default();
+            let (state_hash, state_len) = state_print(daw, guid);
             let _ = write!(
                 w,
-                "{}{name}{} state={:016x}/{}",
+                "{}{name}{} state={state_hash:016x}/{state_len}",
                 if i == 0 { "" } else { ", " },
                 if *enabled { "" } else { " (off)" },
-                fnv1a(&state),
-                state.len()
             );
         }
         w.0 ^= 0x0a;
     }
     Some(w.0)
+}
+
+/// How long a state read stands for a plugin that has given no sign of a
+/// change: a plugin that changes its state without a host's call, its
+/// editor or a word to its host is read again after this.
+pub const STATE_TRUST: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// A plugin's state, as last read: under which key, when, and its hash
+/// and length.
+struct KeptState {
+    key: crate::plugin::PluginStateKey,
+    at: web_time::Instant,
+    hash: u64,
+    len: usize,
+}
+
+/// The last state read of each FX, by guid.
+static STATES: Mutex<Option<HashMap<String, KeptState>>> = Mutex::new(None);
+
+/// How many plugin states [`fingerprint`] read (not kept): what the tests
+/// and the autosave's span count.
+static STATE_READS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How many plugin states every [`fingerprint`] so far has read from the
+/// plugin, rather than kept.
+#[must_use]
+pub fn state_reads() -> u64 {
+    STATE_READS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// `fx_guid`'s state hashed (FNV-1a) and its length, as
+/// `save_plugin_state` gives it (empty for no plugin): read again only
+/// when its key moved ([`crate::plugin::PluginStateKey::still`]) or the
+/// read is older than [`STATE_TRUST`].
+fn state_print(daw: &Standalone, fx_guid: &str) -> (u64, usize) {
+    let Some(key) = daw.plugin_state_key(fx_guid) else {
+        return (fnv1a(&[]), 0);
+    };
+    {
+        let states = STATES.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(kept) = states.as_ref().and_then(|m| m.get(fx_guid))
+            && kept.key.still(&key)
+            && kept.at.elapsed() < STATE_TRUST
+        {
+            return (kept.hash, kept.len);
+        }
+    }
+    // The key is taken before the read: a change made during it moves the
+    // key again, and the next look reads once more.
+    let state = daw.save_plugin_state(fx_guid).unwrap_or_default();
+    STATE_READS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let (hash, len) = (fnv1a(&state), state.len());
+    let mut states = STATES.lock().unwrap_or_else(PoisonError::into_inner);
+    let states = states.get_or_insert_with(HashMap::new);
+    // A kept read is only ever used by its own instance (the key names
+    // it), so one of an instance gone is only memory: let old ones go.
+    if states.len() >= 4096 {
+        states.retain(|_, k| k.at.elapsed() < STATE_TRUST);
+    }
+    states.insert(
+        fx_guid.to_owned(),
+        KeptState {
+            key,
+            at: web_time::Instant::now(),
+            hash,
+            len,
+        },
+    );
+    (hash, len)
 }
 
 /// The fold of one line into a fingerprint.
@@ -533,6 +602,114 @@ mod tests {
         assert_ne!(print_a, print_b);
         assert_eq!(print_b, folded(&b, "print-c"));
         assert_eq!(fingerprint(&a, "print-c").unwrap(), folded(&a, "print-c"));
+    }
+
+    /// A plugin that holds `state` and counts its saves.
+    struct Holding {
+        state: std::sync::Arc<Mutex<Vec<u8>>>,
+        saves: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    }
+
+    impl crate::plugin::PluginInstance for Holding {
+        fn descriptor(&self) -> crate::plugin::PluginDescriptor {
+            crate::plugin::PluginDescriptor {
+                id: "holding".into(),
+                name: "Holding".into(),
+                vendor: String::new(),
+                version: String::new(),
+                format: crate::plugin::PluginFormat::Synthetic,
+            }
+        }
+        fn params(&mut self) -> Vec<crate::plugin::PluginParamInfo> {
+            Vec::new()
+        }
+        fn param_value(&mut self, _: u32) -> Option<f64> {
+            None
+        }
+        fn set_param_value(&mut self, _: u32, value: f64) -> bool {
+            *self.state.lock().unwrap() = value.to_le_bytes().to_vec();
+            true
+        }
+        fn value_to_text(&mut self, _: u32, _: f64) -> Option<String> {
+            None
+        }
+        fn text_to_value(&mut self, _: u32, _: &str) -> Option<f64> {
+            None
+        }
+        fn latency(&mut self) -> u32 {
+            0
+        }
+        fn prepare(&mut self, _: f64, _: u32) -> Result<(), crate::plugin::PluginError> {
+            Ok(())
+        }
+        fn is_prepared(&self) -> bool {
+            true
+        }
+        fn process_block(
+            &mut self,
+            _: &[f32],
+            _: &[f32],
+            _: &mut [f32],
+            _: &mut [f32],
+            _: &crate::plugin::PluginEvents<'_>,
+        ) -> Result<(), crate::plugin::PluginError> {
+            Ok(())
+        }
+        fn deactivate(&mut self) {}
+        fn save_state(&mut self) -> Result<Vec<u8>, crate::plugin::PluginError> {
+            self.saves
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(self.state.lock().unwrap().clone())
+        }
+    }
+
+    /// A still song's plugins are read once, not on every look; a change
+    /// made through the host is read again, and the fingerprint is the
+    /// digest's (which reads every plugin) throughout.
+    #[test]
+    fn a_plugin_is_read_again_only_when_it_may_have_changed() {
+        let daw = song("print-states", 3);
+        let mut held = Vec::new();
+        for i in 0..3 {
+            let state = std::sync::Arc::new(Mutex::new(vec![i]));
+            let saves = std::sync::Arc::<std::sync::atomic::AtomicU64>::default();
+            daw.insert_plugin_instance(
+                format!("fx{i}"),
+                Box::new(Holding {
+                    state: state.clone(),
+                    saves: saves.clone(),
+                }),
+            );
+            held.push((state, saves));
+        }
+        let saves = |i: usize| held[i].1.load(std::sync::atomic::Ordering::Relaxed);
+        let first = fingerprint(&daw, "print-states").unwrap();
+        for _ in 0..5 {
+            assert_eq!(fingerprint(&daw, "print-states").unwrap(), first);
+        }
+        assert_eq!((saves(0), saves(1), saves(2)), (1, 1, 1), "read once each");
+        // Read without changing it: still kept.
+        daw.with_plugin_instance_reading("fx1", |p| p.param_value(0));
+        assert_eq!(fingerprint(&daw, "print-states").unwrap(), first);
+        assert_eq!(saves(1), 1);
+        // A value set through the host: that plugin alone read again.
+        daw.with_plugin_instance("fx1", |p| p.set_param_value(0, 0.5));
+        let moved = fingerprint(&daw, "print-states").unwrap();
+        assert_ne!(moved, first, "the change is seen");
+        assert_eq!((saves(0), saves(1), saves(2)), (1, 2, 1));
+        // The digest reads every plugin and folds to the same number.
+        assert_eq!(moved, folded(&daw, "print-states"));
+        // A plugin replaced under its guid is read afresh.
+        daw.insert_plugin_instance(
+            "fx2",
+            Box::new(Holding {
+                state: std::sync::Arc::new(Mutex::new(vec![9, 9])),
+                saves: held[2].1.clone(),
+            }),
+        );
+        let replaced = fingerprint(&daw, "print-states").unwrap();
+        assert_ne!(replaced, moved);
+        assert_eq!(replaced, folded(&daw, "print-states"));
     }
 
     /// What a look costs on a song of 120 tracks with 40 items each,

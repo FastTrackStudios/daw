@@ -755,10 +755,11 @@ impl Effects for Standalone {
     fn open_ui(&self, project: ProjectContext, target: FxTarget) -> DawResult<()> {
         if let Some(fx_guid) = resolve_fx_guid(self, &project, &target) {
             let plugins = self.plugin_instances.read();
-            if let Some(mut plugin) = plugins.cell(&fx_guid).map(crate::plugin::PluginCell::lock) {
-                plugin
+            if let Some(cell) = plugins.cell(&fx_guid) {
+                cell.lock()
                     .open_gui()
                     .map_err(|e| DawError::operation_failed(e.to_string()))?;
+                cell.set_gui_open(true);
             }
         }
         set_window_open(self, project, target, true)
@@ -766,10 +767,11 @@ impl Effects for Standalone {
     fn close_ui(&self, project: ProjectContext, target: FxTarget) -> DawResult<()> {
         if let Some(fx_guid) = resolve_fx_guid(self, &project, &target) {
             let plugins = self.plugin_instances.read();
-            if let Some(mut plugin) = plugins.cell(&fx_guid).map(crate::plugin::PluginCell::lock) {
-                plugin
+            if let Some(cell) = plugins.cell(&fx_guid) {
+                cell.lock()
                     .close_gui()
                     .map_err(|e| DawError::operation_failed(e.to_string()))?;
+                cell.set_gui_open(false);
             }
         }
         set_window_open(self, project, target, false)
@@ -970,7 +972,10 @@ impl Effects for Standalone {
     fn latency(&self, project: ProjectContext, target: FxTarget) -> Option<FxLatency> {
         if let Some(fx_guid) = resolve_fx_guid(self, &project, &target) {
             let plugins = self.plugin_instances.read();
-            if let Some(mut plugin) = plugins.cell(&fx_guid).map(crate::plugin::PluginCell::lock) {
+            if let Some(mut plugin) = plugins
+                .cell(&fx_guid)
+                .map(crate::plugin::PluginCell::lock_reading)
+            {
                 let samples = plugin.latency() as i32;
                 return Some(FxLatency {
                     pdc_samples: samples,

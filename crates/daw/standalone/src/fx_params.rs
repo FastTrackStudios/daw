@@ -73,7 +73,7 @@ impl Standalone {
     /// Resolve `(fx guid, slot)` against the live plugin instance.
     /// `None` when the FX has no loaded instance (synthetic FX).
     fn plugin_slot(&self, fx_guid: &str, slot: u32, stored: Option<f64>) -> Option<SlotInfo> {
-        self.plugin_instances.with(fx_guid, |plugin| {
+        self.plugin_instances.with_reading(fx_guid, |plugin| {
             let info = plugin.params().into_iter().nth(slot as usize)?;
             let plain = stored
                 .or_else(|| plugin.param_value(info.id))
@@ -183,7 +183,7 @@ impl Standalone {
         stored: &std::collections::HashMap<u32, f64>,
     ) -> Option<Vec<FxParameter>> {
         let plugins = self.plugin_instances.read();
-        let mut plugin = plugins.cell(fx_guid)?.lock();
+        let mut plugin = plugins.cell(fx_guid)?.lock_reading();
         let infos = plugin.params();
         let mut out = Vec::with_capacity(infos.len());
         for (slot, info) in infos.into_iter().enumerate() {
