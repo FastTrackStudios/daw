@@ -566,3 +566,34 @@ fn playing_automation_as_timed_events_allocates_nothing_the_render_did_not() {
     );
     assert_eq!(automated, 0, "the render thread allocates nothing");
 }
+
+/// A host's value reaches a plugin that is not processing (the transport
+/// stopped): set through the FX's parameters, the plugin itself reports
+/// it at once — never activated, and activated with no block run since —
+/// not only with the next block a render plays. What a plugin reports is
+/// what its state saves and a render's copy is made from.
+#[test]
+fn a_set_parameter_reaches_a_plugin_that_is_not_processing() {
+    let (daw, guid, fx_guid) = song("FTS Test Gain", Vec::new(), 1.0);
+    let track = guid_of(&daw, &guid, "Vox");
+    let ctx = FxChainContext::Track(track);
+    let norm = |db: f64| (db - FLOOR_DB) / (CEIL_DB - FLOOR_DB);
+    let reported = || {
+        daw.with_plugin_instance(&fx_guid, |p| p.param_value(0))
+            .flatten()
+            .expect("the gain reports its value")
+    };
+    // Never activated.
+    daw_proto::FxParams::set(&daw, ctx.clone(), 0, 0, norm(-12.0)).expect("set");
+    assert!(
+        (reported() - -12.0).abs() < 1e-9,
+        "inactive: {}",
+        reported()
+    );
+    // Activated, no block since.
+    daw.with_plugin_instance(&fx_guid, |p| p.prepare(f64::from(RATE), 512))
+        .expect("an instance")
+        .expect("activates");
+    daw_proto::FxParams::set(&daw, ctx, 0, 0, norm(3.0)).expect("set");
+    assert!((reported() - 3.0).abs() < 1e-9, "activated: {}", reported());
+}

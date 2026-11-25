@@ -253,10 +253,20 @@ impl FxParams for Standalone {
             .ok_or_else(|| DawError::not_found("Fx", &fx_idx.to_string()))?;
 
         // Live plugin: translate slot → param id, normalized → plain.
-        let (key, stored_value) = match self.plugin_slot(&fx_guid, param_idx, None) {
+        let slot = self.plugin_slot(&fx_guid, param_idx, None);
+        let live = slot.is_some();
+        let (key, stored_value) = match slot {
             Some(slot) => (slot.info.id, slot.denormalize(value)),
             None => (param_idx, value),
         };
+        // Into the plugin itself, now: a render only sends the stored value
+        // with the blocks it plays, so a plugin not processing (the
+        // transport stopped) would keep the old one — in what it reports,
+        // in its state, and in every copy a render makes from that state.
+        if live {
+            self.plugin_instances
+                .with(&fx_guid, |plugin| plugin.set_param_value(key, stored_value));
+        }
 
         self.with_project_mut(&guid, |p| {
             let chain = p

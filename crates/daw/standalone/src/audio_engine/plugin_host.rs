@@ -1314,6 +1314,50 @@ impl LoadedClapPlugin {
         );
     }
 
+    /// Set parameter `param_id` to `value` (plain) in the plugin itself,
+    /// through `clap_plugin_params.flush`: what reaches a plugin that is
+    /// not processing (a stopped transport, an instance never prepared).
+    /// A host's value is otherwise only sent with the next `process`, so
+    /// the plugin — its state, what it reports, a copy made from its
+    /// state for a render — keeps the old one until the song plays.
+    ///
+    /// Activated, the flush goes through the audio-processor handle:
+    /// CLAP calls it on the audio thread then, never beside `process`,
+    /// which `&mut self` (the plugin's lock) guarantees. Whether the
+    /// plugin has `clap_plugin_params`.
+    pub fn set_param_value(&mut self, param_id: u32, value: f64) -> bool {
+        let Some(params) = self
+            .instance
+            .plugin_handle()
+            .get_extension::<PluginParams>()
+        else {
+            return false;
+        };
+        let mut input = EventBuffer::new();
+        input.push(&ParamValueEvent::new(
+            0,
+            ClapId::from(param_id),
+            Pckn::match_all(),
+            value,
+            Cookie::empty(),
+        ));
+        let mut output = EventBuffer::new();
+        match self.activation.as_mut() {
+            Some(act) => params.flush_active(
+                &mut act.processor.plugin_handle(),
+                &input.as_input(),
+                &mut output.as_output(),
+            ),
+            None => {
+                let Some(mut inactive) = self.instance.inactive_plugin_handle() else {
+                    return false;
+                };
+                params.flush(&mut inactive, &input.as_input(), &mut output.as_output());
+            }
+        }
+        true
+    }
+
     /// Close the floating window if one was opened via
     /// [`Self::open_gui_floating`]. Idempotent.
     pub fn close_gui(&mut self) {
@@ -2053,6 +2097,9 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
                 default: p.default,
             })
             .collect()
+    }
+    fn set_param_value(&mut self, id: u32, value: f64) -> bool {
+        LoadedClapPlugin::set_param_value(self, id, value)
     }
     fn param_value(&mut self, id: u32) -> Option<f64> {
         LoadedClapPlugin::param_value(self, id)

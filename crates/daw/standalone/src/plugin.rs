@@ -200,6 +200,15 @@ pub trait PluginInstance: Send {
     /// Current value of a parameter, if the plugin can report it.
     fn param_value(&mut self, id: u32) -> Option<f64>;
 
+    /// Set a parameter (plain value) in the plugin itself, now, whether
+    /// or not it is processing: the plugin's own value, its state and
+    /// what it reports follow at once. Control threads only. Whether the
+    /// plugin took it; `false` (the default) for a plugin whose
+    /// parameters are only the values sent with each block.
+    fn set_param_value(&mut self, _id: u32, _value: f64) -> bool {
+        false
+    }
+
     /// Format the value for display (e.g. `"-12 dB"`). `None` if the
     /// plugin doesn't provide a formatter.
     fn value_to_text(&mut self, id: u32, value: f64) -> Option<String>;
