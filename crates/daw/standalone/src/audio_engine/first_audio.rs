@@ -77,11 +77,7 @@ pub enum Heard {
 
 /// Wait for the armed play to be heard while `still_playing` says it
 /// plays, polling every `poll`, at most `limit`.
-fn wait(
-    still_playing: &dyn Fn() -> bool,
-    poll: Duration,
-    limit: Duration,
-) -> Heard {
+fn wait(still_playing: &dyn Fn() -> bool, poll: Duration, limit: Duration) -> Heard {
     let began = Instant::now();
     loop {
         let heard = HEARD_AT.load(Ordering::Acquire);
@@ -118,11 +114,7 @@ pub fn watch(still_playing: Box<dyn Fn() -> bool + Send>) {
         .name("play-heard".into())
         .spawn(move || {
             let _in = span.enter();
-            let heard = wait(
-                &*still_playing,
-                Duration::from_millis(1),
-                WATCH_FOR,
-            );
+            let heard = wait(&*still_playing, Duration::from_millis(1), WATCH_FOR);
             match heard {
                 Heard::After(d) => {
                     span.record("play.first_audio_ms", d.as_secs_f64() * 1e3);

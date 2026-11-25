@@ -283,7 +283,8 @@ impl Standalone {
                             break;
                         };
                         let began = std::time::Instant::now();
-                        let loaded = self.set_state_chunk(project.clone(), target.clone(), chunk.clone());
+                        let loaded =
+                            self.set_state_chunk(project.clone(), target.clone(), chunk.clone());
                         timed(&load_us, &slowest_load_us, began);
                         if loaded.is_ok()
                             && let Some(rate) = rate
