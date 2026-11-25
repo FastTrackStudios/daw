@@ -30,6 +30,12 @@ pub trait SignalPlugin: Send + Sync {
     fn chain(&self) -> String;
     /// Increases on every change to what `chain` returns. Thread-safe.
     fn revision(&self) -> u64;
+    /// The chain's `values_revision`: increases when a parameter value
+    /// does. Thread-safe. `None` (the default) from a plugin without one:
+    /// it then answers no `signal-revisions/1`.
+    fn values_revision(&self) -> Option<u64> {
+        None
+    }
     /// A CLAP parameter's stable (Signal) id.
     fn param_stable_id(&self, param_id: u32) -> Option<String>;
     fn mod_sources(&self) -> Vec<ModSourceInfo>;
@@ -38,6 +44,38 @@ pub trait SignalPlugin: Send + Sync {
     fn mod_source_value(&self, index: usize) -> f64;
     /// Join a session (`Some((session, port))`) or leave it (`None`).
     fn set_session(&self, session: Option<(&str, &str)>) -> bool;
+}
+
+/// The `signal-revisions/1` vtable for a plugin type, as a `'static`:
+/// [`SignalPlugin::revision`] and [`SignalPlugin::values_revision`], read
+/// from any thread. Return it from `get_extension` for
+/// [`sys::FTS_EXT_SIGNAL_REVISIONS`] when the plugin has a values revision.
+pub struct SignalRevisionsVtable<L>(PhantomData<L>);
+
+impl<L: SignalPluginLookup> SignalRevisionsVtable<L> {
+    pub const VTABLE: sys::fts_plugin_signal_revisions = sys::fts_plugin_signal_revisions {
+        revision: Some(Self::revision),
+        values_revision: Some(Self::values_revision),
+    };
+
+    /// What `get_extension` returns for [`sys::FTS_EXT_SIGNAL_REVISIONS`].
+    #[must_use]
+    pub fn as_ptr() -> *const c_void {
+        let v: &'static sys::fts_plugin_signal_revisions = &Self::VTABLE;
+        std::ptr::from_ref(v).cast()
+    }
+
+    unsafe extern "C" fn revision(plugin: *const clap_plugin) -> u64 {
+        // SAFETY: the host's call, with the plugin it queried.
+        unsafe { L::lookup(plugin) }.map_or(0, |p| p.revision())
+    }
+
+    unsafe extern "C" fn values_revision(plugin: *const clap_plugin) -> u64 {
+        // SAFETY: as above.
+        unsafe { L::lookup(plugin) }
+            .and_then(|p| p.values_revision())
+            .unwrap_or(0)
+    }
 }
 
 /// How a vtable finds the plugin's [`SignalPlugin`] from the raw plugin

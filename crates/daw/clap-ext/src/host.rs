@@ -236,6 +236,8 @@ impl<L: HostActionsLookup> HostActionsVtable<L> {
 pub struct SignalPluginClient {
     plugin: *const clap_plugin,
     ext: *const fts_plugin_signal,
+    /// Its `signal-revisions/1`, when it answers it (null otherwise).
+    revisions: *const sys::fts_plugin_signal_revisions,
 }
 
 // SAFETY: valid while the plugin instance lives (the host holds the client
@@ -258,7 +260,24 @@ impl SignalPluginClient {
         }
         let get = unsafe { (*plugin).get_extension }?;
         let ext = unsafe { get(plugin, sys::FTS_EXT_SIGNAL.as_ptr()) }.cast::<fts_plugin_signal>();
-        (!ext.is_null()).then_some(Self { plugin, ext })
+        let revisions = unsafe { get(plugin, sys::FTS_EXT_SIGNAL_REVISIONS.as_ptr()) }
+            .cast::<sys::fts_plugin_signal_revisions>();
+        (!ext.is_null()).then_some(Self {
+            plugin,
+            ext,
+            revisions,
+        })
+    }
+
+    /// The chain's `values_revision`, read from any thread without the
+    /// plugin's main thread (`signal-revisions/1`). `None` from a plugin
+    /// without the extension: ask it `SIGNAL_REVISIONS` on its main thread.
+    #[must_use]
+    pub fn values_revision(&self) -> Option<u64> {
+        // SAFETY: non-null checked; valid while the plugin is.
+        let ext = unsafe { self.revisions.as_ref() }?;
+        let f = ext.values_revision?;
+        Some(unsafe { f(self.plugin) })
     }
 
     fn ext(&self) -> &fts_plugin_signal {

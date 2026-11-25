@@ -91,6 +91,9 @@ impl SignalPlugin for Comp {
     fn revision(&self) -> u64 {
         self.revision.load(Ordering::Relaxed)
     }
+    fn values_revision(&self) -> Option<u64> {
+        Some(self.revision.load(Ordering::Relaxed) * 10 + 7)
+    }
     fn param_stable_id(&self, param_id: u32) -> Option<String> {
         ["threshold", "ratio"]
             .get(param_id as usize)
@@ -124,8 +127,11 @@ unsafe extern "C" fn plugin_get_extension(
     _plugin: *const clap_plugin,
     id: *const c_char,
 ) -> *const c_void {
-    if unsafe { CStr::from_ptr(id) } == sys::FTS_EXT_SIGNAL {
+    let id = unsafe { CStr::from_ptr(id) };
+    if id == sys::FTS_EXT_SIGNAL {
         SignalVtable::<ByPluginData>::as_ptr()
+    } else if id == sys::FTS_EXT_SIGNAL_REVISIONS {
+        daw_clap_ext::plugin::SignalRevisionsVtable::<ByPluginData>::as_ptr()
     } else {
         std::ptr::null()
     }
@@ -199,6 +205,9 @@ fn a_host_drives_signal_and_reads_its_modulation_sources() {
         r#"{"ok":true,"args":{"track":"Kick/Sum"}}"#
     );
     assert_eq!(client.revision(), 1);
+    // signal-revisions/1: the values' revision, from any thread.
+    let reader = std::thread::scope(|s| s.spawn(|| client.values_revision()).join().unwrap());
+    assert_eq!(reader, Some(17));
     match client.run_action("SIGNAL_X", "{}") {
         Err(ExtError::Failed(why)) => assert_eq!(why, r#"unknown "SIGNAL_X""#),
         other => panic!("{other:?}"),
@@ -258,4 +267,30 @@ fn event_sinks_deliver_to_the_plugins_host_events() {
         GOT.lock().unwrap()[0],
         (7, "hits:Drums/Kick".into(), r#"{"time":1.25}"#.into())
     );
+}
+
+/// A plugin with signal/1 alone answers no values revision: the host asks
+/// it on its main thread instead.
+#[test]
+fn a_plugin_without_signal_revisions_has_no_values_revision() {
+    unsafe extern "C" fn only_signal(_p: *const clap_plugin, id: *const c_char) -> *const c_void {
+        if unsafe { CStr::from_ptr(id) } == sys::FTS_EXT_SIGNAL {
+            SignalVtable::<ByPluginData>::as_ptr()
+        } else {
+            std::ptr::null()
+        }
+    }
+    let comp: Arc<dyn SignalPlugin> = Arc::new(Comp {
+        revision: AtomicU64::new(3),
+        session: Mutex::new(None),
+    });
+    let data: Box<Arc<dyn SignalPlugin>> = Box::new(comp);
+    // SAFETY: a zeroed plugin with the fields the client reads set.
+    let mut plugin: clap_plugin = unsafe { std::mem::zeroed() };
+    plugin.plugin_data = Box::into_raw(data).cast();
+    plugin.get_extension = Some(only_signal);
+    let client = unsafe { SignalPluginClient::query(&raw const plugin) }.expect("signal/1");
+    assert_eq!(client.revision(), 3);
+    assert_eq!(client.values_revision(), None);
+    drop(unsafe { Box::from_raw(plugin.plugin_data.cast::<Arc<dyn SignalPlugin>>()) });
 }

@@ -158,6 +158,18 @@ pub struct fts_plugin_signal {
     >,
 }
 
+// ── signal-revisions/1 ──────────────────────────────────────────────────
+
+pub const FTS_EXT_SIGNAL_REVISIONS: &CStr = c"com.fasttrackstudio.signal-revisions/1";
+
+/// `fts_plugin_signal_revisions_t`: Signal's revisions, from any thread.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct fts_plugin_signal_revisions {
+    pub revision: Option<unsafe extern "C" fn(plugin: *const clap_plugin) -> u64>,
+    pub values_revision: Option<unsafe extern "C" fn(plugin: *const clap_plugin) -> u64>,
+}
+
 // ── host-timeline/1 ─────────────────────────────────────────────────────
 
 pub const FTS_EXT_HOST_TIMELINE: &CStr = c"com.fasttrackstudio.host-timeline/1";

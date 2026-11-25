@@ -205,6 +205,23 @@ typedef struct fts_plugin_signal {
                                const char *port);
 } fts_plugin_signal_t;
 
+/* ── Plugin extension: Signal's revisions, from any thread ─────────── */
+/*
+ * com.fasttrackstudio.signal-revisions/1 — what a host polls to know when
+ * to read signal/1's chain (or its values) again, read beside a render:
+ * no main thread, no lock. `revision` is signal/1's; `values_revision`
+ * the chain's own, which moves when a parameter value does.
+ */
+static CLAP_CONSTEXPR const char FTS_EXT_SIGNAL_REVISIONS[] =
+   "com.fasttrackstudio.signal-revisions/1";
+
+typedef struct fts_plugin_signal_revisions {
+   // [thread-safe]
+   uint64_t(CLAP_ABI *revision)(const clap_plugin_t *plugin);
+   // [thread-safe]
+   uint64_t(CLAP_ABI *values_revision)(const clap_plugin_t *plugin);
+} fts_plugin_signal_revisions_t;
+
 /* ── Host extension: the track's timeline, ahead of the playhead ───── */
 /*
  * com.fasttrackstudio.host-timeline/1 — the plugin reads its own track's
