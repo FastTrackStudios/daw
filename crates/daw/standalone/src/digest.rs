@@ -12,7 +12,11 @@
 //! [`differences`] names what drifted, a section and its first lines apart,
 //! rather than "not equal".
 
-use crate::sync::{FxChainKey, ProjectState, Standalone};
+use std::collections::HashMap;
+use std::fmt::Write as _;
+use std::sync::{Mutex, PoisonError, Weak};
+
+use crate::sync::{FxChainKey, ProjectCell, ProjectState, Standalone};
 use daw_proto::{Marker, Position};
 
 /// A project's lines, by section.
@@ -25,23 +29,7 @@ pub struct Digest {
 /// project.
 #[must_use]
 pub fn digest(daw: &Standalone, project_guid: &str) -> Option<Digest> {
-    let (mut digest, fx_guids) = daw.read_project(project_guid, |p| {
-        let fx_guids: Vec<(String, Vec<(String, String, bool)>)> = p
-            .tracks
-            .iter()
-            .map(|t| {
-                let chain = p
-                    .fx_chains
-                    .get(&FxChainKey::Track(t.guid.clone()))
-                    .into_iter()
-                    .flatten()
-                    .map(|e| (e.fx.guid.clone(), e.fx.name.clone(), e.fx.enabled))
-                    .collect();
-                (t.guid.clone(), chain)
-            })
-            .collect();
-        (of_state(p), fx_guids)
-    })?;
+    let (mut digest, fx_guids) = daw.read_project(project_guid, |p| (of_state(p), fx_of(p)))?;
     // What each FX holds, read from the plugin itself — outside the
     // project's lock, as the plugins are.
     let fx = fx_guids
@@ -66,24 +54,132 @@ pub fn digest(daw: &Standalone, project_guid: &str) -> Option<Digest> {
     Some(digest)
 }
 
+/// Each track's FX, in order: guid, name, enabled.
+type TrackFx = Vec<(String, Vec<(String, String, bool)>)>;
+
+/// Each track's FX, as the `fx` section lists them.
+fn fx_of(p: &ProjectState) -> TrackFx {
+    p.tracks
+        .iter()
+        .map(|t| {
+            let chain = p
+                .fx_chains
+                .get(&FxChainKey::Track(t.guid.clone()))
+                .into_iter()
+                .flatten()
+                .map(|e| (e.fx.guid.clone(), e.fx.name.clone(), e.fx.enabled))
+                .collect();
+            (t.guid.clone(), chain)
+        })
+        .collect()
+}
+
 /// The digest as one number: two projects with the same fingerprint have
 /// the same digest (to a 64-bit hash). What "unsaved changes" compares —
 /// the song now against the song as it was opened or last saved — cheap
 /// to keep where a whole digest is not.
+///
+/// The project's own sections are hashed again only when its revision
+/// moved (every edit moves it); what each FX holds is read from the
+/// plugin every time, since a plugin's state changes without the
+/// project's. Hashed as it is written, never built as text: the same
+/// number as folding [`digest`]'s lines.
 #[must_use]
 pub fn fingerprint(daw: &Standalone, project_guid: &str) -> Option<u64> {
-    let digest = digest(daw, project_guid)?;
-    Some(
-        digest
+    let (hash, fx) = project_print(daw, project_guid)?;
+    let mut w = Fnv(line(hash, "fx"));
+    for (track, chain) in fx.iter() {
+        let _ = write!(w, "{track}: ");
+        for (i, (guid, name, enabled)) in chain.iter().enumerate() {
+            let state = daw.save_plugin_state(guid).unwrap_or_default();
+            let _ = write!(
+                w,
+                "{}{name}{} state={:016x}/{}",
+                if i == 0 { "" } else { ", " },
+                if *enabled { "" } else { " (off)" },
+                fnv1a(&state),
+                state.len()
+            );
+        }
+        w.0 ^= 0x0a;
+    }
+    Some(w.0)
+}
+
+/// The fold of one line into a fingerprint.
+fn line(h: u64, line: &str) -> u64 {
+    fnv1a_from(h, line.as_bytes()) ^ 0x0a
+}
+
+/// FNV-1a as a [`std::fmt::Write`]: a line hashed as it is formatted.
+struct Fnv(u64);
+
+impl std::fmt::Write for Fnv {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.0 = fnv1a_from(self.0, s.as_bytes());
+        Ok(())
+    }
+}
+
+/// A project's own sections, folded, and its FX, as of one revision of
+/// one project cell.
+struct ProjectPrint {
+    /// The cell it was read from: a project replaced under the same guid
+    /// is another cell (kept by a `Weak`, so its address is not reused
+    /// while this is kept).
+    cell: Weak<ProjectCell>,
+    revision: u64,
+    hash: u64,
+    fx: std::sync::Arc<TrackFx>,
+}
+
+/// The last [`ProjectPrint`] of each project, by guid.
+static PRINTS: Mutex<Option<HashMap<String, ProjectPrint>>> = Mutex::new(None);
+
+/// How many times a project's own sections were hashed (not kept): what
+/// the tests count.
+static PROJECT_HASHES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// `project_guid`'s own sections folded (everything but what its FX
+/// hold) and its FX: kept while its revision holds.
+fn project_print(daw: &Standalone, project_guid: &str) -> Option<(u64, std::sync::Arc<TrackFx>)> {
+    let cell = daw.cell(project_guid)?;
+    let revision = cell.revision();
+    {
+        let prints = PRINTS.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(kept) = prints.as_ref().and_then(|m| m.get(project_guid))
+            && kept.revision == revision
+            && std::ptr::eq(kept.cell.as_ptr(), std::sync::Arc::as_ptr(&cell))
+        {
+            return Some((kept.hash, std::sync::Arc::clone(&kept.fx)));
+        }
+    }
+    let (revision, hash, fx) = {
+        let slot = cell.read()?;
+        let p = &slot.project;
+        let digest = of_state(p);
+        let hash = digest
             .sections
             .iter()
-            .flat_map(|(name, lines)| {
-                std::iter::once(*name).chain(lines.iter().map(String::as_str))
-            })
-            .fold(0xcbf2_9ce4_8422_2325_u64, |h, line| {
-                fnv1a_from(h, line.as_bytes()) ^ 0x0a
-            }),
-    )
+            .fold(0xcbf2_9ce4_8422_2325_u64, |h, (name, lines)| {
+                lines.iter().fold(line(h, name), |h, l| line(h, l))
+            });
+        (p.revision, hash, std::sync::Arc::new(fx_of(p)))
+    };
+    PROJECT_HASHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut prints = PRINTS.lock().unwrap_or_else(PoisonError::into_inner);
+    let prints = prints.get_or_insert_with(HashMap::new);
+    prints.retain(|_, p| p.cell.strong_count() > 0);
+    prints.insert(
+        project_guid.to_owned(),
+        ProjectPrint {
+            cell: std::sync::Arc::downgrade(&cell),
+            revision,
+            hash,
+            fx: std::sync::Arc::clone(&fx),
+        },
+    );
+    Some((hash, fx))
 }
 
 /// What differs between `before` and `after`: per section that does, its
@@ -326,5 +422,155 @@ fn of_state(p: &ProjectState) -> Digest {
             ("regions", regions),
             ("tempo", tempo),
         ],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use daw_proto::ProjectInfo;
+
+    use super::*;
+
+    /// The fingerprint as [`digest`]'s lines fold to: what
+    /// [`fingerprint`] must equal.
+    fn folded(daw: &Standalone, guid: &str) -> u64 {
+        digest(daw, guid)
+            .expect("the project")
+            .sections
+            .iter()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |h, (name, lines)| {
+                lines.iter().fold(line(h, name), |h, l| line(h, l))
+            })
+    }
+
+    fn song(guid: &str, tracks: usize) -> Standalone {
+        let daw = Standalone::new();
+        daw.seed_project(ProjectInfo {
+            guid: guid.into(),
+            name: guid.into(),
+            path: String::new(),
+        });
+        daw.write_project(guid, |p| {
+            for i in 0..tracks {
+                p.tracks.push(daw_proto::Track {
+                    guid: format!("t{i}"),
+                    name: format!("Track {i}"),
+                    volume: 0.5,
+                    ..Default::default()
+                });
+                p.fx_chains.insert(
+                    FxChainKey::Track(format!("t{i}")),
+                    vec![crate::sync::FxEntry {
+                        fx: daw_proto::Fx {
+                            guid: format!("fx{i}"),
+                            name: format!("EQ {i}"),
+                            enabled: i % 2 == 0,
+                            ..Default::default()
+                        },
+                        state_chunk: String::new(),
+                        params: HashMap::new(),
+                        ranges: Vec::new(),
+                    }],
+                );
+            }
+        });
+        daw
+    }
+
+    #[test]
+    fn the_fingerprint_is_the_digest_folded_and_moves_with_an_edit() {
+        let daw = song("print-a", 12);
+        let before = fingerprint(&daw, "print-a").unwrap();
+        assert_eq!(before, folded(&daw, "print-a"));
+        daw.write_project("print-a", |p| p.tracks[3].volume = 0.25);
+        let after = fingerprint(&daw, "print-a").unwrap();
+        assert_ne!(after, before, "an edit moves it");
+        assert_eq!(after, folded(&daw, "print-a"));
+        // An FX switched off is in it too.
+        daw.write_project("print-a", |p| {
+            for e in p.fx_chains.values_mut().flatten() {
+                e.fx.enabled = !e.fx.enabled;
+            }
+        });
+        assert_eq!(
+            fingerprint(&daw, "print-a").unwrap(),
+            folded(&daw, "print-a")
+        );
+    }
+
+    #[test]
+    fn a_song_that_holds_still_is_not_hashed_again() {
+        let daw = song("print-b", 8);
+        let first = fingerprint(&daw, "print-b").unwrap();
+        let (_, kept) = project_print(&daw, "print-b").unwrap();
+        for _ in 0..5 {
+            assert_eq!(fingerprint(&daw, "print-b").unwrap(), first);
+            let (_, again) = project_print(&daw, "print-b").unwrap();
+            assert!(
+                std::sync::Arc::ptr_eq(&kept, &again),
+                "kept, not read again"
+            );
+        }
+        daw.write_project("print-b", |p| p.tracks[0].muted = true);
+        let (_, after) = project_print(&daw, "print-b").unwrap();
+        assert!(
+            !std::sync::Arc::ptr_eq(&kept, &after),
+            "read again after an edit"
+        );
+    }
+
+    #[test]
+    fn a_song_replaced_under_its_guid_is_hashed_afresh() {
+        let a = song("print-c", 4);
+        let print_a = fingerprint(&a, "print-c").unwrap();
+        // Another engine, the same guid and revision, other tracks.
+        let b = song("print-c", 5);
+        assert_eq!(
+            a.cell("print-c").unwrap().revision(),
+            b.cell("print-c").unwrap().revision()
+        );
+        let print_b = fingerprint(&b, "print-c").unwrap();
+        assert_ne!(print_a, print_b);
+        assert_eq!(print_b, folded(&b, "print-c"));
+        assert_eq!(fingerprint(&a, "print-c").unwrap(), folded(&a, "print-c"));
+    }
+
+    /// What a look costs on a song of 120 tracks with 40 items each,
+    /// while it holds still: hashed afresh every time (before) against
+    /// kept by revision (now). `--ignored --nocapture` to see it.
+    #[test]
+    #[ignore = "a measurement"]
+    fn what_a_look_costs() {
+        let daw = song("print-bench", 120);
+        for t in 0..120 {
+            for i in 0..40 {
+                let at = f64::from(i) * 2.0;
+                daw_proto::Midi::create_midi_item(
+                    &daw,
+                    daw_proto::ProjectContext::Project("print-bench".into()),
+                    daw_proto::TrackRef::Guid(format!("t{t}")),
+                    at,
+                    at + 1.5,
+                )
+                .expect("an item");
+            }
+        }
+        let n = 200;
+        let start = std::time::Instant::now();
+        for _ in 0..n {
+            std::hint::black_box(folded(&daw, "print-bench"));
+        }
+        let before = start.elapsed() / n;
+        assert_eq!(
+            fingerprint(&daw, "print-bench"),
+            Some(folded(&daw, "print-bench"))
+        );
+        let start = std::time::Instant::now();
+        for _ in 0..n {
+            std::hint::black_box(fingerprint(&daw, "print-bench"));
+        }
+        let after = start.elapsed() / n;
+        eprintln!("fingerprint of a still song: {before:?} before, {after:?} now");
+        assert!(after < before);
     }
 }
