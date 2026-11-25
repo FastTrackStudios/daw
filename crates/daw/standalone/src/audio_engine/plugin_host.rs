@@ -127,6 +127,9 @@ struct DawHostShared {
     /// `com.fasttrackstudio.host-actions/1` (signal#26). `None`: the
     /// extension isn't offered.
     actions: Option<Arc<dyn daw_clap_ext::host::HostActions>>,
+    /// The embedder's automation, offered as
+    /// `com.fasttrackstudio.host-automation/1`: the plugin's own lanes.
+    automation: Option<Arc<dyn daw_clap_ext::automation::HostAutomation>>,
     /// The plugin this host serves, once its instance is made: where a
     /// subscription's events go. Null while the plugin initializes, so a
     /// subscription asked for inside `init` is refused.
@@ -186,6 +189,58 @@ unsafe impl clack_host::extensions::ExtensionImplementation<DawHost> for HostAct
     const IMPLEMENTATION: clack_host::extensions::RawExtensionImplementation =
         clack_host::extensions::RawExtensionImplementation::new(
             &daw_clap_ext::host::HostActionsVtable::<DawActionsLookup>::VTABLE,
+        );
+}
+
+/// `com.fasttrackstudio.host-automation/1`, offered when the embedder gave
+/// this host automation ([`ClapHost::with_automation`]).
+#[derive(Copy, Clone)]
+struct HostAutomationExtension;
+
+// SAFETY: as `HostActionsExtension`.
+unsafe impl clack_host::extensions::Extension for HostAutomationExtension {
+    const IDENTIFIERS: &'static [&'static std::ffi::CStr] =
+        &[daw_clap_ext::sys::FTS_EXT_HOST_AUTOMATION];
+    type ExtensionSide = clack_host::extensions::HostExtensionSide;
+
+    unsafe fn from_raw(_raw: clack_host::extensions::RawExtension<Self::ExtensionSide>) -> Self {
+        Self
+    }
+}
+
+/// Finds the embedder's automation, and the plugin calling, from the raw
+/// host: a call made before the plugin finished `init` names no one and is
+/// refused.
+struct DawAutomationLookup;
+
+impl daw_clap_ext::automation::HostAutomationLookup for DawAutomationLookup {
+    unsafe fn lookup(
+        host: *const clap_sys::host::clap_host,
+    ) -> Option<(
+        Arc<dyn daw_clap_ext::automation::HostAutomation>,
+        daw_clap_ext::automation::Caller,
+    )> {
+        // SAFETY: the plugin's call, with the host clack created for it.
+        unsafe {
+            clack_host::extensions::wrapper::HostWrapper::<DawHost>::handle(host, |h| {
+                let shared = h.shared();
+                let plugin = shared.plugin.load(Ordering::Acquire);
+                Ok(shared
+                    .automation
+                    .clone()
+                    .filter(|_| !plugin.is_null())
+                    .map(|a| (a, daw_clap_ext::automation::Caller::of(plugin))))
+            })
+        }
+        .flatten()
+    }
+}
+
+// SAFETY: the implementation is the header's `fts_host_automation_t`.
+unsafe impl clack_host::extensions::ExtensionImplementation<DawHost> for HostAutomationExtension {
+    const IMPLEMENTATION: clack_host::extensions::RawExtensionImplementation =
+        clack_host::extensions::RawExtensionImplementation::new(
+            &daw_clap_ext::automation::HostAutomationVtable::<DawAutomationLookup>::VTABLE,
         );
 }
 
@@ -332,6 +387,9 @@ impl HostHandlers for DawHost {
         if shared.actions.is_some() {
             builder.register::<HostActionsExtension>();
         }
+        if shared.automation.is_some() {
+            builder.register::<HostAutomationExtension>();
+        }
     }
 }
 
@@ -347,6 +405,8 @@ pub struct ClapHost {
     version: String,
     /// Offered to every plugin this host loads, as `host-actions/1`.
     actions: Option<Arc<dyn daw_clap_ext::host::HostActions>>,
+    /// Offered to every plugin this host loads, as `host-automation/1`.
+    automation: Option<Arc<dyn daw_clap_ext::automation::HostAutomation>>,
 }
 
 impl Default for ClapHost {
@@ -357,6 +417,7 @@ impl Default for ClapHost {
             url: String::new(),
             version: env!("CARGO_PKG_VERSION").to_string(),
             actions: None,
+            automation: None,
         }
     }
 }
@@ -369,6 +430,7 @@ impl ClapHost {
             url: String::new(),
             version: env!("CARGO_PKG_VERSION").to_string(),
             actions: None,
+            automation: None,
         }
     }
 
@@ -377,6 +439,17 @@ impl ClapHost {
     #[must_use]
     pub fn with_actions(mut self, actions: Arc<dyn daw_clap_ext::host::HostActions>) -> Self {
         self.actions = Some(actions);
+        self
+    }
+
+    /// Offer `automation` to the plugins this host loads, as
+    /// `com.fasttrackstudio.host-automation/1`: each plugin's own lanes.
+    #[must_use]
+    pub fn with_automation(
+        mut self,
+        automation: Arc<dyn daw_clap_ext::automation::HostAutomation>,
+    ) -> Self {
+        self.automation = Some(automation);
         self
     }
 
@@ -505,6 +578,7 @@ impl ClapHost {
             restart: restart.clone(),
             notices: notices.clone(),
             actions: self.actions.clone(),
+            automation: self.automation.clone(),
             plugin: Arc::default(),
         };
         let plugin_slot = shared.plugin.clone();

@@ -3,10 +3,12 @@ name = "daw-clap-ext"
 version = "0.1.0"
 edition = "2024"
 license.workspace = true
-description = "FastTrackStudio's CLAP extensions (host-actions/1, host-events/1, signal/1): the C header and both sides in Rust"
+description = "FastTrackStudio's CLAP extensions (host-actions/1, host-events/1, signal/1, host-automation/1): the C header and both sides in Rust"
 
 [lints]
 workspace = true
 
 [dependencies]
 clap-sys = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

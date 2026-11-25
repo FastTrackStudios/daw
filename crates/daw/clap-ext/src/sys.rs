@@ -13,6 +13,47 @@ use clap_sys::string_sizes::CLAP_NAME_SIZE;
 pub const FTS_EXT_HOST_ACTIONS: &CStr = c"com.fasttrackstudio.host-actions/1";
 pub const FTS_EXT_HOST_EVENTS: &CStr = c"com.fasttrackstudio.host-events/1";
 pub const FTS_EXT_SIGNAL: &CStr = c"com.fasttrackstudio.signal/1";
+pub const FTS_EXT_HOST_AUTOMATION: &CStr = c"com.fasttrackstudio.host-automation/1";
+/// The `host-events/1` topic a user's edit of the plugin's lanes arrives on.
+pub const FTS_AUTOMATION_TOPIC: &str = "automation";
+
+pub const FTS_AUTOMATION_CREATE_LANE: u32 = 1 << 0;
+pub const FTS_AUTOMATION_SHOW_LANE: u32 = 1 << 1;
+pub const FTS_AUTOMATION_KEEP_USER_EDITS: u32 = 1 << 2;
+
+/// `fts_host_automation_t`: the host's side, which the plugin calls.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct fts_host_automation {
+    pub lanes:
+        Option<unsafe extern "C" fn(host: *const clap_host, out_json: *const clap_ostream) -> bool>,
+    pub read: Option<
+        unsafe extern "C" fn(
+            host: *const clap_host,
+            param_id: clap_id,
+            from: f64,
+            to: f64,
+            out_json: *const clap_ostream,
+        ) -> bool,
+    >,
+    pub write: Option<
+        unsafe extern "C" fn(
+            host: *const clap_host,
+            param_id: clap_id,
+            from: f64,
+            to: f64,
+            points_json: *const c_char,
+            flags: u32,
+            out_json: *const clap_ostream,
+        ) -> bool,
+    >,
+    pub clear: Option<
+        unsafe extern "C" fn(host: *const clap_host, param_id: clap_id, from: f64, to: f64) -> bool,
+    >,
+    pub begin_edit:
+        Option<unsafe extern "C" fn(host: *const clap_host, label: *const c_char) -> bool>,
+    pub end_edit: Option<unsafe extern "C" fn(host: *const clap_host) -> bool>,
+}
 
 /// `fts_host_actions_t`: the host's side, which the plugin calls.
 #[repr(C)]

@@ -1388,6 +1388,8 @@ name = "daw-clap-ext"
 version = "0.1.0"
 dependencies = [
  "clap-sys",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
