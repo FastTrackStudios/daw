@@ -254,7 +254,8 @@ fn now() -> i64 {
 }
 
 fn import(doc: &loro::LoroDoc, packed: &[u8]) -> StoreResult<()> {
-    let bytes = zstd::decode_all(packed)?;
+    let bytes = tracing::info_span!("store.unpack", store.packed_bytes = packed.len())
+        .in_scope(|| zstd::decode_all(packed))?;
     doc.import(&bytes)
         .map_err(|e| StoreError::Loro(e.to_string()))?;
     Ok(())
@@ -268,6 +269,7 @@ impl Store {
     /// The file would not open, or it is a schema this build does not
     /// read.
     pub fn open(path: &std::path::Path) -> StoreResult<Self> {
+        let _span = tracing::info_span!("store.open").entered();
         run(async {
             // Several processes at once — the app saving it, a script or
             // another tool reading it — through a shared write-ahead log.
@@ -746,6 +748,11 @@ impl Store {
                 None => Err(StoreError::NoBranch(branch.to_owned())),
             }
         })?;
+        let read = tracing::info_span!(
+            "store.read_snapshot",
+            store.packed_bytes = tracing::field::Empty
+        )
+        .entered();
         let snapshot: Option<(i64, Vec<u8>)> = run(async {
             let mut rows = self
                 .conn
@@ -759,9 +766,15 @@ impl Store {
                 None => None,
             })
         })?;
+        read.record(
+            "store.packed_bytes",
+            snapshot.as_ref().map_or(0, |(_, data)| data.len()),
+        );
+        drop(read);
         let (doc, upto) = match (snapshot, parent, base) {
             (Some((upto, packed)), _, _) => {
                 let doc = loro::LoroDoc::new();
+                let _span = tracing::info_span!("store.import_snapshot").entered();
                 import(&doc, &packed)?;
                 (doc, upto)
             }
