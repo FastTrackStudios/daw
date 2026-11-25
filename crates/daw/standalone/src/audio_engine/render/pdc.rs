@@ -182,13 +182,16 @@ impl Delay {
             out[..len].fill(0.0);
             return;
         }
-        for f in 0..frames {
+        // Out comes what went in `delay` frames ago, in comes `src`: a run
+        // of frames at a time up to the ring's end.
+        let mut done = 0;
+        while done < len {
             let at = self.pos * 2;
-            out[f * 2] = self.buf[at];
-            out[f * 2 + 1] = self.buf[at + 1];
-            self.buf[at] = src[f * 2];
-            self.buf[at + 1] = src[f * 2 + 1];
-            self.pos += 1;
+            let run = (delay * 2 - at).min(len - done);
+            out[done..done + run].copy_from_slice(&self.buf[at..at + run]);
+            self.buf[at..at + run].copy_from_slice(&src[done..done + run]);
+            done += run;
+            self.pos += run / 2;
             if self.pos == delay {
                 self.pos = 0;
             }
@@ -217,6 +220,33 @@ mod tests {
         // Frame 6 overall = frame 2 of the second block.
         assert_eq!(&out[4..6], &[1.0, -1.0]);
         assert_eq!(out.iter().filter(|s| **s != 0.0).count(), 2);
+    }
+
+    #[test]
+    fn a_delay_line_is_a_delay_whatever_its_length_against_the_block() {
+        for delay in [1, 3, 4, 5, 64, 100] {
+            let mut d = Delay::default();
+            let mut out = vec![0.0; 8];
+            let mut heard = Vec::new();
+            let signal: Vec<f32> = (1..=48).map(|i| i as f32).collect();
+            for block in 0..12 {
+                let src: Vec<f32> = signal
+                    .chunks(2)
+                    .cycle()
+                    .skip(block * 4)
+                    .take(4)
+                    .flatten()
+                    .copied()
+                    .collect();
+                d.run(delay, &src, &mut out, 4);
+                heard.extend(out.chunks(2).map(|f| f[0]));
+            }
+            let sent: Vec<f32> = signal.chunks(2).cycle().take(48).map(|f| f[0]).collect();
+            for (f, h) in heard.iter().enumerate() {
+                let want = f.checked_sub(delay).map_or(0.0, |s| sent[s]);
+                assert_eq!(*h, want, "delay {delay}, frame {f}");
+            }
+        }
     }
 
     #[test]
