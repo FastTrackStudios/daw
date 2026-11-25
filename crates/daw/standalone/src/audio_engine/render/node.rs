@@ -145,6 +145,14 @@ pub(super) struct Block<'a> {
     pub(super) asked: &'a [offline::ProbeAt],
     pub(super) probe_tracks: &'a [Option<usize>],
     pub(super) probes: Cells<Vec<f32>>,
+    /// Each track's probes: `probe_list[probe_start[t]..probe_start[t + 1]]`.
+    pub(super) probe_start: &'a [u32],
+    pub(super) probe_list: &'a [u32],
+    /// Recording ([`offline::Record`]): each probe's span buffer, and where
+    /// this block lands in it (sample index, samples of the
+    /// block skipped, samples recorded).
+    pub(super) recordings: Cells<std::sync::Arc<[f32]>>,
+    pub(super) record_at: Option<(usize, usize, usize)>,
     #[cfg(any(feature = "decode", feature = "audio"))]
     pub(super) live_taps: &'a super::live_tap::LiveTaps,
     #[cfg(any(feature = "decode", feature = "audio"))]
@@ -206,10 +214,30 @@ impl Block<'_> {
 
     /// Copy `bus` into every probe (and live tap) on track `ti` at `at`.
     fn probe(&self, ti: usize, at: offline::Probe, bus: &[f32]) {
-        for (k, (p, track)) in self.asked.iter().zip(self.probe_tracks).enumerate() {
-            if *track == Some(ti) && p.at == at && k < self.probes.len() {
+        let mine = match (self.probe_start.get(ti), self.probe_start.get(ti + 1)) {
+            (Some(&a), Some(&b)) => &self.probe_list[a as usize..b as usize],
+            _ => &[],
+        };
+        for &k in mine {
+            let k = k as usize;
+            if self.asked[k].at != at {
+                continue;
+            }
+            if let Some((start, skip, len)) = self.record_at {
+                if k >= self.recordings.len() {
+                    continue;
+                }
                 // SAFETY: a probe reads one track, and only that track's
                 // node writes it.
+                let rec = unsafe { self.recordings.at(k) };
+                let Some(dst) = std::sync::Arc::get_mut(rec) else {
+                    continue;
+                };
+                let skip = skip.min(bus.len());
+                let n = len.min(bus.len() - skip);
+                dst[start..start + n].copy_from_slice(&bus[skip..skip + n]);
+            } else if k < self.probes.len() {
+                // SAFETY: as above.
                 let dst = unsafe { self.probes.at(k) };
                 let n = dst.len().min(bus.len());
                 dst[..n].copy_from_slice(&bus[..n]);

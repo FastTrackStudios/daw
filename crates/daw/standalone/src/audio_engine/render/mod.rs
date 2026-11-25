@@ -406,6 +406,13 @@ struct RenderScratch {
     /// signal this block, and the track index each reads this block.
     probes: Vec<Vec<f32>>,
     probe_tracks: Vec<Option<usize>>,
+    /// Each track's probes (indices into `probes`):
+    /// `probe_list[probe_start[t]..probe_start[t + 1]]`.
+    probe_start: Vec<u32>,
+    probe_list: Vec<u32>,
+    probe_fill: Vec<u32>,
+    /// An offline render's recordings ([`offline::Record`]), one per probe.
+    recordings: Vec<Arc<[f32]>>,
 }
 
 impl RenderScratch {
@@ -1570,10 +1577,19 @@ impl ProjectRenderer {
                 .offline
                 .as_ref()
                 .map_or(&[][..], |o| o.probes.as_slice());
-            s.probes.resize_with(asked.len(), Vec::new);
-            for probe in &mut s.probes {
-                probe.clear();
-                probe.resize(frames * 2, 0.0);
+            let record = self.offline.as_ref().and_then(|o| o.record);
+            if let Some(r) = record {
+                // Recorded straight into the span's buffers: no block's.
+                if s.recordings.len() != asked.len() {
+                    s.recordings = asked.iter().map(|_| offline::zeroed(r)).collect();
+                }
+                s.probes.clear();
+            } else {
+                s.probes.resize_with(asked.len(), Vec::new);
+                for probe in &mut s.probes {
+                    probe.clear();
+                    probe.resize(frames * 2, 0.0);
+                }
             }
             s.probe_tracks.clear();
             s.probe_tracks.extend(
@@ -1581,6 +1597,25 @@ impl ProjectRenderer {
                     .iter()
                     .map(|p| tracks.iter().position(|t| t.guid == p.track)),
             );
+            // Each track's probes, so a node visits only its own.
+            s.probe_start.clear();
+            s.probe_start.resize(n + 1, 0);
+            for &t in s.probe_tracks.iter().flatten() {
+                s.probe_start[t + 1] += 1;
+            }
+            for t in 0..n {
+                s.probe_start[t + 1] += s.probe_start[t];
+            }
+            s.probe_list.clear();
+            s.probe_list.resize(s.probe_start[n] as usize, 0);
+            s.probe_fill.clear();
+            s.probe_fill.extend_from_slice(&s.probe_start[..n]);
+            for (k, t) in s.probe_tracks.iter().enumerate() {
+                if let Some(t) = *t {
+                    s.probe_list[s.probe_fill[t] as usize] = k as u32;
+                    s.probe_fill[t] += 1;
+                }
+            }
         }
         // The meter bank. In realtime mode, re-read only when its lock is
         // free (its readers are UI polls) — the cached one otherwise.
@@ -1626,8 +1661,28 @@ impl ProjectRenderer {
             taps,
             probes,
             probe_tracks,
+            probe_start,
+            probe_list,
+            recordings,
             ..
         } = &mut *scratch;
+        // Where this block lands in the recordings: (sample index there,
+        // samples of the block skipped, samples recorded), interleaved.
+        let record_at: Option<(usize, usize, usize)> =
+            self.offline.as_ref().and_then(|o| o.record).map(|r| {
+                let at = start_samples.max(0.0) as u64;
+                let end = (at + frames as u64).min(r.start + r.frames);
+                let first = at.max(r.start);
+                if end <= first {
+                    (0, 0, 0)
+                } else {
+                    (
+                        ((first - r.start) * 2) as usize,
+                        ((first - at) * 2) as usize,
+                        ((end - first) * 2) as usize,
+                    )
+                }
+            });
         let asked = self
             .offline
             .as_ref()
@@ -1827,12 +1882,20 @@ impl ProjectRenderer {
         // buses hold (their media is another render's).
         if probing {
             for ti in (0..n).filter(|&ti| schedule.pos[ti] == schedule::NOT_A_NODE) {
-                for ((p, track), dst) in
-                    asked.iter().zip(probe_tracks.iter()).zip(probes.iter_mut())
-                {
-                    if *track == Some(ti) && p.at == offline::Probe::Input {
-                        let k = dst.len().min(buses[ti].samples.len());
-                        dst[..k].copy_from_slice(&buses[ti].samples[..k]);
+                for (k, (p, track)) in asked.iter().zip(probe_tracks.iter()).enumerate() {
+                    if *track != Some(ti) || p.at != offline::Probe::Input {
+                        continue;
+                    }
+                    let src = &buses[ti].samples;
+                    if let Some((at, skip, len)) = record_at {
+                        if let Some(dst) = recordings.get_mut(k).and_then(Arc::get_mut) {
+                            let skip = skip.min(src.len());
+                            let m = len.min(src.len() - skip);
+                            dst[at..at + m].copy_from_slice(&src[skip..skip + m]);
+                        }
+                    } else if let Some(dst) = probes.get_mut(k) {
+                        let m = dst.len().min(src.len());
+                        dst[..m].copy_from_slice(&src[..m]);
                     }
                 }
                 #[cfg(any(feature = "decode", feature = "audio"))]
@@ -1875,6 +1938,10 @@ impl ProjectRenderer {
             asked,
             probe_tracks,
             probes: schedule::Cells::new(probes),
+            probe_start,
+            probe_list,
+            recordings: schedule::Cells::new(recordings),
+            record_at,
             #[cfg(any(feature = "decode", feature = "audio"))]
             live_taps,
             #[cfg(any(feature = "decode", feature = "audio"))]
@@ -2717,6 +2784,66 @@ pub(crate) mod folder_routing_tests {
         );
         assert!(other < 1e-9, "a track not rendered is silent: {read:?}");
         assert!(rms(&master.samples) > 0.0);
+    }
+
+    // A probe recorded over a span ([`offline::Record`]) is the same signal
+    // its blocks hand over one by one, sample for sample — the span's
+    // frames only, its first and last blocks cut where the span is.
+    #[test]
+    fn a_recorded_probe_is_its_blocks_joined() {
+        use offline::{Offline, Probe, ProbeAt, Record};
+        let (daw, guid) = seeded();
+        let kick = guid_of(&daw, &guid, "Kick");
+        let drums = guid_of(&daw, &guid, "Drums");
+        let probes = vec![
+            ProbeAt {
+                track: kick.clone(),
+                at: Probe::Input,
+            },
+            ProbeAt {
+                track: kick,
+                at: Probe::PostFader,
+            },
+            ProbeAt {
+                track: drums,
+                at: Probe::PreFx,
+            },
+        ];
+        let make = || {
+            ProjectRenderer::offline(
+                &daw,
+                &guid,
+                48_000,
+                Offline {
+                    probes: probes.clone(),
+                    ..Offline::default()
+                },
+            )
+        };
+        let blocks = make();
+        let mut joined: Vec<Vec<f32>> = vec![Vec::new(); probes.len()];
+        for b in 0..6u64 {
+            blocks.render_block(b * 512, 512);
+            blocks.with_probes(|p| {
+                for (j, s) in joined.iter_mut().zip(p) {
+                    j.extend_from_slice(s);
+                }
+            });
+        }
+        let mut recorded = make();
+        recorded.record(Record {
+            start: 300,
+            frames: 2_000,
+        });
+        for b in 0..6u64 {
+            recorded.render_block(b * 512, 512);
+        }
+        let got = recorded.take_recordings();
+        assert_eq!(got.len(), probes.len());
+        for (j, r) in joined.iter().zip(&got) {
+            assert!(j.iter().any(|s| s.abs() > 0.0));
+            assert_eq!(&j[600..4_600], &r[..], "a recording is its blocks");
+        }
     }
 
     // An offline render is of the song as it was when it began: an edit

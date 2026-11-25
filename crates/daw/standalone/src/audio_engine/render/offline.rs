@@ -112,6 +112,20 @@ pub struct Offline {
     /// Tracks (by guid) whose output an earlier render recorded, played in
     /// their place ([`Fed`]). What feeds only them need not be rendered.
     pub fed: HashMap<String, Fed>,
+    /// Record every probe over a whole span ([`Record`]) instead of handing
+    /// it over block by block ([`ProjectRenderer::with_probes`]).
+    pub record: Option<Record>,
+}
+
+/// Every probe recorded over render frames `start..start + frames`, written
+/// by its track's node straight into one buffer sized for the span (on the
+/// thread that rendered the track, never copied block by block), taken
+/// with [`ProjectRenderer::take_recordings`]. A frame outside the span is
+/// not recorded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Record {
+    pub start: u64,
+    pub frames: u64,
 }
 
 impl Offline {
@@ -423,10 +437,44 @@ impl ProjectRenderer {
         f(&scratch.probes)
     }
 
+    /// Record every probe over `record` from the next block on
+    /// ([`Offline::record`]): known once [`prime`](Self::prime) has said
+    /// how late the probes are. An online render ignores it.
+    pub fn record(&mut self, record: Record) {
+        if let Some(o) = self.offline.as_mut() {
+            o.record = Some(record);
+        }
+    }
+
+    /// Each probe's recording ([`Offline::record`]), in the order the probes
+    /// were asked for: interleaved stereo over the recorded span, silence
+    /// where nothing was rendered. Taken: a second call has none.
+    pub fn take_recordings(&self) -> Vec<Arc<[f32]>> {
+        let mut scratch = self
+            .scratch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let (Some(o), true) = (self.offline.as_ref(), scratch.recordings.is_empty()) {
+            if let Some(r) = o.record {
+                return o.probes.iter().map(|_| zeroed(r)).collect();
+            }
+        }
+        std::mem::take(&mut scratch.recordings)
+    }
+
     /// The tracks this render sees, by index: their guids.
     pub fn track_guids(&self) -> Vec<String> {
         self.snapshot()
             .map(|s: Arc<RenderSnapshot>| s.tracks.iter().map(|t| t.guid.clone()).collect())
             .unwrap_or_default()
     }
+}
+
+/// A recording's buffer for `r`, zeroed (its pages are only touched when a
+/// node writes them, on that node's thread).
+#[allow(unsafe_code)]
+pub(super) fn zeroed(r: Record) -> Arc<[f32]> {
+    let len = usize::try_from(r.frames * 2).unwrap_or(0);
+    // SAFETY: zeroed memory is a valid f32 (0.0).
+    unsafe { Arc::<[f32]>::new_zeroed_slice(len).assume_init() }
 }
