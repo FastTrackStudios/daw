@@ -344,6 +344,14 @@ const WANTED_WORDS: usize = 8;
 /// Chunk slots, matching the reach of the `wanted` bitmask.
 const MAX_CHUNKS: usize = WANTED_WORDS * 64;
 
+/// The chunk slots a sample of `num_frames` needs: one per chunk of it,
+/// at least one, at most [`MAX_CHUNKS`].
+fn chunk_slots(num_frames: usize) -> usize {
+    num_frames
+        .div_ceil(CHUNK_FRAMES as usize)
+        .clamp(1, MAX_CHUNKS)
+}
+
 /// A sample that lives compressed in a pack and is decoded a chunk at a time.
 pub struct StreamedSample {
     /// The pack bytes and this entry's byte range within them.
@@ -396,6 +404,22 @@ pub struct StreamedSample {
 pub struct LoopPin {
     sample: Arc<StreamedSample>,
     chunks: Vec<u32>,
+}
+
+/// An empty slot is forgotten, not dropped: it owns nothing, and once the
+/// sample's last `Arc` is gone no reader can hold a debt on it — while
+/// arc-swap's drop walks the whole process's debt list for every slot,
+/// full or empty. With a kit's thousands of samples dropped on a preset
+/// load that walk was a third of a song's opening (perf, Unbreakable).
+impl Drop for StreamedSample {
+    fn drop(&mut self) {
+        let slots = std::mem::take(&mut self.chunks);
+        for slot in slots.into_vec() {
+            if slot.load().is_none() {
+                std::mem::forget(slot);
+            }
+        }
+    }
 }
 
 impl Drop for LoopPin {
@@ -460,7 +484,10 @@ impl StreamedSample {
             channels,
             sample_rate,
             num_frames,
-            chunks: (0..MAX_CHUNKS)
+            // A slot for each chunk the sample has, not MAX_CHUNKS: a drum
+            // hit is a few chunks long, and every slot costs a walk of
+            // arc-swap's process-wide debt list when the sample drops.
+            chunks: (0..chunk_slots(num_frames))
                 .map(|_| ArcSwapOption::empty())
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
@@ -1154,5 +1181,19 @@ impl Streamer {
 fn return_never() -> ! {
     loop {
         std::thread::park();
+    }
+}
+
+#[cfg(test)]
+mod slot_tests {
+    use super::*;
+
+    #[test]
+    fn a_sample_has_a_slot_per_chunk_of_it() {
+        assert_eq!(chunk_slots(0), 1);
+        assert_eq!(chunk_slots(1), 1);
+        assert_eq!(chunk_slots(CHUNK_FRAMES as usize), 1);
+        assert_eq!(chunk_slots(CHUNK_FRAMES as usize + 1), 2);
+        assert_eq!(chunk_slots(usize::MAX / 2), MAX_CHUNKS);
     }
 }
