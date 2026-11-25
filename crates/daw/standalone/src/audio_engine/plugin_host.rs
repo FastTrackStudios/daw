@@ -2110,6 +2110,18 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
     fn text_to_value(&mut self, id: u32, t: &str) -> Option<f64> {
         LoadedClapPlugin::text_to_value(self, id, t)
     }
+    /// A CLAP instance runs on any render thread, beside other tracks'
+    /// plugins: CLAP lets a host call different instances' `process` at
+    /// the same time (one instance only ever from one thread at a time,
+    /// which its cell's lock holds to). `FTS_RENDER_CLAP_SERIAL=1` keeps
+    /// every CLAP on the render thread, in the processing order — for a
+    /// plugin whose instances share a block's state with each other.
+    fn parallel_safe(&self) -> bool {
+        static SERIAL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        !*SERIAL.get_or_init(|| {
+            std::env::var("FTS_RENDER_CLAP_SERIAL").is_ok_and(|v| v.trim() != "0" && !v.is_empty())
+        })
+    }
     fn latency(&mut self) -> u32 {
         LoadedClapPlugin::latency(self)
     }
