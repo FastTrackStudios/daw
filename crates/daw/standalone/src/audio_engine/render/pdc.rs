@@ -17,7 +17,10 @@
 //!
 //! The plan uses the latencies measured by the block before — a latency
 //! that changes (a state loaded, a plugin switched on) is followed a block
-//! later. Delay lines allocate only when an edge's delay changes.
+//! later. Delay lines allocate only when an edge's delay changes, and
+//! change the way Ardour's do (`DelayLine::run`): longer, what is in the
+//! line plays out, its end faded, then silence and the input faded in;
+//! shorter, the old line crossfades into the new — never a cut.
 
 use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 
@@ -141,6 +144,9 @@ pub(crate) fn plan(
     }
 }
 
+/// How long a delay that changes fades, frames (Ardour's `FADE_LEN`).
+const FADE: usize = 128;
+
 /// A stereo delay line (interleaved), as long as its edge's delay.
 #[derive(Default)]
 pub(crate) struct Delay {
@@ -157,25 +163,25 @@ impl Delay {
         self.hot > 0
     }
 
+    /// Whether it must run even at no delay: it holds a line (the delay it
+    /// last ran at), to fade out of when the delay goes.
+    pub(crate) fn engaged(&self) -> bool {
+        self.hot > 0 || !self.buf.is_empty()
+    }
+
     /// `src`'s first `frames` frames, `delay` frames late, into `out`.
-    /// A delay that changed starts empty (it allocates then, and only
-    /// then).
+    /// A delay that changed fades from the old line to the new
+    /// ([`change`](Self::change)); it allocates then, and only then.
     pub(crate) fn run(&mut self, delay: usize, src: &[f32], out: &mut [f32], frames: usize) {
         let len = frames * 2;
-        if delay == 0 {
-            out[..len].copy_from_slice(&src[..len]);
-            if !self.buf.is_empty() {
-                self.buf.clear();
-                self.pos = 0;
-                self.hot = 0;
-            }
+        let was = self.buf.len() / 2;
+        if delay != was {
+            self.change(was, delay, src, out, frames);
             return;
         }
-        if self.buf.len() != delay * 2 {
-            self.buf.clear();
-            self.buf.resize(delay * 2, 0.0);
-            self.pos = 0;
-            self.hot = 0;
+        if delay == 0 {
+            out[..len].copy_from_slice(&src[..len]);
+            return;
         }
         let silent = src[..len].iter().all(|s| *s == 0.0);
         if silent && self.hot == 0 {
@@ -202,15 +208,99 @@ impl Delay {
             delay
         };
     }
+
+    /// The block the delay changes in, from `was` frames to `delay`.
+    /// Longer: what is in the line plays out (with the input's first
+    /// frames, if the line is shorter than a fade), its end faded out,
+    /// then silence, then the input faded in. Shorter: the old line
+    /// crossfades into the new over the block's first frames, the frames
+    /// between them never heard.
+    fn change(&mut self, was: usize, delay: usize, src: &[f32], out: &mut [f32], frames: usize) {
+        let fade = FADE.min(frames);
+        // The old line, oldest frame first.
+        let mut line = Vec::with_capacity(delay.max(was) * 2);
+        line.extend_from_slice(&self.buf[self.pos * 2..]);
+        line.extend_from_slice(&self.buf[..self.pos * 2]);
+        let ramp = |k: usize, of: usize| (k + 1) as f32 / (of + 1) as f32;
+        if delay > was {
+            let add = fade.saturating_sub(was).min(delay - was);
+            line.extend_from_slice(&src[..add * 2]);
+            let n = line.len() / 2;
+            let out_len = n.min(fade);
+            for k in 0..out_len {
+                let g = 1.0 - ramp(k, out_len);
+                let f = n - out_len + k;
+                line[f * 2] *= g;
+                line[f * 2 + 1] *= g;
+            }
+            line.resize(delay * 2, 0.0);
+            self.buf = line;
+            self.pos = 0;
+            for f in 0..frames {
+                let g = if f < fade { ramp(f, fade) } else { 1.0 };
+                let at = self.pos * 2;
+                out[f * 2] = self.buf[at];
+                out[f * 2 + 1] = self.buf[at + 1];
+                self.buf[at] = src[f * 2] * g;
+                self.buf[at + 1] = src[f * 2 + 1] * g;
+                self.pos = (self.pos + 1) % delay;
+            }
+            self.hot = delay;
+            return;
+        }
+        // Shorter: what the old line would have played over the fade.
+        let mut from = [0.0_f32; FADE * 2];
+        for f in 0..fade {
+            let (l, r) = if f < was {
+                (line[f * 2], line[f * 2 + 1])
+            } else {
+                (src[(f - was) * 2], src[(f - was) * 2 + 1])
+            };
+            from[f * 2] = l;
+            from[f * 2 + 1] = r;
+        }
+        if delay == 0 {
+            out[..frames * 2].copy_from_slice(&src[..frames * 2]);
+            self.buf = Vec::new();
+            self.pos = 0;
+            self.hot = 0;
+        } else {
+            // The new line: the old one's newest `delay` frames.
+            self.buf = line.split_off((was - delay) * 2);
+            self.pos = 0;
+            for f in 0..frames {
+                let at = self.pos * 2;
+                out[f * 2] = self.buf[at];
+                out[f * 2 + 1] = self.buf[at + 1];
+                self.buf[at] = src[f * 2];
+                self.buf[at + 1] = src[f * 2 + 1];
+                self.pos = (self.pos + 1) % delay;
+            }
+            self.hot = delay;
+        }
+        for f in 0..fade {
+            let g = ramp(f, fade);
+            out[f * 2] = (1.0 - g) * from[f * 2] + g * out[f * 2];
+            out[f * 2 + 1] = (1.0 - g) * from[f * 2 + 1] + g * out[f * 2 + 1];
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// A line already at `delay` (run once on silence): a line's first run
+    /// is a change from none.
+    fn line(delay: usize) -> Delay {
+        let mut d = Delay::default();
+        d.run(delay, &[0.0; 8], &mut [0.0; 8], 4);
+        d
+    }
+
     #[test]
     fn a_delay_line_delays_by_its_length_across_blocks() {
-        let mut d = Delay::default();
+        let mut d = line(6);
         let mut out = vec![0.0; 8];
         let impulse = [1.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         d.run(6, &impulse, &mut out, 4);
@@ -225,7 +315,7 @@ mod tests {
     #[test]
     fn a_delay_line_is_a_delay_whatever_its_length_against_the_block() {
         for delay in [1, 3, 4, 5, 64, 100] {
-            let mut d = Delay::default();
+            let mut d = line(delay);
             let mut out = vec![0.0; 8];
             let mut heard = Vec::new();
             let signal: Vec<f32> = (1..=48).map(|i| i as f32).collect();

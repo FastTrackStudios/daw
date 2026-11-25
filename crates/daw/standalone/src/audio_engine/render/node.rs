@@ -889,7 +889,7 @@ impl Block<'_> {
             };
             // Late enough to meet the rest of what its destination sums.
             let send_src: &[f32] = match delays.get_mut(si + 1) {
-                Some(line) if delay > 0 || line.hot() => {
+                Some(line) if delay > 0 || line.engaged() => {
                     line.run(delay, send_src, &mut w.delayed, frames);
                     &w.delayed[..frames * 2]
                 }
@@ -954,7 +954,7 @@ impl Block<'_> {
             )
         };
         match line {
-            Some(line) if delay > 0 || line.hot() => line.run(delay, &w.src, out, frames),
+            Some(line) if delay > 0 || line.engaged() => line.run(delay, &w.src, out, frames),
             _ => out.copy_from_slice(&w.src[..frames * 2]),
         }
         edges.share = if mode == graph::Pass::Monitor {

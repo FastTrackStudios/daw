@@ -354,9 +354,11 @@ fn a_render_on_many_threads_is_the_render_on_one_sample_for_sample() {
 }
 
 /// What this song rendered to before the scheduler (one thread, the topo
-/// loop): the scheduler's renders must be these very samples.
-const BEFORE_MASTER: u64 = 18_059_329_272_176_305_637;
-const BEFORE_TAPS: u64 = 13_429_851_952_951_349_753;
+/// loop): the scheduler's renders must be these very samples. (Taken again
+/// when delay lines came to fade as their delay changes: this song's
+/// latencies are learnt in its first block.)
+const BEFORE_MASTER: u64 = 4_633_907_255_700_715_687;
+const BEFORE_TAPS: u64 = 17_720_041_530_141_603_407;
 
 #[test]
 fn the_scheduler_renders_what_the_topo_loop_rendered() {
