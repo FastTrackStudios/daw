@@ -332,6 +332,20 @@ pub trait PluginInstance: Send {
         Err(PluginError::UnsupportedFormat(self.descriptor().format))
     }
 
+    /// What the plugin said of its last block (CLAP's process status):
+    /// whether the renderer may stop calling it while it hears silence
+    /// ([`crate::plugin_sleep`]). `Continue` (the default) is never put to
+    /// sleep.
+    fn process_status(&self) -> crate::plugin_sleep::ProcessStatus {
+        crate::plugin_sleep::ProcessStatus::Continue
+    }
+
+    /// Its tail now (`clap_plugin_tail`), asked from the audio thread after
+    /// a block that said [`ProcessStatus::Tail`](crate::plugin_sleep::ProcessStatus::Tail).
+    fn tail(&mut self) -> crate::plugin_sleep::Tail {
+        crate::plugin_sleep::Tail::Infinite
+    }
+
     /// The plugin's `com.fasttrackstudio.signal/1`, if it has it.
     #[cfg(feature = "clap-host")]
     fn signal(&self) -> Option<daw_clap_ext::host::SignalPluginClient> {
@@ -846,6 +860,9 @@ pub struct PluginNotices {
     /// Bumped whenever the plugin says its state changed: what a saved
     /// copy of its state is checked against.
     pub(crate) state: std::sync::atomic::AtomicU64,
+    /// Bumped on every `request_process`: an asleep plugin asking to be
+    /// called again ([`crate::plugin_sleep`]).
+    pub(crate) wake: std::sync::atomic::AtomicU64,
 }
 
 impl PluginNotices {
@@ -866,6 +883,12 @@ impl PluginNotices {
     #[must_use]
     pub fn state(&self) -> u64 {
         self.state.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Moves on every `request_process` the plugin made.
+    #[must_use]
+    pub fn wake(&self) -> u64 {
+        self.wake.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// The plugin's state changed (it said so, or sent a value of its own).
@@ -902,6 +925,8 @@ pub struct PluginCell {
     touched: std::sync::atomic::AtomicU64,
     /// Its editor is open: edits there may reach its state unseen.
     gui_open: std::sync::atomic::AtomicBool,
+    /// Whether the renderer calls it ([`crate::plugin_sleep`]).
+    sleep: crate::plugin_sleep::SleepState,
 }
 
 /// What says whether a plugin's state may have changed: two keys equal
@@ -944,6 +969,7 @@ impl PluginCell {
             signal,
             touched: std::sync::atomic::AtomicU64::new(0),
             gui_open: std::sync::atomic::AtomicBool::new(false),
+            sleep: crate::plugin_sleep::SleepState::default(),
         };
         drop(cell.lock_reading());
         cell
@@ -1004,6 +1030,29 @@ impl PluginCell {
     #[must_use]
     pub const fn signal(&self) -> Option<daw_clap_ext::host::SignalPluginClient> {
         self.signal
+    }
+
+    /// Its sleep: whether the renderer calls it this block.
+    #[must_use]
+    pub const fn sleep(&self) -> &crate::plugin_sleep::SleepState {
+        &self.sleep
+    }
+
+    /// What wakes it besides its audio and notes: a control thread's touch,
+    /// its editor open, its `request_process` ([`crate::plugin_sleep`]'s
+    /// key). Read without its lock.
+    #[must_use]
+    pub fn wake_key(&self) -> u64 {
+        let gui = self.gui_open.load(std::sync::atomic::Ordering::Acquire);
+        crate::plugin_sleep::key_of(
+            self.instance,
+            [
+                self.touched.load(std::sync::atomic::Ordering::Acquire),
+                self.notices.as_ref().map_or(0, |n| n.wake()),
+                // An open editor wakes it every block: what it shows moves.
+                if gui { self.sleep.skipped() + 1 } else { 0 },
+            ],
+        )
     }
 
     /// Its editor opened or closed.

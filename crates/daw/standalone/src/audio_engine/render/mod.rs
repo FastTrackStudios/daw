@@ -54,6 +54,7 @@ mod part;
 mod pdc;
 mod print;
 mod schedule;
+mod sleep;
 mod snapshot;
 
 use std::sync::Arc;
@@ -748,6 +749,10 @@ struct OfflineStats {
     /// anything at all.
     fx_us: Vec<u64>,
     rendered: Vec<bool>,
+    /// Plugin-blocks not called for being asleep, and about how long they
+    /// would have run, µs ([`crate::plugin_sleep`]).
+    slept: u64,
+    slept_us: u64,
 }
 
 impl OfflineStats {
@@ -773,6 +778,8 @@ impl OfflineStats {
                 self.rendered[ti as usize] = true;
             }
             self.fx_us[ti as usize] += u64::from(st.fx_us.unwrap_or(0));
+            self.slept += u64::from(st.fx_slept);
+            self.slept_us += u64::from(st.slept_us);
         }
     }
 }
@@ -910,6 +917,8 @@ impl Drop for ProjectRenderer {
         span.record("render.threads", stats.threads as u64);
         span.record("render.blocks", stats.blocks);
         span.record("render.slowest_fx", slowest_fx.as_str());
+        span.record("render.sleep_skipped", stats.slept);
+        span.record("render.sleep_saved_ms", stats.slept_us as f64 / 1e3);
     }
 }
 
@@ -1469,6 +1478,8 @@ impl ProjectRenderer {
                     render.threads = tracing::field::Empty,
                     render.blocks = tracing::field::Empty,
                     render.slowest_fx = tracing::field::Empty,
+                    render.sleep_skipped = tracing::field::Empty,
+                    render.sleep_saved_ms = tracing::field::Empty,
                 )
             });
         }
@@ -2532,6 +2543,9 @@ mod pdc_tests;
 
 #[cfg(all(test, feature = "clap-host", not(target_arch = "wasm32")))]
 mod automation_tests;
+
+#[cfg(all(test, feature = "clap-host", not(target_arch = "wasm32")))]
+mod sleep_tests;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod parallel_tests;

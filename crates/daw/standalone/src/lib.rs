@@ -92,6 +92,7 @@ mod peak;
 mod peak_store;
 pub(crate) mod platform;
 pub mod plugin;
+pub mod plugin_sleep;
 mod plugin_loader;
 mod position_conversion;
 mod project;

@@ -113,6 +113,11 @@ pub(super) struct NodeStats {
     pub(super) items_us: u32,
     /// A plugin panicked: its place in the chain, and whether in `prepare`.
     pub(super) panicked: Option<(usize, bool)>,
+    /// Its plugins called, and not called for being asleep, this block,
+    /// and about how long those would have run, µs ([`super::sleep`]).
+    pub(super) fx_ran: u16,
+    pub(super) fx_slept: u16,
+    pub(super) slept_us: u32,
 }
 
 /// Everything a block's nodes share: read-only but for each track's own
@@ -442,11 +447,17 @@ impl Block<'_> {
         // sends (REAPER's signal flow).
         if !t.fx_chain.is_empty() {
             let t_fx = Stamp::now();
+            let dirty_in = *dirty;
             self.chain(ti, t, w, st, bus, dirty, keyed, aux, aux_live);
+            // A chain that put out exact zeros leaves the bus clean, unless
+            // the track hands on more than its output: a pre-FX send's tap,
+            // a plugin's own outputs, a recording played in its place.
+            *dirty |= fed.is_some() || *aux_live || (has_pre_fx_tap && dirty_in);
             let us = t_fx.us();
             st.fx_us = Some(us);
             if let Some(costs) = self.costs {
                 costs.add_fx(ti, us);
+                costs.add_sleep(ti, st.fx_ran, st.fx_slept);
             }
         }
         if !*dirty && !hot(delays, monitor_delay) {
@@ -639,7 +650,36 @@ impl Block<'_> {
             crate::plugin::set_render_transport((self.transport_late)(
                 self.plan.input[ti].saturating_add(chain_latency),
             ));
-            chain_latency = chain_latency.saturating_add(plugin.latency());
+            let latency = plugin.latency();
+            chain_latency = chain_latency.saturating_add(latency);
+            // Asleep, and nothing to wake it: not called, its output the
+            // silence it heard (`super::sleep`). Only a plugin that ever
+            // said it may sleep is asked.
+            let sleepy = plugin.process_status() != crate::plugin_sleep::ProcessStatus::Continue
+                || cell.sleep().is_asleep();
+            let heard = sleepy.then(|| {
+                // SAFETY: this track's sidechain, gathered already.
+                let sidechain = (*keyed && ti < self.sidechains.len())
+                    .then(|| unsafe { self.sidechains.get(ti) }.as_slice());
+                super::sleep::Fx::hear(
+                    cell,
+                    *dirty,
+                    &bus.samples[..frames * 2],
+                    sidechain,
+                    !w.midi.is_empty() || !note_expr_events.is_empty(),
+                    t.fx_params.get(i).map(Vec::as_slice).unwrap_or(&[]),
+                    t.fx_envs.get(i).map(Vec::as_slice).unwrap_or(&[]),
+                    self.clock,
+                )
+            });
+            if let Some(crate::plugin_sleep::Skip::Asleep { saved_us }) =
+                heard.as_ref().map(|h| h.skip(cell))
+            {
+                st.fx_slept = st.fx_slept.saturating_add(1);
+                st.slept_us = st.slept_us.saturating_add(saved_us);
+                continue;
+            }
+            let t_plugin = Stamp::now();
             // De-interleave → process → re-interleave.
             for f in 0..frames {
                 w.in_l[f] = bus.samples[f * 2];
@@ -697,6 +737,19 @@ impl Block<'_> {
                     continue;
                 }
             }
+            st.fx_ran = st.fx_ran.saturating_add(1);
+            let us = t_plugin.us();
+            let zero = match &heard {
+                Some(h) => h.ran(
+                    cell,
+                    plugin,
+                    &w.out_l[..frames],
+                    &w.out_r[..frames],
+                    latency,
+                    us,
+                ),
+                None => crate::plugin_sleep::silence(&w.out_l[..frames], &w.out_r[..frames]).0,
+            };
             for f in 0..frames {
                 bus.samples[f * 2] = w.out_l[f];
                 bus.samples[f * 2 + 1] = w.out_r[f];
@@ -704,8 +757,9 @@ impl Block<'_> {
             if t.aux_taps {
                 *aux_live |= add_aux(&*plugin, aux, frames);
             }
-            // A plugin ran — it may synthesize (MIDI → audio).
-            *dirty = true;
+            // A plugin ran — it may synthesize (MIDI → audio). Exact zeros
+            // leave the bus clean: a sum of silent tracks stays clean.
+            *dirty = !zero;
         }
         if let (true, Some(last)) = (self.probing, chain.len().checked_sub(1)) {
             self.probe(ti, offline::Probe::FxOut(last), &bus.samples);

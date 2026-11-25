@@ -318,7 +318,10 @@ impl<'a> SharedHandler<'a> for DawHostShared {
         self.restart
             .store(true, std::sync::atomic::Ordering::Release);
     }
-    fn request_process(&self) {}
+    /// An asleep plugin asking to be called again ([`crate::plugin_sleep`]).
+    fn request_process(&self) {
+        self.notices.wake.fetch_add(1, Ordering::AcqRel);
+    }
     /// Parked for the embedder: [`LoadedClapPlugin::pump_main_thread`] runs
     /// it. A plugin built on nice-plug delivers its rescans this way.
     fn request_callback(&self) {
@@ -915,6 +918,12 @@ struct ActivationGuard {
     out_ports: AudioPorts,
     events_in: EventBuffer,
     events_out: EventBuffer,
+    /// What the plugin said of its last block, its `tail` (asked on the
+    /// audio thread), and whether its `CONTINUE_IF_NOT_QUIET` is honest
+    /// (`com.fasttrackstudio.sleep/1`): [`crate::plugin_sleep`].
+    status: crate::plugin_sleep::ProcessStatus,
+    tail: Option<clack_extensions::tail::PluginTail>,
+    honest_quiet: bool,
 }
 
 /// Events an activation's buffers hold before they grow: an FX's
@@ -1509,6 +1518,16 @@ impl LoadedClapPlugin {
             out_ports: AudioPorts::with_capacity(output_ports * 2, output_ports),
             events_in: EventBuffer::with_capacity(EVENTS_PER_BLOCK),
             events_out: EventBuffer::with_capacity(64),
+            status: crate::plugin_sleep::ProcessStatus::Continue,
+            tail: self
+                .instance
+                .plugin_handle()
+                .get_extension::<clack_extensions::tail::PluginTail>(),
+            // SAFETY: the instance's own plugin, initialized, on its main
+            // thread (activation's).
+            honest_quiet: unsafe {
+                crate::plugin_sleep::honest_quiet(self.instance.raw_instance())
+            },
         });
         // A restart asked for before this activation is answered by it.
         self.restart
@@ -1679,7 +1698,8 @@ impl LoadedClapPlugin {
         // (see `crate::plugin::render_transport`).
         let steady = crate::plugin::render_frame();
         let transport = crate::plugin::render_transport().map(clap_transport);
-        act.processor
+        let status = act
+            .processor
             .process(
                 &inputs,
                 &mut outputs,
@@ -1689,6 +1709,12 @@ impl LoadedClapPlugin {
                 transport.as_ref(),
             )
             .map_err(|_| ClapHostError::Process)?;
+        act.status = match crate::plugin_sleep::ProcessStatus::from(status) {
+            crate::plugin_sleep::ProcessStatus::ContinueIfNotQuiet if !act.honest_quiet => {
+                crate::plugin_sleep::ProcessStatus::Continue
+            }
+            s => s,
+        };
         if sent_param_change(&act.events_out) {
             self.notices.mark_state_dirty();
         }
@@ -2154,6 +2180,24 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
     }
     fn takes_timed_params(&self) -> bool {
         true
+    }
+    fn process_status(&self) -> crate::plugin_sleep::ProcessStatus {
+        self.activation
+            .as_ref()
+            .map_or(crate::plugin_sleep::ProcessStatus::Continue, |a| a.status)
+    }
+    fn tail(&mut self) -> crate::plugin_sleep::Tail {
+        let Some(act) = self.activation.as_mut() else {
+            return crate::plugin_sleep::Tail::Infinite;
+        };
+        let Some(ext) = act.tail else {
+            // No `tail`: CLAP's default, none.
+            return crate::plugin_sleep::Tail::Finite(0);
+        };
+        match ext.get(&act.processor.plugin_handle()) {
+            clack_extensions::tail::TailLength::Finite(n) => crate::plugin_sleep::Tail::Finite(n),
+            clack_extensions::tail::TailLength::Infinite => crate::plugin_sleep::Tail::Infinite,
+        }
     }
     fn process_block_timed(
         &mut self,
