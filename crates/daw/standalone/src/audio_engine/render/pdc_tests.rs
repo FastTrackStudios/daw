@@ -637,3 +637,78 @@ fn replayed_tracks_keep_the_delay_compensation_of_the_render_they_came_from() {
     assert!(full.iter().any(|s| s.abs() > 0.1));
     assert_eq!(full, again, "replayed, the song is not what it was");
 }
+
+/// A plugin that halves what it hears and, as a CLAP plugin does, refuses
+/// a block bigger than the one it was activated for.
+struct Halve {
+    prepared: Option<u32>,
+}
+
+impl crate::plugin::PluginInstance for Halve {
+    fn descriptor(&self) -> crate::plugin::PluginDescriptor {
+        crate::plugin::PluginDescriptor::default()
+    }
+    fn params(&mut self) -> Vec<crate::plugin::PluginParamInfo> {
+        Vec::new()
+    }
+    fn param_value(&mut self, _: u32) -> Option<f64> {
+        None
+    }
+    fn value_to_text(&mut self, _: u32, _: f64) -> Option<String> {
+        None
+    }
+    fn text_to_value(&mut self, _: u32, _: &str) -> Option<f64> {
+        None
+    }
+    fn latency(&mut self) -> u32 {
+        0
+    }
+    fn prepare(&mut self, _: f64, block: u32) -> Result<(), crate::plugin::PluginError> {
+        self.prepared = Some(block);
+        Ok(())
+    }
+    fn is_prepared(&self) -> bool {
+        self.prepared.is_some()
+    }
+    fn process_block(
+        &mut self,
+        in_l: &[f32],
+        in_r: &[f32],
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        _: &crate::plugin::PluginEvents<'_>,
+    ) -> Result<(), crate::plugin::PluginError> {
+        let Some(block) = self.prepared else {
+            return Err(crate::plugin::PluginError::NotActivated);
+        };
+        if in_l.len() > block as usize {
+            return Err(crate::plugin::PluginError::BlockTooLarge);
+        }
+        for f in 0..in_l.len() {
+            out_l[f] = in_l[f] * 0.5;
+            out_r[f] = in_r[f] * 0.5;
+        }
+        Ok(())
+    }
+    fn deactivate(&mut self) {
+        self.prepared = None;
+    }
+}
+
+#[test]
+fn a_plugin_first_run_at_a_small_block_still_runs_at_a_bigger_one() {
+    // The callback's first block is the device's (128); the render ahead's
+    // chunks are up to 4096. A plugin activated for the first block alone
+    // refused the bigger ones, and its track played dry.
+    let (daw, guid) = clicks();
+    let fx = late_on(&daw, &guid, "Kick");
+    daw.insert_plugin_instance(fx, Box::new(Halve { prepared: None }));
+    let renderer = ProjectRenderer::new(&daw, &guid, 48_000);
+    renderer.render_block(0, 128);
+    let refused = plugin_too_large_skips();
+    let big = renderer.render_block(0, 4096);
+    let master: Vec<f32> = big.samples.chunks_exact(2).map(|f| f[0]).collect();
+    // The kick halved (0.25) beside the snare (0.5): not the dry 1.0.
+    assert_eq!(hits(&master), vec![(CLICK, 0.75)]);
+    assert_eq!(plugin_too_large_skips(), refused, "no block was refused");
+}

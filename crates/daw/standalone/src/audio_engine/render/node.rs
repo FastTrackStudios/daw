@@ -611,11 +611,19 @@ impl Block<'_> {
             if self.panicked_fx.contains(fx_guid) || st.panicked.is_some_and(|(p, _)| p == i) {
                 continue; // panicked earlier — permanently bypassed
             }
-            if !plugin.is_prepared() {
+            // Prepared ahead (at load) at another rate than this render's:
+            // prepared again, here.
+            let wrong_rate = plugin
+                .prepared_rate()
+                .is_some_and(|r| r != f64::from(self.sample_rate));
+            if !plugin.is_prepared() || wrong_rate {
                 // Lazy prepare on first use; bypass on failure. A panic is
                 // caught and the plugin bypassed from then on.
                 let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    plugin.prepare(f64::from(self.sample_rate), frames as u32)
+                    plugin.prepare(
+                        f64::from(self.sample_rate),
+                        (frames as u32).max(super::PREPARE_FRAMES),
+                    )
                 }));
                 match prepared {
                     Ok(Ok(())) => {}
@@ -678,6 +686,11 @@ impl Block<'_> {
             }));
             match result {
                 Ok((Ok(()), schedule)) => automate::record(schedule),
+                Ok((Err(crate::plugin::PluginError::BlockTooLarge), _)) => {
+                    super::PLUGIN_TOO_LARGE_SKIPS
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    continue;
+                }
                 Ok((Err(_), _)) => continue,
                 Err(_) => {
                     st.panicked.get_or_insert((i, false));

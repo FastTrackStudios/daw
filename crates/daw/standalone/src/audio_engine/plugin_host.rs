@@ -2180,6 +2180,9 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
     fn prepare(&mut self, sr: f64, bs: u32) -> Result<(), crate::plugin::PluginError> {
         LoadedClapPlugin::prepare(self, sr, bs).map_err(map_err)
     }
+    fn prepared_rate(&self) -> Option<f64> {
+        LoadedClapPlugin::sample_rate(self)
+    }
     fn is_prepared(&self) -> bool {
         LoadedClapPlugin::is_prepared(self)
     }

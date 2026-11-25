@@ -245,6 +245,14 @@ pub trait PluginInstance: Send {
     /// Whether `prepare` has been called and the plugin is ready.
     fn is_prepared(&self) -> bool;
 
+    /// The sample rate it was prepared at, when the backend says: a plugin
+    /// activated ahead of its first block (at load) at a rate the renderer
+    /// does not run at is prepared again there. `None` (the default) is
+    /// never re-prepared for its rate.
+    fn prepared_rate(&self) -> Option<f64> {
+        None
+    }
+
     /// Whether this plugin may process on a render worker thread, at the
     /// same time as other tracks' plugins. Only a plugin that shares no
     /// per-block state with any other track may say yes: the guide
@@ -453,6 +461,12 @@ pub trait PluginInstance: Send {
         None
     }
 }
+
+/// The largest block a renderer ever hands a plugin: the render ahead's
+/// run-start chunks are 4096 frames, a device block can reach 8192. A
+/// plugin is activated for this many whatever block it is first run at,
+/// so a bigger block later is never refused.
+pub const PREPARE_FRAMES: u32 = 8192;
 
 /// Errors any plugin backend can raise.
 #[derive(Debug)]

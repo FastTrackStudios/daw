@@ -1759,6 +1759,9 @@ impl crate::plugin::PluginInstance for SendableVst3Plugin {
     fn prepare(&mut self, sr: f64, bs: u32) -> Result<(), crate::plugin::PluginError> {
         LoadedVst3Plugin::prepare(self, sr, bs).map_err(map_err)
     }
+    fn prepared_rate(&self) -> Option<f64> {
+        LoadedVst3Plugin::sample_rate(self)
+    }
     fn is_prepared(&self) -> bool {
         LoadedVst3Plugin::is_prepared(self)
     }

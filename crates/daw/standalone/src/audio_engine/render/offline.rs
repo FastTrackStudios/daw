@@ -308,7 +308,9 @@ impl ProjectRenderer {
                     plugins
                         .with(fx, |p| {
                             if !p.is_prepared()
-                                && p.prepare(f64::from(self.sample_rate), block).is_err()
+                                && p
+                                    .prepare(f64::from(self.sample_rate), block.max(super::PREPARE_FRAMES))
+                                    .is_err()
                             {
                                 return 0;
                             }

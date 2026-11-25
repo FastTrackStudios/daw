@@ -604,6 +604,18 @@ pub fn plugin_busy_skips() -> u64 {
     PLUGIN_BUSY_SKIPS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+pub use crate::plugin::PREPARE_FRAMES;
+
+/// Plugin runs bypassed because the block was bigger than the plugin was
+/// activated for: that track played the plugin dry for the block.
+static PLUGIN_TOO_LARGE_SKIPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How many plugin runs were bypassed that way (process-wide).
+#[must_use]
+pub fn plugin_too_large_skips() -> u64 {
+    PLUGIN_TOO_LARGE_SKIPS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// A point in time for the block profile — a no-op on wasm, where
 /// `std::time::Instant` panics (the browser rig renders here too).
 #[derive(Clone, Copy)]
