@@ -113,6 +113,49 @@ pub(crate) fn peak(samples: &[f32]) -> (f32, f32) {
     })
 }
 
+/// A [`Feed`]'s meters, one track's slots written by one thread at a
+/// time; the feed outlives it (taken for one block, by the render that
+/// holds the feed).
+pub(crate) struct FeedMeter {
+    peaks: *mut Option<(f32, f32)>,
+    tracks: usize,
+    grains: usize,
+    grain_peaks: *mut (f32, f32),
+    grain_len: usize,
+}
+
+// SAFETY: each track's slots are written by that track's node only.
+#[allow(unsafe_code)]
+unsafe impl Send for FeedMeter {}
+#[allow(unsafe_code)]
+unsafe impl Sync for FeedMeter {}
+
+#[allow(unsafe_code)]
+impl FeedMeter {
+    /// [`Feed::meter`], for track `track`.
+    ///
+    /// # Safety
+    /// No other thread writes `track`'s slots meanwhile, and the feed is
+    /// alive and not resized.
+    pub(crate) unsafe fn meter(&self, track: usize, post: &[f32]) {
+        if track < self.tracks {
+            // SAFETY: in bounds; the caller's contract.
+            unsafe { *self.peaks.add(track) = Some(peak(post)) };
+        }
+        let grains = self.grains;
+        if (track + 1) * grains > self.grain_len {
+            return;
+        }
+        for g in 0..grains {
+            let span = g * PEAK_GRAIN * 2..((g + 1) * PEAK_GRAIN * 2).min(post.len());
+            // SAFETY: in bounds; the caller's contract.
+            unsafe {
+                *self.grain_peaks.add(track * grains + g) = post.get(span).map_or((0.0, 0.0), peak);
+            }
+        }
+    }
+}
+
 /// One live track's share of a [`Feed`].
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Lane {
@@ -141,6 +184,18 @@ impl Feed {
     /// Track `track`'s post-fader signal over the feed's frames (`post`,
     /// interleaved; empty: silence), metered: its peaks over all of them,
     /// and grain by grain.
+    /// The feed's meters, for the nodes of a block to write each its own
+    /// track's from any thread ([`FeedMeter::meter`]).
+    pub(crate) fn meter_cells(&mut self) -> FeedMeter {
+        FeedMeter {
+            peaks: self.peaks.as_mut_ptr(),
+            tracks: self.peaks.len(),
+            grains: self.grains,
+            grain_peaks: self.grain_peaks.as_mut_ptr(),
+            grain_len: self.grain_peaks.len(),
+        }
+    }
+
     pub(crate) fn meter(&mut self, track: usize, post: &[f32]) {
         if let Some(slot) = self.peaks.get_mut(track) {
             *slot = Some(peak(post));

@@ -27,6 +27,11 @@
 //! - [`item_mix`] — item playback into the track bus
 //! - [`midi`] — per-block MIDI / note-expression event collection
 //! - [`envelope`] — per-frame envelope cursors
+//! - [`schedule`] — which track of a block runs when, on one thread or
+//!   many (each as soon as what feeds it is done), the same for realtime
+//!   and offline renders
+//! - [`node`] — one track's block: media, the sums into it, FX, fader,
+//!   sends and its parent share
 //!
 //! WASM-compatible: pure math + heap, no threads, no cpal. The cpal
 //! mixer in `mixer.rs` wraps this on native; an AudioWorklet shim can
@@ -41,11 +46,14 @@ mod item_mix;
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub mod live_tap;
 mod midi;
+mod node;
 pub mod offline;
+#[cfg(not(target_arch = "wasm32"))]
 mod parallel;
 mod part;
 mod pdc;
 mod print;
+mod schedule;
 mod snapshot;
 
 use std::sync::Arc;
@@ -56,7 +64,6 @@ use item_mix::mix_item_into_bus;
 #[cfg(test)]
 use midi::collect_midi_events;
 use midi::{collect_midi_events_into, collect_note_expressions};
-use parallel::{LaneJob, PluginPtr};
 pub use part::Feed;
 pub(crate) use part::Part;
 pub(crate) use snapshot::{LiveHints, TempoMap};
@@ -346,17 +353,6 @@ struct RenderScratch {
     /// Bus received signal this block (items / sends / children /
     /// synth FX). Clean buses skip every per-frame stage.
     dirty: Vec<bool>,
-    /// De-interleave scratch for the FX stage.
-    in_l: Vec<f32>,
-    in_r: Vec<f32>,
-    out_l: Vec<f32>,
-    out_r: Vec<f32>,
-    /// Post-fader copy of the current track's bus, so sends / parent
-    /// sums can read it while mutating destination buses.
-    src: Vec<f32>,
-    /// Send-tap copies (only filled when a send actually taps there).
-    pre_fx_tap: Vec<f32>,
-    pre_fader_tap: Vec<f32>,
     /// Each track's channels 3/4 (interleaved), what sends to its
     /// sidechain left there this block; sized on first use, so a project
     /// without sidechains carries none.
@@ -369,13 +365,6 @@ struct RenderScratch {
     aux: Vec<Vec<f32>>,
     /// Which tracks' aux outputs carry this block's audio.
     aux_live: Vec<bool>,
-    /// De-interleave scratch for a sidechain.
-    key_l: Vec<f32>,
-    key_r: Vec<f32>,
-    /// One FX's parameters this block, its automation applied
-    /// ([`automate::FxParams`]): kept across blocks so it does not
-    /// allocate on the audio thread.
-    fx_param_events: automate::FxParams,
     /// FX guids whose plugin panicked inside `process_block`/`prepare`.
     /// Once here they are bypassed forever (this engine run) — a plugin
     /// that panics once can't be trusted on the audio thread again.
@@ -391,18 +380,18 @@ struct RenderScratch {
     /// kept across blocks so a note played does not allocate on the audio
     /// thread.
     midi_buckets: Vec<Vec<crate::plugin::PluginMidiEvent>>,
-    midi_events: Vec<crate::plugin::PluginMidiEvent>,
-    /// Realtime mode with a lane pool: this block's independent tracks, one
-    /// job each (see [`LaneJob`]), and which tracks ran that way.
-    lane_jobs: Vec<LaneJob>,
-    /// Per track: something feeds its bus (a child or a send), so it waits
-    /// for the topo loop.
-    fed: Vec<bool>,
-    /// Per track: its FX chain already ran in the parallel pass.
-    chain_done: Vec<bool>,
-    /// Per track: its chain's time last block, to hand out the longest
-    /// lanes first.
-    lane_cost: Vec<u32>,
+    /// The block's schedule ([`schedule`]): which track runs when.
+    schedule: schedule::Schedule,
+    /// Per track: what it hands on this block ([`node::Edges`]).
+    edges: Vec<node::Edges>,
+    /// Per track: what its node did this block.
+    stats: Vec<node::NodeStats>,
+    /// Per track: its time last block (µs), for the schedule's order.
+    cost: Vec<u32>,
+    /// One scratch per rendering thread (the render thread's last).
+    workers: Vec<node::Worker>,
+    /// An offline render's account so far ([`OfflineStats`]).
+    offline_stats: OfflineStats,
     /// This block's delay compensation ([`pdc::plan`]).
     plan: pdc::Plan,
     /// Per track, one delay line per edge out of it (its parent or master,
@@ -410,8 +399,6 @@ struct RenderScratch {
     /// a soloed track heard straight at master.
     delays: Vec<Vec<pdc::Delay>>,
     monitor_delays: Vec<pdc::Delay>,
-    /// One edge's signal, delayed.
-    delayed: Vec<f32>,
     /// An offline render's taps: each track's signal this block
     /// ([`offline::Tap`]), when it taps.
     taps: Vec<Vec<f32>>,
@@ -455,22 +442,10 @@ impl RenderScratch {
         }
         self.aux_live.clear();
         self.aux_live.resize(n, false);
-        self.chain_done.clear();
-        self.chain_done.resize(n, false);
-        if self.lane_cost.len() != n {
-            self.lane_cost.resize(n, 0);
-        }
-        for v in [
-            &mut self.in_l,
-            &mut self.in_r,
-            &mut self.out_l,
-            &mut self.out_r,
-            &mut self.key_l,
-            &mut self.key_r,
-        ] {
-            if v.len() != frames {
-                v.resize(frames, 0.0);
-            }
+        self.edges.resize_with(n, node::Edges::default);
+        self.stats.resize_with(n, node::NodeStats::default);
+        if self.cost.len() != n {
+            self.cost.resize(n, 0);
         }
     }
 }
@@ -723,6 +698,66 @@ impl BlockProfileCell {
     }
 }
 
+/// A renderer's worker pool: its own (realtime) or an offline render's,
+/// borrowed from the process's.
+#[cfg(not(target_arch = "wasm32"))]
+enum Lanes {
+    Own(parallel::LanePool),
+    Offline(parallel::OfflinePool),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Lanes {
+    fn pool(&self) -> &parallel::LanePool {
+        match self {
+            Self::Own(p) => p,
+            Self::Offline(p) => p.pool(),
+        }
+    }
+}
+
+/// An offline render's account, summed over its blocks: what its one wide
+/// event (`render.offline`) says when the renderer goes.
+#[derive(Default)]
+struct OfflineStats {
+    blocks: u64,
+    frames: u64,
+    /// Time spent rendering blocks, µs.
+    wall_us: u64,
+    threads: usize,
+    /// Per track (by index): its FX chain's time, µs, and whether it did
+    /// anything at all.
+    fx_us: Vec<u64>,
+    rendered: Vec<bool>,
+}
+
+impl OfflineStats {
+    fn add_block(
+        &mut self,
+        frames: usize,
+        threads: usize,
+        wall_us: u32,
+        stats: &[node::NodeStats],
+        nodes: &[u32],
+    ) {
+        self.blocks += 1;
+        self.frames += frames as u64;
+        self.wall_us += u64::from(wall_us);
+        self.threads = self.threads.max(threads);
+        if self.fx_us.len() < stats.len() {
+            self.fx_us.resize(stats.len(), 0);
+            self.rendered.resize(stats.len(), false);
+        }
+        for &ti in nodes {
+            let st = &stats[ti as usize];
+            if st.fx_us.is_some() || st.items_us > 0 {
+                self.rendered[ti as usize] = true;
+            }
+            self.fx_us[ti as usize] += u64::from(st.fx_us.unwrap_or(0));
+        }
+    }
+}
+
 pub struct ProjectRenderer {
     daw: Standalone,
     project_guid: String,
@@ -753,9 +788,18 @@ pub struct ProjectRenderer {
     /// by a dual render's two renderers, so an edit is built once.
     #[cfg(not(target_arch = "wasm32"))]
     realtime: std::sync::OnceLock<Arc<SnapshotBuilder>>,
-    /// Realtime mode: the worker threads independent tracks render on.
+    /// The worker threads a block's tracks render on beside the render
+    /// thread ([`schedule`]): a realtime renderer's own pool, or an offline
+    /// render's, borrowed from the process's for its life.
     #[cfg(not(target_arch = "wasm32"))]
-    lanes: std::sync::OnceLock<parallel::LanePool>,
+    lanes: std::sync::OnceLock<Lanes>,
+    /// Workers an offline render asks for ([`set_render_threads`](Self::set_render_threads));
+    /// `usize::MAX` until asked: the machine's default.
+    #[cfg(not(target_arch = "wasm32"))]
+    offline_threads: std::sync::atomic::AtomicUsize,
+    /// An offline render has asked for its pool (on its first block).
+    #[cfg(not(target_arch = "wasm32"))]
+    pool_asked: std::sync::atomic::AtomicBool,
     /// The live set of the snapshot the last block rendered with
     /// ([`graph::live_print`]): what a dual-buffer engine checks the feeds
     /// it hands over against.
@@ -782,6 +826,72 @@ pub struct ProjectRenderer {
     /// An offline render's own plugins, solos, bypasses and taps
     /// ([`offline`]); `None` for the song's own renders.
     offline: Option<offline::Offline>,
+    /// A render not realtime: its one wide event, opened on its first
+    /// block, its fields written when the renderer goes ([`OfflineStats`]).
+    span: std::sync::OnceLock<tracing::Span>,
+}
+
+impl Drop for ProjectRenderer {
+    /// An offline render's wide event: what it rendered, how fast, on how
+    /// many threads, and the tracks whose FX took longest.
+    fn drop(&mut self) {
+        let Some(span) = self.span.take() else {
+            return;
+        };
+        let scratch = self
+            .scratch
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let stats = &scratch.offline_stats;
+        if stats.blocks == 0 {
+            return;
+        }
+        let audio_seconds = stats.frames as f64 / f64::from(self.sample_rate.max(1));
+        let wall_ms = stats.wall_us as f64 / 1e3;
+        let snap = self
+            .cache
+            .lock()
+            .ok()
+            .and_then(|c| c.as_ref().map(|(_, s)| s.clone()));
+        let mut slowest: Vec<(usize, u64)> = stats
+            .fx_us
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, us)| *us > 0)
+            .collect();
+        slowest.sort_unstable_by_key(|(_, us)| std::cmp::Reverse(*us));
+        let slowest_fx = slowest
+            .iter()
+            .take(5)
+            .map(|(ti, us)| {
+                let name = snap
+                    .as_ref()
+                    .and_then(|s| s.tracks.get(*ti))
+                    .map_or("?", |t| t.name.as_str());
+                format!("{name}={:.1}ms", *us as f64 / 1e3)
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        span.record("render.audio_seconds", audio_seconds);
+        span.record("render.wall_ms", wall_ms);
+        span.record(
+            "render.realtime_factor",
+            if wall_ms > 0.0 {
+                audio_seconds * 1e3 / wall_ms
+            } else {
+                0.0
+            },
+        );
+        span.record("render.tracks", stats.fx_us.len() as u64);
+        span.record(
+            "render.tracks_rendered",
+            stats.rendered.iter().filter(|r| **r).count() as u64,
+        );
+        span.record("render.threads", stats.threads as u64);
+        span.record("render.blocks", stats.blocks);
+        span.record("render.slowest_fx", slowest_fx.as_str());
+    }
 }
 
 /// Which tracks a snapshot renders live, and what its tracks ahead are, as
@@ -843,6 +953,10 @@ impl ProjectRenderer {
             realtime: std::sync::OnceLock::new(),
             #[cfg(not(target_arch = "wasm32"))]
             lanes: std::sync::OnceLock::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            offline_threads: std::sync::atomic::AtomicUsize::new(usize::MAX),
+            #[cfg(not(target_arch = "wasm32"))]
+            pool_asked: std::sync::atomic::AtomicBool::new(false),
             live_print: std::sync::atomic::AtomicU64::new(0),
             held: std::sync::atomic::AtomicBool::new(false),
             metering: Arc::new(std::sync::atomic::AtomicBool::new(true)),
@@ -850,7 +964,16 @@ impl ProjectRenderer {
             latencies: Arc::default(),
             song_latency: std::sync::atomic::AtomicU32::new(0),
             offline: None,
+            span: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Whether this renderer renders offline (not for a realtime callback).
+    fn is_offline_render(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        return self.realtime.get().is_none();
+        #[cfg(target_arch = "wasm32")]
+        true
     }
 
     /// How late what reaches master was in the last block rendered,
@@ -878,7 +1001,11 @@ impl ProjectRenderer {
     /// blocks on the project lock or the meter lock and never builds a
     /// snapshot — see [`SnapshotBuilder`]. Project edits reach the audio a
     /// block or two late. Offline renders (tests, bounces) leave this off
-    /// and see every edit on the very next block. Idempotent.
+    /// and see every edit on the very next block. Both render a block the
+    /// same way, on several threads ([`schedule`]): a realtime renderer on
+    /// its own pool at the callback's priority (`FTS_RENDER_THREADS`
+    /// workers, else a few), an offline one on a pool sized to the machine
+    /// ([`set_render_threads`](Self::set_render_threads)). Idempotent.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn set_realtime(&self) {
         self.go_realtime("render-lane", 0, parallel::default_threads());
@@ -940,10 +1067,10 @@ impl ProjectRenderer {
     fn go_realtime(&self, pool_name: &str, priority: i32, threads: usize) {
         use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
         if threads > 0 {
-            let pool = self
-                .lanes
-                .get_or_init(|| parallel::LanePool::named(threads, pool_name, priority));
-            tracing::debug!(workers = pool.threads(), "render: lane pool");
+            let pool = self.lanes.get_or_init(|| {
+                Lanes::Own(parallel::LanePool::named(threads, pool_name, priority))
+            });
+            tracing::debug!(workers = pool.pool().threads(), "render: lane pool");
         }
         self.realtime.get_or_init(|| {
             let wanted = Arc::new(AtomicU64::new(NO_REVISION));
@@ -1039,6 +1166,44 @@ impl ProjectRenderer {
             _ => {}
         }
         current.as_ref().map(|(_, s)| s.clone())
+    }
+
+    /// How many worker threads an offline render (one not
+    /// [realtime](Self::set_realtime)) renders on beside the calling one: 0
+    /// renders on the calling thread alone. Before its first block; by
+    /// default the machine's (`FTS_OFFLINE_RENDER_THREADS`, else its cores
+    /// but two). The samples are the same however many.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_render_threads(&self, workers: usize) {
+        self.offline_threads
+            .store(workers, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The pool this render's blocks run on, if any: a realtime renderer's
+    /// own, else an offline render's, taken on its first block.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn lanes(&self) -> Option<&parallel::LanePool> {
+        // Asked once, on the first block: a render keeps the threads it
+        // began with (and never spawns any in the middle).
+        if self.realtime.get().is_none()
+            && self.lanes.get().is_none()
+            && !self
+                .pool_asked
+                .swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            let asked = self
+                .offline_threads
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let workers = if asked == usize::MAX {
+                parallel::offline_threads()
+            } else {
+                asked
+            };
+            if let Some(pool) = parallel::OfflinePool::take(workers, asked == usize::MAX) {
+                let _ = self.lanes.set(Lanes::Offline(pool));
+            }
+        }
+        self.lanes.get().map(Lanes::pool)
     }
 
     /// The live set of the snapshot the last block rendered with.
@@ -1271,6 +1436,23 @@ impl ProjectRenderer {
         }
 
         let t_start = Stamp::now();
+        if self.is_offline_render() {
+            self.span.get_or_init(|| {
+                tracing::info_span!(
+                    "render.offline",
+                    render.copies = self.offline.is_some(),
+                    render.sample_rate = self.sample_rate,
+                    render.audio_seconds = tracing::field::Empty,
+                    render.wall_ms = tracing::field::Empty,
+                    render.realtime_factor = tracing::field::Empty,
+                    render.tracks = tracing::field::Empty,
+                    render.tracks_rendered = tracing::field::Empty,
+                    render.threads = tracing::field::Empty,
+                    render.blocks = tracing::field::Empty,
+                    render.slowest_fx = tracing::field::Empty,
+                )
+            });
+        }
         let mut scratch = self
             .scratch
             .lock()
@@ -1376,9 +1558,6 @@ impl ProjectRenderer {
             for (lines, edges) in s.delays.iter_mut().zip(&s.plan.edges) {
                 lines.resize_with(edges.len(), pdc::Delay::default);
             }
-            if s.delayed.len() != frames * 2 {
-                s.delayed.resize(frames * 2, 0.0);
-            }
             let tapping = self.offline.as_ref().is_some_and(|o| o.tap.is_some());
             if tapping {
                 s.taps.resize_with(n, Vec::new);
@@ -1429,31 +1608,21 @@ impl ProjectRenderer {
         let RenderScratch {
             buses,
             dirty,
-            in_l,
-            in_r,
-            out_l,
-            out_r,
-            src,
-            pre_fx_tap,
-            pre_fader_tap,
             sidechains,
             keyed,
             aux,
             aux_live,
-            key_l,
-            key_r,
-            fx_param_events,
             panicked_fx,
             midi_buckets,
-            midi_events,
-            lane_jobs,
-            fed: _,
-            chain_done,
-            lane_cost,
+            schedule,
+            edges,
+            stats,
+            cost,
+            workers,
+            offline_stats,
             plan,
             delays,
             monitor_delays,
-            delayed,
             taps,
             probes,
             probe_tracks,
@@ -1483,50 +1652,8 @@ impl ProjectRenderer {
         #[cfg(not(any(feature = "decode", feature = "audio")))]
         let live_on = false;
         let probing = !asked.is_empty() || live_on;
-        // A track tapped live before or inside its chain runs its chain in
-        // the topo loop, where those points are read — never in the lane
-        // pool, which runs a depth's chains before the loop reaches them.
-        #[cfg(any(feature = "decode", feature = "audio"))]
-        let tapped_inside = |ti: usize| {
-            live_plan.iter().flatten().any(|(t, at)| {
-                *t == ti
-                    && matches!(
-                        at,
-                        offline::Probe::PreFx | offline::Probe::FxIn(_) | offline::Probe::FxOut(_)
-                    )
-            })
-        };
-        #[cfg(not(any(feature = "decode", feature = "audio")))]
-        let tapped_inside = |_: usize| false;
-        // A track an earlier render recorded, played in its place.
-        let fed_of = |ti: usize| -> Option<&offline::Fed> {
-            let fed = &self.offline.as_ref()?.fed;
-            if fed.is_empty() {
-                return None;
-            }
-            fed.get(&tracks[ti].guid)
-        };
-        // Copy `bus` into every probe on track `ti` at `at`.
-        let probe = |probes: &mut [Vec<f32>], ti: usize, at: offline::Probe, bus: &[f32]| {
-            for ((p, track), dst) in asked.iter().zip(probe_tracks.iter()).zip(probes.iter_mut()) {
-                if *track == Some(ti) && p.at == at {
-                    let n = dst.len().min(bus.len());
-                    dst[..n].copy_from_slice(&bus[..n]);
-                }
-            }
-            #[cfg(any(feature = "decode", feature = "audio"))]
-            for (slot, planned) in live_plan.iter().enumerate() {
-                if *planned == Some((ti, at)) {
-                    live_taps.write(slot, &bus[..(frames * 2).min(bus.len())]);
-                }
-            }
-        };
         let latencies = &*self.latencies;
         let tap_point = self.offline.as_ref().and_then(|o| o.tap);
-        // Whether a track's delay lines still hold signal to let out.
-        let hot = |delays: &[Vec<pdc::Delay>], monitor: &[pdc::Delay], ti: usize| {
-            delays[ti].iter().any(pdc::Delay::hot) || monitor[ti].hot()
-        };
 
         // What the tracks rendered ahead handed over: their sums onto the
         // live buses and master, their meters as of these frames.
@@ -1583,16 +1710,10 @@ impl ProjectRenderer {
             );
         }
 
-        // 0.5) Live / programmatic MIDI → per-track scratch buckets.
-        // Drained once per block under the queue lock (like stage 0's
-        // live input), resolving each event's track guid to a snapshot
-        // index. The buckets merge into each track's `collect_midi_events`
-        // list at the FX stage below. Empty / no-op when no queue is
-        // installed and when nothing was pushed this block.
-        // Native: the live-MIDI ring is `rtrb`-backed (native dep). On
-        // wasm32 the queue is a `VecDeque` on `Standalone` (pushed by the
-        // `WebRenderer` MIDI methods) — drained here with the same
-        // guid-resolve + bucket merge.
+        // 0.5) Live / programmatic MIDI → per-track scratch buckets,
+        // drained once per block; each track's node merges its bucket into
+        // its chain's events. Native: the live-MIDI ring is `rtrb`-backed;
+        // on wasm32 the queue is a `VecDeque` on `Standalone`.
         #[allow(unused_mut)]
         let live_midi_buckets = midi_buckets;
         for b in live_midi_buckets.iter_mut() {
@@ -1608,7 +1729,6 @@ impl ProjectRenderer {
                 && queue.cons.slots() > 0
             {
                 live_midi_buckets.resize_with(n, Vec::new);
-                // guid → index over the snapshot (built lazily on demand).
                 let idx_of =
                     |guid: &str| -> Option<usize> { tracks.iter().position(|t| t.guid == guid) };
                 let mut forward = self
@@ -1637,885 +1757,197 @@ impl ProjectRenderer {
             }
         }
 
-        // 1) Item playback into per-track buses. Item-level envelopes
-        // (take volume / pan / mute / pitch) are evaluated per-frame
-        // inside mix_item_into_bus via cursors.
-        let (mut items_us, mut slowest_items) = (0u32, (0u32, 0u32));
-        // Each track's cost, counted for a performance meter from the
-        // realtime renders only (a bounce is not the song playing).
-        #[cfg(not(target_arch = "wasm32"))]
-        let costs = self.realtime.get().map(|_| &*self.daw.track_costs);
-        #[cfg(target_arch = "wasm32")]
-        let costs: Option<&super::perf::TrackCosts> = None;
-        for (ti, t) in tracks.iter().enumerate() {
-            // Gate on the solo-routing MASK, not the raw per-track `soloed`
-            // flag: soloing a folder must keep its children audible (they pass
-            // as descendants) and soloing a leaf keeps its folder ancestors as
-            // pass-through. `passes(ti)` is the same predicate stage 0 uses.
-            if !covers(ti) || (any_soloed && !passes(ti)) {
-                continue;
-            }
-            if t.items.is_empty() {
-                continue;
-            }
-            let t_items = Stamp::now();
-            let bus = &mut buses[ti];
-            // What feeds this track arrives late (its plugins' delay): its
-            // own items play that much later, to meet it.
-            let late = f64::from(plan.input[ti]) * rate / self.sample_rate as f64;
-            let (item_start, item_end) = (start_seconds - late, end_seconds - late);
-            for item in &t.items {
-                if item.muted {
-                    continue;
-                }
-                // Fixed lanes: only items on PLAYING lanes sound —
-                // the rest are alternate takes (REAPER 7 comping).
-                if t.lane_play_mask != 0
-                    && let Some(lane) = item.fixed_lane
-                    && (lane >= 64 || t.lane_play_mask & (1u64 << lane) == 0)
-                {
-                    continue;
-                }
-                let Some(audio) = &item.audio else { continue };
-                dirty[ti] |= mix_item_into_bus(
-                    bus,
-                    audio,
-                    item,
-                    item_start,
-                    item_end,
-                    self.sample_rate,
-                    rate,
-                );
-            }
-            let us = t_items.us();
-            if let Some(costs) = costs {
-                costs.add_media(ti, us);
-            }
-            items_us = items_us.saturating_add(us);
-            if us > slowest_items.1 {
-                slowest_items = (ti as u32, us);
-            }
-        }
-
-        // An offline render's input probes: each track's own media alone,
-        // before children, sends or FX add to it.
-        if probing {
-            for (ti, bus) in buses.iter().enumerate() {
-                probe(probes, ti, offline::Probe::Input, &bus.samples);
-            }
-        }
-
         // Debug tracing: FTS_RENDER_DEBUG=1 dumps per-track bus RMS at
         // each stage so silent-master bugs can be localized headlessly.
         // Cached — render_block runs on the audio thread.
         static DEBUG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         let debug = *DEBUG.get_or_init(|| std::env::var("FTS_RENDER_DEBUG").is_ok());
-        if debug {
-            let rms = |s: &[f32]| {
-                (s.iter().map(|s| (*s as f64) * (*s as f64)).sum::<f64>() / s.len().max(1) as f64)
-                    .sqrt()
-            };
-            for (ti, t) in tracks.iter().enumerate() {
-                if t.items.is_empty() {
-                    continue;
-                }
-                let v = rms(&buses[ti].samples);
-                if v > 1e-9 {
-                    eprintln!("[stage1] {:<24} items={} rms={v:.6}", t.name, t.items.len());
-                }
-            }
-        }
 
-        // Per-track meter bank (read above): post-fader block peaks,
-        // written once per track per block (lock-free atomics — safe from
-        // the audio callback). Cell index == project track index ==
-        // snapshot index, matching `TrackRef::Index` on the Peaks service.
-
-        // Plugin instances for the per-track FX stage inside the loop.
-        // The map lives separately from ProjectState so the audio
-        // thread doesn't block project mutations on the proto side.
+        // Plugin instances for the FX chains. The map lives apart from
+        // ProjectState so the audio thread doesn't block project mutations.
         //
-        // TRY, never block. A control thread holds this mutex while it
-        // swaps an instrument in (`insert_plugin_instance`) — normally
-        // microseconds, but the audio callback must not gamble on that: a
-        // blocking acquire here turns any control-side hold into a dropout,
-        // and in a wasm AudioWorklet a contended `Mutex` parks the audio
-        // thread on `memory_atomic_wait32`, which is precisely the thing
-        // the browser rig must never do (browser-keys-rig.md, W13).
-        //
-        // On contention this block renders WITHOUT its plugin stage: dry
-        // audio for one 128-frame quantum (~2.7 ms), which is inaudible
-        // next to the click of an underrun. The next block takes the lock
-        // normally. `poisoned` still recovers, same as before — a
-        // control-thread panic must not cascade into the callback.
-        //
-        // Before giving up, spin briefly: a control thread's hold is a batch
-        // of map inserts (`with_plugin_instances`), a few microseconds, and
-        // for an amp chain "dry for one block" is not inaudible — it is the
-        // raw DI at full level. Bounded, never parked: a hold that outlasts
-        // the spin still costs one dry block, not an underrun.
+        // TRY, never block. A control thread holds it while it swaps an
+        // instrument in — normally microseconds, but the audio callback must
+        // not gamble on that (and in a wasm AudioWorklet a contended `Mutex`
+        // parks the audio thread). Spin briefly, then render this block
+        // WITHOUT its plugin stage: dry audio for one block, not an underrun.
         let t_lock = Stamp::now();
         let plugins = self
             .offline
             .as_ref()
             .map_or(&self.daw.plugin_instances, |o| &o.plugins)
             .try_read_spinning(PLUGIN_LOCK_SPINS);
-
         if plugins.is_none() {
             PLUGIN_STAGE_SKIPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
         let plugin_lock_us = t_lock.us();
+
+        // Each track's cost, counted for a performance meter from the
+        // realtime renders only (a bounce is not the song playing).
+        #[cfg(not(target_arch = "wasm32"))]
+        let costs = self.realtime.get().map(|_| &*self.daw.track_costs);
+        #[cfg(target_arch = "wasm32")]
+        let costs: Option<&super::perf::TrackCosts> = None;
+
+        // 1–4) Every track this render covers, as a node of the routing
+        // graph ([`schedule`], [`node`]): its media, the sums into it, its
+        // FX, fader, sends and parent share — on as many threads as the
+        // pool has, each track as soon as what feeds it is done.
+        #[cfg(not(target_arch = "wasm32"))]
+        let pool = self.lanes();
+        #[cfg(target_arch = "wasm32")]
+        let pool: Option<()> = None;
+        let map = plugins.as_deref();
+        // A track runs on the render thread when one of its plugins must
+        // (not `parallel_safe`) — or when it cannot be asked this block.
+        let pinned = |ti: usize| -> bool {
+            if pool.is_none() {
+                return false;
+            }
+            let t = &tracks[ti];
+            t.fx_chain.iter().enumerate().any(|(i, fx_guid)| {
+                if !t.fx_enabled.get(i).copied().unwrap_or(true) || panicked_fx.contains(fx_guid) {
+                    return false;
+                }
+                let Some(cell) = map.and_then(|m| m.cell(fx_guid)) else {
+                    return false;
+                };
+                cell.try_lock_spinning(PLUGIN_LOCK_SPINS)
+                    .is_none_or(|p| !p.parallel_safe())
+            })
+        };
+        schedule.build(
+            tracks,
+            &snap.order,
+            covers,
+            |ti| u64::from(cost.get(ti).copied().unwrap_or(0)),
+            pinned,
+        );
+        // Input probes of the tracks no node renders here: what their
+        // buses hold (their media is another render's).
+        if probing {
+            for ti in (0..n).filter(|&ti| schedule.pos[ti] == schedule::NOT_A_NODE) {
+                for ((p, track), dst) in
+                    asked.iter().zip(probe_tracks.iter()).zip(probes.iter_mut())
+                {
+                    if *track == Some(ti) && p.at == offline::Probe::Input {
+                        let k = dst.len().min(buses[ti].samples.len());
+                        dst[..k].copy_from_slice(&buses[ti].samples[..k]);
+                    }
+                }
+                #[cfg(any(feature = "decode", feature = "audio"))]
+                for (slot, planned) in live_plan.iter().enumerate() {
+                    if *planned == Some((ti, offline::Probe::Input)) {
+                        live_taps.write(slot, &buses[ti].samples[..frames * 2]);
+                    }
+                }
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let threads = pool.map_or(1, |p| p.threads() + 1);
+        #[cfg(target_arch = "wasm32")]
+        let threads = 1;
+        workers.resize_with(threads.max(workers.len()), node::Worker::default);
+        let block = node::Block {
+            snap: &snap,
+            tracks,
+            sched: schedule,
+            sample_rate: self.sample_rate,
+            frames,
+            rate,
+            start_samples,
+            start_seconds,
+            end_seconds,
+            frames_per_second,
+            clock,
+            block_transport,
+            transport_late: &transport_late,
+            plan,
+            latencies,
+            plugins: map,
+            panicked_fx,
+            meters: &meters,
+            feed_meter: ahead.as_deref_mut().map(Feed::meter_cells),
+            costs,
+            offline: self.offline.as_ref(),
+            tap_point,
+            probing,
+            asked,
+            probe_tracks,
+            probes: schedule::Cells::new(probes),
+            #[cfg(any(feature = "decode", feature = "audio"))]
+            live_taps,
+            #[cfg(any(feature = "decode", feature = "audio"))]
+            live_plan,
+            debug,
+            buses: schedule::Cells::new(buses),
+            dirty: schedule::Cells::new(dirty),
+            sidechains: schedule::Cells::new(sidechains),
+            keyed: schedule::Cells::new(keyed),
+            aux: schedule::Cells::new(aux),
+            aux_live: schedule::Cells::new(aux_live),
+            delays: schedule::Cells::new(delays),
+            monitor_delays: schedule::Cells::new(monitor_delays),
+            taps: schedule::Cells::new(taps),
+            edges: schedule::Cells::new(edges),
+            midi_buckets: schedule::Cells::new(live_midi_buckets),
+            stats: schedule::Cells::new(stats),
+            workers: schedule::Cells::new(workers),
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        block.render(pool);
+        #[cfg(target_arch = "wasm32")]
+        block.render();
+        drop(block);
+        for &ti in &snap.order {
+            if schedule
+                .pos
+                .get(ti)
+                .is_none_or(|&p| p == schedule::NOT_A_NODE)
+            {
+                continue;
+            }
+            let out = &edges[ti];
+            if out.live.first().copied().unwrap_or(false) && out.share == node::Share::Master {
+                for (m, s) in master.samples.iter_mut().zip(out.edge(0, frames)) {
+                    *m += *s;
+                }
+            }
+        }
+        // What the nodes did: their plugins' panics (bypassed from now on),
+        // their costs, the block's profile.
         let (mut fx_us, mut slowest) = (0u32, (0u32, 0u32));
-
-        // 2–4) Per-track processing in topo order over the routing
-        // graph (children before folder parents, senders before their
-        // destinations): each track's bus is gained/panned, its sends
-        // dispatched, and the result summed into its folder parent's
-        // bus *before* the parent's own gain applies — REAPER's folder
-        // routing (the parent fader/FX scale the children's sum plus
-        // the parent's own items). Top-level parent-send tracks sum to
-        // master.
-        let inv_rate = 1.0 / self.sample_rate as f64;
-        let mut from = 0;
-        while from < snap.order.len() {
-            let deep = snap.depth[snap.order[from]];
-            let to = from
-                + snap.order[from..]
-                    .iter()
-                    .take_while(|&&i| snap.depth[i] == deep)
-                    .count();
-            let depth = &snap.order[from..to];
-            from = to;
-            // 1.5) Realtime with a lane pool: at the start of each depth of the
-            // routing graph (`RenderSnapshot::depth`) every track of that depth
-            // holds its whole input — its items, its children's sums, its
-            // received sends, all from shallower tracks already done — so the
-            // depth's FX chains run now, across cores, and the topo loop then
-            // skips them. Only chains whose every plugin is `parallel_safe` and
-            // prepared go, no track with a pre-FX send (its tap is taken in
-            // the loop, before its FX) and none keyed this block (the loop
-            // hands its plugins the sidechain); anything else waits for the
-            // loop, exactly as before.
-            #[cfg(not(target_arch = "wasm32"))]
-            if let (Some(pool), Some(map)) = (self.lanes.get(), plugins.as_ref()) {
-                let mut jobs = 0;
-                // The tempo every plugin reads its note values against this
-                // block — told here, on the render thread, before any runs.
-                let tempo = snap.tempo_map.tempo_at(start_seconds);
-                for &ti in depth {
-                    let t = &tracks[ti];
-                    if !covers(ti)
-                        || !passes(ti)
-                        || keyed[ti]
-                        || tapped_inside(ti)
-                        || t.fx_chain.is_empty()
-                        || t.sends
-                            .iter()
-                            .any(|s| s.mode == daw_proto::routing::SendMode::PreFx)
-                    {
-                        continue;
-                    }
-                    if lane_jobs.len() <= jobs {
-                        lane_jobs.push(LaneJob::default());
-                    }
-                    let job = &mut lane_jobs[jobs];
-                    job.chain.clear();
-                    job.transports.clear();
-                    job.latency = 0;
-                    let mut ok = true;
-                    for (i, fx_guid) in t.fx_chain.iter().enumerate() {
-                        if !t.fx_enabled.get(i).copied().unwrap_or(true)
-                            || panicked_fx.contains(fx_guid)
-                        {
-                            continue;
-                        }
-                        let Some(cell) = map.cell(fx_guid) else {
-                            continue;
-                        };
-                        // Looked at here, run on a worker: the lock is taken
-                        // twice, both times uncontended but for a control write.
-                        let Some(mut plugin) = cell.try_lock_spinning(PLUGIN_LOCK_SPINS) else {
-                            ok = false;
-                            break;
-                        };
-                        if !plugin.is_prepared() || !plugin.parallel_safe() {
-                            ok = false;
-                            break;
-                        }
-                        plugin.set_tempo(tempo);
-                        // Its clock: its audio as late as the track's input
-                        // and the FX before it make it.
-                        job.transports
-                            .push(transport_late(plan.input[ti].saturating_add(job.latency)));
-                        job.latency = job.latency.saturating_add(plugin.latency());
-                        drop(plugin);
-                        job.chain.push((i, PluginPtr::new(cell)));
-                    }
-                    if !ok || job.chain.is_empty() {
-                        job.chain.clear();
-                        job.transports.clear();
-                        continue;
-                    }
-                    job.ti = ti;
-                    job.clock = clock;
-                    job.bus = buses[ti].samples.as_mut_ptr() as usize;
-                    job.aux = if t.aux_taps {
-                        aux_sized(&mut aux[ti], frames);
-                        aux[ti].as_mut_ptr() as usize
+        let (mut items_us, mut slowest_items) = (0u32, (0u32, 0u32));
+        for &ti in schedule.nodes() {
+            let ti = ti as usize;
+            let st = stats[ti];
+            if let Some((i, in_prepare)) = st.panicked
+                && let Some(fx_guid) = tracks[ti].fx_chain.get(i)
+            {
+                panicked_fx.insert(fx_guid.clone());
+                tracing::error!(
+                    "plugin {fx_guid} PANICKED in {} on track '{}' — bypassing it from now on",
+                    if in_prepare {
+                        "prepare"
                     } else {
-                        0
-                    };
-                    job.aux_ran = false;
-                    for v in [&mut job.in_l, &mut job.in_r, &mut job.out_l, &mut job.out_r] {
-                        if v.len() != frames {
-                            v.resize(frames, 0.0);
-                        }
-                    }
-                    collect_midi_events_into(
-                        &mut job.midi,
-                        t,
-                        start_seconds,
-                        end_seconds,
-                        frames_per_second,
-                        frames,
-                    );
-                    if let Some(bucket) = live_midi_buckets.get_mut(ti)
-                        && !bucket.is_empty()
-                    {
-                        job.midi.append(bucket);
-                        job.midi.sort_by_key(|e| e.offset);
-                    }
-                    job.note_expr = collect_note_expressions(
-                        t,
-                        start_seconds,
-                        end_seconds,
-                        frames_per_second,
-                        frames,
-                    );
-                    job.ran = false;
-                    job.panicked = None;
-                    job.busy = 0;
-                    jobs += 1;
-                }
-                if jobs >= 2 {
-                    // Longest lanes first, so the last job to finish is short.
-                    lane_jobs[..jobs].sort_unstable_by_key(|j| std::cmp::Reverse(lane_cost[j.ti]));
-                    pool.run_lanes(&mut lane_jobs[..jobs], tracks, frames);
-                    for job in &mut lane_jobs[..jobs] {
-                        let ti = job.ti;
-                        chain_done[ti] = true;
-                        latencies.set(ti, job.latency);
-                        dirty[ti] |= job.ran;
-                        aux_live[ti] |= job.aux_ran;
-                        lane_cost[ti] = job.us;
-                        if job.busy > 0 {
-                            PLUGIN_BUSY_SKIPS.fetch_add(
-                                u64::from(job.busy),
-                                std::sync::atomic::Ordering::Relaxed,
-                            );
-                        }
-                        fx_us += job.us;
-                        if let Some(costs) = costs {
-                            costs.add_fx(ti, job.us);
-                        }
-                        if job.us > slowest.1 {
-                            slowest = (ti as u32, job.us);
-                        }
-                        if let Some(i) = job.panicked
-                            && let Some(fx_guid) = tracks[ti].fx_chain.get(i)
-                        {
-                            panicked_fx.insert(fx_guid.clone());
-                            tracing::error!(
-                                "plugin {fx_guid} PANICKED in process_block on track '{}' — \
-                                 bypassing it from now on",
-                                tracks[ti].name,
-                            );
-                        }
-                    }
-                }
-                // No pointer into the map outlives this block.
-                for job in &mut lane_jobs[..jobs] {
-                    job.chain.clear();
-                }
+                        "process_block"
+                    },
+                    tracks[ti].name,
+                );
             }
-
-            for &ti in depth {
-                let t = &tracks[ti];
-                if !covers(ti) {
-                    continue;
-                }
-                if !passes(ti) {
-                    // Solo-skipped tracks meter as silence.
-                    meter(&meters, ahead.as_deref_mut(), ti, &[]);
-                    continue;
-                }
-                let fed = fed_of(ti);
-                if let Some(fed) = fed {
-                    dirty[ti] = true;
-                    latencies.set(ti, fed.latency);
-                }
-                // Clean bus = all zeros: gain scales nothing, sends add
-                // nothing, parent sums add nothing. Skip the per-frame
-                // work entirely; only active tracks cost CPU. (A track
-                // with FX must still run — synths generate from MIDI.)
-                if t.fx_chain.is_empty() && fed.is_none() {
-                    latencies.set(ti, 0);
-                }
-                if !dirty[ti] && t.fx_chain.is_empty() && !hot(delays, monitor_delays, ti) {
-                    meter(&meters, ahead.as_deref_mut(), ti, &[]);
-                    continue;
-                }
-
-                // Pre-FX send tap: the bus BEFORE the FX chain runs. At
-                // this point in topo order the bus already holds items +
-                // children sums + received sends — the track's input.
-                let has_pre_fx_tap = t
-                    .sends
-                    .iter()
-                    .any(|s| s.mode == daw_proto::routing::SendMode::PreFx);
-                if probing {
-                    probe(probes, ti, offline::Probe::PreFx, &buses[ti].samples);
-                }
-                if has_pre_fx_tap {
-                    pre_fx_tap.clear();
-                    pre_fx_tap.extend_from_slice(&buses[ti].samples);
-                }
-
-                // FX chain: pipe the bus through every loaded plugin in
-                // order. Running INSIDE the topo loop means a folder's FX
-                // process the children's mix, and bus FX process their
-                // received sends — REAPER's signal flow. Synthetic /
-                // unloaded FX are skipped — no DSP, no work.
-                let t_fx = Stamp::now();
-                if !t.fx_chain.is_empty() && !chain_done[ti] {
-                    let bus = &mut buses[ti];
-                    // MIDI + note-expression events for this block. Both
-                    // lists go to every plugin in the chain (REAPER's
-                    // default) — non-MIDI plugins ignore them.
-                    collect_midi_events_into(
-                        midi_events,
-                        t,
-                        start_seconds,
-                        end_seconds,
-                        frames_per_second,
-                        frames,
-                    );
-                    // Merge programmatic / live MIDI pushed for this track
-                    // this block (drained in stage 0.5), then re-sort so the
-                    // combined list stays offset-ordered for the plugin.
-                    if let Some(bucket) = live_midi_buckets.get_mut(ti)
-                        && !bucket.is_empty()
-                    {
-                        midi_events.append(bucket);
-                        midi_events.sort_by_key(|e| e.offset);
-                    }
-                    let note_expr_events = collect_note_expressions(
-                        t,
-                        start_seconds,
-                        end_seconds,
-                        frames_per_second,
-                        frames,
-                    );
-                    // Mute is applied at the fader, after the chain, so a muted
-                    // track's plugins still run (tails, meters). Say so to the
-                    // plugins that need to know — see `plugin::track_muted`.
-                    let _muted = crate::plugin::TrackMutedGuard::enter(t.muted);
-                    // ...unless nothing would hear them: the fader zeroes a muted
-                    // track, and only a pre-fader (post-FX) send taps it before
-                    // that. Then its chain is not run at all — a mix's muted
-                    // alternatives (the drum Process's seven reverbs, 4% of a
-                    // core each) cost nothing while they are off.
-                    let heard_while_muted = t
-                        .sends
-                        .iter()
-                        .any(|s| s.mode == daw_proto::routing::SendMode::PostFx);
-                    let chain = if t.muted && !heard_while_muted {
-                        &[][..]
-                    } else {
-                        t.fx_chain.as_slice()
-                    };
-                    if t.aux_taps {
-                        aux_sized(&mut aux[ti], frames);
-                    }
-                    let mut chain_latency = 0u32;
-                    for (i, fx_guid) in chain.iter().enumerate() {
-                        // What goes into FX `i` is what came out of `i - 1`.
-                        if probing {
-                            probe(probes, ti, offline::Probe::FxIn(i), &bus.samples);
-                            if let Some(before) = i.checked_sub(1) {
-                                probe(probes, ti, offline::Probe::FxOut(before), &bus.samples);
-                            }
-                        }
-                        if !t.fx_enabled.get(i).copied().unwrap_or(true) {
-                            continue;
-                        }
-                        // `None` = the map was busy this block (see the
-                        // try_read above): render dry rather than block.
-                        let Some(cell) = plugins.as_ref().and_then(|p| p.cell(fx_guid)) else {
-                            continue; // synthetic / not loaded / map busy
-                        };
-                        let Some(mut plugin) = cell.try_lock_spinning(PLUGIN_LOCK_SPINS) else {
-                            PLUGIN_BUSY_SKIPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            continue; // a control thread has it: this block dry
-                        };
-                        let plugin = &mut **plugin;
-                        if panicked_fx.contains(fx_guid) {
-                            continue; // panicked earlier — permanently bypassed
-                        }
-                        if !plugin.is_prepared() {
-                            // Lazy prepare on first use; bypass on failure. A
-                            // panicking plugin must not unwind out of the audio
-                            // callback (extern "C" boundary → abort), so it's
-                            // caught, logged once, and bypassed from then on.
-                            let prepared =
-                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                    plugin.prepare(self.sample_rate as f64, frames as u32)
-                                }));
-                            match prepared {
-                                Ok(Ok(())) => {}
-                                Ok(Err(_)) => continue,
-                                Err(_) => {
-                                    panicked_fx.insert(fx_guid.clone());
-                                    tracing::error!(
-                                        "plugin {fx_guid} PANICKED in prepare on track '{}' — \
-                                         bypassing it from now on",
-                                        t.name,
-                                    );
-                                    continue;
-                                }
-                            }
-                        }
-                        // Its clock: its audio as late as the track's input
-                        // and the FX before it make it.
-                        crate::plugin::set_render_transport(transport_late(
-                            plan.input[ti].saturating_add(chain_latency),
-                        ));
-                        chain_latency = chain_latency.saturating_add(plugin.latency());
-                        // De-interleave → process → re-interleave.
-                        for f in 0..frames {
-                            in_l[f] = bus.samples[f * 2];
-                            in_r[f] = bus.samples[f * 2 + 1];
-                        }
-                        for v in out_l.iter_mut().chain(out_r.iter_mut()) {
-                            *v = 0.0;
-                        }
-                        if keyed[ti] {
-                            let sidechain = &sidechains[ti];
-                            for f in 0..frames {
-                                key_l[f] = sidechain[f * 2];
-                                key_r[f] = sidechain[f * 2 + 1];
-                            }
-                            plugin.set_sidechain(key_l, key_r);
-                        }
-                        let block = automate::FxBlock {
-                            fixed: t.fx_params.get(i).map(Vec::as_slice).unwrap_or(&[]),
-                            envelopes: t.fx_envs.get(i).map(Vec::as_slice).unwrap_or(&[]),
-                            clock,
-                            midi: midi_events.as_slice(),
-                            note_expressions: &note_expr_events,
-                        };
-                        plugin.set_tempo(snap.tempo_map.tempo_at(start_seconds));
-                        // catch_unwind so a panicking third-party plugin bypasses
-                        // (bus keeps its pre-plugin signal — pass-through) instead
-                        // of unwinding across the extern "C" audio callback and
-                        // aborting mid-song. No allocation on the happy path.
-                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            let io = automate::Io {
-                                in_l: &in_l[..frames],
-                                in_r: &in_r[..frames],
-                                out_l: &mut out_l[..frames],
-                                out_r: &mut out_r[..frames],
-                            };
-                            fx_param_events.process(plugin, io, &block)
-                        }));
-                        match result {
-                            Ok((Ok(()), schedule)) => automate::record(schedule),
-                            Ok((Err(_), _)) => continue,
-                            Err(_) => {
-                                panicked_fx.insert(fx_guid.clone());
-                                tracing::error!(
-                                    "plugin {fx_guid} PANICKED in process_block on track '{}' — \
-                                     bypassing it from now on",
-                                    t.name,
-                                );
-                                continue;
-                            }
-                        }
-                        for f in 0..frames {
-                            bus.samples[f * 2] = out_l[f];
-                            bus.samples[f * 2 + 1] = out_r[f];
-                        }
-                        if t.aux_taps {
-                            aux_live[ti] |= add_aux(&*plugin, &mut aux[ti], frames);
-                        }
-                        // A plugin ran — it may synthesize (MIDI → audio),
-                        // so the bus can carry signal even with no items.
-                        dirty[ti] = true;
-                    }
-                    if let (true, Some(last)) = (probing, chain.len().checked_sub(1)) {
-                        probe(probes, ti, offline::Probe::FxOut(last), &bus.samples);
-                    }
-                    crate::plugin::set_render_transport(block_transport);
-                    // A muted chain not run keeps the latency it had.
-                    if !chain.is_empty() || t.fx_chain.is_empty() {
-                        latencies.set(ti, chain_latency);
-                    }
-                }
-                if !t.fx_chain.is_empty() && !chain_done[ti] {
-                    let us = t_fx.us();
-                    fx_us += us;
-                    if let Some(costs) = costs {
-                        costs.add_fx(ti, us);
-                    }
-                    if us > slowest.1 {
-                        slowest = (ti as u32, us);
-                    }
-                }
-                if !dirty[ti] && !hot(delays, monitor_delays, ti) {
-                    meter(&meters, ahead.as_deref_mut(), ti, &[]);
-                    continue;
-                }
-
-                // An offline render's pre-fader tap: post-FX, before the gain.
-                if tap_point == Some(offline::Tap::PreFader)
-                    && let Some(tap) = taps.get_mut(ti)
-                {
-                    tap.copy_from_slice(&buses[ti].samples[..frames * 2]);
-                }
-                if probing {
-                    probe(probes, ti, offline::Probe::PreFader, &buses[ti].samples);
-                }
-
-                // Pre-fader send tap: post-FX, before the gain stage.
-                let has_pre_fader_tap = t
-                    .sends
-                    .iter()
-                    .any(|s| s.mode == daw_proto::routing::SendMode::PostFx);
-                if has_pre_fader_tap {
-                    pre_fader_tap.clear();
-                    pre_fader_tap.extend_from_slice(&buses[ti].samples);
-                }
-
-                // Gain + pan + polarity, per-frame envelopes.
-                // VCA grouping (user guide §5.16): a follower's volume is
-                // dB-added (= linear-multiplied) with every shared-group
-                // lead's fader + volume envelope; the lead's pan (+ pan
-                // envelope) offsets the follower's pan; the lead's mute —
-                // button or MUTE ENVELOPE — silences followers. Follower
-                // faders and mute buttons never move; this is playback-only.
-                let vca_leads: Vec<&TrackSnapshot> = if t.vca_follow != 0 {
-                    tracks
-                        .iter()
-                        .filter(|l| l.vca_lead & t.vca_follow != 0)
-                        .collect()
-                } else {
-                    Vec::new()
-                };
-                let vca_lead_muted = vca_leads.iter().any(|l| l.muted);
-                let mut vca_cursors: Vec<(
-                    Option<EnvelopeCursor>,
-                    Option<EnvelopeCursor>,
-                    Option<EnvelopeCursor>,
-                )> = vca_leads
-                    .iter()
-                    .map(|l| {
-                        (
-                            l.volume_env.as_ref().map(|p| EnvelopeCursor::new(p)),
-                            l.pan_env.as_ref().map(|p| EnvelopeCursor::new(p)),
-                            l.mute_env.as_ref().map(|p| EnvelopeCursor::new(p)),
-                        )
-                    })
-                    .collect();
-                {
-                    let bus = &mut buses[ti];
-                    let mut c_vol = t.volume_env.as_ref().map(|p| EnvelopeCursor::new(p));
-                    let mut c_pvol = t.volume_prefx_env.as_ref().map(|p| EnvelopeCursor::new(p));
-                    let mut c_pan = t.pan_env.as_ref().map(|p| EnvelopeCursor::new(p));
-                    let mut c_ppan = t.pan_prefx_env.as_ref().map(|p| EnvelopeCursor::new(p));
-                    let mut c_mute = t.mute_env.as_ref().map(|p| EnvelopeCursor::new(p));
-                    // No envelope and no VCA lead: the gains are the same on every
-                    // frame — work them out once (the per-frame arithmetic below,
-                    // with its absent envelopes at their defaults) and just scale.
-                    let fixed = c_vol.is_none()
-                        && c_pvol.is_none()
-                        && c_pan.is_none()
-                        && c_ppan.is_none()
-                        && c_mute.is_none()
-                        && vca_leads.is_empty();
-                    if fixed {
-                        let vol = t.volume * 1.0 * 1.0;
-                        let pan = (t.pan + 0.0 + 0.0).clamp(-1.0, 1.0);
-                        if t.muted || vca_lead_muted {
-                            bus.samples[..bus.frames * 2].fill(0.0);
-                        } else {
-                            let sign = if t.phase_inverted { -1.0 } else { 1.0 };
-                            // The same balance law as the per-frame path below.
-                            let (lg, rg) = balance(pan);
-                            let lg = (lg * vol * sign) as f32;
-                            let rg = (rg * vol * sign) as f32;
-                            for fr in bus.samples[..bus.frames * 2].chunks_exact_mut(2) {
-                                fr[0] *= lg;
-                                fr[1] *= rg;
-                            }
-                        }
-                    }
-                    for frame in (0..bus.frames).filter(|_| !fixed) {
-                        let time = start_seconds + frame as f64 * rate * inv_rate;
-                        let v_main = c_vol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
-                        let v_prefx = c_pvol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
-                        // Read and the writing modes: the envelope is the
-                        // volume; Trim/Read: the fader trims it.
-                        let fader = if t.volume_replaces { 1.0 } else { t.volume };
-                        let mut vol = fader * v_main * v_prefx;
-                        let p_main = c_pan
-                            .as_mut()
-                            .and_then(|c| c.eval_at(time))
-                            .map(|v| (v - 0.5) * 2.0)
-                            .unwrap_or(0.0);
-                        let p_prefx = c_ppan
-                            .as_mut()
-                            .and_then(|c| c.eval_at(time))
-                            .map(|v| (v - 0.5) * 2.0)
-                            .unwrap_or(0.0);
-                        let knob = if t.pan_replaces { 0.0 } else { t.pan };
-                        let mut pan = knob + p_main + p_prefx;
-                        // VCA leads ride this follower: gain multiplies,
-                        // pan offsets, lead mute envelopes gate.
-                        let mut vca_env_muted = false;
-                        for (li, lead) in vca_leads.iter().enumerate() {
-                            let (c_lv, c_lp, c_lm) = &mut vca_cursors[li];
-                            let lv = c_lv.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
-                            vol *= lead.volume * lv;
-                            let lp = c_lp
-                                .as_mut()
-                                .and_then(|c| c.eval_at(time))
-                                .map(|v| (v - 0.5) * 2.0)
-                                .unwrap_or(0.0);
-                            pan += lead.pan + lp;
-                            if c_lm
-                                .as_mut()
-                                .and_then(|c| c.eval_at(time))
-                                .map(|v| v > 0.5)
-                                .unwrap_or(false)
-                            {
-                                vca_env_muted = true;
-                            }
-                        }
-                        let pan = pan.clamp(-1.0, 1.0);
-                        let env_muted = c_mute
-                            .as_mut()
-                            .and_then(|c| c.eval_at(time))
-                            .map(|v| v > 0.5)
-                            .unwrap_or(false);
-                        let muted = t.muted || env_muted || vca_lead_muted || vca_env_muted;
-                        if muted {
-                            bus.samples[frame * 2] = 0.0;
-                            bus.samples[frame * 2 + 1] = 0.0;
-                            continue;
-                        }
-                        // Polarity invert folds into the gain sign.
-                        let sign = if t.phase_inverted { -1.0 } else { 1.0 };
-                        let (lg, rg) = balance(pan);
-                        let (lg, rg) = (lg * vol * sign, rg * vol * sign);
-                        bus.samples[frame * 2] *= lg as f32;
-                        bus.samples[frame * 2 + 1] *= rg as f32;
-                    }
-                }
-
-                // Sends — additive into destination buses, per-frame. (Copy the
-                // post-fader source once so we can mutably borrow dest buses.)
-                src.clear();
-                src.extend_from_slice(&buses[ti].samples);
-                if let Some(fed) = fed {
-                    fed.read(start_samples.max(0.0) as u64, src);
-                }
-
-                // Meter the post-fader signal (folder children already
-                // summed in — topo order guarantees the bus is complete).
-                meter(&meters, ahead.as_deref_mut(), ti, src);
-                if tap_point == Some(offline::Tap::PostFader)
-                    && let Some(tap) = taps.get_mut(ti)
-                {
-                    tap.copy_from_slice(&src[..frames * 2]);
-                }
-                if probing {
-                    probe(probes, ti, offline::Probe::PostFader, src);
-                }
-
-                if debug {
-                    let v = (src.iter().map(|s| (*s as f64) * (*s as f64)).sum::<f64>()
-                        / src.len().max(1) as f64)
-                        .sqrt();
-                    if v > 1e-9 {
-                        eprintln!(
-                            "[stage2] {:<24} rms={v:.6} vol={:.3} ps={} pg={} hw={} sends={}",
-                            t.name,
-                            t.volume,
-                            t.parent_send,
-                            if t.parent_idx.is_some() {
-                                "ok"
-                            } else if t.has_parent_guid {
-                                "MISS"
-                            } else {
-                                "none"
-                            },
-                            t.hw_out,
-                            t.sends.len()
-                        );
-                    }
-                }
-                for (si, snd) in t.sends.iter().enumerate() {
-                    if snd.muted {
-                        continue;
-                    }
-                    let Some(di) = snd.dest_idx else { continue };
-                    let delay = plan.edges[ti].get(si + 1).copied().unwrap_or(0) as usize;
-                    // From a plugin's own outputs (3/4, 5/6): taken post-FX,
-                    // and through the fader when the send is post-fader — the
-                    // track's mute and level, not its envelopes.
-                    let mut from_aux = 1.0_f32;
-                    // Pick the tap matching the send's chain position.
-                    let send_src: &[f32] = if snd.from_pair > 0 {
-                        if snd.mode == daw_proto::routing::SendMode::PostFader {
-                            if t.muted {
-                                continue;
-                            }
-                            from_aux = t.volume as f32;
-                        }
-                        let span = (snd.from_pair - 1) * frames * 2..snd.from_pair * frames * 2;
-                        match aux
-                            .get(ti)
-                            .filter(|_| aux_live[ti])
-                            .and_then(|a| a.get(span))
-                        {
-                            Some(pair) => pair,
-                            None => continue,
-                        }
-                    } else {
-                        match snd.mode {
-                            daw_proto::routing::SendMode::PreFx if has_pre_fx_tap => pre_fx_tap,
-                            daw_proto::routing::SendMode::PostFx if has_pre_fader_tap => {
-                                pre_fader_tap
-                            }
-                            _ => src,
-                        }
-                    };
-                    // Late enough to meet the rest of what its destination sums.
-                    let send_src: &[f32] = match delays[ti].get_mut(si + 1) {
-                        Some(line) if delay > 0 || line.hot() => {
-                            line.run(delay, send_src, delayed, frames);
-                            &delayed[..frames * 2]
-                        }
-                        _ => send_src,
-                    };
-                    let dest_bus: &mut [f32] = if snd.to_sidechain {
-                        let sidechain = &mut sidechains[di];
-                        if sidechain.len() != frames * 2 {
-                            sidechain.resize(frames * 2, 0.0);
-                        }
-                        keyed[di] = true;
-                        sidechain
-                    } else {
-                        dirty[di] = true;
-                        &mut buses[di].samples
-                    };
-                    let mut c_vol = snd.volume_env.as_ref().map(|p| EnvelopeCursor::new(p));
-                    let mut c_pan = snd.pan_env.as_ref().map(|p| EnvelopeCursor::new(p));
-                    let mut c_mute = snd.mute_env.as_ref().map(|p| EnvelopeCursor::new(p));
-                    for frame in 0..frames {
-                        let time = start_seconds + frame as f64 * rate * inv_rate;
-                        let env_muted = c_mute
-                            .as_mut()
-                            .and_then(|c| c.eval_at(time))
-                            .map(|v| v > 0.5)
-                            .unwrap_or(false);
-                        if env_muted {
-                            continue;
-                        }
-                        let v_env = c_vol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
-                        let vol = snd.volume * v_env;
-                        let p_off = c_pan
-                            .as_mut()
-                            .and_then(|c| c.eval_at(time))
-                            .map(|v| (v - 0.5) * 2.0)
-                            .unwrap_or(0.0);
-                        let pan = (snd.pan + p_off).clamp(-1.0, 1.0);
-                        let (lg, rg) = balance(pan);
-                        let (lg, rg) = ((lg * vol) as f32 * from_aux, (rg * vol) as f32 * from_aux);
-                        dest_bus[frame * 2] += send_src[frame * 2] * lg;
-                        dest_bus[frame * 2 + 1] += send_src[frame * 2 + 1] * rg;
-                    }
-                }
-
-                // Parent / master sum — not for a track that, under a solo,
-                // only feeds what is soloed; and straight to master for one
-                // soloed with no way there of its own (`graph::Pass`).
-                let mode = pass(ti);
-                // The edge to the parent (or master), delayed to meet the
-                // rest of that sum.
-                let src: &[f32] = if mode == graph::Pass::Monitor {
-                    let delay = plan.to_master[ti] as usize;
-                    let line = &mut monitor_delays[ti];
-                    if delay > 0 || line.hot() {
-                        line.run(delay, src, delayed, frames);
-                        &delayed[..frames * 2]
-                    } else {
-                        src
-                    }
-                } else {
-                    let delay = plan.edges[ti].first().copied().unwrap_or(0) as usize;
-                    match delays[ti].first_mut() {
-                        Some(line) if delay > 0 || line.hot() => {
-                            line.run(delay, src, delayed, frames);
-                            &delayed[..frames * 2]
-                        }
-                        _ => src,
-                    }
-                };
-                if mode == graph::Pass::Monitor {
-                    for (m, smp) in master.samples.iter_mut().zip(src.iter()) {
-                        *m += *smp;
-                    }
-                } else if mode != graph::Pass::Feed && t.parent_send {
-                    match t.parent_idx {
-                        Some(pi) => {
-                            let parent_bus = &mut buses[pi];
-                            for (m, smp) in parent_bus.samples.iter_mut().zip(src.iter()) {
-                                *m += *smp;
-                            }
-                            dirty[pi] = true;
-                        }
-                        None => {
-                            for (m, smp) in master.samples.iter_mut().zip(src.iter()) {
-                                *m += *smp;
-                            }
-                            if debug {
-                                let v =
-                                    (src.iter().map(|s| (*s as f64) * (*s as f64)).sum::<f64>()
-                                        / src.len().max(1) as f64)
-                                        .sqrt();
-                                if v > 1e-9 {
-                                    eprintln!("[->master] {:<24} rms={v:.6}", t.name);
-                                }
-                            }
-                        }
-                    }
-                } else if mode != graph::Pass::Feed && t.hw_out {
-                    // No parent send but routed to hardware — v0 sums hw
-                    // outs straight to the master device buffer.
-                    for (m, smp) in master.samples.iter_mut().zip(src.iter()) {
-                        *m += *smp;
-                    }
-                    if debug {
-                        let v = (src.iter().map(|s| (*s as f64) * (*s as f64)).sum::<f64>()
-                            / src.len().max(1) as f64)
-                            .sqrt();
-                        if v > 1e-9 {
-                            eprintln!("[hw->master] {:<24} rms={v:.6}", t.name);
-                        }
-                    }
-                }
+            let us = st.fx_us.unwrap_or(0);
+            fx_us = fx_us.saturating_add(us);
+            if us > slowest.1 {
+                slowest = (ti as u32, us);
             }
+            items_us = items_us.saturating_add(st.items_us);
+            if st.items_us > slowest_items.1 {
+                slowest_items = (ti as u32, st.items_us);
+            }
+            cost[ti] = us.saturating_add(st.items_us);
+        }
+        if self.is_offline_render() {
+            offline_stats.add_block(frames, threads, t_start.us(), stats, schedule.nodes());
         }
 
         // Rendered ahead: what reached the live tracks and master is the
@@ -2525,6 +1957,7 @@ impl ProjectRenderer {
             return;
         }
 
+        let inv_rate = 1.0 / self.sample_rate as f64;
         // Metronome click: short sine bursts on the beat grid,
         // accented on measure starts. Overlaid pre-master-fader so
         // the click rides the master level like REAPER's default
@@ -3020,6 +2453,9 @@ mod pdc_tests;
 
 #[cfg(all(test, feature = "clap-host", not(target_arch = "wasm32")))]
 mod automation_tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod parallel_tests;
 
 #[cfg(test)]
 mod poison_recovery_tests {

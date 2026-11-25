@@ -1,8 +1,10 @@
-//! **Lane pool** — a realtime renderer's worker threads, so the tracks of
-//! a block that depend on nothing but their own input (instrument lanes:
-//! no children, no received sends) run their FX chains on several cores at
-//! once. Everything after — faders, sends, folder sums, folder FX — stays
-//! on the render thread in topo order.
+//! **Lane pool** — a renderer's worker threads, so the tracks of a block
+//! run on several cores at once ([`super::schedule`] says in which order:
+//! each track as soon as what feeds it is done). A realtime renderer's
+//! pool runs at the audio callback's priority, a few threads; an offline
+//! render's at normal priority, sized to the machine
+//! ([`offline_threads`]), taken from a few kept process-wide
+//! ([`OfflinePool`]).
 //!
 //! The render thread never waits on a lock or a wakeup: it publishes a
 //! batch with one atomic store, unparks the workers (a semaphore signal,
@@ -20,8 +22,6 @@ use std::cell::UnsafeCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
-
-use super::{Stamp, TrackSnapshot};
 
 /// How long a worker spins for the next batch before parking. A block is
 /// ~2.7 ms at 128 frames, so a worker parks between blocks and a batch
@@ -97,6 +97,7 @@ pub(crate) struct LanePool {
     shared: Arc<Shared>,
     workers: Vec<std::thread::JoinHandle<()>>,
     epoch: std::cell::Cell<u32>,
+    realtime: bool,
 }
 
 // SAFETY: `epoch` is touched only by `run`, which only the render thread
@@ -113,6 +114,16 @@ impl LanePool {
     /// the audio callback's) — the render ahead's own pool runs below the
     /// callback.
     pub(crate) fn named(threads: usize, name: &str, priority: i32) -> Self {
+        Self::spawn(threads, name, Some(priority))
+    }
+
+    /// `threads` workers at normal priority, for offline renders: they
+    /// yield while they wait, so they share the machine.
+    pub(crate) fn offline(threads: usize) -> Self {
+        Self::spawn(threads, "render-offline", None)
+    }
+
+    fn spawn(threads: usize, name: &str, priority: Option<i32>) -> Self {
         let shared = Arc::new(Shared {
             state: AtomicU64::new(0),
             done: AtomicUsize::new(0),
@@ -132,7 +143,13 @@ impl LanePool {
             shared,
             workers,
             epoch: std::cell::Cell::new(0),
+            realtime: priority.is_some(),
         }
+    }
+
+    /// Whether its workers are the audio callback's (they never yield).
+    pub(crate) fn realtime(&self) -> bool {
+        self.realtime
     }
 
     /// Worker threads (not counting the render thread).
@@ -143,8 +160,20 @@ impl LanePool {
     /// Run `job(0..count)` across the workers and this thread; returns when
     /// every job has finished. Realtime-safe: no lock, no allocation.
     pub(crate) fn run(&self, count: usize, job: &(dyn Fn(usize) + Sync)) {
+        self.run_with_main(count, job, &|| {});
+    }
+
+    /// [`run`](Self::run), with `main` run on this thread first, while the
+    /// workers take the jobs; then this thread takes what jobs are left.
+    pub(crate) fn run_with_main(
+        &self,
+        count: usize,
+        job: &(dyn Fn(usize) + Sync),
+        main: &dyn Fn(),
+    ) {
         let count = count.min(u16::MAX as usize);
         if count == 0 {
+            main();
             return;
         }
         let epoch = self.epoch.get().wrapping_add(1);
@@ -163,9 +192,14 @@ impl LanePool {
         for w in &self.workers {
             w.thread().unpark();
         }
+        // Every job must still be waited out if `main` panics.
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(main));
         self.shared.work(epoch);
         while self.shared.done.load(Ordering::Acquire) < count {
             std::hint::spin_loop();
+        }
+        if let Err(panic) = unwound {
+            std::panic::resume_unwind(panic);
         }
     }
 }
@@ -182,9 +216,9 @@ impl Drop for LanePool {
     }
 }
 
-fn worker(shared: &Shared, priority: i32) {
+fn worker(shared: &Shared, priority: Option<i32>) {
     #[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
-    let mut seat = audio::io::rt_workers::WorkerSeat::at(priority);
+    let mut seat = priority.map(audio::io::rt_workers::WorkerSeat::at);
     #[cfg(not(all(feature = "audio", not(target_arch = "wasm32"))))]
     let _ = priority;
     let mut seen = unpack(shared.state.load(Ordering::Acquire)).0;
@@ -197,7 +231,9 @@ fn worker(shared: &Shared, priority: i32) {
         if epoch != seen {
             seen = epoch;
             #[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
-            seat.sync();
+            if let Some(seat) = seat.as_mut() {
+                seat.sync();
+            }
             shared.work(epoch);
             idle_since = Instant::now();
             continue;
@@ -242,151 +278,88 @@ pub(crate) fn default_threads() -> usize {
     (cores / 3).clamp(0, 3)
 }
 
-/// A plugin on a lane job — the map's cell, reached from a worker, which
-/// takes the plugin's own lock to run it.
-pub(super) struct PluginPtr(*const crate::plugin::PluginCell);
-
-impl PluginPtr {
-    pub(super) fn new(cell: &crate::plugin::PluginCell) -> Self {
-        Self(cell)
+/// Workers for an offline render: `FTS_OFFLINE_RENDER_THREADS` if set (0
+/// renders on the calling thread alone), else the machine's cores but two
+/// (one for the render thread, one for everything else), at most 63.
+pub(crate) fn offline_threads() -> usize {
+    if let Some(n) = std::env::var("FTS_OFFLINE_RENDER_THREADS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+    {
+        return n.min(63);
     }
-}
-// SAFETY: a cell is `Sync` (a `Mutex`); the pointer is read only while the
-// render thread holds the map for reading, so the cell outlives it.
-unsafe impl Send for PluginPtr {}
-
-/// One independent track's FX chain, to run on any render thread: its own
-/// buffers and events, so jobs share nothing.
-#[derive(Default)]
-pub(super) struct LaneJob {
-    pub(super) ti: usize,
-    /// `(chain index, plugin)` of every plugin that runs, in chain order.
-    pub(super) chain: Vec<(usize, PluginPtr)>,
-    /// Each of `chain`'s clocks: the song time of the audio it is handed
-    /// (the track's input lateness and the FX before it held back).
-    pub(super) transports: Vec<crate::plugin::RenderTransport>,
-    /// The track's bus (interleaved stereo), as an address.
-    pub(super) bus: usize,
-    /// The track's aux buffer ([`super::AUX_PAIRS`] pairs), as an
-    /// address; 0 when nothing sends from it.
-    pub(super) aux: usize,
-    /// A plugin put something on an aux output.
-    pub(super) aux_ran: bool,
-    pub(super) in_l: Vec<f32>,
-    pub(super) in_r: Vec<f32>,
-    pub(super) out_l: Vec<f32>,
-    pub(super) out_r: Vec<f32>,
-    pub(super) midi: Vec<crate::plugin::PluginMidiEvent>,
-    /// Where the block sits on the timeline: what its FX automation is
-    /// read at.
-    pub(super) clock: super::envelope::BlockClock,
-    /// One FX's parameters, its automation applied (reused across blocks).
-    pub(super) params: super::automate::FxParams,
-    pub(super) note_expr: Vec<crate::plugin::PluginNoteExpression>,
-    /// A plugin processed (the bus may now carry signal).
-    pub(super) ran: bool,
-    /// The chain index of a plugin that panicked.
-    pub(super) panicked: Option<usize>,
-    /// Plugins bypassed this block: a control thread held them.
-    pub(super) busy: u32,
-    pub(super) us: u32,
-    /// The chain's latency, samples: what its plugins report.
-    pub(super) latency: u32,
+    let cores = std::thread::available_parallelism().map_or(1, usize::from);
+    cores.saturating_sub(3).min(63)
 }
 
-impl LaneJob {
-    /// Run the chain. `context` is the render thread's render frame.
-    ///
-    /// # Safety
-    /// `bus` is live and used by no other thread for the duration; every
-    /// plugin cell outlives it (the map held for reading).
-    unsafe fn run(
-        &mut self,
-        t: &TrackSnapshot,
-        frames: usize,
-        context: crate::plugin::RenderContext,
-    ) {
-        let started = Stamp::now();
-        let _frame = (crate::plugin::RenderFrameGuard::current() != context)
-            .then(|| crate::plugin::RenderFrameGuard::adopt(context));
-        let _muted = crate::plugin::TrackMutedGuard::enter(t.muted);
-        // SAFETY: the caller's contract.
-        let bus = unsafe { std::slice::from_raw_parts_mut(self.bus as *mut f32, frames * 2) };
-        for (k, (i, PluginPtr(cell))) in self.chain.iter().enumerate() {
-            if let Some(transport) = self.transports.get(k) {
-                crate::plugin::set_render_transport(*transport);
-            }
-            // SAFETY: the caller's contract.
-            let cell = unsafe { &**cell };
-            let Some(mut plugin) = cell.try_lock_spinning(super::PLUGIN_LOCK_SPINS) else {
-                self.busy += 1;
-                continue;
-            };
-            let plugin = &mut **plugin;
-            for f in 0..frames {
-                self.in_l[f] = bus[f * 2];
-                self.in_r[f] = bus[f * 2 + 1];
-            }
-            self.out_l[..frames].fill(0.0);
-            self.out_r[..frames].fill(0.0);
-            let block = super::automate::FxBlock {
-                fixed: t.fx_params.get(*i).map(Vec::as_slice).unwrap_or(&[]),
-                envelopes: t.fx_envs.get(*i).map(Vec::as_slice).unwrap_or(&[]),
-                clock: self.clock,
-                midi: &self.midi,
-                note_expressions: &self.note_expr,
-            };
-            let io = super::automate::Io {
-                in_l: &self.in_l[..frames],
-                in_r: &self.in_r[..frames],
-                out_l: &mut self.out_l[..frames],
-                out_r: &mut self.out_r[..frames],
-            };
-            let params = &mut self.params;
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                params.process(plugin, io, &block)
-            }));
-            match result {
-                Ok((Ok(()), schedule)) => super::automate::record(schedule),
-                Ok((Err(_), _)) => continue,
-                Err(_) => {
-                    self.panicked.get_or_insert(*i);
-                    continue;
-                }
-            }
-            for f in 0..frames {
-                bus[f * 2] = self.out_l[f];
-                bus[f * 2 + 1] = self.out_r[f];
-            }
-            if self.aux != 0 {
-                // SAFETY: the caller's contract, as for `bus`.
-                let aux = unsafe {
-                    std::slice::from_raw_parts_mut(
-                        self.aux as *mut f32,
-                        super::AUX_PAIRS * frames * 2,
-                    )
-                };
-                self.aux_ran |= super::add_aux(plugin, aux, frames);
-            }
-            self.ran = true;
+/// How many offline pools run at once (`FTS_OFFLINE_RENDER_POOLS`, else 2):
+/// a render past them renders on its own thread, rather than every render
+/// at once spinning on every core.
+fn most_offline_pools() -> usize {
+    std::env::var("FTS_OFFLINE_RENDER_POOLS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(2)
+}
+
+/// Offline pools not in use, kept for the next render (threads are not
+/// spawned per render), and how many are out.
+static OFFLINE_POOLS: std::sync::Mutex<(Vec<LanePool>, usize)> =
+    std::sync::Mutex::new((Vec::new(), 0));
+
+/// An offline render's pool, borrowed from the process's for as long as
+/// the render lives.
+pub(crate) struct OfflinePool(Option<LanePool>);
+
+impl OfflinePool {
+    /// A pool of `threads` workers, if one may run now (`None`: render on
+    /// the calling thread). `bounded`: only while fewer than
+    /// `FTS_OFFLINE_RENDER_POOLS` are out (a render that asked for its
+    /// threads by number gets them regardless).
+    pub(crate) fn take(threads: usize, bounded: bool) -> Option<Self> {
+        if threads == 0 {
+            return None;
         }
-        self.us = started.us();
+        let mut pools = OFFLINE_POOLS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if bounded && pools.1 >= most_offline_pools() {
+            return None;
+        }
+        pools.1 += 1;
+        let kept = pools
+            .0
+            .iter()
+            .position(|p| p.threads() == threads)
+            .map(|i| pools.0.swap_remove(i));
+        drop(pools);
+        Some(Self(Some(
+            kept.unwrap_or_else(|| LanePool::offline(threads)),
+        )))
+    }
+
+    pub(crate) fn pool(&self) -> &LanePool {
+        self.0.as_ref().expect("a pool until dropped")
     }
 }
 
-impl LanePool {
-    /// Run every job's chain across the pool; returns when all are done.
-    pub(super) fn run_lanes(&self, jobs: &mut [LaneJob], tracks: &[TrackSnapshot], frames: usize) {
-        let base = jobs.as_mut_ptr() as usize;
-        let context = crate::plugin::RenderFrameGuard::current();
-        self.run(jobs.len(), &|k| {
-            // SAFETY: job `k` runs once, on one thread; its bus and plugins
-            // are its own track's (a track's plugins are its own), and the
-            // caller holds the scratch and the plugin map (for reading) until
-            // this returns.
-            let job = unsafe { &mut *(base as *mut LaneJob).add(k) };
-            unsafe { job.run(&tracks[job.ti], frames, context) };
-        });
+impl Drop for OfflinePool {
+    fn drop(&mut self) {
+        let mut pools = OFFLINE_POOLS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        pools.1 = pools.1.saturating_sub(1);
+        let pool = self.0.take();
+        let spare = match pool {
+            Some(pool) if pools.0.len() < 4 => {
+                pools.0.push(pool);
+                None
+            }
+            other => other,
+        };
+        drop(pools);
+        // Its threads are joined outside the lock.
+        drop(spare);
     }
 }
 
