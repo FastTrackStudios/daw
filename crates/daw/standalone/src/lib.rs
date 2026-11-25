@@ -52,6 +52,8 @@ pub mod steps;
 mod stretch_marker;
 #[cfg(any(feature = "audio", feature = "decode"))]
 mod take_reader;
+#[cfg(feature = "clap-host")]
+pub mod timeline;
 pub use automation_touch::TouchableParam;
 mod batch;
 #[cfg(feature = "bootstrap")]

@@ -369,3 +369,67 @@ impl SignalPluginClient {
         }
     }
 }
+
+// ── host-timeline/1 ─────────────────────────────────────────────────────
+
+/// What a host implements to answer `com.fasttrackstudio.host-timeline/1`
+/// for ONE plugin instance: its track's timeline (`docs/host-timeline.md`).
+pub trait HostTimeline: Send + Sync {
+    /// The revision of what [`read`](Self::read) returns; 0 while the
+    /// plugin has no track. Thread-safe and lock-free: the plugin may ask
+    /// from its audio thread.
+    fn revision(&self) -> u64;
+    /// The whole timeline, or `None` while there is none. Main thread.
+    fn read(&self) -> Option<crate::timeline::Timeline>;
+    /// Claim (`true`) or give back the timeline's playback: while claimed
+    /// the host stops delivering the track's own notes and controllers as
+    /// `process()` events. `false` when the host can't. Main thread.
+    fn set_playback_claimed(&self, claimed: bool) -> bool {
+        let _ = claimed;
+        false
+    }
+}
+
+/// How the vtable finds the [`HostTimeline`] of the plugin a raw host
+/// serves (clack: its host wrapper's shared state; a test: `host_data`).
+pub trait HostTimelineLookup: 'static {
+    /// # Safety
+    ///
+    /// `host` is the `clap_host` the plugin called the vtable with.
+    unsafe fn lookup(host: *const clap_host) -> Option<Arc<dyn HostTimeline>>;
+}
+
+/// The `host-timeline/1` vtable for a host type, as a `'static`.
+pub struct HostTimelineVtable<L>(PhantomData<L>);
+
+impl<L: HostTimelineLookup> HostTimelineVtable<L> {
+    pub const VTABLE: sys::fts_host_timeline = sys::fts_host_timeline {
+        revision: Some(Self::revision),
+        read: Some(Self::read),
+        set_playback_claimed: Some(Self::set_playback_claimed),
+    };
+
+    /// What `get_extension` returns for [`sys::FTS_EXT_HOST_TIMELINE`].
+    #[must_use]
+    pub fn as_ptr() -> *const c_void {
+        let v: &'static sys::fts_host_timeline = &Self::VTABLE;
+        std::ptr::from_ref(v).cast()
+    }
+
+    unsafe extern "C" fn revision(host: *const clap_host) -> u64 {
+        // SAFETY: the plugin's call, with its host.
+        unsafe { L::lookup(host) }.map_or(0, |t| t.revision())
+    }
+
+    unsafe extern "C" fn read(host: *const clap_host, out: *const clap_ostream) -> bool {
+        let Some(timeline) = (unsafe { L::lookup(host) }).and_then(|t| t.read()) else {
+            return false;
+        };
+        // SAFETY: the plugin's stream.
+        unsafe { write_all(out, &timeline.encode()) }
+    }
+
+    unsafe extern "C" fn set_playback_claimed(host: *const clap_host, claimed: bool) -> bool {
+        unsafe { L::lookup(host) }.is_some_and(|t| t.set_playback_claimed(claimed))
+    }
+}

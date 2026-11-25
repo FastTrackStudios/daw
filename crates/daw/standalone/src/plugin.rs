@@ -340,6 +340,24 @@ pub trait PluginInstance: Send {
         None
     }
 
+    /// Bind the plugin's `com.fasttrackstudio.host-timeline/1` to its
+    /// track's timeline (or unbind it with `None`). `false` from a backend
+    /// or instance the extension wasn't offered to.
+    #[cfg(feature = "clap-host")]
+    fn bind_timeline(
+        &mut self,
+        timeline: Option<std::sync::Arc<dyn daw_clap_ext::host::HostTimeline>>,
+    ) -> bool {
+        let _ = timeline;
+        false
+    }
+
+    /// Whether [`bind_timeline`](Self::bind_timeline) bound it to a track.
+    #[cfg(feature = "clap-host")]
+    fn timeline_bound(&self) -> bool {
+        false
+    }
+
     /// Increases each time the plugin renames or re-describes its
     /// parameters (a CLAP's rescan of info or text): re-read
     /// [`params`](Self::params) when it moves. 0 from a backend that never
@@ -523,6 +541,11 @@ pub struct LoadOptions {
     /// `com.fasttrackstudio.host-automation/1`: its own parameters' lanes.
     #[cfg(feature = "clap-host")]
     pub automation: Option<std::sync::Arc<dyn daw_clap_ext::automation::HostAutomation>>,
+    /// Offer a CLAP `com.fasttrackstudio.host-timeline/1`; the embedder
+    /// binds each instance to its track after it is placed
+    /// (`PluginInstance::bind_timeline`).
+    #[cfg(feature = "clap-host")]
+    pub timeline: bool,
 }
 
 /// [`load_plugin`], offering the plugin what `options` holds.
@@ -551,6 +574,9 @@ fn load_clap(
     }
     if let Some(automation) = &options.automation {
         host = host.with_automation(automation.clone());
+    }
+    if options.timeline {
+        host = host.with_timeline();
     }
     let plugin = host
         .load(Path::new(path), 0)
@@ -648,6 +674,36 @@ pub struct RenderTransport {
 std::thread_local! {
     static RENDER_TRANSPORT: std::cell::Cell<Option<RenderTransport>> =
         const { std::cell::Cell::new(None) };
+}
+
+std::thread_local! {
+    /// This thread is rendering a block the transport does not roll
+    /// through (live input played through while stopped).
+    static STOPPED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the block being rendered on this thread is a stopped one
+/// ([`StoppedRender`]): its plugins are told the transport isn't playing.
+#[must_use]
+pub fn rendering_stopped() -> bool {
+    STOPPED.with(std::cell::Cell::get)
+}
+
+/// Marks the renders on this thread, for its life, as of a stopped
+/// transport: a plugin's `IS_PLAYING` is clear there, so a plugin that
+/// plays a timeline (host-timeline/1) knows to stay live.
+pub(crate) struct StoppedRender(bool);
+
+impl StoppedRender {
+    pub(crate) fn enter() -> Self {
+        Self(STOPPED.with(|c| c.replace(true)))
+    }
+}
+
+impl Drop for StoppedRender {
+    fn drop(&mut self) {
+        STOPPED.with(|c| c.set(self.0));
+    }
 }
 
 /// The song's clock for the block being processed ([`RenderTransport`]).
