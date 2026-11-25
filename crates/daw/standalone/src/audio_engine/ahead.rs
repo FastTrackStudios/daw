@@ -944,6 +944,16 @@ impl DualRender {
     /// `render_stopped`). The buffer is the dual render's own, kept from
     /// block to block.
     pub fn render(&mut self, plan: &BlockPlan, render_stopped: bool) -> &StereoBuffer {
+        self.render_block(plan, render_stopped);
+        // The first audible block after play is when play was heard.
+        let rolling = plan.segments().iter().any(|s| s.playing);
+        let heard = (self.out.frames * 2).min(self.out.samples.len());
+        super::first_audio::observe(&self.out.samples[..heard], rolling);
+        &self.out
+    }
+
+    /// [`Self::render`]'s block, into `self.out`.
+    fn render_block(&mut self, plan: &BlockPlan, render_stopped: bool) -> &StereoBuffer {
         let Some(player) = self.player.as_mut() else {
             self.live
                 .render_plan_into(plan, render_stopped, &mut self.out);

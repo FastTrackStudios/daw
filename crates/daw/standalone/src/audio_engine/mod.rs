@@ -42,6 +42,9 @@ pub mod decoder;
     any(target_os = "linux", target_os = "macos", target_os = "ios")
 ))]
 pub mod duplex_engine;
+/// How long play takes to be heard (`transport.play`'s `play.first_audio_ms`).
+#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
+pub mod first_audio;
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub mod materialize;
 /// Fetching streamed media in the order it will be heard.

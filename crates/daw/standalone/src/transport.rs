@@ -72,6 +72,13 @@ fn set_play_state(daw: &Standalone, guid: &str, ps: PlayState) -> DawResult<()> 
     if recording && !was_recording {
         begin_recording(daw, guid, &bundle)?;
     }
+    let was_rolling = matches!(
+        bundle.shared.play_state(),
+        PlayStateRepr::Playing | PlayStateRepr::Recording
+    );
+    if !was_rolling && matches!(ps, PlayState::Playing | PlayState::Recording) {
+        watch_first_audio(&bundle);
+    }
     bundle.shared.set_play_state(play_state_repr(ps));
     let mirrored = daw.with_project_mut(guid, |p| p.transport.play_state = ps);
     if was_recording && !recording {
@@ -81,6 +88,22 @@ fn set_play_state(daw: &Standalone, guid: &str, ps: PlayState) -> DawResult<()> 
     }
     mirrored
 }
+
+/// Time this play to its first audible block (`transport.play`).
+#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
+fn watch_first_audio(bundle: &crate::transport_engine::TransportBundle) {
+    let shared = bundle.shared.clone();
+    crate::audio_engine::first_audio::watch(Box::new(move || {
+        matches!(
+            shared.play_state(),
+            PlayStateRepr::Playing | PlayStateRepr::Recording
+        )
+    }));
+}
+
+/// Without an audio engine nothing is heard.
+#[cfg(not(all(feature = "audio", not(target_arch = "wasm32"))))]
+fn watch_first_audio(_bundle: &crate::transport_engine::TransportBundle) {}
 
 /// Start the recording pass for `guid` (see `crate::recording`).
 #[cfg(all(
